@@ -60,6 +60,7 @@ from reblock.data.pools import (
 from reblock.data.settlements import exclusion_holdout
 from reblock.derivations import access_before
 from reblock.emit import pct_displaced
+from reblock.free_first import HoldNothing
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.osm_footpaths import FootpathSource
 from reblock.methods.substrates import ChordSubstrate
@@ -555,7 +556,8 @@ def pair_scorer() -> PairScorer:
     return PairScorer(
         transport=TRANSPORT, signature=SIGNATURE, snap=NearestNodeSnap(ChordSubstrate()),
         direct=ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
-                                  max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque()),
+                                  max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                  price=Opaque(), free_first=HoldNothing()),
         permeability=load_permeability_config(CONF).params, road_width_m=DEFAULT_ROAD_WIDTH_M)
 
 

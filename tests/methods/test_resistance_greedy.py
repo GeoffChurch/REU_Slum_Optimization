@@ -15,6 +15,7 @@ from shapely.ops import unary_union
 
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
+from reblock.free_first import HoldNothing
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.resistance_greedy import ResistanceGreedyReblocker
 from reblock.methods.substrates import ChordSubstrate
@@ -121,7 +122,7 @@ def test_it_selects_differently_from_clearance() -> None:
     theirs = ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
                                 max_roads=400,
                                 road_width_m=DEFAULT_ROAD_WIDTH_M,
-                                price=Opaque()).propose(block).roads
+                                price=Opaque(), free_first=HoldNothing()).propose(block).roads
     ours = replace(GREEDY, max_roads=30, shortlist=10).propose(block).roads
     assert theirs is not None and ours is not None
 

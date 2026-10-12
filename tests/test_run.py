@@ -15,6 +15,7 @@ from reblock.data.kblock import KblockSource
 from reblock.data.shapefile import ShapefileSource
 from reblock.derive.access import STREET_TOL
 from reblock.eval.kcomplexity import KComplexityEval, WeakDualKEval
+from reblock.free_first import HoldNothing
 from reblock.methods.substrates import ChordSubstrate
 from reblock.methods.topology import TopologyMethod
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
@@ -302,7 +303,8 @@ def _dji_spec(block_groups: list[list[str]], *, depth_target: int) -> PipelineSp
         method=ClearanceReblocker(depth_target=depth_target, substrate=ChordSubstrate(),
                                   repulsion=0.0, max_roads=400,
                                   road_width_m=DEFAULT_ROAD_WIDTH_M,
-                                  price=Opaque()), evals=[KComplexityEval()],
+                                  price=Opaque(),
+                                  free_first=HoldNothing()), evals=[KComplexityEval()],
         max_blocks=1, region_builder=IdentityRegionBuilder(), block_groups=block_groups,
     )
 
@@ -324,7 +326,8 @@ def test_singleton_group_run_matches_single_block_reblock() -> None:
                               building_tier=SpacingDiscs, member_buildings=None)
     block = next(b for b in direct_src.region().blocks if b.block_id == bid)
     clearance = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
-                                   max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque())
+                                   max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                   price=Opaque(), free_first=HoldNothing())
     direct = reblock_block(block, clearance, [KComplexityEval()])
     assert r.proposal.proposal_id == direct.proposal.proposal_id
     assert r.metric("kcomplexity", "delta_k") == direct.metric("kcomplexity", "delta_k")

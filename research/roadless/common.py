@@ -14,10 +14,17 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pandas as pd
 import shapely
+from numpy.typing import NDArray
+
+if TYPE_CHECKING:
+    from geopandas import GeoDataFrame
+
+    from reblock.contracts import Block
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
@@ -141,13 +148,33 @@ def displacement(block, roads, w: np.ndarray) -> float:
     return float((c * w).sum() / w.sum())
 
 
-def prefix_to(block, roads, target: float, w: np.ndarray):
-    """The shortest street-first prefix whose weighted displacement reaches `target` (all roads,
-    in canonical order, if none does): `prefix_to_displacement` with a population."""
+_ROW = "__canonical_row__"      # canonical_order's scratch column (each road's row in the network)
+
+
+def canonical_order(block: Block, roads: GeoDataFrame) -> GeoDataFrame:
+    """THE prefix order of a network: its held roads first, in their own order (the network says
+    which they are: its leading rows, `reblock.free_first.held_count`), then the rest in the
+    order `street_first_ordered` gives the whole network. So the held roads lead every prefix
+    whatever the street-first order would do with them, and every prefix still reaches the
+    street: a held road starts at the street or on an earlier held road, and the rest keep the
+    street-first order, each prefix of which is connected (held roads added to it change nothing
+    there). With nothing held it is `street_first_ordered`, road for road."""
     from reblock.budget import STREET_TOL, street_first_ordered
+    from reblock.free_first import held_count
+    n = held_count(roads)
+    rows = street_first_ordered(block, roads.assign(**{_ROW: np.arange(len(roads))}),
+                                STREET_TOL)[_ROW].to_numpy()
+    return cast("GeoDataFrame",
+                roads.iloc[np.concatenate([np.arange(n), rows[rows >= n]])].reset_index(drop=True))
+
+
+def prefix_to(block, roads, target: float, w: np.ndarray):
+    """The shortest canonical prefix (canonical_order: the held roads, then street-first) whose
+    weighted displacement reaches `target` (all roads, in canonical order, if none does):
+    `prefix_to_displacement` with a population, and with the network's held roads first."""
     if len(roads) == 0:
         return roads
-    ordered = street_first_ordered(block, roads, STREET_TOL)
+    ordered = canonical_order(block, roads)
     if displacement(block, ordered, w) < target:
         return ordered
     lo, hi = 0, len(ordered)
@@ -181,6 +208,32 @@ class Carve:
         return sc.grid.sub_of(corridor)
 
 
+# B's test, one definition for the scorer (Scorer) and the road methods' free-first stage
+# (free_roads.FreeEnclosed): which homes are enclosed at baseline, the open field a road set leaves,
+# and which of the enclosed homes it frees.
+
+def placement(grid: lifted.Grid | lifted.CompositeGrid, polys: NDArray[np.object_],
+              p: lifted.Params) -> lifted.Placement:
+    """The metric's demand placement on `grid` (lifted.Placement), against the open space that
+    reaches the street at baseline: its `enclosed` homes are B's enclosed homes."""
+    return lifted.Placement.of(grid, polys, lifted.grounded(grid, grid.ff0, p),
+                               ring_m=lifted.RING_M)
+
+
+def carved(grid: lifted.Grid | lifted.CompositeGrid,
+           freed: NDArray[np.bool_]) -> NDArray[np.float64]:
+    """The open field (per cell) with the sub-samples `freed` cleared: what a rule's `freed`
+    (Carve's: exactly the corridor) leaves of the block."""
+    return (grid.isub & (~grid.bsub | freed)).mean(axis=-1)
+
+
+def reached(pl: lifted.Placement, grid: lifted.Grid | lifted.CompositeGrid,
+            free: NDArray[np.float64], p: lifted.Params) -> NDArray[np.bool_]:
+    """Per home: enclosed at baseline and freed in the field `free`, some cell within RING_M of
+    its outline open and street-connected there (lifted.Placement.reached)."""
+    return pl.reached(lifted.grounded(grid, free, p))
+
+
 class Scorer:
     def __init__(self, block, mesh: lifted.MeshSpec, p: lifted.Params, rule=None,
                  population=None):
@@ -204,9 +257,8 @@ class Scorer:
         # here on, so freeing space only ever adds conductance. The enclosed homes inject
         # nothing and are out of J; a clearing is scored first by the population it leaves
         # enclosed (`enclosed_left`), then by J over the rest (owner 2026-10-11, "B SGTM").
-        reach = lifted.grounded(self.grid, self.free0, p)   # bool mask
         self.w = population.weights(self.polys)
-        self.pl = lifted.Placement.of(self.grid, self.polys, reach, ring_m=lifted.RING_M)
+        self.pl = placement(self.grid, self.polys, p)
         self.f = self.pl.field(self.w, self.grid.inside.shape)
         self.enclosed = self.pl.enclosed
         self.enclosed0 = float(self.w[self.enclosed].sum() / self.w.sum())
@@ -244,7 +296,7 @@ class Scorer:
         mesh a host pass over every cell: 14 -- 20 s on the oversized blocks)."""
         if not self.enclosed.any():
             return 0.0
-        freed = self.pl.reached(lifted.grounded(self.grid, free, self.p))
+        freed = reached(self.pl, self.grid, free, self.p)
         return float(self.w[self.enclosed & ~freed].sum() / self.w.sum())
 
     def perm_p(self, u: np.ndarray, power: float) -> float:
@@ -254,8 +306,7 @@ class Scorer:
         if roads is None or len(roads) == 0:
             return self.free0
         from reblock.budget import road_corridor
-        g = self.grid
-        return (g.isub & (~g.bsub | self.rule.freed(self, road_corridor(roads)))).mean(axis=-1)
+        return carved(self.grid, self.rule.freed(self, road_corridor(roads)))
 
     def perm(self, roads) -> float:
         free = self.free_of(roads)

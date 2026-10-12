@@ -33,6 +33,7 @@ from reblock.data.osm_extract import NEAR_MISS_TAGS, PbfDesireLines
 from reblock.data.pools import pbf_path
 from reblock.emit import pct_displaced
 from reblock.eval.agreement import buffered_iou, directional_chamfer
+from reblock.free_first import HoldNothing
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.demand_greedy import DemandGreedyReblocker
 from reblock.methods.desire_lines import NoDesire
@@ -101,7 +102,7 @@ def main() -> None:
                                                      road_width_m=DEFAULT_ROAD_WIDTH_M),
         "clearance": ClearanceReblocker(depth_target=1, max_roads=3000, substrate=ChordSubstrate(),
                                         repulsion=0.0, road_width_m=DEFAULT_ROAD_WIDTH_M,
-                                        price=Opaque()),
+                                        price=Opaque(), free_first=HoldNothing()),
         "demand_greedy_uniform": DemandGreedyReblocker(desire_source=NoDesire(), depth_target=1,
                                                        max_roads=3000, substrate=ChordSubstrate(),
                                                        buffer_m=3.0, eps=0.1, gamma=1.0,

@@ -20,6 +20,13 @@ its scoring solves, and its Verdict, the rule fixed in NOTES before its results:
             transparency_rows/held/plan.csv (held_plan: per method its claim and its own knobs,
             each an arm of the 13, base and the claim's random sets with them); the Claim
             (transparency_rows/held/)
+  free      the held stage again, every arm from the free-first stage's roads (FREE,
+            free_roads.FreeEnclosed: roads freeing the homes enclosed at baseline, committed
+            before the method builds); the Claim (transparency_rows/free/)
+  free-local  the free stage's arms on this machine, under their own rows root
+            (transparency_rows/free_local/): the guards' sample, never scored
+What a stage's arms hold first is the stage's (Stage.first): their presets' own (`AsPresets`:
+nothing, reblock.free_first.HoldNothing) or the free-first stage's roads (`FreeEveryArm`).
 `arms` writes a stage's arms, with every value that can change a network, to <rows>/arms.csv
 (committed). The networks are proposed fresh (road_rescore.propose, no derive cache anywhere),
 cut to their canonical prefixes by road_rescore.prefixes and scored by road_rescore.score, under
@@ -69,6 +76,8 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
+import free_roads as fr  # noqa: E402
+import lifted  # noqa: E402
 import road_rescore as rr  # noqa: E402
 import simp_compare  # noqa: E402
 import transparency_sets as ts  # noqa: E402
@@ -118,6 +127,14 @@ BOOT_SEED = 20261012                         # ... and its seed (one weight matr
 ENCLOSED_TOL = 1e-12                         # B (i) shares equal within this (sums of weights)
 # propose's order only (no result depends on it): a guess at each method's cost per building
 COST_GUESS = {"cycle_native": 2.5, "resistance_lp": 2.0, "clearance_looped": 1.0}
+# The free-first stage (free_roads.FreeEnclosed; owner 2026-10-12, "Yes, let's try to free
+# enclosed homes first"): its roads within the prefix budget, area D LENS_D (and count D LENS_D),
+# keyed and routed by the area population (lens (c)'s), on the scorer's raster (MESH)
+FREE_ROWS = HERE / "transparency_rows" / "free"
+FREE_LOCAL_ROWS = HERE / "transparency_rows" / "free_local"
+FREE_MARGIN_M = 0.05     # a target within half the road's width less this: the buffer's polygon
+                         # falls inside its circle by under 0.005 m at a 3.5 m radius
+FREE_LENGTH_TIE = 1e-12  # per metre on every edge: among equal displacements the shorter road
 
 
 # ------------------------------------------------------------------ the sets
@@ -546,6 +563,71 @@ def _check_single_threaded() -> None:
         raise SystemExit(f"run single-threaded: set {bad} to {rr.SINGLE}")
 
 
+# ------------------------------------------------------------------ what every arm holds first
+class FirstRoads(Protocol):
+    """What every arm of a stage commits before its method builds: a stage's choice, applied to
+    each arm's method where the arm is built (Stage.method)."""
+
+    @property
+    def label(self) -> str: ...
+
+    def apply(self, method: Method) -> Method: ...
+
+    def record(self) -> dict[str, object]: ...
+
+
+@dataclass(frozen=True, kw_only=True)
+class AsPresets:
+    """Each arm's method as its preset has it: nothing held (reblock.free_first.HoldNothing)."""
+
+    @property
+    def label(self) -> str:
+        return ""
+
+    def apply(self, method: Method) -> Method:
+        return method
+
+    def record(self) -> dict[str, object]:
+        return dict(free_first="", free_budget=np.nan)
+
+
+@dataclass(frozen=True, kw_only=True)
+class FreeEveryArm:
+    """Every arm's method from `free`'s roads: its `free_first` (clearance_looped's on its tree,
+    whose loop stage then sees them as part of the tree)."""
+
+    free: fr.FreeEnclosed
+
+    @property
+    def label(self) -> str:
+        return "free"
+
+    def apply(self, method: Method) -> Method:
+        if isinstance(method, LoopClosureRefiner):
+            if not isinstance(method.base, ClearanceReblocker):
+                raise TypeError(f"clearance_looped's tree is {type(method.base).__name__}")
+            return dataclasses.replace(method,
+                                       base=dataclasses.replace(method.base, free_first=self.free))
+        if isinstance(method, CycleNativeReblocker | ResistanceLPReblocker):
+            return dataclasses.replace(method, free_first=self.free)
+        raise TypeError(f"{type(method).__name__} has no free-first stage")
+
+    def record(self) -> dict[str, object]:
+        return dict(free_first=f"FreeEnclosed{self.free.tag}", free_budget=self.free.budget)
+
+
+def _uniform(token: str) -> lifted.UniformMesh:
+    """The mesh `token` names (common.mesh_of), which must be the uniform raster."""
+    mesh = common.mesh_of(token)
+    if not isinstance(mesh, lifted.UniformMesh):
+        raise TypeError(f"{token}: the free-first stage runs on the uniform raster, not {mesh!r}")
+    return mesh
+
+
+FREE = fr.FreeEnclosed(budget=LENS_D, mesh=_uniform(MESH), population=common.AreaPopulation(),
+                       target_margin_m=FREE_MARGIN_M, length_tie=FREE_LENGTH_TIE)
+
+
 # ------------------------------------------------------------------ stages
 class Verdict(Protocol):
     """How a stage's results are judged: the rule fixed in NOTES before them."""
@@ -558,14 +640,15 @@ class Verdict(Protocol):
 
 @dataclass(frozen=True, kw_only=True)
 class Stage:
-    """One step of the experiment: `blocks`, the verdict's arms, the rows root `rows` (its
-    networks, logs and progress in <rows>/scratch, git-ignored), and what its scoring solves
-    (`pops` and `scored`, road_rescore.score's)."""
+    """One step of the experiment: `blocks`, the verdict's arms, what every arm holds first
+    (`first`), the rows root `rows` (its networks, logs and progress in <rows>/scratch,
+    git-ignored), and what its scoring solves (`pops` and `scored`, road_rescore.score's)."""
 
     name: str
     rows: Path
     blocks: tuple[str, ...]
     verdict: Verdict
+    first: FirstRoads
     pops: tuple[str, ...]
     scored: rr.Scored
 
@@ -577,6 +660,11 @@ class Stage:
     @property
     def arms(self) -> tuple[Arm, ...]:
         return self.verdict.arms
+
+    def method(self, arm: Arm, presets: Mapping[str, Method], block_id: str) -> Method:
+        """`arm`'s method on `block_id` in this stage: the arm's change on its preset, then what
+        the stage's arms hold first."""
+        return self.first.apply(arm.method(presets, block_id))
 
     @property
     def lineup(self) -> tuple[str, ...]:
@@ -617,7 +705,8 @@ def arms_table(stage: Stage) -> pd.DataFrame:
     for m in _plan(stage):
         for part, arm in m.parts():
             rows.append(dict(arm=arm.name, method=m.method, part=part, preset=arm.preset,
-                             reuse_item4=arm.reuse_item4, **arm.change.record()))
+                             reuse_item4=arm.reuse_item4, **arm.change.record(),
+                             **stage.first.record()))
     return pd.DataFrame(rows)
 
 
@@ -642,21 +731,23 @@ def write_arms(stage: Stage) -> None:
 
 def dry(stage: Stage, bid: str) -> None:
     """Every arm's method on one block, built and not run: its label and identity, the base arms'
-    against the presets', every identity distinct, each discount's set and factors."""
+    against the presets' (holding first what the stage's arms hold), every identity distinct,
+    each discount's set and factors."""
     presets = common.arms()
     [b] = common.build_blocks([bid])
     seen: dict[object, str] = {}
     for arm in stage.arms:
-        m = arm.method(presets, bid)
+        m = stage.method(arm, presets, bid)
         ident = m.identity
         if ident is None:
             raise AssertionError(f"{arm.name}: an uncacheable identity")
         if ident in seen:
             raise AssertionError(f"{arm.name} and {seen[ident]} share an identity")
         seen[ident] = arm.name
-        if isinstance(arm.change, AsConfigured) and ident != presets[arm.preset].identity:
+        if (isinstance(arm.change, AsConfigured)
+                and ident != stage.first.apply(presets[arm.preset]).identity):
             raise AssertionError(f"{arm.name}: not the preset {arm.preset}")
-        line = f"{arm.name:45s} {type(m).__name__}"
+        line = f"{arm.name:45s} {type(m).__name__} {stage.first.label}".rstrip()
         if isinstance(arm.change, Discount):
             t = arm.change.transparency(bid)
             f = factors_of(t, b)
@@ -674,7 +765,7 @@ def propose_one(stage: Stage, bid: str, name: str) -> None:
     arm = stage.arm_of(name)
     if arm.reuse_item4:
         raise SystemExit(f"{name} reuses item 4's network: nothing to propose")
-    method = arm.method(common.arms(), bid)
+    method = stage.method(arm, common.arms(), bid)
     rr.propose(stage.rows, stage.scratch, bid, name, method, True)
     row = pd.read_parquet(rr.proposal_row(stage.rows, bid, name, True)).iloc[0]
     if row.status == "ok":
@@ -765,7 +856,7 @@ def recompute(stage: Stage, bid: str, name: str) -> None:
     arm = stage.arm_of(name)
     if not arm.reuse_item4:
         raise SystemExit(f"{name} is proposed, not reused: nothing to recompute")
-    rr.propose(stage.rows, stage.scratch, bid, name, arm.method(common.arms(), bid), True)
+    rr.propose(stage.rows, stage.scratch, bid, name, stage.method(arm, common.arms(), bid), True)
     row = pd.read_parquet(rr.proposal_row(stage.rows, bid, name, True)).iloc[0]
     if row.status != "ok":
         raise SystemExit(f"{bid} {name}: {row.status}")
@@ -843,9 +934,10 @@ def same_lens(stage: Stage, other: Stage, ids: list[str]) -> None:
         keys = ["block", "method"]
         pairs = pd.DataFrame(same, columns=keys)
         t = pairs.merge(mine, on=keys).merge(theirs, on=keys, suffixes=("", "_other"))
-        diffs = {col: float((t[col] - t[col + "_other"]).abs().max()) for col in ("a", "c", "enc_c")}
-        print(f"D {d:g}: {len(t)} (block, arm) pairs with the same network on {t.block.nunique()} "
-              f"blocks, max |diff| against {other.name}: "
+        diffs = {col: float((t[col] - t[col + "_other"]).abs().max())
+                 for col in ("a", "c", "enc_c")}
+        print(f"D {d:g}: {len(t)} (block, arm) pairs with the same network on "
+              f"{t.block.nunique()} blocks, max |diff| against {other.name}: "
               + ", ".join(f"{k} {v:.1e}" for k, v in diffs.items()), flush=True)
 
 
@@ -1625,22 +1717,31 @@ class Claim:
 # ------------------------------------------------------------------ the stages
 SENTINEL_STAGE = Stage(
     name="sentinel", rows=HERE / "transparency_rows", blocks=SENTINEL, verdict=Screen(plan=PLAN),
-    pops=("count", "area"), scored=rr.Scored(budgets=rr.BUDGETS, whole=True))
+    first=AsPresets(), pops=("count", "area"), scored=rr.Scored(budgets=rr.BUDGETS, whole=True))
 TUNING_STAGE = Stage(
     name="tuning", rows=HERE / "transparency_rows" / "tuning", blocks=simp_compare.TUNING,
-    verdict=Choice(plan=TUNING_PLAN), pops=("area",), scored=rr.Scored(budgets=GUARD_D,
-                                                                       whole=False))
+    verdict=Choice(plan=TUNING_PLAN), first=AsPresets(), pops=("area",),
+    scored=rr.Scored(budgets=GUARD_D, whole=False))
 
 
 def held_stage() -> Stage:
     """The held-out blocks, scored as the 13; its arms read from HELD_PLAN (held_plan)."""
     return Stage(name="held", rows=HELD_ROWS, blocks=HELD, verdict=Claim(plan=held_plan(HELD_PLAN)),
-                 pops=("area",), scored=rr.Scored(budgets=GUARD_D, whole=False))
+                 first=AsPresets(), pops=("area",), scored=rr.Scored(budgets=GUARD_D, whole=False))
 
 
-# Each stage by name, built when named (the held stage reads its plan file then).
-STAGES: dict[str, Callable[[], Stage]] = {"sentinel": lambda: SENTINEL_STAGE,
-                                          "tuning": lambda: TUNING_STAGE, "held": held_stage}
+def free_stage(name: str, rows: Path) -> Stage:
+    """The held stage's blocks, arms and Claim, every arm from FREE's roads, under `rows`."""
+    return Stage(name=name, rows=rows, blocks=HELD, verdict=Claim(plan=held_plan(HELD_PLAN)),
+                 first=FreeEveryArm(free=FREE), pops=("area",),
+                 scored=rr.Scored(budgets=GUARD_D, whole=False))
+
+
+# Each stage by name, built when named (the held and free stages read the plan file then).
+STAGES: dict[str, Callable[[], Stage]] = {
+    "sentinel": lambda: SENTINEL_STAGE, "tuning": lambda: TUNING_STAGE, "held": held_stage,
+    "free": lambda: free_stage("free", FREE_ROWS),
+    "free-local": lambda: free_stage("free-local", FREE_LOCAL_ROWS)}
 
 
 # ------------------------------------------------------------------ main

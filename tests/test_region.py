@@ -17,6 +17,7 @@ from reblock.data.counts import KblockCount, resolved
 from reblock.data.kblock import KblockSource
 from reblock.derive_graph import _closure_paths, _module_file, closure_hash
 from reblock.eval.kcomplexity import KComplexityEval
+from reblock.free_first import HoldNothing
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
@@ -243,7 +244,8 @@ def test_region_reblock_reblocks_the_region_block_against_its_existing_network()
     # depth 2 (the shipped target), which would let ClearanceReblocker propose zero roads -- too
     # trivial to prove the region_reblock == propose(region-block) plumbing invariant below.
     method = ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
-                                max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque())
+                                max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                price=Opaque(), free_first=HoldNothing())
     result = region_reblock([a, b], method, [KComplexityEval()])
 
     assert isinstance(result, Result)

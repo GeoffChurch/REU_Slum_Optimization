@@ -2032,7 +2032,8 @@ def operator(grid: Grid, open_, p: Params):
     return L, cell, unk_cell
 
 
-def grounded(grid: Grid, open_: NDArray[np.float64], p: Params) -> NDArray[np.bool_]:
+def grounded(grid: Grid | CompositeGrid, open_: NDArray[np.float64],
+             p: Params) -> NDArray[np.bool_]:
     """Open cells with a path to the street (ground cells included), on the host."""
     return p.solver.to_host(grid.reach(p.solver.xp.asarray(open_, dtype=float), p))
 

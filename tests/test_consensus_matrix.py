@@ -21,6 +21,7 @@ from reblock.contracts import Block
 from reblock.data.pools import PoolFootpaths, ScreenedPool
 from reblock.emit import pct_displaced
 from reblock.eval.agreement import buffered_iou, directional_chamfer
+from reblock.free_first import HoldNothing
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.demand_greedy import DemandGreedyReblocker
 from reblock.methods.osm_footpaths import OsmFootpathsReblocker
@@ -63,7 +64,7 @@ def _arms() -> dict[str, gpd.GeoDataFrame]:
         roads = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=repulsion,
                                    depth_target=1, max_roads=400,
                                    road_width_m=DEFAULT_ROAD_WIDTH_M,
-                                   price=Opaque()).propose(BLOCK).roads
+                                   price=Opaque(), free_first=HoldNothing()).propose(BLOCK).roads
         arms[name] = cast(gpd.GeoDataFrame, roads)
     assert all(len(r) >= 4 for r in arms.values())
     return arms

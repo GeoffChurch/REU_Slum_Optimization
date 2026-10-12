@@ -12,6 +12,7 @@ from reblock import derive_graph
 from reblock.budget import _noded_graph
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal
+from reblock.free_first import HoldNothing
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.loop_closure import (
     LoopClosureRefiner,
@@ -321,7 +322,8 @@ def test_loop_candidates_max_candidates_none_is_unbounded_default() -> None:
 # in a fake base and varies what it is about with `replace`.
 LOOPS = LoopClosureRefiner(
     base=ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=1,
-                            max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque()),
+                            max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M,
+                            price=Opaque(), free_first=HoldNothing()),
     budget_frac=0.12, min_bridges_per_m=0.01, max_loops=400, min_loop_len_m=40.0,
     search_radius_m=45.0, snap_lam=2.0, max_candidates=1500, road_width_m=DEFAULT_ROAD_WIDTH_M)
 # The same, with the search radius and loop floor scaled down to these metre-sized fixtures.

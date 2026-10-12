@@ -24,6 +24,7 @@ from reblock.derive.access import (
     parcel_access_layers,
     past_every_parcel,
 )
+from reblock.free_first import HoldNothing
 from reblock.methods.clearance import (
     ClearanceReblocker,
     _edge_weights,
@@ -135,7 +136,8 @@ UTM = CRS.from_epsg(32643)
 # Every setting spelled once, at the values `conf/method/clearance.yaml` ships (pinned by
 # `test_clearance_method_yaml_is_clearance`); each test varies what it is about.
 CLEARANCE = ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0, depth_target=2,
-                               max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque())
+                               max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M,
+                               price=Opaque(), free_first=HoldNothing())
 
 
 def _column_block(h: int) -> Block:
@@ -233,7 +235,7 @@ def test_greedy_reblock_achieves_depth_target() -> None:
     graph = GridSubstrate(res=0.5).build(block)
     roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
                                     radii=np.zeros(len(block.building_geometries)),
-                                    factors=np.ones(len(block.building_geometries)))
+                                    factors=np.ones(len(block.building_geometries)), held=())
     assert len(roads) > 0
     after = parcel_access_layers(ParcelAdjacency.of(block, STREET_TOL), roads,
                                  unreached=one_past_deepest).to_numpy()
@@ -246,7 +248,7 @@ def test_greedy_reblock_returns_empty_when_already_shallow() -> None:
     graph = GridSubstrate(res=0.5).build(block)
     roads, params = _greedy_reblock(block, graph, t=0.5, depth_target=2, max_roads=400,
                                     radii=np.zeros(len(block.building_geometries)),
-                                    factors=np.ones(len(block.building_geometries)))
+                                    factors=np.ones(len(block.building_geometries)), held=())
     assert len(roads) == 0
     assert params["roads"] == 0
 

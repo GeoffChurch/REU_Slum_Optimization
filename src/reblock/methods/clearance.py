@@ -14,6 +14,10 @@ See docs/superpowers/specs/2026-07-12-clearance-reblocker-design.md.
 t * f / clearance, so a road may pass closer to a cheap building; under `Opaque` (every factor 1)
 the field is the one above. `length` is the substrate's `edist`, so a
 `transparency.TransparentSubstrate` reroutes this method too.
+
+Roads held first (`free_first`, `reblock.free_first`) are the tree's first roads: the parcels they
+serve take depth 1, later roads branch off them as off any road, `max_roads` counts them, and they
+lead the output.
 """
 from __future__ import annotations
 
@@ -43,6 +47,7 @@ from reblock.derive.access import (
     past_every_parcel,
 )
 from reblock.derive_graph import config_identity
+from reblock.free_first import FreeFirst, HeldRoad, mark_held
 from reblock.methods.substrates import RoutingGraph, Substrate
 from reblock.permeability import with_width
 from reblock.transparency import Transparency, factors_of
@@ -163,15 +168,18 @@ def greedy_drainage(
     passes repulsion-from-buildings weights, `demand_greedy` passes demand-attraction weights.
     Routing is on the substrate graph either way, whose edges run through the gaps between
     parcels, so no cost field can produce a road through a building.
+
+    No road is held first: `demand_greedy`, its caller, has no free-first stage.
     """
-    return _drainage(block, graph, edge_w, depth_target=depth_target, max_roads=max_roads)
+    return _drainage(block, graph, edge_w, depth_target=depth_target, max_roads=max_roads,
+                     held=())
 
 
 def _greedy_reblock(
     block: Block, graph: RoutingGraph, *, t: float, depth_target: int, max_roads: int,
-    radii: NDArray[np.float64], factors: NDArray[np.float64],
+    radii: NDArray[np.float64], factors: NDArray[np.float64], held: tuple[HeldRoad, ...],
 ) -> tuple[gpd.GeoDataFrame, dict[str, object]]:
-    """`greedy_drainage` under the clearance repulsion cost field."""
+    """`greedy_drainage` under the clearance repulsion cost field, from the `held` roads."""
     # One point per building, aligned with `radii`: `get_coordinates` of the geometry column
     # would return every VERTEX of every footprint at the polygon tier.
     building_pts = block.buildings.xy
@@ -179,13 +187,15 @@ def _greedy_reblock(
         raise ValueError("substrate yields no nodes for this block")
     w = _edge_weights(graph.pts, graph.rows, graph.cols, graph.edist, building_pts, radii, t,
                       factors=factors)
-    return _drainage(block, graph, w, depth_target=depth_target, max_roads=max_roads)
+    return _drainage(block, graph, w, depth_target=depth_target, max_roads=max_roads, held=held)
 
 
 def _drainage(
     block: Block, graph: RoutingGraph, edge_w: NDArray[np.float64], *,
-    depth_target: int, max_roads: int,
+    depth_target: int, max_roads: int, held: tuple[HeldRoad, ...],
 ) -> tuple[gpd.GeoDataFrame, dict[str, object]]:
+    """The greedy, its first roads the `held` ones (nodes of `graph`): the parcels they serve
+    take depth 1, the network grows from them, and they count toward `max_roads`."""
     parcels = block.parcels
     geoms = list(parcels.geometry)
     parcel_ids = np.asarray(parcels["parcel_id"])
@@ -197,7 +207,7 @@ def _drainage(
         adjacency, None, unreached=past_every_parcel).to_numpy().astype(np.float64)
 
     empty = gpd.GeoDataFrame(geometry=[], crs=block.crs)
-    if depth.size == 0 or float(depth.max()) <= depth_target:
+    if not held and (depth.size == 0 or float(depth.max()) <= depth_target):
         return empty, {"roads": 0, "max_depth_after": int(depth.max()) if depth.size else 0,
                        "grid_unreachable": 0, "max_roads_hit": False}
 
@@ -217,6 +227,11 @@ def _drainage(
             "frontage the least-cost forest has no root")
 
     roads: list[LineString] = []
+    for r in held:
+        roads.append(r.geometry)
+        _relax_depth(depth, adj, [int(p) for p in parcel_tree.query(
+            r.geometry, predicate="dwithin", distance=STREET_TOL)])
+        net.extend(r.nodes)
     n_grid_unreachable = 0
     while len(roads) < max_roads:
         maxd = float(depth.max())
@@ -278,6 +293,8 @@ class ClearanceReblocker:
     _: KW_ONLY
     # Each building's factor on its term of the cost field (`Opaque`: today's).
     price: Transparency
+    # The tree's first roads (`HoldNothing`: today's).
+    free_first: FreeFirst
 
     @property
     def identity(self) -> Hashable | None:
@@ -289,15 +306,18 @@ class ClearanceReblocker:
         n_b = 0 if block.building_geometries.empty else len(block.building_geometries)
         radii = np.zeros(n_b, dtype=np.float64)   # plain clearance; weighted footprints are future
         graph = self.substrate.build(block)
+        held = self.free_first.held(block, graph, width_m=self.road_width_m)
         roads, params = _greedy_reblock(
             block, graph, t=t, depth_target=self.depth_target,
-            max_roads=self.max_roads, radii=radii, factors=factors_of(self.price, block))
-        # The label names render files: the price (nothing for `Opaque`) is in it.
-        pid = (f"clearance{self.price.tag}:{self.substrate.tag}:r{self.repulsion:g}"
-               f":d{self.depth_target}:mr{self.max_roads}")
+            max_roads=self.max_roads, radii=radii, factors=factors_of(self.price, block),
+            held=held)
+        # The label names render files: the price and the held roads (nothing for `Opaque` and
+        # `HoldNothing`) are in it.
+        pid = (f"clearance{self.price.tag}{self.free_first.tag}:{self.substrate.tag}"
+               f":r{self.repulsion:g}:d{self.depth_target}:mr{self.max_roads}")
         return Proposal(
             block_id=block.block_id, crs=block.crs, edges=None,
-            roads=with_width(roads, self.road_width_m),
+            roads=mark_held(with_width(roads, self.road_width_m), len(held)),
             proposal_id=pid, method="clearance",
             params={**params, "substrate": self.substrate.tag, "repulsion": self.repulsion,
                     "depth_target": self.depth_target})

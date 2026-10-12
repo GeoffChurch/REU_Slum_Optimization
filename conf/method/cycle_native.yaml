@@ -23,3 +23,5 @@ road_width_m: 7.0
 # Each building's factor on the displacement that ranks candidates (reblock.transparency);
 # Opaque is every factor 1.
 price: {_target_: reblock.transparency.Opaque}
+# Roads committed before the first cycle (reblock.free_first); HoldNothing holds none.
+free_first: {_target_: reblock.free_first.HoldNothing}

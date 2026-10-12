@@ -24,6 +24,7 @@ from reblock.contracts import Block, Method, Proposal
 from reblock.derivations import propose
 from reblock.derive.access import STREET_TOL
 from reblock.derive_graph import config_identity
+from reblock.free_first import held_count, mark_held
 from reblock.methods.arterial.primitives import _snap_graph
 from reblock.methods.arterial.realize import _snap
 from reblock.methods.boundary_graph import _boundary_graph
@@ -218,7 +219,10 @@ class LoopClosureRefiner:
     bridge-removing loop-closing connectors, greedily, up to `budget_frac`'s share of the base
     proposal's road length / `max_loops`, with a `min_bridges_per_m` diminishing-returns early
     stop. NOT frozen: `base` is an arbitrary (unhashable) `Method`, and `@dataclass(frozen=True)`
-    would auto-generate a `__hash__` over it -- mirrors the sibling `ClearanceReblocker`."""
+    would auto-generate a `__hash__` over it -- mirrors the sibling `ClearanceReblocker`.
+
+    The base's roads lead the output in their order, so the roads it held first
+    (`reblock.free_first`) stay held: the loops see them as part of the tree."""
 
     base: Method
     budget_frac: float
@@ -284,7 +288,8 @@ class LoopClosureRefiner:
         pid = f"loop_closure:{base_prop.proposal_id}:bf{self.budget_frac}:ml{self.max_loops}"
         return Proposal(
             block_id=block.block_id, crs=block.crs, edges=None,
-            roads=with_width(roads, self.road_width_m),
+            # `greedy_close_loops` returns the base's roads first, in order, then the connectors.
+            roads=mark_held(with_width(roads, self.road_width_m), held_count(base_roads)),
             proposal_id=pid, method="loop_closure",
             params={"budget_frac": self.budget_frac, "min_bridges_per_m": self.min_bridges_per_m,
                     "max_loops": self.max_loops,

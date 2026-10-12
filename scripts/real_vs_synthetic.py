@@ -59,6 +59,7 @@ from reblock.derive.access import STREET_TOL
 from reblock.derive.geometric_access import geometric_access_distances
 from reblock.derive.network_metrics import meshedness, node_network
 from reblock.emit import pct_displaced
+from reblock.free_first import HoldNothing
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.demand_greedy import DemandGreedyReblocker
 from reblock.methods.loop_closure import LoopClosureRefiner
@@ -207,11 +208,11 @@ def main() -> None:
     methods: dict[str, Method] = {
         "clearance": ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
                                         max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M,
-                                        price=Opaque()),
+                                        price=Opaque(), free_first=HoldNothing()),
         "looped_tree": LoopClosureRefiner(
             base=ClearanceReblocker(depth_target=1, substrate=ChordSubstrate(), repulsion=0.0,
                                     max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M,
-                                    price=Opaque()),
+                                    price=Opaque(), free_first=HoldNothing()),
             budget_frac=0.12, min_bridges_per_m=0.01, max_loops=400, min_loop_len_m=40.0,
             search_radius_m=45.0, snap_lam=2.0, max_candidates=1500,
             road_width_m=DEFAULT_ROAD_WIDTH_M),

@@ -23,6 +23,7 @@ from reblock.contracts import Block, Proposal, Source
 from reblock.data.kblock import KblockSource
 from reblock.data.shapefile import ShapefileSource
 from reblock.derive_graph import Identified, _closure_paths, _module_file, closure_hash
+from reblock.free_first import HoldNothing
 from reblock.methods.desire_substrate import DesireWarpedSubstrate
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
@@ -122,10 +123,12 @@ def test_a_methods_code_version_is_blind_to_its_siblings() -> None:
 
     clearance = modules(ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0,
                                            depth_target=2, max_roads=400,
-                                           road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque()))
+                                           road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                           price=Opaque(), free_first=HoldNothing()))
     cycle = modules(CycleNativeReblocker(substrate=ChordSubstrate(), max_displacement=0.10,
                                          max_cycles=400, shortlist=8, params=SHIPPED,
-                                         road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque()))
+                                         road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                         price=Opaque(), free_first=HoldNothing()))
     assert clearance != cycle
     assert SRC / "methods" / "cycle_native.py" not in clearance
     assert SRC / "methods" / "clearance.py" not in cycle
@@ -133,12 +136,14 @@ def test_a_methods_code_version_is_blind_to_its_siblings() -> None:
     a = _code_version(_propose_impl, (ClearanceReblocker(substrate=ChordSubstrate(), repulsion=0.0,
                                                          depth_target=2, max_roads=400,
                                                          road_width_m=DEFAULT_ROAD_WIDTH_M,
-                                                         price=Opaque()),))
+                                                         price=Opaque(),
+                                                         free_first=HoldNothing()),))
     b = _code_version(_propose_impl, (CycleNativeReblocker(substrate=ChordSubstrate(),
                                                            max_displacement=0.10, max_cycles=400,
                                                            shortlist=8, params=SHIPPED,
                                                            road_width_m=DEFAULT_ROAD_WIDTH_M,
-                                                           price=Opaque()),))
+                                                           price=Opaque(),
+                                                           free_first=HoldNothing()),))
     assert a != b, "two methods must not share a code version"
 
 

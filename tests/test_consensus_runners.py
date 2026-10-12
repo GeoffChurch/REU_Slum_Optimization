@@ -19,6 +19,7 @@ from threadpoolctl import threadpool_info, threadpool_limits
 import scripts.consensus_matrix as study
 from reblock.compare import load_permeability_config
 from reblock.contracts import Block, Method
+from reblock.free_first import HoldNothing
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
@@ -37,7 +38,8 @@ def _study_of(runner: study.Runner, out: Path) -> study.Study:
     """Two real arms on synthetic recipients; the pool is never read."""
     arms: dict[str, Method] = {
         name: ClearanceReblocker(substrate=ChordSubstrate(), repulsion=repulsion, depth_target=1,
-                                 max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque())
+                                 max_roads=400, road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                 price=Opaque(), free_first=HoldNothing())
         for name, repulsion in (("own", 0.0), ("repelled", 3.0))}
     return study.Study(pool=pool(RECIPIENTS, with_paths=()), arms=arms, reference="own",
                        pcfg=PCFG, recipients=len(RECIPIENTS), runner=runner, out=out)

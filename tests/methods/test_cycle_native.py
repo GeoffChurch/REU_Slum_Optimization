@@ -17,6 +17,7 @@ from shapely.geometry.base import BaseMultipartGeometry
 from reblock.budget import _rnd
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
+from reblock.free_first import HoldNothing
 from reblock.methods.cycle_native import CycleNativeReblocker
 from reblock.methods.substrates import ChordSubstrate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
@@ -29,7 +30,8 @@ UTM = CRS.from_epsg(32734)
 # what it is about with `replace`.
 CYCLE = CycleNativeReblocker(substrate=ChordSubstrate(), max_displacement=0.20, max_cycles=400,
                              shortlist=8, params=SHIPPED,
-                             road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque())
+                             road_width_m=DEFAULT_ROAD_WIDTH_M,
+                             price=Opaque(), free_first=HoldNothing())
 
 
 def _block(nx_: int = 7, ny: int = 7, step: float = 10.0) -> Block:

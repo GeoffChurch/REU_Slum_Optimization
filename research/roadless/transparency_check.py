@@ -7,6 +7,10 @@ rest are unit tests (tests/test_transparency.py).
     uv run python $S rule
     uv run python $S held
     uv run python $S claim
+    uv run python $S hold-nothing <out.csv> <procs> <ids,>
+    uv run python $S no-enclosed <out.csv> <procs> <ids,>
+    uv run python $S free-roads <out.csv> <procs> <ids,>
+    uv run python $S lead <stage> <out.csv> <procs> <ids,>
 
 `opaque` (guard 1): each method as configured (compare_config's all_methods, common.arms()), with
 `Opaque` for the price and `TransparentSubstrate(<its substrate>, Opaque())` for the route, run
@@ -50,6 +54,43 @@ knob behind base everywhere leaves nothing to compare, and rule 2 does not hold 
 sets as good as the claim fail rule 3; a median (a) loss of 0.011 at count D 0.10 alone fails
 rule 4.
 
+The free-first stage (free_roads.FreeEnclosed; transparency_run's `free` stage), its guards on the
+real blocks, each writing one row per job to <out.csv> and raising on any failure:
+
+`hold-nothing` (guard 1): every arm of the held stage, as configured (its tree's or its own
+`free_first` checked to be HoldNothing), proposed fresh here and set against the held stage's
+network of record (computed on the cluster's nodes before free first existed): the same frame --
+columns, WKB row for row, widths.
+
+`no-enclosed` (guard 2), on blocks with no home enclosed at baseline: FREE's plan finds none and
+holds nothing on each plan method's own graph, and every arm of the free stage (FREE on every arm)
+proposed fresh is the held stage's network of record, frame for frame.
+
+`free-roads` (guard 3), on blocks with homes enclosed at baseline: FREE's plan on each plan method's
+graph and on its claim's routed one (TransparentSubstrate: the same nodes and edges), the same roads
+on all; then the scorer itself (common.Scorer at the stage's mesh, on the CPU) finds the same
+enclosed homes, each held road frees its home (and every home its step says it frees) once the
+roads up to it are carved, what the roads leave enclosed is the plan's share, and their true
+displacement under both weightings is the plan's and within its budget.
+
+`lead <stage>` (guard 4), on a free stage's networks, ordered networks and prefix rows: every
+network holds FREE's roads first (its marked leading rows, WKB row for row), its ordered network
+leads with them, every prefix row at D LENS_D (count and area) holds them all, and on each of
+those prefixes the scorer finds no home enclosed but those the plan left (unreachable, or over the
+budget).
+
+FAULT INJECTION, the free-first guards (each a patch in one process, no file edited):
+`hold-nothing`: HoldNothing holding one road (its graph's first edge) fails it on all 17 arms of
+6310. `no-enclosed`: the stage judging enclosure at a 0.1 m ring (the scorer's is lifted.RING_M,
+1 m), under which it finds 2 homes enclosed on 6310 and 1 on 40144 where the scorer finds none,
+fails it: it holds roads for them, and all 34 networks differ. `free-roads`: every held road one
+segment short makes the stage itself raise, its road not freeing its home by the metric's test, on
+all ten blocks. `lead`: the free-local stage's 51 networks on 41673, 21252 and 43708 re-cut with
+the held roads where street_first_ordered puts them (common.canonical_order replaced by it) fail
+it on 41: the held roads lead 10, every held road is inside the D 0.05 prefixes of 18, and the
+D 0.05 prefixes of 31 leave homes enclosed that the held roads free (all of 21252's two in every
+clearance_looped arm).
+
 FAULT INJECTION, `rule`: the veto without B (i), and the random sets of every form for each
 candidate, each fail it. `claim`: rule 2 over every block (the knob's B (i) ignored), rule 2
 holding when any knob is beaten, rule 1 without B (i), and the kept blocks' weights not
@@ -66,7 +107,9 @@ import multiprocessing
 import os
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar, cast
 
 import geopandas as gpd
 import numpy as np
@@ -75,15 +118,20 @@ import shapely
 from numpy.typing import NDArray
 
 from reblock.contracts import Block, Method
+from reblock.free_first import HELD_COL, HoldNothing, held_count
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.cycle_native import CycleNativeReblocker
 from reblock.methods.loop_closure import LoopClosureRefiner
 from reblock.methods.resistance_lp import ResistanceLPReblocker
+from reblock.methods.substrates import RoutingGraph
+from reblock.permeability import with_width
 from reblock.transparency import Opaque, TransparentSubstrate, factors_of
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
+import free_roads as fr  # noqa: E402
+import lifted  # noqa: E402
 import transparency_sets as ts  # noqa: E402
 
 NETS = HERE / "road_rows" / "scratch" / "networks"
@@ -92,6 +140,7 @@ SINGLE = dict(OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1"
 # propose order only (no result depends on it): the costliest first
 COST_GUESS = {"cycle_native": 2.5, "resistance_lp": 2.0, "clearance_looped": 1.0}
 STRATIFICATION = ts.AreaMass(strata=20)     # the experiment's control (owner's ruling 2026-10-12)
+J = TypeVar("J")                            # a pool's job
 F_CHECK = 0.25              # any factor in (0, 1) does for these checks
 
 
@@ -286,7 +335,8 @@ def rule() -> None:
     short = {a.name: a.change.label for a in m.arms}
     by = {v: k for k, v in short.items()}
 
-    def lens_of(c: dict[str, NDArray[np.float64]], enc: dict[str, NDArray[np.float64]] | None = None,
+    def lens_of(c: dict[str, NDArray[np.float64]],
+                enc: dict[str, NDArray[np.float64]] | None = None,
                 a: dict[str, NDArray[np.float64]] | None = None) -> dict[float, pd.DataFrame]:
         rows = [dict(block=b, method=n, c=c.get(short[n], c["base"])[i],
                      enc_c=(enc or {}).get(short[n], np.zeros(13))[i],
@@ -313,7 +363,8 @@ def rule() -> None:
     assert float(r["lo"]) <= 0.015 <= float(r["hi"])
     assert abs(float(r["gap_closed"]) - 0.015 / 0.4) < 1e-12
     assert {short[n] for n, x in st.items() if x["goes_on"]} == {
-        "base", "chunks4", "simp-f0.1-price-route", *[f"rand{s}-f0.1-price-route" for s in tr.SEEDS]}
+        "base", "chunks4", "simp-f0.1-price-route",
+        *[f"rand{s}-f0.1-price-route" for s in tr.SEEDS]}
     print("the largest qualifying candidate chosen; base, the best knob, its form's random sets on")
     st, _, chosen = decide(c, enc={"simp-f0.1-price-route": np.r_[0.001, np.zeros(12)]})
     assert st[by["simp-f0.1-price-route"]]["veto"] and chosen == "simp-f0.1-price", chosen
@@ -448,6 +499,290 @@ def claim() -> None:
     print("clearance_looped, one knob: every rule holding, a shift")
 
 
+# ------------------------------------------------------------------ free first (BACKLOG 5)
+
+def _same_frame(a: gpd.GeoDataFrame, b: gpd.GeoDataFrame) -> bool:
+    """Two networks as frames: the same columns, the same WKB row for row (every coordinate
+    exact), the same widths, the same held roads."""
+    return bool(list(a.columns) == list(b.columns) and len(a) == len(b)
+                and _wkb(a) == _wkb(b)
+                and np.array_equal(a["width_m"].to_numpy(), b["width_m"].to_numpy())
+                and held_count(a) == held_count(b))
+
+
+def _tree(method: Method) -> CycleNativeReblocker | ResistanceLPReblocker | ClearanceReblocker:
+    """The method that holds roads first: clearance_looped's tree, or the method itself."""
+    m = method.base if isinstance(method, LoopClosureRefiner) else method
+    if not isinstance(m, CycleNativeReblocker | ResistanceLPReblocker | ClearanceReblocker):
+        raise TypeError(f"{type(m).__name__} has no free-first stage")
+    return m
+
+
+def _against_held(job: tuple[str, str, str]) -> dict[str, object]:
+    """One (stage, block, arm): the arm's network proposed fresh here, against the held stage's
+    network of record (computed before free first existed, every arm holding nothing)."""
+    import transparency_run as tr
+    stage_name, bid, name = job
+    stage, held_stage = tr._stage(stage_name), tr.held_stage()
+    arm = stage.arm_of(name)
+    [b] = common.build_blocks([bid])
+    method = stage.method(arm, common.arms(), bid)
+    first = _tree(method).free_first
+    t0, c0 = time.perf_counter(), time.process_time()
+    roads = _roads(method, b)
+    wall, cpu = time.perf_counter() - t0, time.process_time() - c0
+    theirs = gpd.read_parquet(held_stage.record_path(bid, name))
+    same = _same_frame(roads, theirs)
+    print(f"{time.strftime('%H:%M:%S')} {bid} {name} ({type(first).__name__}): {len(roads)} roads "
+          f"(held stage {len(theirs)}), held {held_count(roads)}, same {same}, {wall:.0f}s",
+          flush=True)
+    return dict(stage=stage_name, block=bid, arm=name, first=type(first).__name__,
+                hold_nothing=isinstance(first, HoldNothing), roads=len(roads),
+                held_stage_roads=len(theirs), held=held_count(roads),
+                columns=",".join(roads.columns),
+                same=same, wall_s=wall, cpu_s=cpu)
+
+
+def _pool_rows(fn: Callable[[J], dict[str, object]], jobs: list[J], procs: int) -> pd.DataFrame:
+    with multiprocessing.get_context("fork").Pool(min(procs, len(jobs)), maxtasksperchild=1) as p:
+        return pd.DataFrame(list(p.imap_unordered(fn, jobs)))
+
+
+def _jobs(stage_name: str, ids: list[str]) -> list[tuple[str, str, str]]:
+    """Every (block, arm) of the stage on `ids`, the costliest first (propose's order guess)."""
+    import transparency_run as tr
+    stage = tr._stage(stage_name)
+    sizes = pd.read_parquet(HERE / "large82_area.parquet").set_index("block")["n"]
+    jobs = [(float(sizes[bid]) * COST_GUESS[a.group], (stage_name, bid, a.name))
+            for bid in stage.ids_of(",".join(ids)) for a in stage.arms]
+    return [j for _, j in sorted(jobs, key=lambda c: -c[0])]
+
+
+def _write(df: pd.DataFrame, out: Path) -> None:
+    out.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out, index=False)
+    pd.set_option("display.width", 250)
+    pd.set_option("display.max_rows", 500)
+    print(df.to_string(index=False))
+
+
+def hold_nothing(out: Path, procs: int, ids: list[str]) -> None:
+    """Guard 1 (the module's docstring)."""
+    _check_single_threaded()
+    df = _pool_rows(_against_held, _jobs("held", ids), procs).sort_values(["block", "arm"])
+    _write(df, out)
+    bad = df[~(df.same.astype(bool) & df.hold_nothing.astype(bool))]
+    print(f"{len(df)} networks on {df.block.nunique()} blocks, holding nothing: "
+          f"{int(df.hold_nothing.sum())}; the held stage's network, frame for frame: "
+          f"{int(df.same.sum())}")
+    if len(bad):
+        raise SystemExit(f"{len(bad)} networks are not the held stage's: {bad.arm.tolist()[:5]}")
+
+
+def _method_graphs(bid: str, b: Block) -> dict[str, tuple[RoutingGraph, float]]:
+    """Per plan method, its preset's routing graph and road width, and the claim's routed graph
+    (TransparentSubstrate over the preset's: the same nodes and edges, other lengths)."""
+    import transparency_run as tr
+    presets = common.arms()
+    out: dict[str, tuple[RoutingGraph, float]] = {}
+    for m in tr.held_plan(tr.HELD_PLAN):
+        for arm in (m.base, m.claim):
+            tree = _tree(arm.method(presets, bid))
+            out[arm.name] = (tree.substrate.build(b), tree.road_width_m)
+    return out
+
+
+def _plans(bid: str, b: Block) -> dict[str, fr.Plan]:
+    """FREE's plan on every graph of `_method_graphs`; the held roads the same on all."""
+    import transparency_run as tr
+    plans = {name: tr.FREE.plan(b, graph, width_m=width)
+             for name, (graph, width) in _method_graphs(bid, b).items()}
+    first = next(iter(plans.values()))
+    for name, p in plans.items():
+        if (_wkb_roads(p) != _wkb_roads(first) or [s.home for s in p.steps]
+                != [s.home for s in first.steps] or p.enclosed != first.enclosed):
+            raise AssertionError(f"{bid}: {name}'s graph holds other roads than "
+                                 f"{next(iter(plans))}'s")
+    return plans
+
+
+def _held_rows(roads: gpd.GeoDataFrame) -> NDArray[np.intp]:
+    """The rows `roads` marks held, wherever they are (`held_count` refuses a frame whose held
+    rows do not lead: this is the guard looking at one that may not)."""
+    if HELD_COL not in roads.columns:
+        return np.zeros(0, dtype=np.intp)
+    return np.flatnonzero(roads[HELD_COL].to_numpy(dtype=bool))
+
+
+def _head(roads: gpd.GeoDataFrame, m: int) -> gpd.GeoDataFrame:
+    """The first `m` roads, a frame."""
+    return cast(gpd.GeoDataFrame, roads.iloc[:m])
+
+
+def _wkb_roads(p: fr.Plan) -> list[bytes]:
+    return [bytes(w) for w in shapely.to_wkb(np.asarray([s.road.geometry for s in p.steps]))]
+
+
+def no_enclosed(out: Path, procs: int, ids: list[str]) -> None:
+    """Guard 2 (the module's docstring). A block the scorer's placement finds a home enclosed on
+    is no block for it; on the others the stage must hold nothing and change no network."""
+    _check_single_threaded()
+    import transparency_run as tr
+    problems = []
+    for b in common.build_blocks(ids):
+        grid = tr.FREE.mesh.build(b, fr.REACH_P, common.AreaPopulation())
+        if common.placement(grid, np.asarray(b.buildings.outlines), fr.REACH_P).enclosed.any():
+            raise SystemExit(f"{b.block_id}: the scorer's placement finds homes enclosed at "
+                             "baseline: not a block for this guard")
+        plans = _plans(b.block_id, b)
+        p = next(iter(plans.values()))
+        print(f"{b.block_id}: no home enclosed at baseline; the stage finds {len(p.enclosed)} "
+              f"and holds {len(p.steps)} roads on the {len(plans)} graphs ({', '.join(plans)})",
+              flush=True)
+        if p.enclosed or p.steps:
+            problems.append(f"{b.block_id}: the stage holds {len(p.steps)} roads for "
+                            f"{len(p.enclosed)} homes the scorer does not find enclosed")
+    df = _pool_rows(_against_held, _jobs("free", ids), procs).sort_values(["block", "arm"])
+    _write(df, out)
+    bad = df[~df.same.astype(bool) | (df.held > 0)]
+    print(f"{len(df)} networks with FREE on every arm, on {df.block.nunique()} blocks: the held "
+          f"stage's network (holding nothing), frame for frame: {int(df.same.sum())}")
+    if len(bad):
+        problems.append(f"{len(bad)} networks differ from holding nothing: "
+                        f"{bad.arm.tolist()[:5]}")
+    if problems:
+        raise SystemExit("\n".join(problems))
+
+
+def _cpu_scorer(b: Block) -> common.Scorer:
+    """The scorer road_rescore.py scores with (its mesh, physics and area population), its
+    solves on the CPU: B (i)'s test is its `pl` and `free_of`."""
+    import road_rescore as rr
+    import transparency_run as tr
+    p = lifted.Params(ell_m=rr.ELL_M, K=rr.K, along=lifted.along_of(rr.ALONG,
+                                                                    lifted.scans_of("cpu")),
+                      solver=lifted.solver_of("cpu"))
+    return common.Scorer(b, tr.FREE.mesh, p, population=common.AreaPopulation())
+
+
+def _freed(sc: common.Scorer, roads: gpd.GeoDataFrame) -> NDArray[np.bool_]:
+    """Per home: enclosed at baseline and freed once `roads` are carved, by the scorer (its
+    free field, and B (i)'s test as Scorer.enclosed_left applies it)."""
+    return common.reached(sc.pl, sc.grid, sc.free_of(roads), sc.p)
+
+
+def _free_roads_one(bid: str) -> dict[str, object]:
+    import transparency_run as tr
+    [b] = common.build_blocks([bid])
+    t0 = time.perf_counter()
+    plans = _plans(bid, b)
+    t_plan = (time.perf_counter() - t0) / len(plans)
+    p = next(iter(plans.values()))
+    width = next(iter(_method_graphs(bid, b).values()))[1]
+    t0 = time.perf_counter()
+    sc = _cpu_scorer(b)
+    t_sc = time.perf_counter() - t0
+    if tuple(int(h) for h in np.flatnonzero(sc.enclosed)) != p.enclosed:
+        raise AssertionError(f"{bid}: the plan's enclosed homes {p.enclosed} are not the "
+                             f"scorer's {np.flatnonzero(sc.enclosed).tolist()}")
+    roads = [s.road.geometry for s in p.steps]
+
+    def frame(k: int) -> gpd.GeoDataFrame:
+        return with_width(gpd.GeoDataFrame(geometry=roads[:k], crs=b.crs), width)
+
+    for k, s in enumerate(p.steps, start=1):
+        freed = _freed(sc, frame(k))
+        if not freed[s.home] or not all(freed[j] for j in s.freed):
+            raise AssertionError(f"{bid}: road {k} (home {s.home}) does not free "
+                                 f"{[j for j in s.freed if not freed[j]] or [s.home]}")
+    left = sc.enclosed_left(sc.free_of(frame(len(roads))))
+    polys = np.asarray(b.buildings.outlines)
+    d_area = common.displacement(b, frame(len(roads)), common.AreaPopulation().weights(polys))
+    d_count = common.displacement(b, frame(len(roads)), common.CountPopulation().weights(polys))
+    if (abs(left - p.share_after) > 1e-12 or abs(d_area - p.D_area) > 1e-12
+            or abs(d_count - p.D_count) > 1e-12 or max(d_area, d_count) > tr.FREE.budget):
+        raise AssertionError(f"{bid}: left {left} against {p.share_after}, D {d_area} {d_count} "
+                             f"against {p.D_area} {p.D_count}")
+    return dict(block=bid, n=len(polys), enclosed=len(p.enclosed),
+                homes=",".join(str(h) for h in p.enclosed), share_before=p.share_before,
+                roads=len(p.steps), D_area=p.D_area, D_count=p.D_count,
+                road_m=",".join(f"{r.length:.1f}" for r in roads),
+                nodes=",".join(str(len(s.road.nodes)) for s in p.steps),
+                held_for=",".join(str(s.home) for s in p.steps),
+                freed=";".join(",".join(str(j) for j in s.freed) for s in p.steps),
+                unreachable=",".join(map(str, p.unreachable)),
+                over_budget=",".join(map(str, p.over_budget)), share_after=p.share_after,
+                graphs=len(plans), t_plan_s=t_plan, t_scorer_s=t_sc)
+
+
+def free_roads(out: Path, procs: int, ids: list[str]) -> None:
+    """Guard 3 (the module's docstring)."""
+    _check_single_threaded()
+    df = _pool_rows(_free_roads_one, ids, procs).sort_values("n")
+    _write(df, out)
+    print(f"{len(df)} blocks: {int(df.enclosed.sum())} homes enclosed at baseline, "
+          f"{int(df.roads.sum())} roads held, each freeing its home by the scorer's test; "
+          f"left enclosed on {int((df.share_after > 0).sum())} blocks")
+
+
+def _lead_one(job: tuple[str, str]) -> list[dict[str, object]]:
+    import road_rescore as rr
+    import transparency_run as tr
+    stage_name, bid = job
+    stage = tr._stage(stage_name)
+    [b] = common.build_blocks([bid])
+    p = next(iter(_plans(bid, b).values()))
+    want = _wkb_roads(p)
+    allowed = set(p.unreachable) | set(p.over_budget)
+    sc = _cpu_scorer(b)
+    rows = []
+    for arm in stage.arms:
+        net = gpd.read_parquet(stage.record_path(bid, arm.name))
+        ordered = gpd.read_parquet(rr.ordered_path(stage.scratch, bid, arm.name))
+        pre = pd.read_parquet(rr.prefix_dir(stage.rows) / f"{bid}__{arm.name}.parquet")
+        n = held_count(net)
+        at = _held_rows(ordered)            # where the ordered network has its held roads
+        leads = bool(n == len(want) and _wkb(_head(net, n)) == want
+                     and np.array_equal(at, np.arange(n)) and _wkb(_head(ordered, n)) == want)
+        r: dict[str, object] = dict(block=bid, arm=arm.name, held=n, plan_roads=len(want),
+                                    leads=leads, held_rows=",".join(map(str, at)))
+        for pop in ("count", "area"):
+            row = pre[(pre["pop"] == pop) & np.isclose(pre.budget, tr.LENS_D)].iloc[0]
+            m = int(row.m)
+            holds_all = bool(len(at) == len(want) and (at < m).all())
+            left = set(np.flatnonzero(sc.enclosed & ~_freed(sc, _head(ordered, m))).tolist())
+            r.update({f"m_{pop}": m, f"holds_all_{pop}": holds_all,
+                      f"left_{pop}": ",".join(map(str, sorted(left))),
+                      f"ok_{pop}": bool(holds_all and left <= allowed)})
+        rows.append(r)
+        print(f"{bid} {arm.name}: {n} held (plan {len(want)}), leads {leads}; at D {tr.LENS_D:g} "
+              f"count prefix {r['m_count']} roads, area prefix {r['m_area']}, left enclosed "
+              f"{r['left_count'] or '-'} | {r['left_area'] or '-'}", flush=True)
+    return rows
+
+
+def lead(stage_name: str, out: Path, procs: int, ids: list[str]) -> None:
+    """Guard 4 (the module's docstring), on `stage_name`'s rows."""
+    _check_single_threaded()
+    import transparency_run as tr
+    stage = tr._stage(stage_name)
+    if not isinstance(stage.first, tr.FreeEveryArm):
+        raise SystemExit(f"{stage_name}'s arms hold nothing first")
+    with multiprocessing.get_context("fork").Pool(min(procs, len(ids)), maxtasksperchild=1) as pl:
+        got = [r for rows in pl.imap_unordered(_lead_one, [(stage_name, bid) for bid in
+                                                           stage.ids_of(",".join(ids))])
+               for r in rows]
+    df = pd.DataFrame(got).sort_values(["block", "arm"])
+    _write(df, out)
+    bad = df[~(df.leads.astype(bool) & df.ok_count.astype(bool) & df.ok_area.astype(bool))]
+    print(f"{len(df)} networks on {df.block.nunique()} blocks: held roads leading "
+          f"{int(df.leads.sum())}; every held road in the D {tr.LENS_D:g} prefixes and no home "
+          f"left enclosed there but those the plan left: count {int(df.ok_count.sum())}, area "
+          f"{int(df.ok_area.sum())}")
+    if len(bad):
+        raise SystemExit(f"{len(bad)} networks fail: {bad.arm.tolist()[:5]}")
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     if a[0] == "opaque":
@@ -460,5 +795,13 @@ if __name__ == "__main__":
         held()
     elif a[0] == "claim":
         claim()
+    elif a[0] == "hold-nothing":
+        hold_nothing(Path(a[1]), int(a[2]), a[3].split(","))
+    elif a[0] == "no-enclosed":
+        no_enclosed(Path(a[1]), int(a[2]), a[3].split(","))
+    elif a[0] == "free-roads":
+        free_roads(Path(a[1]), int(a[2]), a[3].split(","))
+    elif a[0] == "lead":
+        lead(a[1], Path(a[2]), int(a[3]), a[4].split(","))
     else:
         raise SystemExit(f"unknown command {a[0]!r}")

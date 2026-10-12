@@ -2,7 +2,8 @@
 (BACKLOG 4(b), "the price of roads"): the 4-block sentinel, then the 60 that fit at h 0.5.
 
 Each method's network (reblock.derivations.propose, the derive cache), cut to its canonical
-street-first prefixes (common.prefix_to) at BUDGETS and whole, scored
+prefixes (common.prefix_to: the roads it holds first, if it marks any, then street-first) at
+BUDGETS and whole, scored
   (a) by the shipped permeability (reblock.permeability) on COUNT-weight prefixes;
   (b) roadless, the walking model changed only: count population, p 1, the same prefixes;
   (c) roadless as the optimizers use it: area population, J_2, on AREA-weight prefixes;
@@ -352,7 +353,7 @@ POPS = ("count", "area")         # the two weightings: (a) and (b) on count, (c)
 
 
 def prefix_len(block, ordered, target: float, w: np.ndarray) -> int:
-    """common.prefix_to's length on roads already in canonical order (street_first_ordered once
+    """common.prefix_to's length on roads already in canonical order (common.canonical_order once
     per network rather than once per budget): the shortest prefix whose `w`-weighted
     displacement reaches `target`, or all of them. Checked against common.prefix_to on every
     network (prefixes_one)."""
@@ -379,8 +380,9 @@ class PrefixJob(NamedTuple):
 
 
 def prefixes_one(job: PrefixJob) -> str | None:
-    """One network's canonical prefixes: per weighting and budget its length, and per distinct
-    prefix its road length, displacement under both weightings and (a). The ordered network to
+    """One network's canonical prefixes (common.canonical_order: its held roads, if the network
+    marks any, then street-first): per weighting and budget its length, and per distinct prefix
+    its road length, displacement under both weightings and (a). The ordered network to
     <scratch>, the rows to prefix_dir(<rows>). The failed job's name, or None."""
     try:
         _prefixes_one(job)
@@ -394,13 +396,12 @@ def prefixes_one(job: PrefixJob) -> str | None:
 def _prefixes_one(job: PrefixJob) -> None:
     import geopandas as gpd
 
-    from reblock.budget import STREET_TOL, street_first_ordered
     from reblock.compare import load_permeability_config
     from reblock.permeability import EgressContext, permeability
     scratch, bid, name, b = job.scratch, job.bid, job.name, _BLOCKS[job.bid]
     t0 = time.perf_counter()
     roads = gpd.read_parquet(net_path(scratch, bid, name, False))
-    ordered = street_first_ordered(b, roads, STREET_TOL)
+    ordered = common.canonical_order(b, roads)
     write_parquet(ordered, ordered_path(scratch, bid, name))
     t_order = time.perf_counter() - t0
     polys = np.asarray(b.buildings.outlines)

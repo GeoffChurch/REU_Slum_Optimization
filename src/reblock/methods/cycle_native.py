@@ -18,6 +18,10 @@ The displacement in that ratio is PRICED (`price`, `reblock.transparency`: build
 counts times its factor); the `max_displacement` cap is not, since it decides how far the method
 builds rather than what it builds. Under `Opaque` the two are the same number, bit for bit.
 
+Roads held first (`free_first`, `reblock.free_first`) are committed before the first cycle: the
+cap and the ranking count their displacement, the cycles route from them as from the street, and
+they lead the output. They are spurs, so a network holding any is no longer bridgeless.
+
 Avoiding the outbound edges is what makes the return path a genuine alternate route rather than a
 retrace; without it the "cycle" is a there-and-back spur and the method degenerates to clearance.
 
@@ -65,6 +69,7 @@ from shapely.ops import nearest_points, unary_union
 
 from reblock.contracts import Block, Proposal
 from reblock.derive_graph import config_identity
+from reblock.free_first import FreeFirst, mark_held
 from reblock.methods.substrates import RoutingGraph, Substrate
 from reblock.permeability import (
     EgressContext,
@@ -116,6 +121,8 @@ class CycleNativeReblocker:
     _: KW_ONLY
     # Each building's factor on the displacement that RANKS candidate cycles (`Opaque`: today's).
     price: Transparency
+    # Roads committed before the first cycle (`HoldNothing`: today's).
+    free_first: FreeFirst
 
     @property
     def identity(self) -> Hashable | None:
@@ -128,7 +135,7 @@ class CycleNativeReblocker:
         graph = self.substrate.build(block)
         geoms = list(block.parcels.geometry)
         if not geoms or len(graph.pts) == 0:
-            return self._out(block, empty)
+            return self._out(block, empty, held=0)
 
         # Every candidate cycle is scored against this one block's mesh and no-roads baseline.
         ctx = EgressContext.of(block, self.params)
@@ -137,7 +144,7 @@ class CycleNativeReblocker:
         seeds = np.flatnonzero(
             shapely.dwithin(shapely.points(graph.pts), street, graph.net_tol)).tolist()
         if not seeds:
-            return self._out(block, empty)
+            return self._out(block, empty, held=0)
 
         pt_tree = cKDTree(graph.pts)
         reps = np.array([[g.representative_point().x, g.representative_point().y] for g in geoms])
@@ -147,13 +154,19 @@ class CycleNativeReblocker:
         rr = np.concatenate([graph.rows, graph.cols])
         cc = np.concatenate([graph.cols, graph.rows])
 
-        roads: list[LineString] = []
-        cur_p = float(permeability(ctx, empty))
+        # The held roads are the first committed: in the network the cycles route from, in the
+        # displacement the cap and the ranking read, and leading the output.
+        held = self.free_first.held(block, graph, width_m=self.road_width_m)
+        roads: list[LineString] = [r.geometry for r in held]
+        cur_p = float(permeability(ctx, with_width(gpd.GeoDataFrame(geometry=roads, crs=crs),
+                                                   self.road_width_m)))
         # The committed corridor as per-building covered pieces, so a candidate cycle is priced by
         # the buildings IT reaches rather than by re-unioning the whole network -- a recompute
         # whose cost grows with every road committed (see `buildings.IncrementalOverlap`).
         taken = PricedOverlap(block.buildings, factors=factors_of(self.price, block))
         hw = self.road_width_m / 2.0
+        if roads:
+            taken.add(unary_union([g.buffer(hw) for g in roads]))
         for _ in range(self.max_cycles):
             # The cap reads TRUE displacement, the ranking below PRICED.
             spent = taken.total() / n_b
@@ -211,15 +224,16 @@ class CycleNativeReblocker:
             roads.extend(best[0])
             cur_p = best[1]
             taken.add(best[2])
-        return self._out(block, gpd.GeoDataFrame(geometry=roads, crs=crs))
+        return self._out(block, gpd.GeoDataFrame(geometry=roads, crs=crs), held=len(held))
 
-    def _out(self, block: Block, roads: gpd.GeoDataFrame) -> Proposal:
-        out = with_width(roads, self.road_width_m)
+    def _out(self, block: Block, roads: gpd.GeoDataFrame, *, held: int) -> Proposal:
+        out = mark_held(with_width(roads, self.road_width_m), held)
         return Proposal(
             block_id=block.block_id, crs=block.crs, roads=out, edges=None,
-            # The label names render files, so it carries what changes the road set: the
-            # price (nothing for `Opaque`), the substrate, and max_cycles whenever it binds.
-            proposal_id=(f"cycle_native{self.price.tag}:{self.substrate.tag}"
+            # The label names render files, so it carries what changes the road set: the price
+            # and the held roads (nothing for `Opaque` and `HoldNothing`), the substrate, and
+            # max_cycles whenever it binds.
+            proposal_id=(f"cycle_native{self.price.tag}{self.free_first.tag}:{self.substrate.tag}"
                          f":d{self.max_displacement:g}:mc{self.max_cycles}"),
             method="cycle_native",
             params={"roads": len(out), "road_width_m": self.road_width_m})

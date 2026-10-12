@@ -27,3 +27,5 @@ road_width_m: 7.0
 # Each building's factor in the displacement budget (reblock.transparency); Opaque is every
 # factor 1, the plain budget.
 price: {_target_: reblock.transparency.Opaque}
+# Roads committed before the first chunk (reblock.free_first); HoldNothing holds none.
+free_first: {_target_: reblock.free_first.HoldNothing}

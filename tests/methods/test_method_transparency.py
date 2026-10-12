@@ -25,6 +25,7 @@ from shapely.geometry import LineString, Point, Polygon, box
 from reblock.budget import road_corridor
 from reblock.buildings import ANCHOR_COL, Footprints
 from reblock.contracts import Block, Method
+from reblock.free_first import HoldNothing
 from reblock.methods.clearance import ClearanceReblocker, _edge_weights, _sigmoid
 from reblock.methods.cycle_native import CycleNativeReblocker
 from reblock.methods.resistance_lp import ResistanceLPReblocker
@@ -154,7 +155,8 @@ METHODS: dict[str, RoadMethod] = {
     "cycle_native": replace(CYCLE, max_displacement=CAP),
     "resistance_lp": ResistanceLPReblocker(substrate=ChordSubstrate(), max_displacement=CAP,
                                            max_road_m=1e6, chunks=8, params=SHIPPED,
-                                           road_width_m=DEFAULT_ROAD_WIDTH_M, price=Opaque()),
+                                           road_width_m=DEFAULT_ROAD_WIDTH_M,
+                                           price=Opaque(), free_first=HoldNothing()),
     "clearance": CLEARANCE,
 }
 

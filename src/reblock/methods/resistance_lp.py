@@ -47,6 +47,11 @@ The budget row IS this method's allocation, so `price` (`reblock.transparency`) 
 every `f_b` is 1 and nothing changes; under a discount the network's TRUE displacement exceeds
 `max_displacement` by what the discounted buildings were let off. What the method reports, and
 every lens, is still the true displacement of the roads it emits.
+
+Roads held first (`free_first`, `reblock.free_first`) are committed before the first chunk: built,
+so the linearization, the paths' network and the next chunk's lower bound on `u` include them, and
+their displacement spends the instalments' cumulative budget like any committed road's (an
+instalment they already exceed builds nothing). They lead the output.
 """
 from __future__ import annotations
 
@@ -64,9 +69,10 @@ from shapely import STRtree
 from shapely.geometry import LineString, Point
 from shapely.ops import nearest_points, unary_union
 
-from reblock.buildings import Extents
+from reblock.buildings import Extents, IncrementalOverlap
 from reblock.contracts import Block, Proposal
 from reblock.derive_graph import config_identity
+from reblock.free_first import FreeFirst, mark_held
 from reblock.methods.resistance_greedy import _mesh, linearized_gain
 from reblock.methods.substrates import RoutingGraph, Substrate
 from reblock.permeability import (
@@ -227,6 +233,8 @@ class ResistanceLPReblocker:
     _: KW_ONLY
     # Each building's factor in the displacement budget and its rounding (`Opaque`: today's).
     price: Transparency
+    # Roads committed before the first chunk (`HoldNothing`: today's).
+    free_first: FreeFirst
 
     @property
     def identity(self) -> Hashable | None:
@@ -239,7 +247,7 @@ class ResistanceLPReblocker:
         empty = with_width(gpd.GeoDataFrame(geometry=[], crs=crs), self.road_width_m)
         geoms = list(block.parcels.geometry)
         if len(geoms) == 0 or len(graph.pts) == 0:
-            return self._proposal(block, empty, {"roads": 0, "stopped": "empty"})
+            return self._proposal(block, empty, {"roads": 0, "stopped": "empty"}, held=0)
 
         # The evaluator's own context, so the LP linearizes exactly the Laplacian it is graded on
         # -- an adjacency built here at the road half-width once gave it a 6x looser mesh.
@@ -248,7 +256,8 @@ class ResistanceLPReblocker:
         net0 = np.flatnonzero(
             shapely.dwithin(shapely.points(graph.pts), street, graph.net_tol)).tolist()
         if not net0:
-            return self._proposal(block, empty, {"roads": 0, "stopped": "no street frontage"})
+            return self._proposal(block, empty, {"roads": 0, "stopped": "no street frontage"},
+                                  held=0)
 
         n_b = len(block.buildings)
         disp_cap = self.max_displacement * n_b
@@ -266,9 +275,17 @@ class ResistanceLPReblocker:
         ri, ci, dg, segs = _mesh(ctx, self.road_width_m)
         seg_tree = STRtree(list(segs)) if len(segs) else None
 
-        best: list[LineString] = []
-        best_perm = permeability(ctx, empty)
+        # The held roads are the first committed: built for the linearization and the paths'
+        # network, and their true displacement the lower bound on `u` from the first chunk on.
+        held = self.free_first.held(block, graph, width_m=self.road_width_m)
+        best: list[LineString] = [r.geometry for r in held]
+        best_perm = permeability(ctx, with_width(gpd.GeoDataFrame(geometry=best, crs=crs),
+                                                 self.road_width_m))
         base_c = np.zeros(n_b)
+        if best:                    # as `_round` seeds its tracker with the committed roads
+            start = IncrementalOverlap(block.buildings)
+            start.add(shapely.union_all([g.buffer(self.road_width_m / 2.0) for g in best]))
+            base_c = start.c()
         k = max(self.chunks, 1)
         for t in range(k):
             built = with_width(gpd.GeoDataFrame(geometry=best, crs=crs) if best else empty,
@@ -335,7 +352,7 @@ class ResistanceLPReblocker:
         gdf = with_width(gpd.GeoDataFrame(geometry=best, crs=crs),
                   self.road_width_m)
         return self._proposal(block, gdf, {"roads": len(best),
-                                           "permeability": float(best_perm)})
+                                           "permeability": float(best_perm)}, held=len(held))
 
     def _round(
         self, buildings: Extents, committed: list[LineString], path_segs: list[list[int]],
@@ -388,13 +405,14 @@ class ResistanceLPReblocker:
         return out, tracker.c()
 
     def _proposal(self, block: Block, roads: gpd.GeoDataFrame,
-                  params: dict[str, object]) -> Proposal:
+                  params: dict[str, object], *, held: int) -> Proposal:
         return Proposal(
             block_id=block.block_id, crs=block.crs, edges=None,
-            roads=with_width(roads, self.road_width_m),
-            # The label names render files: the price (nothing for `Opaque`) is in it.
-            proposal_id=(f"resistance_lp{self.price.tag}:{self.substrate.tag}"
-                         f":d{self.max_displacement:g}:k{self.chunks}"),
+            roads=mark_held(with_width(roads, self.road_width_m), held),
+            # The label names render files: the price and the held roads (nothing for `Opaque`
+            # and `HoldNothing`) are in it.
+            proposal_id=(f"resistance_lp{self.price.tag}{self.free_first.tag}:"
+                         f"{self.substrate.tag}:d{self.max_displacement:g}:k{self.chunks}"),
             method="resistance_lp",
             params={**params, "substrate": self.substrate.tag,
                     "max_displacement": self.max_displacement, "chunks": self.chunks})
