@@ -52,9 +52,17 @@ only), each under the three lenses with B (i); and each stored clearing with the
 enclosed freed first (clear.free_first under the rule, the clearing held, no budget: its D grows by
 what that costs), where it leaves any. Rows aperture_rows/score/o<offset>/<rule>/<id>.parquet;
 per home (P, P_{1/2}, J_2 terms at baseline and under SIMP's default) aperture_rows/homes_score/...
+
+`report`: the summaries, aperture_rows/summary_<name>.csv (committed; the rows are not): Q1
+q1_blocks, q1 (spreads by size: small, large, oversized), q1_pooled (the people over every block);
+Q2 q2_blocks (CANDIDATE per block), q2 (spreads by rule and size), q2_pooled, q2_levels (the blocks
+whose level moves past LEVEL_FACTOR: the change by what the homes sit behind); Q3 q3_angle,
+q3_align, q3_subcell, q3_width (the corridor), q3_levels, q3_homes, q3_top (the drift blocks); Q4
+q4_tau, q4_leads, q4_stored; and simp.
 """
 from __future__ import annotations
 
+import functools
 import multiprocessing
 import socket
 import sys
@@ -168,10 +176,17 @@ UNIFORM_MAX_M = 49.0     # a block over this many million unknowns at h 0.5 (8 p
                          # scored on OVERSIZED_MESH: 30796's 48.7M is the largest the cards hold
 
 
+@functools.cache
+def _large_sizes() -> dict[str, float]:
+    """The 82 large blocks' unknowns at h 0.5, millions (large82_area.parquet: here, not on the
+    cluster, where a task is given its mesh)."""
+    d = pd.read_parquet(HERE / "large82_area.parquet")
+    return dict(zip(d.block, d.M_unknowns, strict=True))
+
+
 def mesh_token_of(bid: str) -> str:
     """The mesh `base` scores a block on: uniform h 0.5, or the composite for an oversized one."""
-    sizes = pd.read_parquet(HERE / "large82_area.parquet").set_index("block").M_unknowns
-    return OVERSIZED_MESH if bid in sizes.index and sizes[bid] > UNIFORM_MAX_M else "0.5"
+    return OVERSIZED_MESH if _large_sizes().get(bid, 0.0) > UNIFORM_MAX_M else "0.5"
 
 
 def base_path(bid: str, tag: str) -> Path:
@@ -679,6 +694,7 @@ def simp(bid: str, rule: str, device: str, power: float) -> None:
 # ------------------------------------------------------------------ the report
 
 LENS_COLS = ("L_P", "L_Pq0.5", "L_J2")          # P, the equity view P_{1/2}, then J_2
+CANDIDATE = "Fws"                               # the rule the per-block tables report
 REACH_TOL = width.REACH_TOL                     # a road prefix reaches D 0.05 at BUDGET - this
 U_ROWS = width.ROWS / "score"                   # today's rule's fields (width.py's U: the same
                                                 # code path, bit for bit; GPU, at 4139177d)
@@ -711,8 +727,10 @@ def _spread(df: pd.DataFrame, by: list[str], cols: list[str]) -> pd.DataFrame:
 
 
 def _size_class(bids: pd.Series) -> pd.Series:
+    """small (the 220), large (uniform h 0.5) or oversized (OVERSIZED_MESH)."""
     small = set(common.recipients())
-    return bids.map(lambda b: "small" if b in small else "large")
+    return bids.map(lambda b: "small" if b in small else
+                    "oversized" if mesh_token_of(b) == OVERSIZED_MESH else "large")
 
 
 def _q1(homes: pd.DataFrame, pk: pd.DataFrame) -> pd.DataFrame:
@@ -728,9 +746,11 @@ def _q1(homes: pd.DataFrame, pk: pd.DataFrame) -> pd.DataFrame:
         w, u0 = g.w.to_numpy(), np.nan_to_num(g.u0.to_numpy())
         tq = (g.inj_q * np.nan_to_num(g.u_q)).to_numpy()
         terms = dict(P=w * u0, Pq=tq, J2=w * u0 ** 2)
-        row = dict(block=bid, homes=int(live.sum()))
-        for name, share in (("pocket", np.nan_to_num(g.behind.to_numpy())),
-                            ("phantom", np.nan_to_num(g.phantom.to_numpy()))):
+        row = dict(block=bid, homes=int(live.sum()), pop=float(w[live].sum()))
+        for name, raw in (("pocket", g.behind.to_numpy()), ("phantom", g.phantom.to_numpy())):
+            if np.isnan(raw[live]).all():       # an oversized block's sub-cell gaps: not computed
+                continue
+            share = np.nan_to_num(raw)
             hit = live & (share > BEHIND)
             row[f"{name}_homes"] = int(hit.sum())
             row[f"{name}_pop"] = float(w[hit].sum() / w[live].sum())
@@ -761,7 +781,7 @@ def _q2(base: pd.DataFrame, homes: pd.DataFrame, mv: pd.DataFrame, rule: str) ->
         bT = base[(base.block == bid) & (base.rule == "T")].iloc[0]
         bR = base[(base.block == bid) & (base.rule == rule)].iloc[0]
         out.append(dict(
-            block=bid, rule=rule, mesh=bR["mesh"], homes=len(w),
+            block=bid, rule=rule, mesh=bR["mesh"], homes=len(w), pop=float(w.sum()),
             enclosed_T=int(eT.sum()), enclosed=int(eR.sum()),
             new=int(new.sum()), new_pop=float(w[new].sum() / w.sum()),
             new_by_rule=int((new & (nf == 1.0)).sum()),
@@ -771,7 +791,7 @@ def _q2(base: pd.DataFrame, homes: pd.DataFrame, mv: pd.DataFrame, rule: str) ->
             moved_pop=float(w[both & (moved > 1e-12)].sum() / w.sum()),
             moved_demand=float((w * moved)[both].sum() / w.sum()),
             split=int(bR["split"]), split_reached=int(bR["split_reached"]),
-            split_pop=float(bR["split_pop"]),
+            split_pop=float(bR["split_pop"]), split_pop_T=float(bT["split_pop"]),
             free_D_T=float(bT["free_D"]), free_n_T=int(bT["free_n"]),
             free_D=float(bR["free_D"]), free_n=int(bR["free_n"]),
             free_left=float(bR["free_left"]),
@@ -789,13 +809,84 @@ def _q2(base: pd.DataFrame, homes: pd.DataFrame, mv: pd.DataFrame, rule: str) ->
     return pd.DataFrame(out)
 
 
+LEVEL_FACTOR = 1.5       # Q2: a block whose baseline moves past this factor (either way) on a lens
+IN_CRACK = 0.5           # a home in a crack: over this share of its injection in cells whose way
+                         # out is a crack of at most CRACK_M
+LEVEL_GROUPS = ("rest", "partly in a crack", "in a crack", "phantom", "enclosed by the rule")
+DRIFT_GROUPS = ("rest", "in a crack", "crack moves", "phantom")
+
+
+def _crack_groups(cells: dict[str, np.ndarray]) -> np.ndarray:
+    """Per home (`_cells_behind`'s shares at one alignment): behind a phantom passage (over BEHIND
+    of its injection); else in a crack (over IN_CRACK of it in cells whose way out is a crack of
+    at most CRACK_M, one or two sub-samples), or partly (over BEHIND); else the rest."""
+    crack = np.nan_to_num(cells["crack"])
+    grp = np.full(len(crack), "rest", dtype=object)
+    grp[crack > BEHIND] = "partly in a crack"
+    grp[crack > IN_CRACK] = "in a crack"
+    grp[np.nan_to_num(cells["phantom"]) > BEHIND] = "phantom"
+    return grp
+
+
+def _drift_groups(c0: dict[str, np.ndarray], ck: dict[str, np.ndarray]) -> np.ndarray:
+    """Per home, from `_cells_behind` at the metric's offset (c0) and at the shift (ck): behind a
+    phantom passage at either (over BEHIND of its injection); else its crack moves (the share of
+    its injection whose way out is a crack of at most CRACK_M changes by over BEHIND with the
+    alignment: the crack's width snapping to the sampling); else in a crack at both (over
+    IN_CRACK); else the rest."""
+    a, b = np.nan_to_num(c0["crack"]), np.nan_to_num(ck["crack"])
+    grp = np.full(len(a), "rest", dtype=object)
+    grp[np.minimum(a, b) > IN_CRACK] = "in a crack"
+    grp[np.abs(a - b) > BEHIND] = "crack moves"
+    grp[np.fmax(np.nan_to_num(c0["phantom"]), np.nan_to_num(ck["phantom"])) > BEHIND] = "phantom"
+    return grp
+
+
+def _level_homes(base_: pd.DataFrame, homes: pd.DataFrame, rule: str) -> pd.DataFrame:
+    """Q2, on the uniform blocks whose baseline under `rule` moves past LEVEL_FACTOR from
+    today's (either way) on any lens: per lens, the change of the homes' terms grouped by what
+    each sits behind under today's rule at the metric's offset (`_crack_groups`), the homes
+    `rule` encloses apart (their terms leaving the lens): per group its homes and population,
+    its share of today's level and of the change."""
+    lv = base_[base_.rule.isin(["T", rule])].pivot(index="block", columns="rule",
+                                                    values=["P0", "Pq0", "J2_0"])
+    out = []
+    for bid in lv.index:
+        ratio = {c: float(lv.loc[bid, (c, rule)] / lv.loc[bid, (c, "T")])
+                 for c in ("P0", "Pq0", "J2_0")}
+        if (np.isnan(list(ratio.values())).any()
+                or all(1 / LEVEL_FACTOR <= x <= LEVEL_FACTOR for x in ratio.values())
+                or mesh_token_of(bid) == OVERSIZED_MESH):
+            continue
+        g = homes[homes.block == bid]
+        hT, hR = (g[g.rule == x].set_index("home").sort_index() for x in ("T", rule))
+        w = hT.w.to_numpy()
+        grp = _crack_groups(_cells_behind(bid, 0))
+        grp[hR.enclosed.to_numpy() & ~hT.enclosed.to_numpy()] = "enclosed by the rule"
+        for lens, col in (("P", "P0"), ("Pq", "Pq0"), ("J2", "J2_0")):
+            t = {}
+            for x, h in (("T", hT), (rule, hR)):
+                if lens == "Pq":
+                    t[x] = (h.inj_q * h.u_q.fillna(0.0)).to_numpy()
+                else:
+                    t[x] = w * h.u0.fillna(0.0).to_numpy() ** (2.0 if lens == "J2" else 1.0)
+            d = t[rule] - t["T"]
+            for name in LEVEL_GROUPS:
+                m = grp == name
+                out.append(dict(block=bid, rule=rule, lens=lens, ratio=ratio[col], behind=name,
+                                homes=int(m.sum()), population=float(w[m].sum() / w.sum()),
+                                T_share=float(t["T"][m].sum() / t["T"].sum()),
+                                change_share=float(d[m].sum() / d.sum())))
+    return pd.DataFrame(out)
+
+
 def _drift_homes(sh: pd.DataFrame, cells: dict) -> pd.DataFrame:
     """Q3, per drift block, rule and lens (P, P_{1/2}, J_2): how each home's term in the ratio
     J / J0 under SIMP's default moves from the metric's offset to the block's shift, by what the
-    home sits behind at either alignment (`cells`: fine_bottleneck per (block, offset): a
-    phantom passage; else a crack of at most CRACK_M (one or two sub-samples); else another
-    sub-cell gap; else nothing), over BEHIND of its injection: per group its homes, population,
-    share of J0 and of the ratio's change (signed and absolute)."""
+    home sits behind at the two alignments (`cells`: `_cells_behind` per (block, offset);
+    `_drift_groups`: a phantom passage, a crack whose sampled width moves with the alignment, a
+    crack at both, the rest): per group its homes, population, share of J0 and of the ratio's
+    change (signed and absolute)."""
     out = []
     for (bid, rule), g in sh.groupby(["block", "rule"]):
         k = ALIGN[bid]
@@ -804,11 +895,7 @@ def _drift_homes(sh: pd.DataFrame, cells: dict) -> pd.DataFrame:
             continue
         live = (~(at[0].enclosed | at[k].enclosed)).to_numpy()
         w = at[0].w.to_numpy()
-        grp = np.full(len(w), "none", dtype=object)
-        for name, key in (("sub-cell gap", "behind"), ("crack <= 0.25 m", "crack"),
-                          ("phantom", "phantom")):
-            share = np.fmax(cells[(bid, 0)][key], cells[(bid, k)][key])
-            grp[np.nan_to_num(share) > BEHIND] = name
+        grp = _drift_groups(cells[(bid, 0)], cells[(bid, k)])
         for lens in ("P", "Pq", "J2"):
             c, base0 = {}, {}
             for o, h in at.items():
@@ -825,7 +912,7 @@ def _drift_homes(sh: pd.DataFrame, cells: dict) -> pd.DataFrame:
                 base0[o] = np.where(live, a * u0 ** p / J0, 0.0)
             d = c[k] - c[0]
             total, absum = float(d.sum()), float(np.abs(d).sum())
-            for name in ("none", "sub-cell gap", "crack <= 0.25 m", "phantom"):
+            for name in DRIFT_GROUPS:
                 m = live & (grp == name)
                 out.append(dict(block=bid, rule=rule, shift=k, lens=lens, behind=name,
                                 homes=int(m.sum()), population=float(w[m].sum() / w[live].sum()),
@@ -837,16 +924,52 @@ def _drift_homes(sh: pd.DataFrame, cells: dict) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
+def _drift_top(sh: pd.DataFrame) -> pd.DataFrame:
+    """Q3, per drift block, rule and lens: the share of the baseline the three heaviest homes hold
+    at either alignment, and the largest change of one home's term in the ratio J / J0 under
+    SIMP's default from the metric's offset to the block's shift, against the ratio's change."""
+    out = []
+    for (bid, rule), g in sh.groupby(["block", "rule"]):
+        k = ALIGN[bid]
+        at = {o: g[g.offset == o].set_index("home").sort_index() for o in (0, k)}
+        if any(x.empty for x in at.values()):
+            continue
+        live = (~(at[0].enclosed | at[k].enclosed)).to_numpy()
+        for lens in ("P", "Pq", "J2"):
+            c, top = {}, {}
+            for o, h in at.items():
+                a = h.inj_q.to_numpy() if lens == "Pq" else h.w.to_numpy()
+                u0, ud = ((h.uq0, h.uq_default) if lens == "Pq" else (h.u0, h.u_default))
+                p = 2.0 if lens == "J2" else 1.0
+                t0 = np.where(live, a * np.nan_to_num(u0.to_numpy()) ** p, 0.0)
+                c[o] = np.where(live, a * np.nan_to_num(ud.to_numpy()) ** p, 0.0) / t0.sum()
+                top[o] = float(np.sort(t0)[-3:].sum() / t0.sum())
+            d = c[k] - c[0]
+            j = int(np.argmax(np.abs(d)))
+            out.append(dict(block=bid, rule=rule, shift=k, lens=lens, top3_o0=top[0],
+                            top3_shift=top[k], change=float(d.sum()), max_home=int(j),
+                            max_home_change=float(d[j]),
+                            max_home_abs_share=float(abs(d[j]) / np.abs(d).sum())))
+    return pd.DataFrame(out)
+
+
 def _cells_behind(bid: str, off: int) -> dict[str, np.ndarray]:
-    """fine_bottleneck at OFFSETS[off] per home: the injection share behind a sub-cell gap
-    (`behind`), a phantom passage (`phantom`), and a crack of at most CRACK_M not a phantom
-    passage (`crack`)."""
-    [b] = common.build_blocks([bid])
-    cb, behind, phantom = width.fine_bottleneck(b, off)
-    g = lifted.Grid.of(*lifted._geometry(b), H, offset=OFFSETS[off])
-    pl = common.placement(g, np.asarray(b.buildings.outlines), params("uni", "cpu"))
-    crack = pl.S.T.tocsr() @ ((cb > 0) & (cb <= CRACK_M + 1e-9)).astype(float)
-    return dict(behind=behind, phantom=phantom, crack=np.where(pl.enclosed, np.nan, crack))
+    """fine_bottleneck at OFFSETS[off] per home, under today's placement: the injection share
+    behind a sub-cell gap (`behind`), behind a phantom passage (`phantom`), and in cells whose way
+    out is a crack of at most CRACK_M (`crack`: bottleneck above 0, at most CRACK_M). Geometry
+    only; kept as rows (aperture_rows/behind/<id>_o<off>.parquet) for the report's next run."""
+    path = ROWS / "behind" / f"{bid}_o{off}.parquet"
+    if not path.exists():
+        [b] = common.build_blocks([bid])
+        cb, behind, phantom = width.fine_bottleneck(b, off)
+        g = lifted.Grid.of(*lifted._geometry(b), H, offset=OFFSETS[off])
+        pl = common.placement(g, np.asarray(b.buildings.outlines), params("uni", "cpu"))
+        crack = pl.S.T.tocsr() @ ((cb > 0) & (cb <= CRACK_M + 1e-9)).astype(float)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rr.write_parquet(pd.DataFrame(dict(behind=behind, phantom=phantom, crack=np.where(
+            pl.enclosed, np.nan, crack))), path)
+    d = pd.read_parquet(path)
+    return {c: d[c].to_numpy() for c in ("behind", "phantom", "crack")}
 
 
 def _tau_table(t13: pd.DataFrame, ref: pd.DataFrame, rule: str) -> tuple[pd.DataFrame, ...]:
@@ -899,25 +1022,70 @@ def report() -> None:
     t = pd.DataFrame(rel).pivot(index=["angle", "rule"], columns="W", values="C_over_T")
     _summary("q3_width", t.reset_index())
     # Q1, Q2: every block at baseline
-    base_, homes = _read("base"), _read("homes")
+    # a block's later pass may run today's rule again beside its own (its placement, for the
+    # moves): the first pass's rows kept
+    base_ = _read("base").drop_duplicates(["block", "rule"])
+    homes = _read("homes").drop_duplicates(["block", "rule", "home"])
     pk = _read("pockets")
     if not base_.empty:
         if not pk.empty:
             q1 = _q1(homes, pk)
             q1.insert(1, "size", _size_class(q1.block))
             _summary("q1_blocks", q1)
-            cols = [c for c in q1.columns if c not in ("block", "size", "homes")]
+            cols = [c for c in q1.columns if c not in ("block", "size", "homes", "pop")]
             _summary("q1", _spread(q1, ["size"], cols))
+            # pooled: the people (each block's population at its share) over every block's
+            pooled = []
+            for size, g in q1.groupby("size"):
+                row = dict(size=size, blocks=len(g), homes=int(g.homes.sum()))
+                for name in ("pocket", "phantom"):
+                    ok = g[f"{name}_pop"].notna()
+                    for what in ("pop", "demand"):
+                        row[f"{name}_{what}"] = float(
+                            (g[f"{name}_{what}"] * g["pop"])[ok].sum() / g["pop"][ok].sum())
+                    row[f"{name}_homes"] = int(g[f"{name}_homes"][ok].sum())
+                pooled.append(row)
+            _summary("q1_pooled", pd.DataFrame(pooled))
         mv = _read("moves")
         q2 = pd.concat([_q2(base_, homes, mv, r) for r in ("A", "Aw", "Aws", "Fws")],
                        ignore_index=True)
         q2.insert(1, "size", _size_class(q2.block))
-        _summary("q2_blocks", q2)
+        _summary("q2_blocks", q2[q2.rule == CANDIDATE])
+        # pooled over blocks: the people (each block's shares at its population)
+        pool = []
+        for (rule, size), g in q2.groupby(["rule", "size"]):
+            pop = g["pop"].sum()
+
+            def pooled(col: str, g=g, pop=pop) -> float:
+                return float((g[col] * g["pop"]).sum() / pop)
+
+            pool.append(dict(rule=rule, size=size, blocks=len(g), homes=int(g.homes.sum()),
+                             new=int(g.new.sum()), new_pop=pooled("new_pop"),
+                             new_by_rule=int(g.new_by_rule.sum()),
+                             enclosed_T=int(g.enclosed_T.sum()), enclosed=int(g.enclosed.sum()),
+                             blocks_new=int((g.new > 0).sum()),
+                             moved_demand=pooled("moved_demand"),
+                             **({"moved_pocket_demand": pooled("moved_pocket_demand"),
+                                 "moved_sliver_demand": pooled("moved_sliver_demand")}
+                                if "moved_pocket_demand" in g and g.moved_pocket_demand.notna()
+                                .all() else {}),
+                             split=int(g.split.sum()), split_pop=pooled("split_pop"),
+                             split_pop_T=pooled("split_pop_T"),
+                             free_blocks_T=int((g.free_n_T > 0).sum()),
+                             free_blocks=int((g.free_n > 0).sum()),
+                             free_n_T=int(g.free_n_T.clip(lower=0).sum()),
+                             free_n=int(g.free_n.clip(lower=0).sum()),
+                             free_D_T_med=float(g.free_D_T[g.free_n_T > 0].median()),
+                             free_D_med=float(g.free_D[g.free_n > 0].median()),
+                             free_D_max=float(g.free_D.max()),
+                             free_left_max=float(g.free_left.max())))
+        _summary("q2_pooled", pd.DataFrame(pool))
+        _summary("q2_levels", _level_homes(base_, homes, CANDIDATE))
         cols = [c for c in ("new", "new_pop", "new_by_rule", "new_by_rule_pop", "freed", "moved",
                             "moved_pop", "moved_demand", "moved_pocket", "moved_pocket_pop",
                             "moved_pocket_demand", "moved_sliver", "moved_sliver_demand", "split",
-                            "split_pop", "free_D_T", "free_D", "free_n_T", "free_n", "P0", "Pq0",
-                            "J2_0") if c in q2]
+                            "split_pop", "split_pop_T", "free_D_T", "free_D", "free_n_T", "free_n",
+                            "P0", "Pq0", "J2_0") if c in q2]
         sp_ = _spread(q2, ["rule", "size"], cols)
         tot = q2.groupby(["rule", "size"]).agg(
             blocks_new=("new", lambda s: int((s > 0).sum())), homes_new=("new", "sum"),
@@ -938,8 +1106,8 @@ def report() -> None:
             row = dict(block=bid, rule=rule, shift=k)
             for col in LENS_COLS:
                 row[f"{col}_o0"] = float(at[0][col].iloc[0])
-                row[f"{col}_o{k}"] = float(at[k][col].iloc[0])
-                row[f"{col}_change"] = row[f"{col}_o{k}"] - row[f"{col}_o0"]
+                row[f"{col}_shift"] = float(at[k][col].iloc[0])
+                row[f"{col}_change"] = row[f"{col}_shift"] - row[f"{col}_o0"]
             row["enclosed_o0"] = float(at[0].enclosed.iloc[0])
             row["enclosed_shift"] = float(at[k].enclosed.iloc[0])
             lv.append(row)
@@ -949,6 +1117,7 @@ def report() -> None:
         if not sh.empty:
             cells = {(bid, o): _cells_behind(bid, o) for bid, k in ALIGN.items() for o in (0, k)}
             _summary("q3_homes", _drift_homes(sh[sh.block.isin(list(ALIGN))], cells))
+            _summary("q3_top", _drift_top(sh[sh.block.isin(list(ALIGN))]))
         # Q4: the 13 tuning blocks, today's method order against the rule's
         ref = pd.concat([pd.read_parquet(f) for f in sorted((U_ROWS / "o0" / "U").glob(
             "*.parquet"))], ignore_index=True)

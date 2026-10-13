@@ -2036,8 +2036,10 @@ class Regions(NamedTuple):
     the components of open space, then the regions a clearing enters, each with its `owner`
     building (owner[r - ncomp]: pieces of buildings, and an Aperture's gadgets); (a, b) the
     adjacency, both ways; `entry` the regions the street steps into; `R` (grid cells flat, regions)
-    the regions each cell is in (its component, and the piece of every building covering part of
-    it)."""
+    the regions a home is freed through at each cell (RegionGraph.sources): a cell that can take
+    demand at baseline its component (and the pieces covering it), any other the pieces whose
+    building, cleared alone, lets it (under today's rule and lifted.JoinParts every piece covering
+    a closed cell)."""
     ncomp: int
     owner: NDArray[np.int64]
     a: NDArray[np.int64]
@@ -2280,7 +2282,11 @@ class PartRule(Protocol):
     on their gradient); placeable(reach, F, grid): of the reached cells (host, the grid's shape),
     those that may take a home's demand and free an enclosed home (F host); codes(code, F, grid):
     free first's per-sub-sample codes (building, -1 open, -2 never open) at baseline, the
-    sub-samples the tracks do not read made never open. `name`: its part of the rule's name."""
+    sub-samples the tracks do not read made never open; through(cells, jbits, F, grid): free
+    first's view of one building cleared alone in a cell, per incidence (a cell, the bits of that
+    building's sub-samples there, F host at baseline): whether its sub-samples then join the part
+    the cell's node conducts through, and whether the cell can then take demand. `name`: its part
+    of the rule's name."""
 
     @property
     def name(self) -> str: ...
@@ -2292,6 +2298,10 @@ class PartRule(Protocol):
 
     def codes(self, code: NDArray[np.int64], F: NDArray[np.float64],
               grid: Grid | CompositeGrid) -> NDArray[np.int64]: ...
+
+    def through(self, cells: NDArray[np.int64], jbits: NDArray[np.int64],
+                F: NDArray[np.float64], grid: Grid | CompositeGrid
+                ) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]: ...
 
 
 @dataclass(frozen=True)
@@ -2311,6 +2321,10 @@ class JoinParts:
 
     def codes(self, code, F, grid):
         return code
+
+    def through(self, cells, jbits, F, grid):
+        every = np.ones(len(cells), dtype=bool)
+        return every, every
 
 
 @dataclass(frozen=True)
@@ -2354,6 +2368,17 @@ class AnchorPart:
         out = code.copy()
         out[:n * S2][drop.ravel()] = -2
         return out
+
+    def through(self, cells, jbits, F, grid):
+        # cleared alone, the building's sub-samples join the anchor's part if the part then
+        # holding the anchor takes some of them (a cell with no anchor: whatever opens joins), and
+        # the cell takes demand if what is then open is one part
+        nparts, part_of, anchor = self._luts(grid, np)
+        S2 = F.shape[1]
+        code = _open_code(F[cells], np) | jbits
+        a = anchor[cells]
+        joins = np.where(a >= 0, (part_of[code * S2 + np.maximum(a, 0)] & jbits) != 0, True)
+        return joins, nparts[code] < 2
 
 
 class _ApAxis(NamedTuple):
@@ -2527,6 +2552,14 @@ def _components(grid: Grid | CompositeGrid, o, p: Params, widths) -> NDArray[np.
     return out
 
 
+def _demand_cells(rule: Aperture, grid: Grid | CompositeGrid, open0: NDArray[np.bool_],
+                  F0: NDArray[np.float64]) -> NDArray[np.bool_]:
+    """(cells flat) the cells that can take demand at baseline under `rule`, whatever the reach:
+    open, and placeable by its PartRule (not split, under AnchorPart). Free first frees a home
+    through these cells' components, through pieces elsewhere (_track_regions)."""
+    return open0 & rule.parts.placeable(np.ones(grid.inside.shape, dtype=bool), F0, grid).ravel()
+
+
 def _track_regions(grid: Grid | CompositeGrid, open0: NDArray[np.bool_], bf: sp.csr_matrix,
                    lab: NDArray[np.int64], p: Params, rule: Aperture) -> Regions:
     """Free first's Regions under an Aperture, on the host (NOTES, "The grid fix"): the open
@@ -2535,7 +2568,8 @@ def _track_regions(grid: Grid | CompositeGrid, open0: NDArray[np.bool_], bf: sp.
     and adjacency only where a clearing really joins two regions, read off each step's tracks at
     baseline, so the graph claims no path the operator lacks:
     - a cell is one node: its component (if it has an open sub-sample) and the piece of every
-      building covering part of it are adjacent (RegionGraph's shared cell);
+      building covering part of it are adjacent (RegionGraph's shared cell), in a split cell
+      (lifted.AnchorPart) only the pieces whose building, cleared alone, joins the anchor's part;
     - a track whose closed sub-samples all belong to one building j joins, once j is cleared, the
       nodes of the step's two end cells, so every region of the two (their components, j's
       pieces there) is made adjacent to j's piece in an end cell, or, where j covers neither end
@@ -2543,7 +2577,10 @@ def _track_regions(grid: Grid | CompositeGrid, open0: NDArray[np.bool_], bf: sp.
     - a track blocked by exactly two buildings, each with a piece in an end cell, joins those two
       pieces (entering both pays for both);
     - a track through a sub-sample outside the block, or blocked by three or more, joins nothing.
-    The street steps into the components holding a ground cell and the pieces covering one."""
+    The street steps into the components holding a ground cell and the pieces covering one. A home
+    is freed through a near cell's component only where the cell can take demand at baseline,
+    else through the pieces there whose building, cleared alone, lets it (R): a split cell's node
+    reaching the street frees no home until its parts are one."""
     th = p.solver.to_host
     n, S2 = grid.inside.size, grid.S * grid.S
     xp = p.solver.xp
@@ -2568,6 +2605,14 @@ def _track_regions(grid: Grid | CompositeGrid, open0: NDArray[np.bool_], bf: sp.
     inc_bld, inc_cell = inc_bld[keep], inc_cell[keep]
     ninc = len(inc_bld)
     inc_key = inc_bld * (n + 1) + inc_cell                 # sorted
+    # one building cleared alone in a cell it covers part of (rule.parts.through): whether its
+    # sub-samples then join the part the cell's node conducts through (only then is its piece
+    # there joined to the cell's component), and whether the cell can then take demand (a home
+    # is freed through a cell that cannot at baseline, closed or split, only by such a piece)
+    jbits = ((lab[inc_cell] == inc_bld[:, None]).astype(np.int64)
+             << np.arange(S2, dtype=np.int64)[None, :]).sum(axis=1)
+    joins, frees = rule.parts.through(inc_cell, jbits, F0, grid)
+    takes = _demand_cells(rule, grid, open0, F0)
 
     def inc_of(j: NDArray[np.int64], x: NDArray[np.int64]) -> NDArray[np.int64]:
         """The incidence (j, x) for each pair, -1 where j covers no part of x."""
@@ -2648,8 +2693,9 @@ def _track_regions(grid: Grid | CompositeGrid, open0: NDArray[np.bool_], bf: sp.
     owner_piece[piece] = inc_bld
     reg_piece = ncomp + piece                              # each incidence's region
     links_a, links_b = [], []
-    # a cell is one node: its component and the pieces there
-    open_inc = open0[inc_cell]
+    # a cell is one node: its component and the pieces there whose building, cleared, joins the
+    # part the node conducts through
+    open_inc = open0[inc_cell] & joins
     links_a.append(comp[inc_cell[open_inc]])
     links_b.append(reg_piece[open_inc])
     order = np.argsort(inc_cell, kind="stable")
@@ -2689,9 +2735,11 @@ def _track_regions(grid: Grid | CompositeGrid, open0: NDArray[np.bool_], bf: sp.
     ground = grid.ground.ravel()
     entry = np.concatenate([np.unique(comp[open0 & ground]),
                             np.unique(reg_piece[ground[inc_cell]])])
-    oc = np.flatnonzero(open0)
-    R = sp.csr_matrix((np.ones(len(oc) + ninc), (np.concatenate([oc, inc_cell]),
-                                                  np.concatenate([comp[oc], reg_piece]))),
+    oc = np.flatnonzero(takes)
+    via = takes[inc_cell] | frees
+    R = sp.csr_matrix((np.ones(len(oc) + int(via.sum())),
+                       (np.concatenate([oc, inc_cell[via]]),
+                        np.concatenate([comp[oc], reg_piece[via]]))),
                       shape=(n, ncomp + npiece + ngad))
     return Regions(ncomp=ncomp, owner=np.concatenate([owner_piece, g_key[:, 0]]),
                    a=adj[:, 0], b=adj[:, 1], entry=entry, R=R)

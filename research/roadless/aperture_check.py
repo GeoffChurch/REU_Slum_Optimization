@@ -10,6 +10,7 @@ process, no file edited): a guard passes on the code as it is and must fail unde
     uv run python $S connect <ids,> [fault]
     uv run python $S convex <ids,> [fault]
     uv run python $S gradient <ids,> [fault]
+    uv run python $S free <ids,> [fault]
 
 `identity`: with today's rule selected the numbers of width_check's REFERENCE (57, computed at
 3f74f5fa before the cells strategy and the step rule existed) reproduce bit for bit
@@ -44,9 +45,12 @@ joined to the street's side through a split cell (a cell whose open sub-samples 
 one in the street's flood component and one not, joined by the cell's one node); a cell only the
 flood fill reaches is reported by kind (its 2 x 2 centre footprint: an edge sliver no track from
 a neighbour's centre reaches; else behind a bent passage, open but with no straight track to a
-reached cell). The guard fails on a cell only the aperture reaches that no split cell explains.
-Fault `diagonal-leak`: tracks traced through sub-sample centres only (a diagonal step through two
-sub-samples touching at a corner counts as open).
+reached cell). The guard fails on a cell only the aperture reaches that no split cell explains;
+under the face rule (FACE_RULES), whose axis-aligned steps join exactly the cells whose read
+sub-samples touch across a face, on any cell where its reach and the flood fill of the sub-samples
+it reads (split cells' minor parts closed) differ. Fault `diagonal-leak`: tracks traced through
+sub-sample centres only (a diagonal step through two sub-samples touching at a corner counts as
+open).
 
 `convex`: under the Aperture, P is convex in the clearing fractions (q 1): along CONVEX_LINES
 random segments, every along edge's width has second differences at most CONVEX_TOL (concave) and
@@ -58,6 +62,14 @@ and 3, P and J_2, eps 1e-4, a random fractional clearing) against central differ
 FD_STEP, solves to FD_RTOL from zero) on GRAD_BUILDINGS buildings, within GRAD_TOL of the largest.
 Fault `no-spread`: the openness's vjp without the spread S^2 / n (a footprint sub-sample's openness
 per unit of its cell's open fraction).
+
+`free`: free first (clear.free_first, budget 1, nothing held) under the rules whose split cells
+take no demand (FREE_RULES, lifted.AnchorPart) frees every home enclosed at baseline it takes a
+crossing for, by the metric's own test (free_first raises on a crossing that does not: the region
+graph claimed a path the raster lacks). On 24240 home 1639's only near cells whose node reaches
+the street are split (a corner contact; 45267 has one too). Fault `split-source`: every open cell
+taken to take demand in the region graph (lifted._demand_cells), so such a home's source is the
+street's own component and its crossing clears nothing.
 """
 from __future__ import annotations
 
@@ -582,6 +594,35 @@ def gradient(ids: list[str]) -> list[str]:
     return bad
 
 
+# ------------------------------------------------------------------ free first
+
+FREE_RULES = ("apws", "apwfs")
+
+
+def free(ids: list[str]) -> list[str]:
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        for name in FREE_RULES:
+            c = _clearing(b, lifted.steps_of(name))
+            sc = c.sc
+            try:
+                held = clear.free_first(c, budget=1.0, held=np.zeros(c.n, dtype=bool))
+            except RuntimeError as e:
+                print(f"{bid} {name}: {e} -> FAILS", flush=True)
+                bad.append(f"{bid} {name}")
+                continue
+            left = sc.enclosed & ~common.reached(sc.pl, sc.grid, c.open_(held), c.p)
+            print(f"{bid} {name}: {int(sc.enclosed.sum())} homes enclosed at baseline, free first "
+                  f"clears {int(held.sum())} buildings (D {float(c.cost[held].sum()):.4f}), "
+                  f"{int(left.sum())} left enclosed -> ok", flush=True)
+    return bad
+
+
+def _every_open_cell(rule, grid, open0, F0):
+    return open0
+
+
 def _no_spread_vjp(grid, A, xp):
     st = lifted._sub_state(grid, xp)
     return (st.cov * A).sum(axis=1)
@@ -589,7 +630,7 @@ def _no_spread_vjp(grid, A, xp):
 
 GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "identity": identity, "open": open_field, "channel": channel, "cracks": cracks,
-    "connect": connect, "convex": convex, "gradient": gradient}
+    "connect": connect, "convex": convex, "gradient": gradient, "free": free}
 FAULTS: dict[str, dict[str, Callable]] = {
     "identity": {"ulp": lambda: _patched(lifted.SmallestCell, "widths", _ulp_widths)},
     "open": {"sum": lambda: _patched(lifted, "_track_means", _sum_means)},
@@ -598,6 +639,7 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "connect": {"diagonal-leak": lambda: _patched(lifted, "axis_tracks", _centre_tracks)},
     "convex": {"square": lambda: _patched(lifted, "_track_means", _square_means)},
     "gradient": {"no-spread": lambda: _patched(lifted, "_openness_vjp", _no_spread_vjp)},
+    "free": {"split-source": lambda: _patched(lifted, "_demand_cells", _every_open_cell)},
 }
 
 

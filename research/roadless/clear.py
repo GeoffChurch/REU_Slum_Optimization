@@ -283,23 +283,24 @@ class RegionGraph:
     a: np.ndarray
     b: np.ndarray
     entry: np.ndarray
-    R: sp.csr_matrix            # (grid cells flat, regions): the regions each cell is in
-    open0: np.ndarray           # (grid cells flat,) open at baseline
+    R: sp.csr_matrix            # (grid cells flat, regions): the regions a home is freed
+                                # through at each cell (lifted.Regions)
 
     @classmethod
     def of(cls, c: Clearing) -> RegionGraph:
         g = c.sc.grid
         open0 = (c.open_(np.zeros(c.n, dtype=bool)) > 0).ravel()
         rg = c.p.steps.regions(g, open0, c.bf, c.lab.reshape(g.inside.size, -1), c.p)
-        return cls(ncomp=rg.ncomp, owner=rg.owner, a=rg.a, b=rg.b, entry=rg.entry, R=rg.R,
-                   open0=open0)
+        return cls(ncomp=rg.ncomp, owner=rg.owner, a=rg.a, b=rg.b, entry=rg.entry, R=rg.R)
 
     def sources(self, near: np.ndarray) -> np.ndarray:
-        """The regions a home is freed through, from its near cells (flat): the components of
-        the open ones and the pieces covering the closed ones."""
-        op = self.open0[near]
-        comps = self.R[near[op]].indices
-        return np.unique(np.concatenate([comps[comps < self.ncomp], self.R[near[~op]].indices]))
+        """The regions a home is freed through, from its near cells (flat): the component of
+        each one that can take demand at baseline (open, and not split under lifted.AnchorPart),
+        and for the others the pieces lifted.Regions.R lists there (a closed cell's covering
+        pieces; a split cell's, those whose clearing alone makes its parts one)."""
+        sub = self.R[near].tocsr()
+        has = sub[:, :self.ncomp].getnnz(axis=1) > 0
+        return np.unique(np.concatenate([sub[has][:, :self.ncomp].indices, sub[~has].indices]))
 
 
 class Crossing(NamedTuple):
