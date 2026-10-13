@@ -3505,3 +3505,92 @@ ones, 1,540 tasks, the blocks split by an estimate of their cost (orion 116, qua
 scoring here, 8 processes. Smoke on 41132 (138 buildings, the 220's median) here: SIMP base 152 --
 247 s an arm, the bound 11 min, peak RSS 0.7 GB, the scoring 49 s; 5618 (759 buildings, the
 largest) 34 min for SIMP on P and 47 on J_2.
+
+### The stored clearings, committed (owner 2026-10-13: "Yes to everything")
+
+BACKLOG's "The stored clearings made durable". The optimizers' rows (relax_rows/, polish_rows/,
+clear_rows_*/, pweight_rows/) are git-ignored, one parquet a block, and were rewritten in place: the
+free-first runs of 2026-10-11 20:17 overwrote the default's and the cheap preset's rows of 12
+blocks. research/roadless/clearings/ now commits each clearing's core (clearings.py: the format, its
+writer and its reader; clearings_export.py fills it from the rows; clearings_check.py checks it
+against the real blocks and the scorer; tests/test_clearings.py).
+
+What is there. 151 runs on 303 blocks (the 220 small, the 82 large, 5810@major), 60,715 rows and
+538,595 positions, from every row file of relax_rows (1,947), polish_rows (199), clear_rows_*
+(3,994) and pweight_rows/simp (244). A run is one directory's rows of one power, its id the rows'
+path under research/roadless (relax_rows/uni/<plan>/D0.05.p2): 70 SIMP runs and the relaxation's
+rounding of the 3 Frank-Wolfe plans (`.fw`); 6 polish runs; 43 clear_rows_* runs (the greedies, the
+SIMP path, grow-prune, the floating search, the swings); pweight_rows/simp's 4 objectives, in flight
+(60 -- 62 of 220 blocks each when exported: re-run the export when pweight.py is done); 23 sets the
+studies gathered into parquets (fine_clearings, ov_clearings, walls_clearings, ...), each equal to a
+stored run's; and 2 runs of rows only the cluster launcher still holds (below). runs.csv gives each
+run's settings as its name encodes them (power, population, along, the search's along, mesh, budget,
+demand), its source files and bytes, when it was written, its scorer (`metric`) and its blocks, rows
+and positions.
+
+Format. CSV, the positions space-separated: a file a run, a line a (block, step) with D, `perm` (the
+run's lens at that clearing as the optimizer stored it: Lens A at D = budget for the power-2 area
+runs), the positions, `enclosed` and free first's `free_D` and `free_cleared` where the row has
+them, and the timings. A greedy's rows are nested (a step's positions add to the last's), a swing's
+each a whole clearing. 8.6 MB, 3.5 MB as git stores it: about what the rows weigh as parquet (3.3 MB
+zstd against 3.0 MB zlib'd CSV in a trial), with no exception to the .gitignore that ignores
+*.parquet, a rewritten row a changed line in git diff (the audit the overwrites lacked), and
+readable without a library; the floats are reprs and read back exactly. Left out: SIMP's design x
+(`simp_x`, the Frank-Wolfe iterate `x`: a float a building, 2.6 MB compressed), the machine's name
+and memory, and the stores that hold no clearing (road_rows, transparency_rows: networks;
+insulator_rows, res_rows, rows_h0.5_ell3_K8*: scores; pweight_rows/fw, /score: bounds and scores).
+The export names each with its reason and raises on a store or a column it does not know.
+
+The ids. blocks.csv pins each block by its building count and the SHA-256 of its outlines' WKB in
+row order (clearings.fingerprint, through common.build_blocks); Store.cleared(run, block, step=)
+hashes the block it is handed and raises StaleClearing on a count or a fingerprint that is not the
+committed one, so a block rebuilt with its buildings reordered, moved, added or dropped cannot be
+handed another block's positions. The guards are fault-injected in tests/test_clearings.py. That the
+positions still index the buildings that made them: every row's D recomputed from its positions
+(area share, or building share for the count runs) equals the row's own to 1e-9 on all 60,715
+(clearings_check.py blocks), and the 159 block banks the cluster runs were shipped
+(.cluster_submit/runs/*/bank.pkl, 2026-10-03 to 10-12) hold all 303 blocks 2,230 times, each with
+today's count and fingerprint (`banks`).
+
+Which rows predate which metric change (runs.csv's `metric`: preB, B or mixed; a row with `enclosed`
+is B's):
+- lifted.Placement (7913fe4, 2026-10-11 16:21: B is the metric). Before it a home with no ring cell,
+  shadowed by the nearest-building rule or enclosed, injected nothing; since, a shadowed home
+  injects on its open side and the enclosed are scored apart. 145 runs are preB, pweight_rows' 4 are
+  B, and the default's and the cheap preset's D 0.05 runs are mixed (49 and 47 preB rows of
+  2026-10-06 and 10-08, 12 B rows each, the free-first runs of 20:17). A preB row's Lens A is
+  today's where the block has no shadowed home, and is not where it has. Rescored today
+  (clearings_check.py rescore, CPU, 16 rows on each of three small blocks): on 4408 (263 buildings,
+  none enclosed or shadowed) and 19537 (247, four enclosed, none shadowed) 11 of the 14 preB rows
+  match their stored Lens A to 5.5e-8 (SIMP and its rounding, the sightline runs and the greedies'
+  steps among them) and the rest are M4's, below; on 19570 (312, one enclosed, two shadowed) all 14
+  move, 13 down by 3.7e-4 to 1.7e-2 (the sightline rows most); the pweight rows (B) match to 3.1e-11
+  on all three. On the 60 large blocks the stored clearings moved by a median 7e-5, at most 1.6e-3
+  ("Re-scoring the road methods: the 60 large blocks under B").
+- The three M4 runs (clear_rows_M4_h0.5, _area, _area_p2: the first greedy, written or migrated to
+  the `cleared` format 2026-09-30 14:12) are off today by 2e-6 -- 4.5e-4 on 4408 and 19537, though
+  their P0 (to 1e-12) and D agree with later runs': the score of the clearing itself differs. The
+  ten other greedy-format runs tried (B0.01g3 of 09-30 14:52 on) match there. The cause is not
+  isolated; the nearest change is the batched greedy's (d88265e, 15:40 that day: bbox-rasterized
+  labels, overlapping footprints to the later one). Read these runs' Lens A to no better than 5e-4.
+- Nothing else is known to have moved a score: the demand Strategy (2026-10-12) is the population's
+  own, injection for injection.
+
+The 12 blocks' overwritten rows are not gone. The launcher kept the inputs of run road-b (2026-10-11
+16:23: a tar a large block, its stored clearings among them,
+.cluster_submit/runs/road-b/remote/inputs/<block>.tar; road-b-r1 shipped the same bytes), and in
+them the default's and the cheap preset's rows of 20543, 21252, 22267, 22336, 23597, 38254, 39240,
+41515, 41673, 41806, 43708 and 5706 stand as written (2026-10-06 03:24 -- 05:45 and 10-08 17:05). Of
+the 801 row copies in the input tars of 24 cluster runs these 24 rows are the only ones that differ
+from the local row, and none is missing locally (clearings_export.ShippedFamily takes any that does
+or is). They are committed as D0.05.p2@road-b, with SIMP's grey and the timings. Their positions are
+the `default` and `cheap` sets of fine_clearings and the `simp_default` and `cheap` of
+walls_clearings, their Lens A walls' stored_perm to the last digit, and free first moved them by a
+median -0.0030 (the default) and -0.0022 (the cheap preset) at a median Jaccard of 0.88 and 0.83, as
+"B's optimizer: free first" has it.
+
+Re-running. The export adds the rows the store lacks, keeps those the sources lost, and raises on a
+row that differs (the in-place overwrite) unless its run is named in --replace, when the old row is
+left in git's history; a block whose footprints changed raises too. The optimizers still write in
+place (their no-overwrite guard is the other half of BACKLOG's item), so run the export after every
+batch.
