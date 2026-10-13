@@ -54,22 +54,28 @@ items up front"), in the order proposed:
    no floor added to tau (alignment is per-block noise the bootstrap already carries). A
    block's level is not: alignment alone moves it by up to 0.16, so per-block levels need a
    margin of about +-0.08 on some large blocks.
-2. **Visualization**: the presets' clearings and the corridors they induce (the current through
-   the opened space), side by side, so results can be looked at, not only scored. First page:
-   5810 (NOTES, "Visualization: block 5810"). Why a level moves (each home's term at two lattice
-   offsets on 20543, 38366, 17608): done (NOTES, "Uniform conductance with an effective width",
-   Q3). The homes whose demand sits in pockets joined to the street only by phantom passages
-   (4-adjacent cells whose open sub-samples do not touch) or sub-cell cracks carry it: under U, 2 --
-   5% of the people behind phantom passages hold 17 -- 42% of J_2's baseline, and the share moves
-   with the alignment (20543: 0.60 to 0.33 for all such homes).
-3. **The sightline metric and building transparency** (discussion): what each measures, where
-   SIMP is weaker under sightline, and transparency as a model of the world against a device of
-   the search (the translucent greedy). With it, the passable width, now implicit in h and the
-   sub-sampling (a gap conducts by its sampled open fraction, which the alignment sets). Its
-   angle error (NOTES, "The sightline metric's angle error"): uneven ray directions and unboosted
-   turning edges; two fixes measured on a corridor. The owner's call on the turning boost (a model
-   change: walkers stop going ballistic in a lane); then its gradient, uniform rays on the GPU and
-   the composite mesh, and a re-score under the sightline metric.
+2. **Visualization**: the presets' clearings and the corridors they induce (the current through the
+   opened space), side by side, so results can be looked at, not only scored. First page: 5810
+   (NOTES, "Visualization: block 5810"). The corridor pictures use uniform, the metric's own
+   conductance (owner 2026-10-13; item 4, decision 3), so what is shown is what is scored. Why a
+   level moves (each home's term at two lattice offsets on 20543, 38366, 17608): done (NOTES,
+   "Uniform conductance with an effective width", Q3). The homes whose demand sits in pockets
+   joined to the street only by phantom passages (4-adjacent cells whose open sub-samples do not
+   touch) or sub-cell cracks carry it: under U, 2 -- 5% of the people behind phantom passages hold
+   17 -- 42% of J_2's baseline, and the share moves with the alignment (20543: 0.60 to 0.33 for all
+   such homes).
+3. **The sightline metric and building transparency** (discussion): what each measures, where SIMP
+   is weaker under sightline, and transparency as a model of the world against a device of the
+   search (the translucent greedy). With it, the passable width, now implicit in h and the
+   sub-sampling (a gap conducts by its sampled open fraction, which the alignment sets). Its angle
+   error (NOTES, "The sightline metric's angle error"): uneven ray directions and unboosted turning
+   edges; two fixes measured on a corridor. The owner's call on the turning boost (a model change:
+   walkers stop going ballistic in a lane); then its gradient, uniform rays on the GPU and the
+   composite mesh, and a re-score under the sightline metric. With uniform chosen for the metric
+   and the pictures (owner 2026-10-13; item 4, decision 3), the turning-boost call and these
+   follow-ups have no use left: parked, sightline stays selectable (kept or pruned in the
+   consolidated pass). The passable width: the grid fix (item 4, decision 3) removes the phantom
+   passages; closing real gaps under a width stays a separate choice.
    Buildings as imperfect insulators (owner 2026-10-11; NOTES, "The insulator world"): no single
    eps both meets the owner's first criterion (a walled-in home worse, but not massively worse,
    than its open neighbours: 1e-3 -- 3e-3) and keeps the gates (1e-4 or less). Tested for that
@@ -157,22 +163,31 @@ items up front"), in the order proposed:
    school, especially since people do come in and out of it"): area sets both a building's
    injection and its displacement cost; the sources are already outside the buildings
    (Placement's ring of free cells within 1 m), which was the owner's other concern.
-   (3) **The conductance: the effective-width study is done (owner's call)** (NOTES, "Uniform
-   conductance with an effective width"). The owner wants corridors to FORM in the flow (a cleared
-   building can open several), not the clearing to look like lanes, and asked for a justified
-   uniform: open space conducting more the farther it is from buildings. Built, lifted.Params.cells
-   (a Strategy): B_r, each sub-sample conducting by min(its openness, the open share within r) (P
-   stays convex, guarded; a gap below 2 r conducts like width^2), and D_s, min(1, d / s) (scoring
-   only), beside U, sightline (S) and its turning boost (S_t, lifted.TurnBoosted). B_r keeps U's
-   angle error, U's alignment on lanes and U's method order (tau 1.00 on P), but moves the flow only
-   a little onto lanes U's flow already uses (no new corridors at r up to 1.5 m), and SIMP under it
-   gains nothing over U's clearing on its own lens; D1 is the strongest uniform, with a worse angle
-   error (2.39 at 1 m against 1.66) and no gradient; S_t mends sightline's 1.5 -- 2 m lanes and its
-   streaks (keep it over S for the pictures). Every variant hands P_{1/2} and J_2 to the homes in
-   pockets behind phantom passages and sub-cell cracks (item 2) and makes a block's level several
-   times as sensitive to the lattice as U's: fix those pockets first (fine-lattice connectivity and
-   enclosed test, or a passable width) whatever the conductance. Untested: B_r beyond 1.5 m (what
-   would decide whether D1 is dominated).
+   (3) **The conductance: decided (owner 2026-10-13), uniform (U), for the metric and the corridor
+   pictures alike** ("LGTM, incl using uniform for the corridor pictures"; on new corridors: "I
+   don't actually mind if there are no new corridors. That may be to be expected"). The
+   effective-width study (NOTES, "Uniform conductance with an effective width") built B_r (each
+   sub-sample conducting by min(its openness, the open share within r); P stays convex, a gap
+   below 2 r conducts like width^2) and D_s (min(1, d / s), scoring only) as lifted.Params.cells (a
+   Strategy), beside sightline (S) and its turning boost (S_t, lifted.TurnBoosted). U is the
+   natural model (open ground conducts alike and buildings not at all, P the walkers' total escape
+   time, no knob) and the most robust: the smallest angle error of every variant at every width
+   (1.66 at 1 m; B_r 1.72 -- 1.85, D_s 2.39, S 5.32) and the least drift of P with the lattice. The
+   principled alternative changes no decision: B_r keeps U's method order (tau 1.00 on P), moves
+   the flow only a little onto lanes U's flow already uses (no new corridors at r up to 1.5 m), and
+   SIMP under it gains nothing over U's clearing on its own lens. The variants stay selectable
+   (pruning in the consolidated pass). **Next: the grid fix** (owner 2026-10-13, "LGTM"), before
+   any re-scoring: every variant, U included, hands P_{1/2} and J_2 to the homes in pockets behind
+   phantom passages (4-adjacent cells whose open sub-samples do not touch) and sub-cell cracks
+   (item 2). A step conducts today by the smallest open fraction of the cells it touches, how much
+   of each cell is open, not whether the open parts meet; the fix makes it conduct by the share of
+   its width open all the way from cell centre to cell centre, read on the sub-samples: U
+   discretized faithfully (as a cut-cell scheme's face apertures), no new parameter, still convex;
+   a phantom passage conducts nothing, so B's enclosed test and Placement, reading the same steps,
+   score its homes apart or place their demand where there is a way out. A passable width (gaps
+   under about 0.5 m closed) stays a separate modelling choice, after the fix if real cracks still
+   matter. Queued: how common the pockets are on every block, the homes newly enclosed and free
+   first's cost, the drift and angle checks, the method order.
    (4) **Exits: the region model** (owner: "we'd still only leak at the
    outer boundary, so all current must exit ... some of the outer boundary might not leak at all
    and might have 0 conductance (like a railroad)"; "we can adjust boundary leakage, uniform

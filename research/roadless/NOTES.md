@@ -3998,3 +3998,13 @@ it was resubmitted one card a variant: about 4.5 GPU-h. The CPU nodes' first sco
 kept): a field took 575 -- 1,094 s there (31 -- 36 memory-bound AMG solves a node) against ~50 s
 here, so 1558 would have needed ~13 h a variant. Here: the guards, the corridors (about 2,500
 solves, seconds in all), the smoke tests, the maps and the fine bottlenecks, about 6 CPU-h.
+
+The owner's call (2026-10-13): uniform, for the metric and for the corridor pictures alike ("I
+don't actually mind if there are no new corridors. That may be to be expected"; "LGTM, incl using
+uniform for the corridor pictures"); the variants stay selectable. Next, before any re-scoring, the
+pockets' fix as one rule rather than a mask on today's: a step conducts by the share of its width
+open all the way from cell centre to cell centre, read on the sub-samples (U discretized
+faithfully, the face apertures of a cut-cell scheme where today's rule uses the cells' volume
+fractions), so a phantom passage conducts nothing and B's enclosed test and Placement, reading the
+same steps, see it; a passable width stays a separate choice, after the fix if real cracks still
+matter (BACKLOG 4, decision (3)).
