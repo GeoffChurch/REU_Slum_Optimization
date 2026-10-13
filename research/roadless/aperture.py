@@ -17,6 +17,7 @@ and J_2 (lens (c)).
     uv run python $S base <id> <cpu|gpu> <mesh> <T,...>  # Q1, Q2: one block at baseline
     uv run python $S base-all <ids,|@file> <procs>       # here: small blocks whole, pockets
     uv run python $S base-local <ids,|@file> <procs> <T,...>   # here: large blocks' base
+    uv run python $S moves <ids,|@file> <procs>          # here: Q2's demand moves by cause
     uv run python $S score <id> <rule> <offset> <cpu|gpu> 0.5   # Q3, Q4: one block's fields
     uv run python $S score-plan <id> <cpu|gpu>           # ... every pair score_plan names
     uv run python $S tars <dir> <ids,>                   # a tar per block of score's inputs
@@ -306,6 +307,63 @@ def pockets(b) -> None:
           flush=True)
 
 
+def moves_path(bid: str) -> Path:
+    return ROWS / "moves" / f"{bid}.parquet"
+
+
+MOVE_RULES = ("Aw", "Aws")      # `moves`: the rules whose demand moves are split by cause
+
+
+def moves(b) -> None:
+    """Q2's demand moves by cause (geometry only, the uniform grid at the metric's offset): per
+    home, the share of its injection under today's placement that each rule of MOVE_RULES takes
+    off cells the 4-connected flood fill of open sub-samples does not reach (`pocket`: behind a
+    phantom passage, today reaching the street only through it) and off cells it does reach
+    (`sliver`: an edge sliver, the cell's centre footprint, or behind a bent passage, which no
+    straight track from a reached centre crosses; or a split cell); a home enclosed under either
+    rule moves nothing here. Rows aperture_rows/moves/<id>.parquet."""
+    t0 = time.time()
+    polys = np.asarray(b.buildings.outlines)
+    g = lifted.Grid.of(*lifted._geometry(b), H, offset=OFFSETS[0])
+    fl = _flood(g)
+    plT = common.placement(g, polys, params(RULES["T"], "cpu"))
+    ST = plT.S.tocsc()
+    out = dict(block=b.block_id, home=np.arange(len(polys)), enclosed_T=plT.enclosed)
+    for r in MOVE_RULES:
+        p = params(RULES[r], "cpu")
+        ok = lifted.placeable(g, g.ff0, p).ravel()
+        pl = common.placement(g, polys, p)
+        live = ~plT.enclosed & ~pl.enclosed
+        off = ~ok
+        out[f"pocket_{r}"] = np.where(live, np.asarray(ST[off & ~fl].sum(axis=0)).ravel(), np.nan)
+        out[f"sliver_{r}"] = np.where(live, np.asarray(ST[off & fl].sum(axis=0)).ravel(), np.nan)
+        out[f"enclosed_{r}"] = pl.enclosed
+    df = pd.DataFrame(out).assign(t=time.time() - t0)
+    moves_path(b.block_id).parent.mkdir(parents=True, exist_ok=True)
+    rr.write_parquet(df, moves_path(b.block_id))
+    print(f"{time.strftime('%H:%M:%S')} {b.block_id} moves in {time.time() - t0:.0f}s", flush=True)
+
+
+def _moves_one(bid: str) -> str | None:
+    if moves_path(bid).exists():
+        return None
+    try:
+        [b] = common.build_blocks([bid])
+        moves(b)
+    except Exception as e:                  # noqa: BLE001 -- reported, the run goes on
+        print(f"{bid} FAILED {type(e).__name__}: {str(e)[:300]}", flush=True)
+        return bid
+    return None
+
+
+def moves_all(ids: list[str], procs: int) -> None:
+    rr._check_single_threaded()
+    with multiprocessing.get_context("fork").Pool(procs, maxtasksperchild=4) as pool:
+        failed = [f for f in pool.imap_unordered(_moves_one, ids) if f]
+    if failed:
+        raise SystemExit(f"{len(failed)} blocks failed: {', '.join(failed)}")
+
+
 def _local_one(job: tuple[str, bool]) -> str | None:
     """A pool's task (the CPU): a small block's `base` under every rule and its pockets, or (a
     large block, `base` on the cluster) its pockets alone; the block's id if it failed."""
@@ -555,11 +613,14 @@ def _q1(homes: pd.DataFrame, pk: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(out)
 
 
-def _q2(base: pd.DataFrame, homes: pd.DataFrame, rule: str) -> pd.DataFrame:
+def _q2(base: pd.DataFrame, homes: pd.DataFrame, mv: pd.DataFrame, rule: str) -> pd.DataFrame:
     """Q2 per block, `rule` against today's at baseline: the homes it encloses (and of them those
     the flood fill reaches, enclosed by the rule rather than the geometry), the homes it frees,
-    the demand it moves, the split cells, free first's cost, and the baselines' change."""
+    the demand it moves (and, from `moves`, how much off cells behind a phantom passage and how
+    much off edge slivers and bent passages), the split cells, free first's cost, and the
+    baselines' change."""
     out = []
+    by = {bid: m.set_index("home") for bid, m in mv.groupby("block")} if not mv.empty else {}
     for bid, g in homes.groupby("block"):
         hT, hR = g[g.rule == "T"].set_index("home"), g[g.rule == rule].set_index("home")
         if hR.empty:
@@ -589,6 +650,14 @@ def _q2(base: pd.DataFrame, homes: pd.DataFrame, rule: str) -> pd.DataFrame:
             P0=float(bR["P0"] / bT["P0"]), Pq0=float(bR["Pq0"] / bT["Pq0"]),
             J2_0=float(bR["J2_0"] / bT["J2_0"]),
             op_only=bR.get("op_only", np.nan), flood_only=bR.get("flood_only", np.nan)))
+        m = by.get(bid)
+        if m is not None and f"pocket_{rule}" in m:
+            pk, sv = (np.nan_to_num(m[f"{c}_{rule}"].to_numpy()) for c in ("pocket", "sliver"))
+            out[-1].update(moved_pocket=int((pk > 1e-12).sum()),
+                           moved_pocket_pop=float(w[pk > 1e-12].sum() / w.sum()),
+                           moved_pocket_demand=float((w * pk).sum() / w.sum()),
+                           moved_sliver=int((sv > 1e-12).sum()),
+                           moved_sliver_demand=float((w * sv).sum() / w.sum()))
     return pd.DataFrame(out)
 
 
@@ -711,12 +780,15 @@ def report() -> None:
             _summary("q1_blocks", q1)
             cols = [c for c in q1.columns if c not in ("block", "size", "homes")]
             _summary("q1", _spread(q1, ["size"], cols))
-        q2 = pd.concat([_q2(base_, homes, r) for r in ("A", "Aw", "Aws")], ignore_index=True)
+        mv = _read("moves")
+        q2 = pd.concat([_q2(base_, homes, mv, r) for r in ("A", "Aw", "Aws")], ignore_index=True)
         q2.insert(1, "size", _size_class(q2.block))
         _summary("q2_blocks", q2)
-        cols = ["new", "new_pop", "new_by_rule", "new_by_rule_pop", "freed", "moved", "moved_pop",
-                "moved_demand", "split", "split_pop", "free_D_T", "free_D", "free_n_T", "free_n",
-                "P0", "Pq0", "J2_0"]
+        cols = [c for c in ("new", "new_pop", "new_by_rule", "new_by_rule_pop", "freed", "moved",
+                            "moved_pop", "moved_demand", "moved_pocket", "moved_pocket_pop",
+                            "moved_pocket_demand", "moved_sliver", "moved_sliver_demand", "split",
+                            "split_pop", "free_D_T", "free_D", "free_n_T", "free_n", "P0", "Pq0",
+                            "J2_0") if c in q2]
         sp_ = _spread(q2, ["rule", "size"], cols)
         tot = q2.groupby(["rule", "size"]).agg(
             blocks_new=("new", lambda s: int((s > 0).sum())), homes_new=("new", "sum"),
@@ -792,15 +864,15 @@ def main(argv: list[str]) -> None:
     if cmd == "channel":
         channel(int(a[0]))
     elif cmd == "base":
-        token, rules = a[2], tuple(a[3].split(","))
-        if token != mesh_token_of(a[0]):
-            raise SystemExit(f"{a[0]}: base on {mesh_token_of(a[0])}, not {token}")
+        token, rules = a[2], tuple(a[3].split(","))     # the mesh as cluster.py sized the task
         if rules[0] != "T" or not set(rules) <= set(RULES):
             raise SystemExit(f"rules {rules}: today's (T) first, then any of {list(RULES)}")
         [b] = common.build_blocks([a[0]])
         base(b, a[1], token, rules)
     elif cmd == "base-all":
         base_all(_ids(a[0]), int(a[1]))
+    elif cmd == "moves":
+        moves_all(_ids(a[0]), int(a[1]))
     elif cmd == "base-local":
         rules = tuple(a[2].split(","))
         if rules[0] != "T" or not set(rules) <= set(RULES):
