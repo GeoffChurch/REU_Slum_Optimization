@@ -228,7 +228,7 @@ class Grid:
         return Regions(ncomp=int(ncomp), owner=owner, a=adj.row[off], b=adj.col[off],
                        entry=entry, R=R)
 
-    def aperture_axes(self, K: int, wide: bool, xp) -> list[_ApAxis]:
+    def aperture_axes(self, K: int, band: Band, xp) -> list[_ApAxis]:
         """Aperture's tracks on this grid (_ApAxis), per axis: a slot's cell by its offset from
         each edge's first cell (the pattern's own a, b and line; others computed, the dummy cell
         where off the raster)."""
@@ -239,7 +239,7 @@ class Grid:
         out = []
         for k in range(K):
             a, b, line, _wk = pat.along[k]
-            tr = axis_tracks(int(v[k, 0]), int(v[k, 1]), self.S, wide)
+            tr = axis_tracks(int(v[k, 0]), int(v[k, 1]), self.S, band)
             cells = [a, b, *list(line)]
             r, c = a // nx, a % nx
             for ox, oy in tr.cells[len(cells):]:
@@ -801,7 +801,7 @@ class CompositeGrid:
             "cells (Grid.regions_smallest); a CompositeGrid has cells of several sizes and no "
             "raster")
 
-    def aperture_axes(self, K: int, wide: bool, xp) -> list[_ApAxis]:
+    def aperture_axes(self, K: int, band: Band, xp) -> list[_ApAxis]:
         """Aperture's tracks on this mesh (_ApAxis), per axis: a step between two fine cells reads
         the tracks, a slot's cell the one holding the fine-lattice position at its offset from
         the step's first cell (the pattern's own a, b and line; others located, the dummy cell
@@ -812,7 +812,7 @@ class CompositeGrid:
         out = []
         for k in range(K):
             a, b, line, _wk = pat.along[k]
-            tr = axis_tracks(int(v[k, 0]), int(v[k, 1]), self.S, wide)
+            tr = axis_tracks(int(v[k, 0]), int(v[k, 1]), self.S, band)
             cells = [a, b, *list(line)]
             for ox, oy in tr.cells[len(cells):]:
                 q = self._locate((self.i0[a] + oy).astype(float), (self.j0[a] + ox).astype(float))
@@ -2176,20 +2176,46 @@ def _segment_cover(p0: tuple[Fraction, Fraction],
     return out
 
 
+@dataclass(frozen=True)
+class Band:
+    """How an Aperture traces its tracks (axis_tracks): an oblique step's band the edge's own share
+    of the cross-section, h / |v_k| (parallel edges' bands tile the plane), or the cell's width h
+    (`wide`); an axis-aligned step's tracks from one centre to the next, or across the face only,
+    each the two sub-samples either side of it (`face`: the cut-cell face aperture, the cells' own
+    open parts joined by their node). `name`: its part of the rule's name."""
+    wide: bool
+    face: bool
+
+    @property
+    def name(self) -> str:
+        return ("w" if self.wide else "") + ("f" if self.face else "")
+
+
 @functools.cache
-def axis_tracks(dx: int, dy: int, S: int, wide: bool) -> Tracks:
+def axis_tracks(dx: int, dy: int, S: int, band: Band) -> Tracks:
     """Aperture's tracks for a step (dx, dy) on a raster of S x S sub-samples a cell (S even, so a
     cell's centre is a lattice corner). Coordinates in sub-samples: cell a's sub-sample (i, j) is
     the square (I, J) = (i, j), its centre at (S/2, S/2), b's at (S/2 + S dx, S/2 + S dy). A track
     is the segment between the two centres moved across by an offset u (u = dx y - dy x, the
     distance across times |v|): u at the half-integers inside the band, |u| < S / 2 for the edge's
     own share of the cross-section (h / |v|: parallel edges' bands tile the plane) or |u| < S |v|
-    / 2 for the cell's width h (`wide`). A lattice corner has an integer u, so no track passes
-    through one: each is a 4-connected chain of sub-samples."""
+    / 2 for the cell's width h (band.wide). A lattice corner has an integer u, so no track passes
+    through one: each is a 4-connected chain of sub-samples. With band.face an axis-aligned step's
+    tracks are the S pairs of sub-samples facing each other across the face (the cut-cell face
+    aperture: a one-sub-sample sliver along a wall touches its neighbour there, where a track to
+    its cell's centre would cross the wall)."""
     if S % 2:
         raise ValueError(f"S {S} is odd: a cell's centre is not a lattice corner")
+    if band.face and (dx == 0 or dy == 0):
+        if (dx, dy) == (1, 0):
+            return Tracks(cells=((0, 0), (1, 0)), tracks=tuple(
+                ((0, i * S + S - 1), (1, i * S)) for i in range(S)))
+        if (dx, dy) == (0, 1):
+            return Tracks(cells=((0, 0), (0, 1)), tracks=tuple(
+                ((0, (S - 1) * S + j), (1, j)) for j in range(S)))
+        raise ValueError(f"axis ({dx}, {dy}): the lattice's axis vectors are (1, 0) and (0, 1)")
     v2 = dx * dx + dy * dy
-    umax = S * math.sqrt(v2) / 2 if wide else S / 2
+    umax = S * math.sqrt(v2) / 2 if band.wide else S / 2
     us = [Fraction(2 * i + 1, 2) for i in range(-S * v2, S * v2) if abs((2 * i + 1) / 2) < umax]
     cells: list[tuple[int, int]] = [(0, 0), (dx, dy), *_line_cells(dx, dy)]
     tracks = []
@@ -2340,10 +2366,10 @@ class _ApAxis(NamedTuple):
     coarse: object
 
 
-def _ap_axes(grid: Grid | CompositeGrid, K: int, wide: bool, xp) -> list[_ApAxis]:
-    key = ("aperture", K, wide, xp.__name__)
+def _ap_axes(grid: Grid | CompositeGrid, K: int, band: Band, xp) -> list[_ApAxis]:
+    key = ("aperture", K, band, xp.__name__)
     if key not in grid.cache:
-        grid.cache[key] = grid.aperture_axes(K, wide, xp)
+        grid.cache[key] = grid.aperture_axes(K, band, xp)
     return grid.cache[key]
 
 
@@ -2366,9 +2392,10 @@ class Aperture:
     """The grid fix (owner 2026-10-13, BACKLOG 4 decision (3); NOTES, "The grid fix: steps that
     conduct by their open width"): a step conducts by the share of its width open all the way from
     one cell's centre to the next, read on the sub-samples. Tracks parallel to v_k across the step's
-    band (axis_tracks: the edge's own share of the cross-section, h / |v_k|, or the cell's width h
-    if `wide`), each the 4-connected chain of sub-samples its segment passes through between the
-    two centres, each conducting by the smallest of p.cells' per-sub-sample factors on it (U: the
+    band (axis_tracks, by `band`: the edge's own share of the cross-section, h / |v_k|, or the
+    cell's width h; an axis-aligned step's tracks centre to centre or across the face only), each
+    the 4-connected chain of sub-samples its segment passes through, each conducting by the
+    smallest of p.cells' per-sub-sample factors on it (U: the
     openness); the step by the mean over its tracks, so an open field gives SmallestCell's
     operator, a crack one sub-sample wide on an axis-aligned step conducts 1/S of it, and two cells
     whose open sub-samples do not touch conduct nothing. U computed faithfully: a cut-cell scheme's
@@ -2381,12 +2408,12 @@ class Aperture:
     (AdaptiveMesh's d0 > the ground band). `parts`: what a split cell, whose open sub-samples
     form parts that do not touch, conducts by (PartRule: its one node joins them, or only its
     anchor's part conducts)."""
-    wide: bool
+    band: Band
     parts: PartRule
 
     @property
     def name(self) -> str:
-        return ("apw" if self.wide else "ap") + self.parts.name
+        return "ap" + self.band.name + self.parts.name
 
     def _flat(self, grid, o, p):
         """(the factors the tracks read, (cells + 1) x S*S flat, the dummy cell's 0; the parts'
@@ -2399,12 +2426,12 @@ class Aperture:
     def widths(self, grid, o, kap, p):
         xp = p.solver.xp
         flat, _keep = self._flat(grid, o, p)
-        for ax in _ap_axes(grid, p.K, self.wide, xp):
+        for ax in _ap_axes(grid, p.K, self.band, xp):
             yield _track_means(flat, ax, xp)
 
     def gradient(self, grid, o, kap, p, gc):
         flat, keep = self._flat(grid, o, p)
-        return _ApertureGrad(grid, o, p, _ap_axes(grid, p.K, self.wide, p.solver.xp), flat,
+        return _ApertureGrad(grid, o, p, _ap_axes(grid, p.K, self.band, p.solver.xp), flat,
                              keep)
 
     def reach(self, grid, o, p):
@@ -2556,7 +2583,7 @@ def _track_regions(grid: Grid | CompositeGrid, open0: NDArray[np.bool_], bf: sp.
     double: list[tuple] = []                # (u, v, j, k)
     opened: list[tuple] = []                # (u, v): a track open at baseline
     for (ea, eb, _line, _wk), ax in zip(grid.pattern(p.K, xp).along,
-                                        _ap_axes(grid, p.K, rule.wide, xp), strict=True):
+                                        _ap_axes(grid, p.K, rule.band, xp), strict=True):
         u, v = th(ea), th(eb)
         base = [th(q) for q in ax.base]
         fine = np.ones(len(u), dtype=bool) if ax.coarse is None else ~th(ax.coarse)
@@ -2671,13 +2698,15 @@ def _track_regions(grid: Grid | CompositeGrid, open0: NDArray[np.bool_], bf: sp.
 
 
 def steps_of(token: str) -> StepWidth:
-    """`ap[w][s]` -> Aperture: the band the edge's own share (`ap`) or the cell's width (`apw`);
-    a split cell's parts joined by its node, or (`s`) only its anchor's part conducting
+    """`ap[w][f][s]` -> Aperture (Band): an oblique step's band the edge's own share (`ap`) or
+    the cell's width (`w`); an axis-aligned step's tracks centre to centre, or across the face
+    (`f`); a split cell's parts joined by its node, or (`s`) only its anchor's part conducting
     (AnchorPart)."""
-    m = re.fullmatch(r"ap(w?)(s?)", token)
+    m = re.fullmatch(r"ap(w?)(f?)(s?)", token)
     if m is None:
-        raise ValueError(f"unknown step width {token!r}: ap[w][s]")
-    return Aperture(wide=bool(m[1]), parts=AnchorPart() if m[2] else JoinParts())
+        raise ValueError(f"unknown step width {token!r}: ap[w][f][s]")
+    return Aperture(band=Band(wide=bool(m[1]), face=bool(m[2])),
+                    parts=AnchorPart() if m[3] else JoinParts())
 
 
 class Conductance(NamedTuple):

@@ -78,10 +78,9 @@ import lifted  # noqa: E402
 import relax  # noqa: E402
 import width_check  # noqa: E402
 
-RULES = (lifted.Aperture(wide=False, parts=lifted.JoinParts()),
-         lifted.Aperture(wide=True, parts=lifted.JoinParts()),
-         lifted.Aperture(wide=True, parts=lifted.AnchorPart()))
-SPLIT_RULES = ("aps", "apws")     # `connect`: the rules whose split cells conduct through one part
+RULES = tuple(lifted.steps_of(t) for t in ("ap", "apw", "apws", "apwfs"))
+SPLIT_RULES = ("aps", "apws", "apwfs")     # `connect`: the rules whose split cells conduct
+                                           # through one part
 SEED = 20261013
 EPS = 1e-4                # SIMP base's eps world
 H = 0.5
@@ -447,11 +446,11 @@ def connect(ids: list[str]) -> list[str]:
     return bad
 
 
-def _centre_tracks(dx: int, dy: int, S: int, wide: bool) -> lifted.Tracks:
+def _centre_tracks(dx: int, dy: int, S: int, band: lifted.Band) -> lifted.Tracks:
     """axis_tracks traced through sub-sample centres only: each track the sub-samples whose centre
     its line passes (Bresenham-like, one per row or column crossed), so a diagonal step through
     two sub-samples touching at a corner is open."""
-    tr = _TRACKS(dx, dy, S, wide)
+    tr = _TRACKS(dx, dy, S, band)
     out = []
     for t in tr.tracks:
         keep = list(t)

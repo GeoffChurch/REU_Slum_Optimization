@@ -7,20 +7,21 @@ sub-samples do not touch are joined (a phantom passage). The fix (lifted.Apertur
 conduct by the share of its width open all the way from one cell's centre to the next, read on the
 sub-samples. RULES names the rules compared (a name and its lifted.conductance_of spec, the spec in
 every row): T `uni` (today's), A `uni+ap` (the aperture, each step's band its own share of the
-cross-section, h / |v_k|), Aw `uni+apw` (the band the cell's width h) and Aws `uni+apws` (Aw, a
-split cell conducting through one part only: lifted.AnchorPart). h 0.5, ell 3 m, K 8,
-area population, B's placement; lenses P (power 1), P_{1/2} (common.PriorityDemand(0.5), power 1)
-and J_2 (lens (c)).
+cross-section, h / |v_k|), Aw `uni+apw` (the band the cell's width h), Aws `uni+apws` (Aw, a
+split cell conducting through one part only: lifted.AnchorPart) and Fws `uni+apwfs` (Aws, an
+axis-aligned step's tracks across the face: lifted.Band's face). h 0.5, ell 3 m, K 8, area
+population, B's placement; lenses P (power 1), P_{1/2} (common.PriorityDemand(0.5), power 1) and
+J_2 (lens (c)).
 
     S=research/roadless/aperture.py      # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S channel <procs>                     # Q3: the corridor (angle, alignment)
-    uv run python $S base <id> <cpu|gpu> <mesh> <T,...>  # Q1, Q2: one block at baseline
+    uv run python $S base <id> <cpu|gpu> <mesh> <rules,> [tag]   # Q1, Q2: one block
     uv run python $S base-all <ids,|@file> <procs>       # here: small blocks whole, pockets
-    uv run python $S base-local <ids,|@file> <procs> <T,...>   # here: large blocks' base
+    uv run python $S base-local <ids,|@file> <procs> <rules,> [tag]   # here: blocks' base
     uv run python $S moves <ids,|@file> <procs>          # here: Q2's demand moves by cause
     uv run python $S pockets-composite <ids,|@file> <procs>   # here: oversized blocks' pockets
     uv run python $S score <id> <rule> <offset> <cpu|gpu> 0.5   # Q3, Q4: one block's fields
-    uv run python $S score-plan <id> <cpu|gpu>           # ... every pair score_plan names
+    uv run python $S score-plan <id> <cpu|gpu> <drift rules,> <tuning rules,>   # score_plan's
     uv run python $S tars <dir> <ids,>                   # a tar per block of score's inputs
     uv run python $S simp <id> <rule> <cpu|gpu> <power>  # SIMP base under a rule (the gradient)
     uv run python $S report                              # every question's tables, the summaries
@@ -79,7 +80,7 @@ from simp_compare import TUNING  # noqa: E402
 
 # ------------------------------------------------------------------ the run's configuration
 # Everything that can change a number is here, and named in the rows (the run's identity).
-RULES = {"T": "uni", "A": "uni+ap", "Aw": "uni+apw", "Aws": "uni+apws"}
+RULES = {"T": "uni", "A": "uni+ap", "Aw": "uni+apw", "Aws": "uni+apws", "Fws": "uni+apwfs"}
 H = 0.5
 ELL_M = 3.0
 K = 8
@@ -172,12 +173,13 @@ def mesh_token_of(bid: str) -> str:
     return OVERSIZED_MESH if bid in sizes.index and sizes[bid] > UNIFORM_MAX_M else "0.5"
 
 
-def base_path(bid: str) -> Path:
-    return ROWS / "base" / f"{bid}.parquet"
+def base_path(bid: str, tag: str) -> Path:
+    """`base`'s rows of a block; `tag` names a later pass over other rules ("" the first)."""
+    return ROWS / "base" / f"{bid}{'__' + tag if tag else ''}.parquet"
 
 
-def homes_path(bid: str) -> Path:
-    return ROWS / "homes" / f"{bid}.parquet"
+def homes_path(bid: str, tag: str) -> Path:
+    return ROWS / "homes" / f"{bid}{'__' + tag if tag else ''}.parquet"
 
 
 def _parts(grid: lifted.Grid | lifted.CompositeGrid) -> np.ndarray:
@@ -197,7 +199,7 @@ def _flood(grid: lifted.Grid) -> np.ndarray:
     return aperture_check.flood(grid)[0].ravel()
 
 
-def base(b, device: str, token: str, rules: tuple[str, ...]) -> None:
+def base(b, device: str, token: str, rules: tuple[str, ...], tag: str) -> None:
     """One block at baseline under `rules` (the module's docstring)."""
     rr._check_single_threaded()
     t0 = time.time()
@@ -273,14 +275,17 @@ def base(b, device: str, token: str, rules: tuple[str, ...]) -> None:
         del sc, c, sol_q
         p.solver.release()
     h = pd.concat(homes, ignore_index=True)
-    ref = rules[0]                  # the moves against the first rule's (today's) placement: the
-    for r in rules:                 # share of a home's injection that sits in other cells
-        d = 0.5 * abs(S_of[r] - S_of[ref]).sum(axis=0).A.ravel()
+    # the moves against today's placement (built here if today's rule is not among `rules`: the
+    # placement alone, no solve): the share of a home's injection that sits in other cells
+    ref = S_of["T"] if "T" in S_of else common.placement(
+        grid, polys, params(RULES["T"], device)).S.tocsc()
+    for r in rules:
+        d = 0.5 * abs(S_of[r] - ref).sum(axis=0).A.ravel()
         h.loc[h.rule == r, "moved"] = d
     out = pd.DataFrame(rows).assign(t_grid=t_grid, t_block=time.time() - t0,
                                     host=socket.gethostname(),
                                     peak_rss_gb=rr._status_gb("VmHWM"))
-    for path, df in ((base_path(bid), out), (homes_path(bid), h)):
+    for path, df in ((base_path(bid, tag), out), (homes_path(bid, tag), h)):
         path.parent.mkdir(parents=True, exist_ok=True)
         rr.write_parquet(df, path)
     print(f"{time.strftime('%H:%M:%S')} {bid} base done in {time.time() - t0:.0f}s, "
@@ -419,7 +424,7 @@ def moves_path(bid: str) -> Path:
     return ROWS / "moves" / f"{bid}.parquet"
 
 
-MOVE_RULES = ("Aw", "Aws")      # `moves`: the rules whose demand moves are split by cause
+MOVE_RULES = ("Aw", "Aws", "Fws")    # `moves`: the rules whose demand moves are split by cause
 
 
 def moves(b) -> None:
@@ -478,8 +483,8 @@ def _local_one(job: tuple[str, bool]) -> str | None:
     bid, small = job
     try:
         [b] = common.build_blocks([bid])
-        if small and not base_path(bid).exists():
-            base(b, "cpu", "0.5", BASE_RULES_SMALL)
+        if small and not base_path(bid, "").exists():
+            base(b, "cpu", "0.5", BASE_RULES_SMALL, "")
         if not pockets_path(bid).exists():
             pockets(b)
     except Exception as e:                  # noqa: BLE001 -- reported, the run goes on
@@ -488,25 +493,26 @@ def _local_one(job: tuple[str, bool]) -> str | None:
     return None
 
 
-def _base_cpu(job: tuple[str, tuple[str, ...]]) -> str | None:
-    """A pool's task: `base` on the CPU under `rules` (a large block that fits this machine's
-    memory); the block's id if it failed."""
-    bid, rules = job
-    if base_path(bid).exists():
+def _base_cpu(job: tuple[str, tuple[str, ...], str]) -> str | None:
+    """A pool's task: `base` on the CPU under `rules` (a block that fits this machine's memory),
+    rows tagged `tag`; the block's id if it failed."""
+    bid, rules, tag = job
+    if base_path(bid, tag).exists():
         return None
     try:
         [b] = common.build_blocks([bid])
-        base(b, "cpu", mesh_token_of(bid), rules)
+        base(b, "cpu", mesh_token_of(bid), rules, tag)
     except Exception as e:                  # noqa: BLE001 -- reported, the run goes on
         print(f"{bid} FAILED {type(e).__name__}: {str(e)[:300]}", flush=True)
         return bid
     return None
 
 
-def base_local(ids: list[str], procs: int, rules: tuple[str, ...]) -> None:
+def base_local(ids: list[str], procs: int, rules: tuple[str, ...], tag: str) -> None:
     rr._check_single_threaded()
     with multiprocessing.get_context("fork").Pool(procs, maxtasksperchild=1) as pool:
-        failed = [f for f in pool.imap_unordered(_base_cpu, [(i, rules) for i in ids]) if f]
+        failed = [f for f in pool.imap_unordered(_base_cpu, [(i, rules, tag) for i in ids])
+                  if f]
     if failed:
         raise SystemExit(f"{len(failed)} blocks failed: {', '.join(failed)}")
 
@@ -607,28 +613,23 @@ def score(b, rule: str, off: int, device: str) -> None:
           f"peak RSS {setup['peak_rss_gb']:.1f} GB", flush=True)
 
 
-SCORE_PLAN_RULES = ("T", "Aw", "Aws")   # the drift blocks at both alignments (A, behind on the
-                                        # corridor and the small blocks, at baseline only)
-SCORE_RULE = "Aws"                       # the other tuning blocks: the candidate at offset 0
-                                         # (today's fields are width.py's U rows)
-
-
-def score_plan(bid: str) -> list[tuple[str, int]]:
-    """The (rule, offset) pairs `score` runs on a block: Q3's drift blocks under every rule at
-    the metric's offset and their shift (ALIGN), the 13 tuning blocks (Q4) under SCORE_RULE at
-    the metric's offset."""
+def score_plan(bid: str, drift: tuple[str, ...], tuning: tuple[str, ...]
+               ) -> list[tuple[str, int]]:
+    """The (rule, offset) pairs `score` runs on a block: Q3's drift blocks under the rules
+    `drift` at the metric's offset and their shift (ALIGN), the 13 tuning blocks (Q4) under the
+    rules `tuning` at the metric's offset (today's fields there are width.py's U rows). The runs:
+    drift T, Aw, Aws and tuning Aws (ap-score*), then drift and tuning Fws (ap-score-f)."""
     if bid in ALIGN:
-        return [(r, o) for o in (0, ALIGN[bid]) for r in SCORE_PLAN_RULES]
+        return [(r, o) for o in (0, ALIGN[bid]) for r in drift]
     if bid in TUNING:
-        return [(SCORE_RULE, 0)]
+        return [(r, 0) for r in tuning]
     raise SystemExit(f"{bid}: neither a drift block nor a tuning block")
 
 
-def score_all(bid: str, device: str) -> None:
-    """`score` for every pair of score_plan(bid) whose rows are not here yet, the block built
-    once."""
+def score_all(bid: str, device: str, drift: tuple[str, ...], tuning: tuple[str, ...]) -> None:
+    """`score` for every pair of score_plan whose rows are not here yet, the block built once."""
     [b] = common.build_blocks([bid])
-    for rule, off in score_plan(bid):
+    for rule, off in score_plan(bid, drift, tuning):
         if score_path(off, rule, bid).exists():
             print(f"{bid} {rule} o{off}: rows here already", flush=True)
             continue
@@ -641,14 +642,33 @@ def tars(out: Path, ids: list[str]) -> None:
     width.tars(out, ids, "score")
 
 
+TODAYS_SIMP = {1.0: "pweight_rows/simp/P", 2.0: "pweight_rows/simp/J2"}   # SIMP base under
+                                        # today's rule, free first, area D 0.05: the small blocks
+
+
 def simp(bid: str, rule: str, device: str, power: float) -> None:
     """SIMP base (SIMP_PLAN), J_power, area D BUDGET, free first, under the rule (relax.one):
-    whether the relaxation's gradient works under it; rows aperture_rows/simp/<rule>/."""
+    whether the relaxation's gradient works under it. Beside it, today's SIMP base clearing of the
+    same objective (TODAYS_SIMP, a small block's) scored under the rule, with the homes it leaves
+    enclosed freed first (D grows): SIMP under the rule should not be behind it on its own lens.
+    Rows aperture_rows/simp/<rule>/."""
     rr._check_single_threaded()
     t0 = time.time()
     row = relax.one(bid, power, device, SIMP_PLAN, RULES[rule], BUDGET, demand=POP)
     row.update(rule=rule, spec=RULES[rule], budget=BUDGET, host=socket.gethostname(),
                peak_rss_gb=rr._status_gb("VmHWM"), wall=time.time() - t0)
+    c = relax._clearing(bid, device, RULES[rule], SIMP_PLAN.mesh, demand=POP)
+    rel = relax.Relaxation(c, power)
+    x = clearings.Store.committed().cleared(TODAYS_SIMP[power], c.sc.block, step=1)
+    held0 = np.zeros(c.n, dtype=bool)
+    held0[x] = True
+    held = clear.free_first(c, budget=1.0, held=held0)
+    for name, r in (("todays", held0), ("todays_free", held)):
+        row[f"{name}_perm"] = rel.perm(rel.exact(r.astype(float)))
+        row[f"{name}_D"] = float(c.cost[r].sum())
+        row[f"{name}_enclosed"] = c.sc.enclosed_left(c.open_(r))
+    row["jaccard_todays"] = len(set(x.tolist()) & set(row["simp_cleared"])) / len(
+        set(x.tolist()) | set(row["simp_cleared"]))
     out = ROWS / "simp" / rule / f"{bid}_p{power:g}.parquet"
     out.parent.mkdir(parents=True, exist_ok=True)
     rr.write_parquet(pd.DataFrame([row]), out)
@@ -889,7 +909,8 @@ def report() -> None:
             cols = [c for c in q1.columns if c not in ("block", "size", "homes")]
             _summary("q1", _spread(q1, ["size"], cols))
         mv = _read("moves")
-        q2 = pd.concat([_q2(base_, homes, mv, r) for r in ("A", "Aw", "Aws")], ignore_index=True)
+        q2 = pd.concat([_q2(base_, homes, mv, r) for r in ("A", "Aw", "Aws", "Fws")],
+                       ignore_index=True)
         q2.insert(1, "size", _size_class(q2.block))
         _summary("q2_blocks", q2)
         cols = [c for c in ("new", "new_pop", "new_by_rule", "new_by_rule_pop", "freed", "moved",
@@ -958,9 +979,10 @@ def report() -> None:
                                       *LENS_COLS]])
     simp_rows = _read("simp")
     if not simp_rows.empty:
-        _summary("simp", simp_rows[[c for c in ("block", "rule", "power", "simp_perm", "simp_D",
-                                                "free_D", "free_cleared", "enclosed", "t")
-                                    if c in simp_rows]])
+        _summary("simp", simp_rows[[c for c in (
+            "block", "rule", "power", "simp_perm", "simp_D", "free_D", "free_cleared", "enclosed",
+            "todays_perm", "todays_D", "todays_enclosed", "todays_free_perm", "todays_free_D",
+            "todays_free_enclosed", "jaccard_todays", "t") if c in simp_rows]])
 
 
 def _ids(arg: str) -> list[str]:
@@ -973,10 +995,10 @@ def main(argv: list[str]) -> None:
         channel(int(a[0]))
     elif cmd == "base":
         token, rules = a[2], tuple(a[3].split(","))     # the mesh as cluster.py sized the task
-        if rules[0] != "T" or not set(rules) <= set(RULES):
-            raise SystemExit(f"rules {rules}: today's (T) first, then any of {list(RULES)}")
+        if not set(rules) <= set(RULES):
+            raise SystemExit(f"rules {rules}: any of {list(RULES)}")
         [b] = common.build_blocks([a[0]])
-        base(b, a[1], token, rules)
+        base(b, a[1], token, rules, a[4] if len(a) > 4 else "")
     elif cmd == "base-all":
         base_all(_ids(a[0]), int(a[1]))
     elif cmd == "pockets-composite":
@@ -985,16 +1007,16 @@ def main(argv: list[str]) -> None:
         moves_all(_ids(a[0]), int(a[1]))
     elif cmd == "base-local":
         rules = tuple(a[2].split(","))
-        if rules[0] != "T" or not set(rules) <= set(RULES):
-            raise SystemExit(f"rules {rules}: today's (T) first, then any of {list(RULES)}")
-        base_local(_ids(a[0]), int(a[1]), rules)
+        if not set(rules) <= set(RULES):
+            raise SystemExit(f"rules {rules}: any of {list(RULES)}")
+        base_local(_ids(a[0]), int(a[1]), rules, a[3] if len(a) > 3 else "")
     elif cmd == "score":
         if a[4] != "0.5":
             raise SystemExit("score runs on uniform h 0.5 (its mesh token)")
         [b] = common.build_blocks([a[0]])
         score(b, a[1], int(a[2]), a[3])
     elif cmd == "score-plan":
-        score_all(a[0], a[1])
+        score_all(a[0], a[1], tuple(a[2].split(",")), tuple(a[3].split(",")))
     elif cmd == "tars":
         tars(Path(a[0]), _ids(a[1]))
     elif cmd == "simp":
