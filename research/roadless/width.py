@@ -662,6 +662,26 @@ def maps(ids: list[str]) -> None:
         fig.savefig(out / f"{bid}_variants.png", dpi=90)
         plt.close(fig)
         print(out / f"{bid}_variants.png", flush=True)
+        # the same, zoomed on current_map's window: a quarter of the block's extent about the
+        # median building SIMP's default clears
+        cx = float(np.median([q.centroid.x for q in polys[x]]))
+        cy = float(np.median([q.centroid.y for q in polys[x]]))
+        minx, miny, maxx, maxy = b.boundary.bounds
+        half = 0.125 * max(maxx - minx, maxy - miny)
+        fig, axes = plt.subplots(2, 4, figsize=(4 * 9, 2 * 9 + 2))
+        for ax, (variant, d0) in zip(axes.ravel(), base.items(), strict=True):
+            lim = float(np.nanquantile(np.abs(d0), 0.99))
+            im = draw(ax, d0, f"{variant}: baseline against the prior (zoom)", False,
+                      cmap="RdBu_r", vmin=-lim, vmax=lim)
+            ax.set_xlim(cx - half, cx + half)
+            ax.set_ylim(cy - half, cy + half)
+            fig.colorbar(im, ax=ax, shrink=0.6)
+        fig.suptitle(f"{bid}: the baseline's flow against the prior, every variant, zoomed",
+                     fontsize=14)
+        fig.tight_layout()
+        fig.savefig(out / f"{bid}_variants_zoom.png", dpi=90)
+        plt.close(fig)
+        print(out / f"{bid}_variants_zoom.png", flush=True)
 
 
 # ------------------------------------------------------------------ the report
@@ -730,7 +750,11 @@ def report() -> None:
         _summary("q3_levels", pd.DataFrame(lv))
     homes = _read("homes")
     if not homes.empty:
-        _summary("q3_homes", _home_drift(homes))
+        blocks = {b.block_id: b for b in common.build_blocks(list(ALIGN))}
+        fb = {(bid, o): fine_bottleneck(blocks[bid], o) for bid, k in ALIGN.items()
+              for o in (0, k)}
+        _summary("q3_homes", _home_drift(homes, {key: v[1] for key, v in fb.items()},
+                                         {key: v[2] for key, v in fb.items()}))
     # Q4: the 13 tuning blocks, every method under every variant
     t13 = s0[s0.block.isin(TUNING) & s0.kind.isin(["stored", "road"])].copy()
     t13["reaches"] = (t13.kind == "stored") | (t13.D >= BUDGET - REACH_TOL)
@@ -823,36 +847,98 @@ def _variant_key(s: pd.Series) -> pd.Series:
     return s.map(order) if s.name == "variant" else s
 
 
-def _home_drift(homes: pd.DataFrame) -> pd.DataFrame:
-    """Q3, per block of ALIGN and variant: how each home's term in J_2's ratio J / J0 under SIMP's
-    default moves between the metric's offset and the block's shift, by the home's bottleneck
-    width at the metric's offset (`_bottleneck`): per group its homes, population, share of J0,
-    and share of the ratio's change, signed and absolute."""
+FINE_STEPS = (0.125, 0.25, 0.375, 0.5, 0.75, 1.0, 1.5, 2.0)   # fine bottleneck widths tried (m)
+SUBCELL_M = 0.5            # a gap narrower than a cell: behind one, a cell's bottleneck is at most this
+
+
+def fine_bottleneck(b, off: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """At baseline on the fine lattice (h / 4) at OFFSETS[off]: per cell, its bottleneck width to
+    the street, the largest of FINE_STEPS w such that a 4-connected path of open sub-samples whose
+    clear width 2 d is at least w (d to the nearest footprint sub-sample, WallDistance's) joins one
+    of its sub-samples to a ground cell's (0 if none); and per home, the share of its injection
+    (lifted.Placement.S) in cells behind a gap narrower than a cell: a bottleneck of at most
+    SUBCELL_M, and narrower than the cell's own clear width (a courtyard behind a crack, not a
+    cell sitting in a narrow strip, whose way out is as narrow as it is); and per home, the share
+    in cells with no such path at all (bottleneck 0): open sub-samples joined to the street only
+    through the operator's cell graph, two 4-adjacent cells each with an open sub-sample whose open
+    parts do not touch (a phantom passage, which a finer raster would not have). nan if enclosed.
+    `_bottleneck`'s cell-level
+    width averages a cell's sub-samples, footprint ones among them, so it cannot see such a gap.
+    Geometry only: no conductance."""
+    p = params("uni", "cpu")
+    g = lifted.Grid.of(*lifted._geometry(b), H, offset=OFFSETS[off])
+    pl = common.placement(g, np.asarray(b.buildings.outlines), p)
+    S = g.S
+    stand = lifted._closed(g, g.ff0, np) >= 1.0
+    opened = lifted._fine(g.isub, S) & ~stand
+    d = ndimage.distance_transform_edt(~stand) * (g.h / S) - g.h / (2 * S)
+    ground = lifted._fine(np.repeat(g.ground[..., None], S * S, axis=-1), S)
+    cell_b = np.zeros(g.inside.size)
+    for w in FINE_STEPS:
+        wide = opened & (2.0 * d >= w - 1e-9)
+        lab, _n = ndimage.label(wide)
+        reach = np.zeros(int(lab.max()) + 1, dtype=bool)
+        reach[lab[wide & ground]] = True
+        reach[0] = False
+        cell_b[lifted._cell_sum(reach[lab].astype(float), S).ravel() > 0] = w
+    ny, nx = g.inside.shape
+    own = np.where(opened, 2.0 * d, 0.0).reshape(ny, S, nx, S).max(axis=(1, 3)).ravel()
+    room = np.zeros(g.inside.size)                     # its own clear width, as a step
+    for w in FINE_STEPS:
+        room[own >= w - 1e-9] = w
+    pocket = (cell_b <= SUBCELL_M + 1e-9) & (cell_b < room)
+    ST = pl.S.T.tocsr()
+    behind = ST @ pocket.astype(float)
+    phantom = ST @ ((cell_b == 0.0) & (room > 0)).astype(float)
+    return (cell_b, np.where(pl.enclosed, np.nan, behind),
+            np.where(pl.enclosed, np.nan, phantom))
+
+
+def _home_drift(homes: pd.DataFrame, behind: dict[tuple[str, int], np.ndarray],
+                phantom: dict[tuple[str, int], np.ndarray]) -> pd.DataFrame:
+    """Q3, per block of ALIGN, variant and lens (P, J_2): how each home's term in the ratio
+    J / J0 under SIMP's default moves between the metric's offset and the block's shift, by the
+    share of the home's injection behind a gap narrower than a cell (`fine_bottleneck`, the larger
+    of its two alignments): per group its homes, population, share of J0 at the metric's offset,
+    and share of the ratio's change, signed and absolute; with the share of J0 the three heaviest
+    homes hold at each offset; per group too the population and the share of J0 of its homes
+    with over 5% of their injection behind a phantom passage only (`fine_bottleneck`) at either
+    alignment."""
     out = []
-    groups = ((0.0, 0.5), (0.5, 1.0), (1.0, 2.0), (2.0, np.inf))
+    groups = (("none", 0.0, 0.0), ("under 5%", 0.0, 0.05), ("over 5%", 0.05, 1.0))
     for bid, k in ALIGN.items():
+        if (bid, 0) not in behind or (bid, k) not in behind:
+            continue
+        share = np.fmax(behind[(bid, 0)], behind[(bid, k)])
+        ghost = np.fmax(phantom[(bid, 0)], phantom[(bid, k)]) > 0.05
         for v, g in homes[homes.block == bid].groupby("variant"):
-            at = {o: g[g.offset == o].set_index("home") for o in (0, k)}
+            at = {o: g[g.offset == o].set_index("home").sort_index() for o in (0, k)}
             if any(x.empty for x in at.values()):
                 continue
-            live = ~(at[0].enclosed | at[k].enclosed)
-            c = {}
-            for o, h in at.items():
-                J0 = float((h.w[live] * h.u0[live] ** 2).sum())
-                c[o] = (h.w * h.u_default ** 2 / J0).where(live, 0.0)
-                c[f"base{o}"] = (h.w * h.u0 ** 2 / J0).where(live, 0.0)
-            d = c[k] - c[0]
-            width = at[0].bottleneck
-            total, absum = float(d.sum()), float(d.abs().sum())
-            for lo, hi in groups:
-                m = live & (width > lo) & (width <= hi) if lo > 0 else live & (width <= hi)
-                out.append(dict(block=bid, variant=v, shift=k, bottleneck=f"{lo:g}-{hi:g}",
-                                homes=int(m.sum()),
-                                population=float(at[0].w[m].sum() / at[0].w[live].sum()),
-                                J0_share=float(c["base0"][m].sum()),
-                                change=float(d[m].sum()), change_share=float(d[m].sum() / total),
-                                abs_share=float(d[m].abs().sum() / absum),
-                                ratio_o0=float(c[0].sum()), ratio_shift=float(c[k].sum())))
+            live = (~(at[0].enclosed | at[k].enclosed)).to_numpy() & ~np.isnan(share)
+            w = at[0].w.to_numpy()
+            for power, lens in ((1.0, "P"), (2.0, "J2")):
+                c, base, top3 = {}, {}, {}
+                for o, h in at.items():
+                    u0, ud = np.nan_to_num(h.u0.to_numpy()), np.nan_to_num(h.u_default.to_numpy())
+                    J0 = float((w[live] * u0[live] ** power).sum())
+                    c[o] = np.where(live, w * ud ** power / J0, 0.0)
+                    base[o] = np.where(live, w * u0 ** power / J0, 0.0)
+                    top3[o] = float(np.sort(base[o])[-3:].sum())
+                d = c[k] - c[0]
+                total, absum = float(d.sum()), float(np.abs(d).sum())
+                for name, lo, hi in groups:
+                    m = live & ((share == 0.0) if hi == 0.0 else (share > lo) & (share <= hi))
+                    out.append(dict(
+                        block=bid, variant=v, shift=k, lens=lens, behind=name,
+                        homes=int(m.sum()), population=float(w[m].sum() / w[live].sum()),
+                        phantom_population=float(w[m & ghost].sum() / w[live].sum()),
+                        J0_share=float(base[0][m].sum()), J0_share_shift=float(base[k][m].sum()),
+                        J0_share_phantom=float(base[0][m & ghost].sum()),
+                        change=float(d[m].sum()), change_share=float(d[m].sum() / total),
+                        abs_share=float(np.abs(d[m]).sum() / absum),
+                        ratio_o0=float(c[0].sum()), ratio_shift=float(c[k].sum()),
+                        top3_o0=top3[0], top3_shift=top3[k]))
     return pd.DataFrame(out)
 
 
