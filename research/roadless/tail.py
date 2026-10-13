@@ -11,7 +11,7 @@ import lifted
 blocks = common.build_blocks(common.recipients())
 for i in [int(a) for a in sys.argv[1].split(",")]:
     b = blocks[i]
-    p = lifted.Params(ell_m=3.0, K=8)
+    p = lifted.Params(ell_m=3.0, K=8, cells=lifted.OpenFraction())
     sc = common.Scorer(b, lifted.UniformMesh(0.5, offset=lifted.OFFSET), p,
                        demand=common.PopulationDemand())
     tau = sc.w * sc.u0                                      # per home, sums to P0

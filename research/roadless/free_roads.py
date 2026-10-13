@@ -83,7 +83,7 @@ CODE = source_hash(Path(__file__), Path(common.__file__), Path(lifted.__file__))
 # The reach of open space (lifted.grounded, Grid.reach) reads only the solver's device, here the
 # CPU; Params' physics fields (turning length, headings, along-conductance) are its defaults, which
 # enter no reach and so no held road.
-REACH_P = lifted.Params(solver=lifted.CpuAMG())
+REACH_P = lifted.Params(solver=lifted.CpuAMG(), cells=lifted.OpenFraction())
 
 
 class Population(Protocol):

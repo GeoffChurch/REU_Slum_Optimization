@@ -142,6 +142,11 @@ class Clearing:
         understates it). Everything but the per-building results stays on the device."""
         g = self.sc.grid
         xp, th = self.p.solver.xp, self.p.solver.to_host
+        if not self.ps.cells.pointwise:
+            raise NotImplementedError(
+                f"{self.ps.cells.name}: a cell factor that looks past its cell moves the edges "
+                "around a building too, which the secant tension (each edge's gain attributed to "
+                "the buildings covering its cells) does not see")
         op = self.open_(self.removed)
         op_eps = op + EPS * (self.full - op)
         sy = lifted.System(g, op_eps, self.ps)
@@ -205,8 +210,8 @@ def loo(i: int, h: float, pop: str = "count", power: float = 1.0) -> None:
     blocks = common.build_blocks(common.recipients())
     b = blocks[i]
     mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
-    c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8), population=common.POPULATIONS[pop],
-                 demand=common.PopulationDemand())
+    c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8, cells=lifted.OpenFraction()),
+                 population=common.POPULATIONS[pop], demand=common.PopulationDemand())
     sc = c.sc
     P0 = sc.J(sc.u0, power)
     t = time.time()
@@ -666,7 +671,8 @@ def greedy_block(b, rnd: engine.Round, h: float, d_max: float, out: Path, popula
     """The greedy to d_max. Records perm (in J_power) and perm1 (the p = 1 score) at every
     step; `cleared` lists the step's buildings in pick order."""
     mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
-    c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8, along=along, solver=solver),
+    c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8, along=along, solver=solver,
+                                        cells=lifted.OpenFraction()),
                  population=population, search=search, demand=common.PopulationDemand())
     sc = c.sc
     J0 = sc.J(sc.u0, power)

@@ -1054,14 +1054,19 @@ def directions(nmax: int) -> list[tuple[int, int]]:
 class AlongConductance(Protocol):
     """Per-heading multipliers on the along-axis edges: layers(grid, open_, K)[k] is layer k's
     factor per cell (>= 1, non-decreasing as space is freed, so monotonicity survives) or the
-    scalar 1.0. vjp(grid, open_, K, A) is the gradient with respect to open_ of
-    sum_k sum_x A[k, x] layers[k][x] (what clearing a cell does to the factors elsewhere).
-    open_, A and the results are the grid's fields; a conductance that scans lines does so on
-    the fine lattice's raster (grid.paint), a cell's factor its mean over its pixels."""
+    scalar 1.0. turning(grid, open_, K)[k] is the same for the turning edges (x, k)-(x, k+1):
+    the scalar 1.0 but for TurnBoosted. vjp(grid, open_, K, A) is the gradient with respect to
+    open_ of sum_k sum_x A[k, x] layers[k][x] (what clearing a cell does to the factors
+    elsewhere). open_, A and the results are the grid's fields; a conductance that scans lines
+    does so on the fine lattice's raster (grid.paint), a cell's factor its mean over its
+    pixels."""
     name: str
 
     def layers(self, grid: Grid | CompositeGrid, open_,
                K: int) -> list[float] | NDArray[np.float64]: ...
+
+    def turning(self, grid: Grid | CompositeGrid, open_,
+                K: int) -> list[float] | NDArray[np.float64]: ...
 
     def vjp(self, grid: Grid | CompositeGrid, open_, K: int, A) -> NDArray[np.float64]: ...
 
@@ -1072,6 +1077,9 @@ class Uniform:
     name: str = "uni"
 
     def layers(self, grid, open_, K):
+        return [1.0] * K
+
+    def turning(self, grid, open_, K):
         return [1.0] * K
 
     def vjp(self, grid, open_, K, A):
@@ -1112,6 +1120,9 @@ class Sightline:
         ang, R = self.runs(grid.paint(open_, np), grid.h)
         W = _angle_weights(K, ang)
         return grid.mean((1.0 + self.beta * np.tensordot(W, R, axes=1)).astype(np.float32), np)
+
+    def turning(self, grid, open_, K):
+        return [1.0] * K
 
     def vjp(self, grid, open_, K, A):
         """Hard runs are piecewise constant in open_: zero almost everywhere."""
@@ -1510,6 +1521,9 @@ class SoftSightline:
         self._cache[key] = (weakref.ref(grid), out)    # an id outlives its grid: check it
         return out
 
+    def turning(self, grid, open_, K):
+        return [1.0] * K
+
     def vjp(self, grid, open_, K, A):
         """(field) on the scans' device."""
         xp = self.scans.xp
@@ -1527,19 +1541,310 @@ class SoftSightline:
         return grid.gather(out, xp)
 
 
+@dataclass(frozen=True)
+class TurnBoosted:
+    """An along-conductance whose boost scales the turning edges too: the turning edge
+    (x, k)-(x, k+1) times min(F_k(x), F_k+1(x)), F the inner conductance's layers (NOTES, "The
+    sightline metric's angle error": the boost then scales the whole (x, theta) metric, so a
+    walker in a boosted lane keeps the persistence length ell instead of going ballistic and
+    zig-zagging between headings). For scoring and maps only: no gradient (`vjp` raises, so
+    neither SIMP nor the greedy's tension can run under it). The layers' device is the inner
+    conductance's (np.minimum dispatches to cupy's)."""
+    inner: AlongConductance
+
+    @property
+    def name(self) -> str:
+        return self.inner.name + "t"
+
+    def layers(self, grid, open_, K):
+        return self.inner.layers(grid, open_, K)
+
+    def turning(self, grid, open_, K):
+        F = self.inner.layers(grid, open_, K)
+        return [np.minimum(F[k], F[(k + 1) % K]) for k in range(K)]
+
+    def vjp(self, grid, open_, K, A):
+        raise NotImplementedError(f"{self.name}: the turning boost is not in the gradient (for "
+                                  "scoring and maps only)")
+
+
 def along_of(spec: str, scans: Scans = CpuScans()) -> AlongConductance:
     """`uni` -> Uniform(); `sl3` -> Sightline(beta 3); `ss10k2` -> SoftSightline(beta 10,
-    kappa 2); `ss30k2n2r30` -> SoftSightline(beta 30, kappa 2, hill 2, r0 30 m)."""
+    kappa 2); `ss30k2n2r30` -> SoftSightline(beta 30, kappa 2, hill 2, r0 30 m); a trailing `t`
+    on an `ss` spec (`ss100k2n2r30t`) -> TurnBoosted of it."""
     if spec == "uni":
         return Uniform()
     if spec.startswith("sl"):
         return Sightline(float(spec[2:]))
-    m = re.fullmatch(r"ss([0-9.]+)k([0-9.]+)(?:n([0-9.]+)r([0-9.]+))?", spec)
+    m = re.fullmatch(r"ss([0-9.]+)k([0-9.]+)(?:n([0-9.]+)r([0-9.]+?))?(t?)", spec)
     if m:
         shape = {} if m.group(3) is None else dict(hill=float(m.group(3)),
                                                    r0_m=float(m.group(4)))
-        return SoftSightline(float(m.group(1)), float(m.group(2)), **shape, scans=scans)
+        ss = SoftSightline(float(m.group(1)), float(m.group(2)), **shape, scans=scans)
+        return TurnBoosted(ss) if m.group(5) else ss
     raise ValueError(f"unknown along conductance {spec!r}")
+
+
+# ----------------------------------------------------------------- what an open cell conducts by
+
+class CellConductance(Protocol):
+    """What an open cell conducts by (Params.cells; NOTES, "Uniform conductance with an effective
+    width"): factor(grid, open_, solver), per cell on the solver's device, in place of the cell's
+    open fraction in its turning edges' weight and, as the smallest over the cells a step
+    touches, in its along edges'. Which cells are in the operator does not change (open fraction
+    above 0), and every factor is above 0 there and at most the open fraction, so the operator
+    keeps its edges, and it grows as space is freed, so Rayleigh monotonicity holds.
+    vjp(grid, open_, A, solver): the gradient with respect to open_ of sum_x A[x] factor[x]
+    (relax.Relaxation's chain rule), or NotImplementedError where the factor has none.
+    `pointwise`: a cell's factor depends on its own open fraction alone, which the greedy's
+    secant tension assumes (clear.Clearing.tension). `name`: its part of a run's conductance
+    (conductance_of), "" for the open fraction itself."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def pointwise(self) -> bool: ...
+
+    def factor(self, grid: Grid | CompositeGrid, open_, solver: Solver): ...
+
+    def vjp(self, grid: Grid | CompositeGrid, open_, A, solver: Solver): ...
+
+
+@dataclass(frozen=True)
+class OpenFraction:
+    """U: a cell conducts by its open fraction, so a gap narrower than a cell conducts in
+    proportion to its width and a channel in proportion to its width (today's model, the
+    sub-cell fractions' fix for the flicker: NOTES, "Results so far")."""
+
+    @property
+    def name(self) -> str:
+        return ""
+
+    @property
+    def pointwise(self) -> bool:
+        return True
+
+    def factor(self, grid, open_, solver):
+        return open_
+
+    def vjp(self, grid, open_, A, solver):
+        return A
+
+
+class _FineWalls(NamedTuple):
+    """A uniform grid's footprints on its fine lattice, for the factors that look past a cell
+    (Blurred, WallDistance), on one device. `cov` (ny S, nx S): 1.0 at an inside sub-sample a
+    footprint covers, 0 elsewhere (a sub-sample outside the block counts open: every ring of a
+    kblock, and a region's outer ring, is a street, and a hole is open space); `inside` the
+    inside sub-samples, as 1.0; `spread` (ny, nx): S^2 / the cell's covered sub-samples (0
+    without any), so one unit of the cell's open fraction above its baseline `o0` clears that
+    share of each of its footprint sub-samples."""
+    cov: object
+    inside: object
+    spread: object
+    o0: object
+
+
+def _fine(sub: NDArray, S: int) -> NDArray:
+    """(ny, nx, S*S) -> (ny S, nx S): `_to_cells`'s inverse."""
+    ny, nx = sub.shape[:2]
+    return sub.reshape(ny, nx, S, S).transpose(0, 2, 1, 3).reshape(ny * S, nx * S)
+
+
+def _uniform(grid: Grid | CompositeGrid, who: str) -> Grid:
+    if not isinstance(grid, Grid):
+        raise NotImplementedError(f"{who}: built on the uniform grid's fine lattice; a "
+                                  f"{type(grid).__name__} has cells of several sizes")
+    return grid
+
+
+def _fine_walls(grid: Grid, xp) -> _FineWalls:
+    key = ("fine walls", xp.__name__)
+    if key not in grid.cache:
+        cov = grid.isub & grid.bsub
+        n = cov.sum(axis=-1)
+        grid.cache[key] = _FineWalls(
+            cov=xp.asarray(_fine(cov, grid.S), dtype=xp.float64),
+            inside=xp.asarray(_fine(grid.isub, grid.S), dtype=xp.float64),
+            spread=xp.asarray(np.where(n > 0, grid.S * grid.S / np.maximum(n, 1), 0.0)),
+            o0=xp.asarray(grid.ff0))
+    return grid.cache[key]
+
+
+def _closed(grid: Grid, o, xp):
+    """(ny S, nx S) on the device: each sub-sample's closed share in the open field `o`
+    (ny, nx): a footprint sub-sample's is 1 - t, t its cell's cleared share of its footprint
+    sub-samples, (o - o0) spread, clipped to [0, 1] (the cleared part of a cell spread evenly
+    over its footprint: exact for a cell under one building, cleared or not); every other
+    sub-sample's 0."""
+    fw = _fine_walls(grid, xp)
+    t = xp.clip((o - fw.o0) * fw.spread, 0.0, 1.0)
+    S = grid.S
+    return fw.cov * xp.repeat(xp.repeat(1.0 - t, S, axis=0), S, axis=1)
+
+
+class _Disk(NamedTuple):
+    """A disk of radius r about a sub-sample of the fine lattice, as rows: (dr, L) the sub-samples
+    dr rows away and up to L columns either side; `n` how many, `pad` the margin a raster needs
+    for every sub-sample's disk to fall inside it."""
+    rows: tuple[tuple[int, int], ...]
+    n: int
+    pad: int
+
+
+def _disk(r_m: float, h: float, S: int) -> _Disk:
+    rho = r_m * S / h                       # in sub-samples
+    R = int(np.floor(rho + 1e-9))
+    rows = tuple((dr, int(np.floor(np.sqrt(rho * rho - dr * dr) + 1e-9)))
+                 for dr in range(-R, R + 1))
+    return _Disk(rows=rows, n=sum(2 * L + 1 for _, L in rows), pad=R + 1)
+
+
+def _disk_sum(Z, disk: _Disk, xp):
+    """The sum of the fine raster Z over the disk about each of its sub-samples (0 beyond Z), by
+    row prefix sums. The disk is symmetric, so this is its own adjoint."""
+    P = disk.pad
+    ny, nx = Z.shape
+    C = xp.zeros((ny + 2 * P, nx + 2 * P + 1))
+    C[P:P + ny, P + 1:P + 1 + nx] = Z
+    C = xp.cumsum(C, axis=1)                # C[:, k]: the sum of the padded row left of k
+    out = xp.zeros((ny, nx))
+    for dr, L in disk.rows:
+        rows = slice(P + dr, P + dr + ny)
+        out += C[rows, P + L + 1:P + L + 1 + nx] - C[rows, P - L:P - L + nx]
+    return out
+
+
+def _cell_sum(F, S: int):
+    """(ny S, nx S) -> (ny, nx): each cell's sum over its sub-samples."""
+    ny, nx = F.shape[0] // S, F.shape[1] // S
+    return F.reshape(ny, S, nx, S).sum(axis=(1, 3))
+
+
+@dataclass(frozen=True)
+class Blurred:
+    """B_r: each sub-sample of the fine lattice conducts by min(its openness, B), B the open share
+    of the sub-samples within r_m of it (a disk; outside the block counts open: _FineWalls), and
+    a cell by the sum of that over its sub-samples inside the block, over S^2 (as its open
+    fraction counts them). At a 0/1 state min(open, B) is open x B: open ground conducts by how
+    open its neighbourhood is. In a channel narrower than 2 r, B grows with the width everywhere
+    in it, so the channel conducts like width^2, and like width beyond, less 2 r / 3 pi at each
+    straight wall. Integrated over the cell's own sub-samples, so a cell partly open conducts in
+    proportion: B sampled at the cell's centre instead lets a cell half in a narrow channel
+    conduct about as much as one wholly in it, and how many cells a channel touches sets its
+    conductance (NOTES: the flicker the sub-cell fractions removed). B is affine in the open
+    field (the cleared part of a cell spread evenly over its footprint sub-samples, `_closed`),
+    so the factor, a sum of minimums of affine functions, is concave in the clearing fractions
+    and P stays convex (relax.py). Above 0 wherever a cell has an open sub-sample (its own disk
+    holds it). r_m is required: it names the conductance (`b<r>`)."""
+    r_m: float
+
+    @property
+    def name(self) -> str:
+        return f"b{self.r_m:g}"
+
+    @property
+    def pointwise(self) -> bool:
+        return False
+
+    def _parts(self, g: Grid, o, xp):
+        """(Z the closed share per sub-sample, B the open share of its disk, the disk)."""
+        Z = _closed(g, o, xp)
+        disk = _disk(self.r_m, g.h, g.S)
+        return Z, 1.0 - _disk_sum(Z, disk, xp) / disk.n, disk
+
+    def factor(self, grid, open_, solver):
+        g, xp = _uniform(grid, self.name), solver.xp
+        Z, B, _ = self._parts(g, open_.reshape(g.inside.shape), xp)
+        k = _fine_walls(g, xp).inside * xp.minimum(1.0 - Z, B)
+        return (_cell_sum(k, g.S) / (g.S * g.S)).reshape(open_.shape)
+
+    def vjp(self, grid, open_, A, solver):
+        """A sub-sample's term is its openness where that is at most B (its own cell's
+        footprint), else B, whose gradient is the disk's (its own adjoint); each through the
+        cell footprint sub-samples' share cleared (the clip in `_closed` taken as inactive: a
+        one-sided derivative where a cell is fully cleared)."""
+        g, xp = _uniform(grid, self.name), solver.xp
+        ny, nx = g.inside.shape
+        S = g.S
+        Z, B, disk = self._parts(g, open_.reshape(ny, nx), xp)
+        fw = _fine_walls(g, xp)
+        a = fw.inside * xp.repeat(xp.repeat(A.reshape(ny, nx) / (S * S), S, axis=0), S, axis=1)
+        own = (1.0 - Z) <= B
+        H = xp.where(own, a, 0.0) + _disk_sum(xp.where(own, 0.0, a), disk, xp) / disk.n
+        return (_cell_sum(fw.cov * H, S) * fw.spread).reshape(open_.shape)
+
+
+@dataclass(frozen=True)
+class WallDistance:
+    """D_s (the owner's distance form): each open sub-sample conducts by min(1, d / s_m), d its
+    distance to the nearest footprint sub-sample still standing, measured from its centre to the
+    footprint's edge (the fine lattice's Euclidean distance transform less half a sub-sample;
+    outside the block counts open: _FineWalls), and a cell by the mean of that over its
+    sub-samples, each weighted by its openness, so a channel conducts like width^2 below 2 s and
+    like width less s beyond. A footprint sub-sample stands when none of its cell's footprint is
+    cleared (`_closed` exactly 1): a cell under one building is exact, a cell two buildings share
+    counts both cleared once either is. The distances move with every clearing, so the factor is
+    not affine in the clearing fractions and has no gradient here: for scoring (and a greedy's
+    exact solves), not SIMP. s_m is required: it names the conductance (`d<s>`)."""
+    s_m: float
+
+    @property
+    def name(self) -> str:
+        return f"d{self.s_m:g}"
+
+    @property
+    def pointwise(self) -> bool:
+        return False
+
+    def factor(self, grid, open_, solver):
+        g, xp = _uniform(grid, self.name), solver.xp
+        ny, nx = g.inside.shape
+        S = g.S
+        Z = _closed(g, open_.reshape(ny, nx), xp)
+        stand = Z >= 1.0
+        if bool(stand.any()):
+            d = solver.ndimage.distance_transform_edt(~stand) * (g.h / S) - g.h / (2 * S)
+            ramp = xp.clip(d / self.s_m, 0.0, 1.0)
+        else:
+            ramp = xp.ones(Z.shape)
+        k = _fine_walls(g, xp).inside * (1.0 - Z) * ramp
+        return (_cell_sum(k, S) / (S * S)).reshape(open_.shape)
+
+    def vjp(self, grid, open_, A, solver):
+        raise NotImplementedError(f"{self.name}: the distances move with every clearing, so "
+                                  "the factor is not affine in the clearing fractions; no "
+                                  "gradient (for scoring, not SIMP)")
+
+
+def cells_of(token: str) -> CellConductance:
+    """`b<r>` -> Blurred(r metres); `d<s>` -> WallDistance(s metres)."""
+    if m := re.fullmatch(r"b([0-9]+(?:\.[0-9]+)?)", token):
+        return Blurred(float(m[1]))
+    if m := re.fullmatch(r"d([0-9]+(?:\.[0-9]+)?)", token):
+        return WallDistance(float(m[1]))
+    raise ValueError(f"unknown cell conductance {token!r}: b<r> or d<s>")
+
+
+class Conductance(NamedTuple):
+    """A run's conductance: what an open cell conducts by, and the per-heading multipliers."""
+    cells: CellConductance
+    along: AlongConductance
+
+    @property
+    def name(self) -> str:
+        return self.along.name + (f"+{self.cells.name}" if self.cells.name else "")
+
+
+def conductance_of(spec: str, scans: Scans) -> Conductance:
+    """`<along>` (along_of; every open cell by its open fraction, OpenFraction: today's) or
+    `<along>+<cells>` (cells_of): uni, ss100k2n2r30, ss100k2n2r30t, uni+b1, uni+d0.5."""
+    along, plus, cells = spec.partition("+")
+    if plus and not cells:
+        raise ValueError(f"unknown conductance {spec!r}: <along>[+<cells>]")
+    return Conductance(cells=cells_of(cells) if plus else OpenFraction(),
+                       along=along_of(along, scans))
 
 
 class Solver(Protocol):
@@ -1888,6 +2193,8 @@ class Params:
     K: int = 8
     along: AlongConductance = Uniform()
     solver: Solver = CpuAMG()
+    # what an open cell conducts by (OpenFraction: today's): required, so every run names it
+    cells: CellConductance = dataclasses.field(kw_only=True)
 
 
 class Pattern(NamedTuple):
@@ -1909,21 +2216,34 @@ def _free_ids(o, xp):
     return cell, nf
 
 
+def cell_factor(grid: Grid | CompositeGrid, o, p: Params):
+    """`p.cells`'s factor of the flat open field `o` (device), flat: what each open cell conducts
+    by (OpenFraction: `o` itself)."""
+    return p.cells.factor(grid, o.reshape(grid.inside.shape), p.solver).ravel()
+
+
 def along_edges(grid: Grid, open_, p: Params):
     """Per axis k: (k, a, b, w) with a, b open-cell ids (cell order of `open_ > 0`), b ahead
-    of a along v_k, every cell the step crosses open; w is scaled by the SMALLEST open fraction
-    among those cells (a gap narrower than a cell conducts in proportion to its width) and by
-    the smaller of the two ends' `p.along` factors. Device arrays."""
+    of a along v_k, every cell the step crosses open; w is scaled by the SMALLEST cell factor
+    (`p.cells`; today's the open fraction: a gap narrower than a cell conducts in proportion to
+    its width) among those cells and by the smaller of the two ends' `p.along` factors. Device
+    arrays."""
     xp = p.solver.xp
     o = xp.asarray(open_, dtype=xp.float64).ravel()
+    yield from _along(grid, o, cell_factor(grid, o, p), p)
+
+
+def _along(grid: Grid, o, kap, p: Params):
+    """along_edges on the flat open field `o` and its cell factors `kap` (device)."""
+    xp = p.solver.xp
     cell, _nf = _free_ids(o, xp)
     pat = grid.pattern(p.K, xp)
-    F = p.along.layers(grid, open_, p.K)
+    F = p.along.layers(grid, o.reshape(grid.inside.shape), p.K)
     for k in range(p.K):
         a, b, line, wk = pat.along[k]
-        frac = xp.minimum(o[a], o[b])
+        frac = xp.minimum(kap[a], kap[b])
         for li in line:
-            frac = xp.minimum(frac, o[li])
+            frac = xp.minimum(frac, kap[li])
         ok = frac > 0
         a, b, frac = a[ok], b[ok], frac[ok]
         w = frac * (wk if np.isscalar(wk) else wk[ok])
@@ -1971,19 +2291,27 @@ def crossing(grid: Grid, open_: NDArray[np.float64], sol: Solution,
 def edges(grid: Grid, open_, p: Params):
     """Every edge of the operator as families (ca, cb, ka, kb, w): free-cell ids and axes of the
     two ends. Along-axis edges per axis, then the turning edges (k, k+1) inside every free cell,
-    scaled by its open fraction and area (its volume). Ground is applied by `operator`. Device
-    arrays."""
+    scaled by its cell factor (`p.cells`; today's its open fraction) and area (its volume), and
+    by `p.along`'s turning factor (TurnBoosted's; 1 otherwise). Ground is applied by `operator`.
+    Device arrays."""
     xp = p.solver.xp
     _v, _th, _m, gap = axes(p.K)
-    for k, a, b, w in along_edges(grid, open_, p):
-        yield a, b, xp.full(len(a), k), xp.full(len(a), k), w
     o = xp.asarray(open_, dtype=xp.float64).ravel()
-    vol = o[o > 0]
+    kap = cell_factor(grid, o, p)
+    for k, a, b, w in _along(grid, o, kap, p):
+        yield a, b, xp.full(len(a), k), xp.full(len(a), k), w
+    free = o > 0
+    vol = kap[free]
     c = xp.arange(len(vol))
-    area = grid.cell_area(xp, o > 0)
+    area = grid.cell_area(xp, free)
+    T = p.along.turning(grid, o.reshape(grid.inside.shape), p.K)
     for k in range(p.K):
-        yield (c, c, xp.full(len(c), k), xp.full(len(c), (k + 1) % p.K),
-               vol * (area / (p.ell_m ** 2 * gap[k])))
+        w = vol * (area / (p.ell_m ** 2 * gap[k]))
+        if not np.isscalar(T[k]):
+            w = w * xp.asarray(T[k]).ravel()[free]
+        elif T[k] != 1.0:
+            w = w * T[k]
+        yield c, c, xp.full(len(c), k), xp.full(len(c), (k + 1) % p.K), w
 
 
 def unknown_of(ground, open_, xp=np):
@@ -2039,10 +2367,13 @@ def grounded(grid: Grid | CompositeGrid, open_: NDArray[np.float64],
 
 
 def master_operator(grid: Grid, p: Params):
-    """The operator on every inside cell (uniform along-factors), on the solver's device: the
-    pattern every system's is a restriction of. Unknowns: inside non-ground cells x K,
-    row-major."""
-    return operator(grid, grid.isub.mean(axis=-1), dataclasses.replace(p, along=Uniform()))[0]
+    """The operator on every inside cell (uniform along-factors, cells by their open fraction),
+    on the solver's device: the pattern every system's is a restriction of. Unknowns: inside
+    non-ground cells x K, row-major. (Its values are U's whatever `p.cells`: every footprint
+    open, Blurred's and WallDistance's factors are the open fraction; the aggregation reads the
+    pattern only.)"""
+    return operator(grid, grid.isub.mean(axis=-1),
+                    dataclasses.replace(p, along=Uniform(), cells=OpenFraction()))[0]
 
 
 def _csr(solver, vals, rows, cols, n: int, cache: dict):

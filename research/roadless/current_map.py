@@ -51,6 +51,8 @@ class Flow(NamedTuple):
 
 
 def flow(sc: common.Scorer, open_: np.ndarray, p: lifted.Params) -> Flow:
+    """The flow of `open_` under `p` (its cells and along conductances, every edge's weight from
+    lifted.edges: the along families first, then the turning ones)."""
     xp = p.solver.xp
     g = sc.grid
     sol = lifted.solve(g, open_, sc.f, p, rtol=1e-9, host=False)
@@ -60,20 +62,20 @@ def flow(sc: common.Scorer, open_: np.ndarray, p: lifted.Params) -> Flow:
     uk[sol.unk_cell >= 0] = sol.u.reshape(-1, p.K)
     phi = xp.zeros((p.K, N))
     power = xp.zeros(N)
-    _v, _th, m, gap = lifted.axes(p.K)
-    for k, a, b, w in lifted.along_edges(g, open_, p):
-        du = uk[a, k] - uk[b, k]
-        fa, fb = free[a], free[b]
+    _v, _th, m, _gap = lifted.axes(p.K)
+    for i, (ca, cb, _ka, _kb, w) in enumerate(lifted.edges(g, open_, p)):
+        if i >= p.K:                       # the turning families: (x, k)-(x, k+1), k = i - K
+            k = i - p.K
+            power[free] += w * (uk[:, k] - uk[:, (k + 1) % p.K]) ** 2
+            continue
+        k = i                              # the along families, axis by axis
+        du = uk[ca, k] - uk[cb, k]
+        fa, fb = free[ca], free[cb]
         phi[k] += 0.5 * (xp.bincount(fa, w * du, minlength=N) + xp.bincount(fb, w * du, minlength=N))
         e = w * du * du
         power += 0.5 * (xp.bincount(fa, e, minlength=N) + xp.bincount(fb, e, minlength=N))
     u = xp.zeros(N)
     u[free] = uk @ xp.asarray(m / np.pi)
-    vol = xp.asarray(open_.ravel()[np.flatnonzero(open_ > 0)])
-    for k in range(p.K):
-        k2 = (k + 1) % p.K
-        w = vol * (g.h * g.h / (p.ell_m ** 2 * gap[k]))
-        power[free] += w * (uk[:, k] - uk[:, k2]) ** 2
     th = p.solver.to_host
     return Flow(phi=th(phi), power=th(power), P=sol.P, u=th(u))
 
@@ -107,7 +109,7 @@ def arm_of(spec: str, bid: str, cost: np.ndarray) -> Arm:
 def main(bid: str, arms: list[str], device: str, zoom: bool) -> None:
     [b] = common.build_blocks([bid])
     scans, solver = lifted.scans_of(device), lifted.solver_of(device)
-    base = lifted.Params(3.0, 8, solver=solver)
+    base = lifted.Params(3.0, 8, solver=solver, cells=lifted.OpenFraction())
     mesh = lifted.UniformMesh(H, offset=lifted.OFFSET)
     sc = common.Scorer(b, mesh, base, population=common.POPULATIONS["area"],
                        demand=common.PopulationDemand())

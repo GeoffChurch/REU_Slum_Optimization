@@ -22,7 +22,7 @@ OUT = Path(sys.argv[1])
 mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
 [b] = common.build_blocks([BID])
 scans = lifted.scans_of("gpu")
-base = lifted.Params(3.0, 8, solver=lifted.solver_of("gpu"))
+base = lifted.Params(3.0, 8, solver=lifted.solver_of("gpu"), cells=lifted.OpenFraction())
 sc = common.Scorer(b, mesh, base, population=common.POPULATIONS["area"],
                    demand=common.PopulationDemand())
 g = sc.grid

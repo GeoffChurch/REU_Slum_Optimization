@@ -1,0 +1,875 @@
+"""Uniform conductance with an effective width: does it make corridors form? (BACKLOG 4, the
+metric decisions, (3); owner 2026-10-12: "resistance not just within buildings but radiate out
+from them, or just have conductance be some monotone function of the distance to the nearest
+footprint"; NOTES, "Uniform conductance with an effective width").
+
+The variants (VARIANTS: a name and its lifted.conductance_of spec, the spec in every row): U `uni`
+(a cell by its open fraction, today's); B_r `uni+b<r>` (lifted.Blurred: min(o, the open share of
+the disk of radius r m), r 0.5, 1, 1.5); D_s `uni+d<s>` (lifted.WallDistance: min(1, d / s) per
+open sub-sample, d to the nearest footprint, s 0.5, 1); S `ss100k2n2r30` (the sightline metric as
+today); S_t `ss100k2n2r30t` (lifted.TurnBoosted: its boost on the turning edges too). h 0.5,
+ell 3 m, K 8, area population, B's placement. Three lenses (LENSES): P (the population's demand,
+power 1), J_2 (lens (c)) and P_{1/2} (common.PriorityDemand(0.5), power 1).
+
+    S=research/roadless/width.py     # from the repo root, PYTHONPATH=., single-threaded
+    uv run python $S channel <procs>                  # Q2, the width response, the alignment
+    uv run python $S score <id> <variant> <offset>    # Q1, Q3, Q4: one task (cluster.py cpu)
+    uv run python $S simp <id> <variant>              # Q4: SIMP base, objective P, free first
+    uv run python $S tars <dir> <ids,>                # a tar per block of the road prefixes
+    uv run python $S maps <ids,>                      # Q1: the maps (PNGs), from the flows
+    uv run python $S report                           # every question's tables, the summaries
+
+`channel` (here, `procs` processes): the W x 40 m corridor of "The sightline metric's angle
+error" with its walls footprints (walled_channel: a dead end behind the demand, the street at the
+far end, the lattice checks.channel's), at the angles of sightline_angle.ANGLES and the widths
+WIDTHS_ANGLE (Q2); at 0 and 30 deg over WIDTHS (how conduction grows with width); and at 0 deg
+under ALIGN_SHIFTS lattice offsets (how much a sub-cell shift moves P), with BlurCentre beside
+B_r for the alignment only (the blurred openness sampled at each cell's centre, with the min and
+without it: the form the brief wrote). Rows width_rows/channel.parquet.
+
+`score`: one block under one variant on the lattice at OFFSETS[offset]: the baseline, the stored
+clearings (STORED, through clearings.Store), item 4's road prefixes at area D 0.05 (ROADS; offset
+0 only) and the no-buildings prior (every inside sub-sample open, the homes' demand as placed),
+each under the three lenses with B (i) and the escape-time tails; on the sentinel at offset 0 the
+flows of the baseline, SIMP's default and the prior (the flux per cell) and their corridor indices
+(`_indices`); per home its escape time at baseline and under SIMP's default, and its bottleneck
+width (`_bottleneck`). Rows width_rows/score/o<offset>/<variant>/<id>.parquet, homes
+width_rows/homes/o<offset>/<variant>/<id>.parquet, flows width_rows/flows/<variant>/<id>.parquet.
+
+`simp`: relax.one at SIMP_PLAN (SIMP base), objective P (the population's demand, power 1), area
+D 0.05, free first (clear.free_first), under the variant, on the GPU; rows
+width_rows/simp/<variant>/<id>.parquet.
+"""
+from __future__ import annotations
+
+import multiprocessing
+import socket
+import sys
+import tarfile
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import NamedTuple
+
+import numpy as np
+import pandas as pd
+from scipy import ndimage
+from shapely.geometry import LineString, Polygon
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import clear  # noqa: E402
+import clearings  # noqa: E402
+import common  # noqa: E402
+import lifted  # noqa: E402
+import relax  # noqa: E402
+import road_rescore as rr  # noqa: E402
+from simp_compare import TUNING  # noqa: E402
+
+# ------------------------------------------------------------------ the run's configuration
+# Everything that can change a number is here, and named in the rows (the run's identity).
+VARIANTS = {"U": "uni", "B0.5": "uni+b0.5", "B1": "uni+b1", "B1.5": "uni+b1.5",
+            "D0.5": "uni+d0.5", "D1": "uni+d1", "S": "ss100k2n2r30", "St": "ss100k2n2r30t"}
+H = 0.5
+ELL_M = 3.0
+K = 8
+# offset_check.OFFSETS: the metric's lattice offset, then shifts by a half, a quarter and three
+# quarters of a cell on both axes
+OFFSETS = (lifted.OFFSET, (0.8713, 0.6931), (0.1213, 0.9431), (0.6213, 0.4431))
+SENTINEL = ("ZAF.9.3.1_1_22422", "ZAF.9.3.1_1_30848", "ZAF.9.3.1_1_5810", "ZAF.9.5.4_1_9712")
+# Q3's blocks and, per block, the shift that moved SIMP's default's Lens A most from the metric's
+# offset under U (res_rows/uni/<id>_p2_h0.5_offsets.parquet, 2026-10-10, preB): 20543 0.503 ->
+# 0.356, 38366 0.464 -> 0.371, 17608 0.760 -> 0.698
+ALIGN = {"ZAF.9.3.1_1_20543": 2, "ZAF.9.3.1_1_38366": 2, "ZAF.9.3.1_1_17608": 3}
+STORED = {"simp_default": "relax_rows/uni/fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2/D0.05.p2",
+          "cheap": "polish_rows/uni/S0.01cat.P64w8/D0.05.p2"}
+ROADS = ("clearance", "clearance_looped", "cycle_native", "cycle_native_betweenness_contrast",
+         "resistance_lp", "euclidean_grid")
+ROAD_ROWS = HERE / "road_rows"               # item 4's rows; its networks under scratch/
+BUDGET = relax.D_LENS                        # area D 0.05
+SCORE_RTOL = clear.RTOL_SCORE                # every score: the optimizers' exact one
+DEVICE = "cpu"                               # score: the CPU nodes
+POP = common.PopulationDemand()
+PQ = common.PriorityDemand(0.5)
+LENSES = ("P", "J2", "Pq0.5")
+SIMP_PLAN = relax.plan_of("fw0.q3.i10.t0.001.e0.0001.k1s1e-06")    # SIMP base
+SIMP_DEVICE = "gpu"
+# corridor indices (`_indices`)
+OPEN_M = (1.0, 2.0)        # the open-lane share: flux in cells at least this far from a footprint
+COHERENCE_M = 2.0          # the coherence's neighbourhood: a square of this half-side
+TOP = 0.10                 # the concentration: the flux share of the top 10% of the open area
+WIDTH_STEPS = (0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0)   # bottleneck widths tried (m)
+ROWS = HERE / "width_rows"
+
+# the channel checks
+L_C = 40.0
+WALL_M = 3.0               # the walls' thickness: beyond every disk (1.5 m + a cell) here
+ANGLES = (0, 2, 4, 6, 8, 10, 15, 20, 26.57, 30, 35, 40, 45)     # sightline_angle.ANGLES
+WIDTHS_ANGLE = (1.0, 1.5, 2.0, 4.0)
+WIDTHS = (0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0)
+ALIGN_SHIFTS = 8           # lattice offsets k / 8 of a cell (k = 0 .. 7) on both axes
+WIDTHS_ALIGN = (0.75, 1.0, 1.5, 2.0)
+
+
+# ------------------------------------------------------------------ conductances
+
+def params(spec: str, device: str) -> lifted.Params:
+    cond = lifted.conductance_of(spec, lifted.scans_of(device))
+    return lifted.Params(ELL_M, K, along=cond.along, cells=cond.cells,
+                         solver=lifted.solver_of(device))
+
+
+class _CentreDisk(NamedTuple):
+    """A disk of radius r about a cell's centre on the fine lattice: (dr, lo, hi) the sub-samples
+    (the cell's first fine row + dr, its first fine column + lo .. hi); `n` how many, `pad` the
+    margin a raster needs."""
+    rows: tuple[tuple[int, int, int], ...]
+    n: int
+    pad: int
+
+
+def _centre_disk(r_m: float, h: float, S: int) -> _CentreDisk:
+    rho, c0 = r_m * S / h, (S - 1) / 2
+    rows = []
+    for dr in range(int(np.floor(c0 - rho)) - 1, int(np.ceil(c0 + rho)) + 2):
+        a = dr - c0
+        if a * a > rho * rho:
+            continue
+        half = np.sqrt(rho * rho - a * a)
+        lo, hi = int(np.ceil(c0 - half - 1e-9)), int(np.floor(c0 + half + 1e-9))
+        if lo <= hi:
+            rows.append((dr, lo, hi))
+    pad = max(max(-dr, dr - S + 2, -lo, hi - S + 2) for dr, lo, hi in rows) + 1
+    return _CentreDisk(rows=tuple(rows), n=sum(hi - lo + 1 for _, lo, hi in rows), pad=pad)
+
+
+@dataclass(frozen=True)
+class BlurCentre:
+    """A diagnostic for the channel's alignment check only: the blurred openness B sampled at
+    each cell's centre (the open share of the fine lattice's sub-samples within r_m of it), the
+    cell's factor min(o, B) (`with_min`) or B itself on every open cell (the brief's literal
+    form). Not lifted.Blurred, which integrates min(open, B) over each cell's sub-samples: NOTES
+    has why. Numpy only, no gradient."""
+    r_m: float
+    with_min: bool
+
+    @property
+    def name(self) -> str:
+        return f"{'bc' if self.with_min else 'bb'}{self.r_m:g}"
+
+    @property
+    def pointwise(self) -> bool:
+        return False
+
+    def factor(self, grid, open_, solver):
+        S, (ny, nx) = grid.S, grid.inside.shape
+        o = open_.reshape(ny, nx)
+        Z = lifted._closed(grid, o, np)
+        disk = _centre_disk(self.r_m, grid.h, S)
+        P = disk.pad
+        C = np.zeros((ny * S + 2 * P, nx * S + 2 * P + 1))
+        C[P:P + ny * S, P + 1:P + 1 + nx * S] = Z
+        C = np.cumsum(C, axis=1)
+        closed = np.zeros((ny, nx))
+        for dr, lo, hi in disk.rows:
+            R = slice(P + dr, P + dr + ny * S, S)
+            closed += C[R, P + hi + 1:P + hi + 1 + nx * S:S] - C[R, P + lo:P + lo + nx * S:S]
+        B = 1.0 - closed / disk.n
+        k = np.minimum(o, B) if self.with_min else np.where(o > 0, B, 0.0)
+        return k.reshape(open_.shape)
+
+    def vjp(self, grid, open_, A, solver):
+        raise NotImplementedError(f"{self.name}: a diagnostic, no gradient")
+
+
+# ------------------------------------------------------------------ the channel (Q2)
+
+def walled_channel(alpha_deg: float, W: float, h: float,
+                   offset: tuple[float, float]) -> tuple[lifted.Grid, np.ndarray]:
+    """checks.channel's W x L_C corridor rotated alpha_deg, its walls footprints WALL_M thick on
+    both sides and behind its start (so the factors that look past a cell see walls, not the
+    open street side of a block edge), the street the block's far edge. The lattice is
+    checks.channel's at `offset` (the corridor's own bounds), shifted a whole number of cells to
+    start below the walled block. Demand: the open non-ground cells within 1 m of the dead end,
+    summing to 1."""
+    a = np.radians(alpha_deg)
+    e, n = np.array([np.cos(a), np.sin(a)]), np.array([-np.sin(a), np.cos(a)])
+
+    def pt(s: float, t: float) -> tuple[float, float]:
+        x = s * e + t * n
+        return float(x[0]), float(x[1])
+
+    def rect(s0: float, s1: float, t0: float, t1: float) -> Polygon:
+        return Polygon([pt(s0, t0), pt(s1, t0), pt(s1, t1), pt(s0, t1)])
+
+    w2, T = W / 2, WALL_M
+    block = rect(-T, L_C, -w2 - T, w2 + T)
+    walls = [rect(-T, L_C, w2, w2 + T), rect(-T, L_C, -w2 - T, -w2), rect(-T, 0.0, -w2, w2)]
+    street = LineString([pt(L_C, -w2 - T), pt(L_C, w2 + T)])
+    cx, cy = rect(0.0, L_C, -w2, w2).bounds[:2]
+    bx, by = block.bounds[:2]
+    off = ((offset[0] + (cx - bx) / h) % 1.0, (offset[1] + (cy - by) / h) % 1.0)
+    grid = lifted.Grid.of(block, walls, [street], h, band_m=1.0, offset=off)
+    src = LineString([pt(0.0, -w2), pt(0.0, w2)]).buffer(1.0)
+    f = (grid.mask_of(src) & (grid.ff0 > 0) & ~grid.ground).astype(float)
+    return grid, f / f.sum()
+
+
+class ChannelJob(NamedTuple):
+    check: str          # angle | width | align
+    variant: str        # a VARIANTS key, or one of CENTRE (BlurCentre)
+    W: float
+    angle: float
+    shift: int          # align: k of ALIGN_SHIFTS (0: the metric's offset)
+
+
+CENTRE = {f"{kind}{r:g}": BlurCentre(r, kind == "bc") for kind in ("bc", "bb")
+          for r in (0.5, 1.0, 1.5)}       # the alignment check's diagnostics
+
+
+def _channel_params(variant: str) -> lifted.Params:
+    if variant in CENTRE:
+        return lifted.Params(ELL_M, K, along=lifted.Uniform(), solver=lifted.CpuAMG(),
+                             cells=CENTRE[variant])
+    return params(VARIANTS[variant], "cpu")
+
+
+def _channel_one(job: ChannelJob) -> dict:
+    k = job.shift / ALIGN_SHIFTS
+    offset = ((lifted.OFFSET[0] + k) % 1.0, (lifted.OFFSET[1] + k) % 1.0)
+    grid, f = walled_channel(job.angle, job.W, H, offset)
+    t0 = time.time()
+    P = lifted.solve(grid, grid.ff0, f, _channel_params(job.variant)).P
+    return dict(job._asdict(), P=P, t=time.time() - t0)
+
+
+def channel(procs: int) -> None:
+    """Every channel job, `procs` processes; rows width_rows/channel.parquet."""
+    rr._check_single_threaded()
+    names = list(VARIANTS)
+    jobs = ([ChannelJob("angle", v, W, a, 0) for v in names for W in WIDTHS_ANGLE for a in ANGLES]
+            + [ChannelJob("width", v, W, a, 0) for v in names for W in WIDTHS for a in (0, 30)]
+            + [ChannelJob("align", v, W, 0.0, s)
+               for v in (*names, *CENTRE) for W in WIDTHS_ALIGN
+               for s in range(ALIGN_SHIFTS)])
+    t0 = time.time()
+    with multiprocessing.get_context("fork").Pool(procs) as pool:
+        rows = pool.map(_channel_one, jobs, chunksize=1)
+    out = ROWS / "channel.parquet"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    rr.write_parquet(pd.DataFrame(rows), out)
+    print(f"{len(rows)} channel solves in {time.time() - t0:.0f}s -> {out}", flush=True)
+
+
+# ------------------------------------------------------------------ one block, one variant
+
+def _open_of(g: lifted.Grid, lab: np.ndarray, cleared: np.ndarray, n: int) -> np.ndarray:
+    """The open field with the buildings `cleared` (positions) gone (clear.Clearing.open_)."""
+    removed = np.zeros(n, dtype=bool)
+    removed[cleared] = True
+    gone = (lab >= 0) & removed[np.maximum(lab, 0)]
+    return (g.isub & (~g.bsub | gone)).mean(axis=-1)
+
+
+def _wall_distance(g: lifted.Grid, o: np.ndarray) -> np.ndarray:
+    """(ny, nx) metres from each cell to the nearest footprint still standing in the open field
+    `o` (WallDistance's: the fine lattice's distance transform less half a sub-sample, averaged
+    over the cell's sub-samples; inf with no footprint standing)."""
+    S = g.S
+    stand = lifted._closed(g, o, np) >= 1.0
+    ny, nx = g.inside.shape
+    if not stand.any():
+        return np.full((ny, nx), np.inf)
+    d = ndimage.distance_transform_edt(~stand) * (g.h / S) - g.h / (2 * S)
+    return d.reshape(ny, S, nx, S).mean(axis=(1, 3))
+
+
+class Flux(NamedTuple):
+    """Per grid cell (ny, nx): S the flux, sum over headings of |signed flux| (current_map.flow's
+    layers: half of every along edge's to each end), and J the net flux vector (Jx, Jy)."""
+    S: np.ndarray
+    Jx: np.ndarray
+    Jy: np.ndarray
+
+
+def _flux(g: lifted.Grid, o: np.ndarray, p: lifted.Params, sol: lifted.Solution) -> Flux:
+    v, _th, _m, _gap = lifted.axes(p.K)
+    e = v / np.linalg.norm(v, axis=1)[:, None]
+    free = np.flatnonzero(o.ravel() > 0)
+    N = o.size
+    uk = np.zeros((len(free), p.K))
+    uk[sol.unk_cell >= 0] = sol.u.reshape(-1, p.K)
+    S, Jx, Jy = np.zeros(N), np.zeros(N), np.zeros(N)
+    for i, (ca, cb, _ka, _kb, w) in enumerate(lifted.edges(g, o, p)):
+        if i >= p.K:                            # the turning families carry no flux
+            break
+        q = p.solver.to_host(w) * (uk[ca, i] - uk[cb, i])
+        fa, fb = free[ca], free[cb]
+        half = 0.5 * (np.bincount(fa, q, minlength=N) + np.bincount(fb, q, minlength=N))
+        S += np.abs(half)
+        Jx += half * e[i, 0]
+        Jy += half * e[i, 1]
+    shape = g.inside.shape
+    return Flux(S=S.reshape(shape), Jx=Jx.reshape(shape), Jy=Jy.reshape(shape))
+
+
+def _indices(g: lifted.Grid, o: np.ndarray, fx: Flux, dist: np.ndarray) -> dict[str, float]:
+    """The corridor indices of a flow (NOTES): `open<d>` the share of the flux in cells at least
+    d m from a standing footprint, `area<d>` those cells' share of the open area (open<d> /
+    area<d> above 1: the walkers favour the open lanes); `coh` the flux-weighted coherence of the
+    net flux over a square of half-side COHERENCE_M, sum_c |sum_N J| / sum_c sum_N |J| (1: every
+    neighbour's flow parallel; lower where streams split, merge or cross); `top` the share of the
+    flux in the TOP of the open area carrying the most."""
+    on = o > 0
+    S = np.where(on, fx.S, 0.0)
+    out: dict[str, float] = {}
+    tot, area = float(S.sum()), float(o[on].sum())
+    for dm in OPEN_M:
+        far = on & (dist >= dm)
+        out[f"open{dm:g}"] = float(S[far].sum() / tot)
+        out[f"area{dm:g}"] = float(o[far].sum() / area)
+    m = 2 * int(round(COHERENCE_M / g.h)) + 1
+    bx = ndimage.uniform_filter(np.where(on, fx.Jx, 0.0), m, mode="constant")
+    by = ndimage.uniform_filter(np.where(on, fx.Jy, 0.0), m, mode="constant")
+    bn = ndimage.uniform_filter(np.where(on, np.hypot(fx.Jx, fx.Jy), 0.0), m, mode="constant")
+    out["coh"] = float(np.hypot(bx, by)[on].sum() / bn[on].sum())
+    s, a = S[on], o[on]
+    order = np.argsort(-s / a)                  # flux per unit of open area, densest first
+    cum = np.cumsum(a[order])
+    out["top"] = float(s[order][cum <= TOP * cum[-1]].sum() / tot)
+    return out
+
+
+def _bottleneck(sc: common.Scorer, dist: np.ndarray) -> np.ndarray:
+    """Per home, its bottleneck width at baseline: the largest of WIDTH_STEPS w such that a path
+    of open cells (4-connected, the operator's cell graph) whose clear width 2 d is at least w
+    joins one of its demand cells to the street (0 below the first; nan if enclosed)."""
+    g = sc.grid
+    on = sc.free0 > 0
+    ST = sc.pl.S.T.tocsr()                      # homes x cells: each home's demand cells
+    out = np.where(sc.enclosed, np.nan, 0.0)
+    for w in WIDTH_STEPS:
+        wide = on & (2.0 * dist >= w)
+        lab, _n = ndimage.label(wide)
+        reach = np.zeros(int(lab.max()) + 1, dtype=bool)
+        reach[lab[wide & g.ground]] = True
+        reach[0] = False
+        hit = (ST @ reach[lab].ravel().astype(float)) > 0
+        out[hit & ~sc.enclosed] = w
+    return out
+
+
+def _road_fields(b, g: lifted.Grid, bid: str) -> dict[str, tuple[np.ndarray, float]]:
+    """Item 4's road prefixes at area D BUDGET (road_rescore's prefix rows and ordered networks),
+    carved on `g`: per method, (the open field, the prefix's area displacement)."""
+    import geopandas as gpd
+
+    from reblock.budget import road_corridor
+    out = {}
+    for method in ROADS:
+        pre = pd.read_parquet(rr.prefix_dir(ROAD_ROWS) / f"{bid}__{method}.parquet")
+        row = pre[(pre["pop"] == "area") & np.isclose(pre.budget, BUDGET)]
+        [m] = row.m.astype(int)
+        [D] = row.D_area.astype(float)
+        ordered = gpd.read_parquet(rr.ordered_path(ROAD_ROWS / "scratch", bid, method))
+        out[method] = (common.carved(g, g.sub_of(road_corridor(ordered.iloc[:m]))), D)
+    return out
+
+
+def score_path(off: int, variant: str, bid: str) -> Path:
+    return ROWS / "score" / f"o{off}" / variant / f"{bid}.parquet"
+
+
+def homes_path(off: int, variant: str, bid: str) -> Path:
+    return ROWS / "homes" / f"o{off}" / variant / f"{bid}.parquet"
+
+
+def flows_path(variant: str, bid: str) -> Path:
+    return ROWS / "flows" / variant / f"{bid}.parquet"
+
+
+def score(bid: str, variant: str, off: int) -> None:
+    """One block under one variant at OFFSETS[off] (the module's docstring)."""
+    rr._check_single_threaded()
+    t0 = time.time()
+    spec = VARIANTS[variant]
+    [b] = common.build_blocks([bid])
+    p = params(spec, DEVICE)
+    sc = common.Scorer(b, lifted.UniformMesh(H, offset=OFFSETS[off]), p,
+                       population=common.POPULATIONS["area"], demand=POP)
+    g, n = sc.grid, len(sc.polys)
+    shape = g.inside.shape
+    # P_{1/2}'s injection from the scorer's baseline escape times (PriorityDemand.baseline's,
+    # without solving that baseline again), and its own baseline
+    inj_q = PQ.injection(sc.w, sc.u0, sc.enclosed)
+    f_q = sc.pl.field(inj_q, shape)
+    sol_q = lifted.solve(g, sc.free0, f_q, p)
+    J2_0 = sc.J(sc.u0, 2.0)
+    lab = g.label_sub(sc.polys)
+    cost = sc.w / sc.w.sum()
+    store = clearings.Store.committed()
+    fields: dict[str, tuple[str, np.ndarray, float]] = {"baseline": ("baseline", sc.free0, 0.0)}
+    for name, run in STORED.items():
+        x = store.cleared(run, b, step=1)
+        fields[name] = ("stored", _open_of(g, lab, x, n), float(cost[x].sum()))
+    if off == 0:
+        for name, (o, D) in _road_fields(b, g, bid).items():
+            fields[name] = ("road", o, D)
+    fields["prior"] = ("prior", g.isub.mean(axis=-1), np.nan)
+    t_setup = time.time() - t0
+    flows = bid in SENTINEL and off == 0
+    rows, kept = [], {}
+    u_default = None
+    for name, (kind, o, D) in fields.items():
+        ts = time.time()
+        sy = lifted.System(g, o, p)
+        s1 = lifted.solve(g, o, sc.f, p, system=sy, rtol=SCORE_RTOL)
+        u = sc.home_u_of(s1, o)
+        sq = lifted.solve(g, o, f_q, p, system=sy, rtol=SCORE_RTOL)
+        row = dict(block=bid, variant=variant, spec=spec, offset=off, field=name, kind=kind,
+                   D=D, enclosed=sc.enclosed_left(o), P=s1.P, Pq=sq.P,
+                   L_P=1.0 - s1.P / sc.P0, L_J2=sc.perm_p(u, 2.0),
+                   **{"L_Pq0.5": 1.0 - sq.P / sol_q.P},
+                   umed=float(np.nanmedian(u) / np.nanmedian(sc.u0)),
+                   u95=float(np.nanpercentile(u, 95) / np.nanpercentile(sc.u0, 95)),
+                   umax=float(np.nanmax(u) / np.nanmax(sc.u0)), unknowns=s1.n_unknowns)
+        if name == "simp_default":
+            u_default = u
+        if flows and name in ("baseline", "simp_default", "prior"):
+            fx = _flux(g, o, p, s1)
+            row.update(_indices(g, o, fx, _wall_distance(g, o)))
+            kept[name] = fx.S
+        row["t"] = time.time() - ts
+        rows.append(row)
+        print(f"{bid} {variant} o{off} {name}: L_P {row['L_P']:.4f} L_J2 {row['L_J2']:.4f} "
+              f"L_Pq {row['L_Pq0.5']:.4f} ({row['t']:.0f}s)", flush=True)
+        del sy
+        p.solver.release()
+    setup = dict(cells=int(g.inside.sum()), P0=sc.P0, J2_0=J2_0, Pq0=sol_q.P,
+                 enclosed0=sc.enclosed0, t_setup=t_setup, t_block=time.time() - t0,
+                 host=socket.gethostname(), peak_rss_gb=rr._status_gb("VmHWM"))
+    out = pd.DataFrame(rows).assign(**setup)
+    score_path(off, variant, bid).parent.mkdir(parents=True, exist_ok=True)
+    rr.write_parquet(out, score_path(off, variant, bid))
+    homes = pd.DataFrame(dict(block=bid, variant=variant, offset=off, home=np.arange(n),
+                              w=sc.w, enclosed=sc.enclosed, u0=sc.u0, u_default=u_default,
+                              bottleneck=_bottleneck(sc, _wall_distance(g, sc.free0))))
+    homes_path(off, variant, bid).parent.mkdir(parents=True, exist_ok=True)
+    rr.write_parquet(homes, homes_path(off, variant, bid))
+    if flows:
+        on = np.flatnonzero(g.inside.ravel())
+        fl = pd.DataFrame({"cell": on.astype(np.int32),
+                           **{f"S_{k}": v.ravel()[on].astype(np.float32) for k, v in kept.items()}})
+        flows_path(variant, bid).parent.mkdir(parents=True, exist_ok=True)
+        rr.write_parquet(fl, flows_path(variant, bid))
+    print(f"{time.strftime('%H:%M:%S')} {bid} {variant} o{off} done in {time.time() - t0:.0f}s, "
+          f"peak RSS {setup['peak_rss_gb']:.1f} GB", flush=True)
+
+
+# ------------------------------------------------------------------ SIMP under a variant (Q4)
+
+def simp_path(variant: str, bid: str) -> Path:
+    return ROWS / "simp" / variant / f"{bid}.parquet"
+
+
+def simp(bid: str, variant: str) -> None:
+    """SIMP base, objective P, area D BUDGET, free first, under the variant (relax.one)."""
+    rr._check_single_threaded()
+    t0 = time.time()
+    row = relax.one(bid, 1.0, SIMP_DEVICE, SIMP_PLAN, VARIANTS[variant], BUDGET, demand=POP)
+    row.update(variant=variant, spec=VARIANTS[variant], budget=BUDGET, host=socket.gethostname(),
+               peak_rss_gb=rr._status_gb("VmHWM"), wall=time.time() - t0)
+    simp_path(variant, bid).parent.mkdir(parents=True, exist_ok=True)
+    rr.write_parquet(pd.DataFrame([row]), simp_path(variant, bid))
+    print(f"{time.strftime('%H:%M:%S')} {bid} simp {variant} done in {time.time() - t0:.0f}s",
+          flush=True)
+
+
+# ------------------------------------------------------------------ the cluster's inputs
+
+def tars(out: Path, ids: list[str]) -> None:
+    """Per block, what `score` reads that git does not carry, at its repo paths: item 4's prefix
+    rows and ordered networks of ROADS (the stored clearings are committed)."""
+    out.mkdir(parents=True, exist_ok=True)
+    for bid in ids:
+        members = [rr.prefix_dir(ROAD_ROWS) / f"{bid}__{m}.parquet" for m in ROADS]
+        members += [rr.ordered_path(ROAD_ROWS / "scratch", bid, m) for m in ROADS]
+        absent = [str(m) for m in members if not m.exists()]
+        if absent:
+            raise SystemExit(f"{bid}: {len(absent)} inputs absent, e.g. {absent[0]}")
+        with tarfile.open(out / f"{bid}.tar", "w") as tf:
+            for m in members:
+                tf.add(m, arcname=str(m.resolve().relative_to(common.REPO)))
+        print(f"{bid}: {len(members)} files, {(out / f'{bid}.tar').stat().st_size / 2**20:.1f} MB",
+              flush=True)
+
+
+# ------------------------------------------------------------------ the SIMP clearings, cross-scored
+
+def cross_path(variant: str, bid: str) -> Path:
+    return ROWS / "cross" / variant / f"{bid}.parquet"
+
+
+def cross(bid: str, variant: str) -> None:
+    """Every variant's SIMP clearing of `bid` (simp_path, those present) scored under `variant`:
+    the three lenses and B (i), as `score` scores a field. Rows cross_path."""
+    rr._check_single_threaded()
+    t0 = time.time()
+    runs = {v: pd.read_parquet(simp_path(v, bid)).iloc[0] for v in VARIANTS
+            if simp_path(v, bid).exists()}
+    if not runs:
+        raise SystemExit(f"{bid}: no SIMP clearing under any variant")
+    [b] = common.build_blocks([bid])
+    p = params(VARIANTS[variant], DEVICE)
+    sc = common.Scorer(b, lifted.UniformMesh(H, offset=OFFSETS[0]), p,
+                       population=common.POPULATIONS["area"], demand=POP)
+    g, n = sc.grid, len(sc.polys)
+    inj_q = PQ.injection(sc.w, sc.u0, sc.enclosed)
+    f_q = sc.pl.field(inj_q, g.inside.shape)
+    sol_q = lifted.solve(g, sc.free0, f_q, p)
+    lab = g.label_sub(sc.polys)
+    rows = []
+    for v, r in runs.items():
+        x = np.asarray(r.simp_cleared, dtype=np.int64)
+        o = _open_of(g, lab, x, n)
+        sy = lifted.System(g, o, p)
+        s1 = lifted.solve(g, o, sc.f, p, system=sy, rtol=SCORE_RTOL)
+        sq = lifted.solve(g, o, f_q, p, system=sy, rtol=SCORE_RTOL)
+        rows.append(dict(block=bid, variant=variant, spec=VARIANTS[variant], clearing=v,
+                         n_cleared=len(x), D=float((sc.w[x] / sc.w.sum()).sum()),
+                         enclosed=sc.enclosed_left(o), L_P=1.0 - s1.P / sc.P0,
+                         L_J2=sc.perm_p(sc.home_u_of(s1, o), 2.0),
+                         **{"L_Pq0.5": 1.0 - sq.P / sol_q.P}, own_perm=float(r.simp_perm)))
+        del sy
+        p.solver.release()
+    cross_path(variant, bid).parent.mkdir(parents=True, exist_ok=True)
+    rr.write_parquet(pd.DataFrame(rows).assign(t=time.time() - t0), cross_path(variant, bid))
+    print(f"{time.strftime('%H:%M:%S')} {bid} cross {variant}: {len(rows)} clearings in "
+          f"{time.time() - t0:.0f}s", flush=True)
+
+
+# ------------------------------------------------------------------ the maps (Q1)
+
+def _delta(y: np.ndarray, prior: np.ndarray) -> np.ndarray:
+    """Monroe, Colaresi & Quinn's delta (their Eq 16, the counts large against any prior), as the
+    atlas pages show it: the log ratio of a cell's share of all walking to its share in the
+    no-buildings prior; nan where either is 0."""
+    ok = (y > 0) & (prior > 0)
+    out = np.full(y.shape, np.nan)
+    out[ok] = np.log(y[ok] / y[ok].sum()) - np.log(prior[ok] / prior[ok].sum())
+    return out
+
+
+def maps(ids: list[str]) -> None:
+    """Per sentinel block: one PNG a variant (the baseline's flow against the no-buildings prior,
+    SIMP's default's against it, and the flux SIMP's default adds or takes away), and one of
+    every variant's baseline against the prior side by side; width_rows/maps/ (ignored)."""
+    import geopandas as gpd
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.colors as mcolors
+    import matplotlib.pyplot as plt
+    out = ROWS / "maps"
+    out.mkdir(parents=True, exist_ok=True)
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        g = lifted.Grid.of(*lifted._geometry(b), H, offset=OFFSETS[0])
+        polys = np.asarray(b.buildings.outlines)
+        x = clearings.Store.committed().cleared(STORED["simp_default"], b, step=1)
+        kept = np.delete(polys, x)
+        ny, nx = g.inside.shape
+        ext = (g.x0 - g.h / 2, g.x0 + (nx - 0.5) * g.h, g.y0 - g.h / 2, g.y0 + (ny - 0.5) * g.h)
+        scale = 14.0 / max(ny, nx) * max(ny, nx) / max(nx, 1)
+        base: dict[str, np.ndarray] = {}
+
+        def draw(ax, v, title, cleared_outline: bool, **kw):
+            im = ax.imshow(v.reshape(ny, nx), origin="lower", extent=ext,
+                           interpolation="nearest", **kw)
+            gpd.GeoSeries(list(kept if cleared_outline else polys)).plot(ax=ax, color="0.6",
+                                                                          lw=0)
+            if cleared_outline:
+                gpd.GeoSeries(list(polys[x])).boundary.plot(ax=ax, color="#2ca02c", lw=0.6)
+            gpd.GeoSeries([b.boundary]).boundary.plot(ax=ax, color="k", lw=0.8)
+            ax.set_axis_off()
+            ax.set_aspect("equal")
+            ax.set_title(title, fontsize=11)
+            return im
+
+        for variant in VARIANTS:
+            f = pd.read_parquet(flows_path(variant, bid))
+            S = {}
+            for k in ("baseline", "simp_default", "prior"):
+                S[k] = np.full(ny * nx, np.nan)
+                S[k][f.cell.to_numpy()] = f[f"S_{k}"].to_numpy(dtype=float)
+            d0, d1 = _delta(S["baseline"], S["prior"]), _delta(S["simp_default"], S["prior"])
+            base[variant] = d0
+            lim = float(np.nanquantile(np.abs(d0), 0.99))
+            dS = S["simp_default"] - S["baseline"]
+            dlim = float(np.nanquantile(np.abs(dS), 0.995))
+            fig, axes = plt.subplots(1, 3, figsize=(3 * 11, 11 * ny / nx * scale + 1))
+            kw = dict(cmap="RdBu_r", vmin=-lim, vmax=lim)
+            ims = [draw(axes[0], d0, f"{variant} ({VARIANTS[variant]}): baseline flow against "
+                        "the no-buildings prior,\nlog of its share over the prior's (red: more "
+                        "walking than in the open field)", False, **kw),
+                   draw(axes[1], d1, "SIMP's default (green outlines) against the same prior",
+                        True, **kw),
+                   draw(axes[2], dS, "flux SIMP's default adds (red) or takes away (blue)", True,
+                        cmap="RdBu_r", norm=mcolors.SymLogNorm(dlim * 1e-3, vmin=-dlim,
+                                                               vmax=dlim))]
+            for ax, im in zip(axes, ims, strict=True):
+                fig.colorbar(im, ax=ax, shrink=0.6)
+            fig.suptitle(f"{bid} under {variant}", fontsize=14)
+            fig.tight_layout()
+            fig.savefig(out / f"{bid}_{variant}.png", dpi=110)
+            plt.close(fig)
+            print(out / f"{bid}_{variant}.png", flush=True)
+        fig, axes = plt.subplots(2, 4, figsize=(4 * 9, 2 * 9 * ny / nx * scale + 1))
+        for ax, (variant, d0) in zip(axes.ravel(), base.items(), strict=True):
+            lim = float(np.nanquantile(np.abs(d0), 0.99))
+            im = draw(ax, d0, f"{variant}: baseline against the prior", False, cmap="RdBu_r",
+                      vmin=-lim, vmax=lim)
+            fig.colorbar(im, ax=ax, shrink=0.6)
+        fig.suptitle(f"{bid}: the baseline's flow against the no-buildings prior, every variant",
+                     fontsize=14)
+        fig.tight_layout()
+        fig.savefig(out / f"{bid}_variants.png", dpi=90)
+        plt.close(fig)
+        print(out / f"{bid}_variants.png", flush=True)
+
+
+# ------------------------------------------------------------------ the report
+
+def _read(kind: str) -> pd.DataFrame:
+    files = sorted((ROWS / kind).rglob("*.parquet"))
+    return pd.concat([pd.read_parquet(f) for f in files], ignore_index=True) if files else (
+        pd.DataFrame())
+
+
+def _summary(name: str, df: pd.DataFrame) -> None:
+    path = ROWS / f"summary_{name}.csv"
+    df.to_csv(path, index=False, float_format="%.6g")
+    print(f"\n{name} -> {path}\n{df.to_string(index=False, float_format=lambda v: f'{v:.4g}')}",
+          flush=True)
+
+
+LENS_COLS = ("L_P", "L_Pq0.5", "L_J2")          # P, the equity view P_{1/2}, then J_2
+REACH_TOL = 1e-9                                # a road prefix reaches D 0.05 at BUDGET - this
+
+
+def report() -> None:
+    """Every question's tables, written to width_rows/summary_*.csv (committed)."""
+    from scipy.stats import kendalltau
+    pd.set_option("display.width", 220)
+    names = list(VARIANTS)
+    # Q2: the channel
+    ch = pd.read_parquet(ROWS / "channel.parquet")
+    a = ch[ch.check == "angle"].groupby(["variant", "W"]).P.agg(lambda s: s.max() / s.min())
+    _summary("q2_angle", a.unstack().reindex(names).reset_index())
+    w = ch[ch.check == "width"]
+    rel = []
+    for (ang, W), g in w.groupby(["angle", "W"]):
+        u = float(g[g.variant == "U"].P.iloc[0])
+        rel += [dict(angle=ang, W=W, variant=r.variant, C_over_U=u / r.P) for r in g.itertuples()]
+    t = pd.DataFrame(rel).pivot(index=["angle", "variant"], columns="W", values="C_over_U")
+    _summary("q2_width", t.reindex([(ang, v) for ang in (0, 30) for v in names]).reset_index())
+    al = ch[ch.check == "align"].groupby(["variant", "W"]).P.agg(lambda s: s.max() / s.min())
+    _summary("q2_align", al.unstack().reindex([*names, *CENTRE]).reset_index())
+    sc = _read("score")
+    if sc.empty:
+        return
+    # Q1: the corridor indices on the sentinel
+    s0 = sc[sc.offset == 0]
+    q1 = s0[s0.block.isin(SENTINEL) & s0.field.isin(["baseline", "simp_default", "prior"])]
+    if "coh" in q1:
+        q1 = q1[["block", "variant", "field", "open1", "area1", "open2", "area2", "coh", "top"]]
+        q1 = q1.assign(lift1=q1.open1 / q1.area1, lift2=q1.open2 / q1.area2)
+        _summary("q1_indices", q1.sort_values(["block", "field", "variant"],
+                                              key=_variant_key))
+    # Q3: a block's level at two offsets
+    lv = []
+    for bid, k in ALIGN.items():
+        for v in names:
+            at = {o: sc[(sc.block == bid) & (sc.variant == v) & (sc.offset == o)
+                        & (sc.field == "simp_default")] for o in (0, k)}
+            if any(len(x) != 1 for x in at.values()):
+                continue
+            row = dict(block=bid, variant=v, shift=k)
+            for col in LENS_COLS:
+                row[f"{col}_o0"] = float(at[0][col].iloc[0])
+                row[f"{col}_o{k}"] = float(at[k][col].iloc[0])
+                row[f"{col}_change"] = row[f"{col}_o{k}"] - row[f"{col}_o0"]
+            lv.append(row)
+    if lv:
+        _summary("q3_levels", pd.DataFrame(lv))
+    homes = _read("homes")
+    if not homes.empty:
+        _summary("q3_homes", _home_drift(homes))
+    # Q4: the 13 tuning blocks, every method under every variant
+    t13 = s0[s0.block.isin(TUNING) & s0.kind.isin(["stored", "road"])].copy()
+    t13["reaches"] = (t13.kind == "stored") | (t13.D >= BUDGET - REACH_TOL)
+    t13 = t13[t13.reaches]
+    taus, lens, price = [], [], []
+    for bid, gb in t13.groupby("block"):
+        ref = gb[gb.variant == "U"].set_index("field")
+        for v, g in gb.groupby("variant"):
+            g = g.set_index("field").reindex(ref.index)
+            if g[list(LENS_COLS)].isna().any().any():
+                continue
+            for col in LENS_COLS:
+                rv = rr._b_rank(g.reset_index(), "enclosed", col)
+                ru = rr._b_rank(ref.reset_index(), "enclosed", col)
+                taus.append(dict(block=bid, variant=v, lens=col, methods=len(g),
+                                 tau=float(kendalltau(ru, rv).statistic)))
+                roads = g[g.kind == "road"]
+                best = roads[col].idxmax()
+                price.append(dict(block=bid, variant=v, lens=col, best_road=best,
+                                  simp_minus_best=float(g.loc["simp_default", col]
+                                                        - roads[col].max()),
+                                  cheap_minus_best=float(g.loc["cheap", col] - roads[col].max()),
+                                  best_share=float(roads[col].max() / g.loc["simp_default", col])))
+            lens.append(g.reset_index()[["block", "variant", "field", *LENS_COLS]])
+    if taus:
+        tt = pd.DataFrame(taus)
+        _summary("q4_tau", tt.groupby(["variant", "lens"]).tau.agg(
+            median="median", q25=lambda s: s.quantile(0.25), q75=lambda s: s.quantile(0.75),
+            min="min", blocks="count").reset_index().sort_values(["lens", "variant"],
+                                                                 key=_variant_key))
+        pr = pd.DataFrame(price)
+        _summary("q4_price", pr.groupby(["variant", "lens"]).agg(
+            simp_minus_best=("simp_minus_best", "median"),
+            cheap_minus_best=("cheap_minus_best", "median"),
+            best_share=("best_share", "median"),
+            leader=("best_road", lambda s: s.value_counts().idxmax()),
+            leader_blocks=("best_road", lambda s: int(s.value_counts().max()))).reset_index()
+            .sort_values(["lens", "variant"], key=_variant_key))
+        ln = pd.concat(lens, ignore_index=True)
+        _summary("q4_lenses", ln.groupby(["variant", "field"])[list(LENS_COLS)].median()
+                 .reset_index().sort_values(["field", "variant"], key=_variant_key))
+    simp_rows = _read("simp")
+    if not simp_rows.empty:
+        _summary("q4_simp", _simp_table(simp_rows, _read("cross")))
+        _summary("q4_where", _where(simp_rows, homes))
+
+
+def _where(simp_rows: pd.DataFrame, homes: pd.DataFrame) -> pd.DataFrame:
+    """Where each B_r's SIMP clearing differs from U's, per sentinel block: the buildings both
+    clear, U's alone and B_r's alone, by their median footprint area, distance to the block's
+    outline (its streets), gap to the nearest other footprint, and depth (the home's escape time
+    at baseline under U over the population-weighted mean)."""
+    import shapely
+    out = []
+    for bid, g in simp_rows.groupby("block"):
+        sets = {r.variant: set(np.asarray(r.simp_cleared).tolist()) for r in g.itertuples()}
+        if "U" not in sets:
+            continue
+        [b] = common.build_blocks([bid])
+        polys = np.asarray(b.buildings.outlines)
+        area = shapely.area(polys)
+        street = shapely.distance(polys, b.boundary.boundary)
+        tree = shapely.STRtree(polys)
+        gap = np.full(len(polys), np.inf)
+        idx = tree.query(polys, predicate="dwithin", distance=20.0)
+        own = idx[0] != idx[1]
+        d = shapely.distance(polys[idx[0][own]], polys[idx[1][own]])
+        np.minimum.at(gap, idx[0][own], d)
+        h0 = homes[(homes.block == bid) & (homes.variant == "U") & (homes.offset == 0)]
+        h0 = h0.set_index("home")
+        live = ~h0.enclosed
+        mean_u0 = float((h0.w[live] * h0.u0[live]).sum() / h0.w[live].sum())
+        depth = (h0.u0 / mean_u0).reindex(range(len(polys))).to_numpy()
+        for v, s in sets.items():
+            if v == "U":
+                continue
+            for part, ids in (("both", sets["U"] & s), ("U_only", sets["U"] - s),
+                              (f"{v}_only", s - sets["U"])):
+                j = np.array(sorted(ids), dtype=np.int64)
+                out.append(dict(block=bid, variant=v, part=part, buildings=len(j),
+                                area_m2=float(np.median(area[j])) if len(j) else np.nan,
+                                street_m=float(np.median(street[j])) if len(j) else np.nan,
+                                gap_m=float(np.median(gap[j])) if len(j) else np.nan,
+                                depth=float(np.nanmedian(depth[j])) if len(j) else np.nan))
+    return pd.DataFrame(out)
+
+
+def _variant_key(s: pd.Series) -> pd.Series:
+    order = {v: i for i, v in enumerate(VARIANTS)}
+    return s.map(order) if s.name == "variant" else s
+
+
+def _home_drift(homes: pd.DataFrame) -> pd.DataFrame:
+    """Q3, per block of ALIGN and variant: how each home's term in J_2's ratio J / J0 under SIMP's
+    default moves between the metric's offset and the block's shift, by the home's bottleneck
+    width at the metric's offset (`_bottleneck`): per group its homes, population, share of J0,
+    and share of the ratio's change, signed and absolute."""
+    out = []
+    groups = ((0.0, 0.5), (0.5, 1.0), (1.0, 2.0), (2.0, np.inf))
+    for bid, k in ALIGN.items():
+        for v, g in homes[homes.block == bid].groupby("variant"):
+            at = {o: g[g.offset == o].set_index("home") for o in (0, k)}
+            if any(x.empty for x in at.values()):
+                continue
+            live = ~(at[0].enclosed | at[k].enclosed)
+            c = {}
+            for o, h in at.items():
+                J0 = float((h.w[live] * h.u0[live] ** 2).sum())
+                c[o] = (h.w * h.u_default ** 2 / J0).where(live, 0.0)
+                c[f"base{o}"] = (h.w * h.u0 ** 2 / J0).where(live, 0.0)
+            d = c[k] - c[0]
+            width = at[0].bottleneck
+            total, absum = float(d.sum()), float(d.abs().sum())
+            for lo, hi in groups:
+                m = live & (width > lo) & (width <= hi) if lo > 0 else live & (width <= hi)
+                out.append(dict(block=bid, variant=v, shift=k, bottleneck=f"{lo:g}-{hi:g}",
+                                homes=int(m.sum()),
+                                population=float(at[0].w[m].sum() / at[0].w[live].sum()),
+                                J0_share=float(c["base0"][m].sum()),
+                                change=float(d[m].sum()), change_share=float(d[m].sum() / total),
+                                abs_share=float(d[m].abs().sum() / absum),
+                                ratio_o0=float(c[0].sum()), ratio_shift=float(c[k].sum())))
+    return pd.DataFrame(out)
+
+
+def _simp_table(simp_rows: pd.DataFrame, crossed: pd.DataFrame) -> pd.DataFrame:
+    """Q4's SIMP runs: per block and variant, the clearing's own P lens, its size, the Jaccard
+    overlap with U's, and its lenses under U's conductance and its own (cross)."""
+    out = []
+    for bid, g in simp_rows.groupby("block"):
+        sets = {r.variant: set(np.asarray(r.simp_cleared).tolist()) for r in g.itertuples()}
+        for r in g.itertuples():
+            row = dict(block=bid, variant=r.variant, own_P=float(r.simp_perm),
+                       n_cleared=len(sets[r.variant]), D=float(r.simp_D),
+                       free_D=float(r.free_D), enclosed=float(r.enclosed), t=float(r.t))
+            if "U" in sets:
+                u = sets["U"]
+                row["jaccard_U"] = len(u & sets[r.variant]) / len(u | sets[r.variant])
+            if not crossed.empty:
+                for c in crossed[(crossed.block == bid) & (crossed.clearing == r.variant)
+                                 ].to_dict("records"):
+                    for col in LENS_COLS:
+                        row[f"{col}_under_{c['variant']}"] = float(c[col])
+            out.append(row)
+    return pd.DataFrame(out)
+
+
+def main(argv: list[str]) -> None:
+    cmd, *a = argv
+    if cmd == "channel":
+        channel(int(a[0]))
+    elif cmd == "score":
+        score(a[0], a[1], int(a[2]))
+    elif cmd == "simp":
+        simp(a[0], a[1])
+    elif cmd == "cross":
+        cross(a[0], a[1])
+    elif cmd == "tars":
+        tars(Path(a[0]), a[1].split(","))
+    elif cmd == "maps":
+        maps(a[0].split(","))
+    elif cmd == "report":
+        report()
+    else:
+        raise SystemExit(__doc__)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

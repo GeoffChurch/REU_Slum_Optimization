@@ -32,7 +32,8 @@ def one(job: tuple[str, str]) -> list[dict]:
     b = _B[bid]
     pop = common.POPULATIONS["area"]
     mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
-    sc = common.Scorer(b, mesh, lifted.Params(3.0, 8, lifted.along_of(along)), population=pop,
+    sc = common.Scorer(b, mesh, lifted.Params(3.0, 8, lifted.along_of(along),
+                                              cells=lifted.OpenFraction()), population=pop,
                        demand=common.PopulationDemand())
     w = pop.weights(sc.polys)
     rows = []

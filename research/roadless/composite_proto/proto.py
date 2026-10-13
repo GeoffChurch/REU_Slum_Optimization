@@ -165,7 +165,8 @@ if __name__ == "__main__":
     import glob
     bid, r, D = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
     Dg = float(sys.argv[4]) if len(sys.argv) > 4 else D
-    p = lifted.Params(3.0, 8, along=lifted.Uniform(), solver=lifted.CpuAMG())
+    p = lifted.Params(3.0, 8, along=lifted.Uniform(), solver=lifted.CpuAMG(),
+                      cells=lifted.OpenFraction())
     [b] = common.build_blocks([bid])
     sc = common.Scorer(b, lifted.UniformMesh(0.5, offset=lifted.OFFSET), p,
                        population=common.POPULATIONS["area"], demand=common.PopulationDemand())

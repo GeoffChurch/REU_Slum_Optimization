@@ -15,7 +15,7 @@ HERE = Path(__file__).resolve().parent
 RUNS = {"simp": "clear_rows_SIMPfw0.q3.i10.t0.001.e0.0001.k1_h0.5_area_p2",
         "greedy": "clear_rows_S0.01cat_h0.5_area_p2"}
 [b] = common.build_blocks(["ZAF.9.3.1_1_5810"])
-p = lifted.Params(3.0, 8, solver=lifted.solver_of("cpu"))
+p = lifted.Params(3.0, 8, solver=lifted.solver_of("cpu"), cells=lifted.OpenFraction())
 g = lifted.UniformMesh(0.5, offset=lifted.OFFSET).build(b, p, common.POPULATIONS["area"])
 polys = np.asarray(b.buildings.outlines)
 lab = g.label_sub(polys)                       # (ny, nx, 16), -1 none

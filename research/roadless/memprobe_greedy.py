@@ -85,7 +85,8 @@ def main(bid: str, spec: str, d_max: float, allocator: str) -> None:
     along = lifted.along_of(specs[0], scans)
     search = lifted.along_of(specs[1], scans) if len(specs) == 2 else None
     (b,) = common.build_blocks([bid])
-    p = lifted.Params(ell_m=3.0, K=8, along=along, solver=lifted.solver_of("gpu"))
+    p = lifted.Params(ell_m=3.0, K=8, along=along, solver=lifted.solver_of("gpu"),
+                      cells=lifted.OpenFraction())
     mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
     c = clear.Clearing(b, mesh, p, population=common.POPULATIONS["area"], search=search,
                        demand=common.PopulationDemand())

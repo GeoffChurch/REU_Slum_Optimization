@@ -19,7 +19,7 @@ OUT = Path(__file__).resolve().parent / "fabric_5810.npz"
 t0 = time.time()
 [b] = common.build_blocks(["ZAF.9.3.1_1_5810"])
 t1 = time.time()
-p = lifted.Params(3.0, 8, solver=lifted.solver_of("cpu"))
+p = lifted.Params(3.0, 8, solver=lifted.solver_of("cpu"), cells=lifted.OpenFraction())
 g = lifted.UniformMesh(0.5, offset=lifted.OFFSET).build(b, p, common.POPULATIONS["area"])
 t2 = time.time()
 polys = np.asarray(b.buildings.outlines)

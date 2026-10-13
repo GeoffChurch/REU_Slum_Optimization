@@ -643,8 +643,8 @@ def _cpu_scorer(b: Block) -> common.Scorer:
     solves on the CPU: B (i)'s test is its `pl` and `free_of`."""
     import road_rescore as rr
     import transparency_run as tr
-    p = lifted.Params(ell_m=rr.ELL_M, K=rr.K, along=lifted.along_of(rr.ALONG,
-                                                                    lifted.scans_of("cpu")),
+    cond = lifted.conductance_of(rr.ALONG, lifted.scans_of("cpu"))
+    p = lifted.Params(ell_m=rr.ELL_M, K=rr.K, along=cond.along, cells=cond.cells,
                       solver=lifted.solver_of("cpu"))
     return common.Scorer(b, tr.FREE.mesh, p, population=common.AreaPopulation(),
                          demand=common.PopulationDemand())

@@ -2,8 +2,10 @@
 
 Clear a fraction x_j in [0, 1] of each building: a cell's open fraction is ff0 + sum_j x_j
 (the share of the cell building j covers), so it is affine in x. Each edge weight is a minimum
-of open fractions (concave in x), and by the Dirichlet principle P(w) = max_u 2 f^T u -
-sum_e w_e (du_e)^2 is a maximum of functions affine and non-increasing in w. So P(x) is convex,
+of cell factors (lifted.Params.cells: the open fractions themselves, or lifted.Blurred's sum over
+a cell's sub-samples of min(openness, B), B affine in the open field), concave in x, and by the
+Dirichlet principle P(w) = max_u 2 f^T u - sum_e w_e (du_e)^2 is a maximum of functions affine
+and non-increasing in w. So P(x) is convex,
 and so is min P(x) s.t. sum_j c_j x_j <= D, 0 <= x <= 1 (c_j the population share). J_p for
 p != 1 is not convex; Frank-Wolfe is then a local method and the gap is not a bound.
 
@@ -149,16 +151,17 @@ class Relaxation:
         K = p.K
         uk, lk = _cells_axes(sy, sol.u, K), _cells_axes(sy, lam, K)
         o = xp.asarray(op_eps).ravel()
+        kap = lifted.cell_factor(g, o, p)               # what each cell conducts by (p.cells)
         cell, _nf = lifted._free_ids(o, xp)
         pat = g.pattern(K, xp)
         _v, _th, _m, gap = lifted.axes(K)
-        gc = xp.zeros(o.size)                           # dJ / d(open) per grid cell
+        gc = xp.zeros(o.size)                           # dJ / d(cell factor) per grid cell
         Fl = p.along.layers(g, op_eps, K)
         dF = None                                       # dJ / d(layer factor), if any vary
         for k in range(K):
             a, b, line, const = pat.along[k]           # const: a fully open edge's weight
             cells = [a, b, *list(line)]
-            vals = xp.stack([o[q] for q in cells])
+            vals = xp.stack([kap[q] for q in cells])
             frac = vals.min(axis=0)
             act = vals <= frac[None, :]                  # the cells attaining the min
             ca, cb = cell[a], cell[b]
@@ -176,14 +179,18 @@ class Relaxation:
             coef = -q * const * boost / act.sum(axis=0)
             for i, qc in enumerate(cells):
                 gc += xp.bincount(qc[act[i]], coef[act[i]], minlength=o.size)
-        if dF is not None:                              # the factors' own response to opening
-            gc += xp.asarray(p.along.vjp(g, op_eps, K, dF.reshape(K, *op_eps.shape))).ravel()
         free = xp.flatnonzero(o > 0)
         area = g.cell_area(xp, o > 0)
         for k in range(K):
             k2 = (k + 1) % K
             q = (uk[:, k] - uk[:, k2]) * (lk[:, k] - lk[:, k2])
             gc[free] += -q * (area / (p.ell_m ** 2 * gap[k]))
+        # dJ / d(open): through the cell factors (OpenFraction's vjp: gc itself), plus the along
+        # factors' own response to opening
+        gc = xp.asarray(p.cells.vjp(g, o.reshape(op_eps.shape), gc.reshape(op_eps.shape),
+                                    p.solver)).ravel()
+        if dF is not None:
+            gc += xp.asarray(p.along.vjp(g, op_eps, K, dF.reshape(K, *op_eps.shape))).ravel()
         grad = (1.0 - self.eps) * (c.bf @ p.solver.to_host(gc)[self.inside])
         if self.q != 1.0:
             grad = grad * self.q * self.proj(x) ** (self.q - 1.0)
@@ -705,13 +712,15 @@ def simp(rel: Relaxation, x0: np.ndarray, budget: float,
 
 def _clearing(bid: str, device: str, along: str, mesh: lifted.MeshSpec, *,
               demand: common.Demand) -> Clearing:
-    """`along`: the metric's conductance, or <metric>@<search>: SIMP's gradient under the search
-    one (as the greedy's translucent search), every score under the metric. `demand`: what each
-    home injects (common.Demand); the area population sets the cost whatever it is."""
+    """`along`: the metric's conductance (lifted.conductance_of: `<along>[+<cells>]`), or
+    <metric>@<search>: SIMP's gradient under the search one's along-conductance (as the greedy's
+    translucent search), every score under the metric. `demand`: what each home injects
+    (common.Demand); the area population sets the cost whatever it is."""
     [b] = common.build_blocks([bid])
     scans = lifted.scans_of(device)
     specs = along.split("@")
-    p = lifted.Params(3.0, 8, along=lifted.along_of(specs[0], scans),
+    cond = lifted.conductance_of(specs[0], scans)
+    p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells,
                       solver=lifted.solver_of(device))
     return Clearing(b, mesh, p, population=common.POPULATIONS["area"],
                     search=lifted.along_of(specs[1], scans) if len(specs) == 2 else None,

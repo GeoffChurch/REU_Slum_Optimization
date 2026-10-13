@@ -19,7 +19,8 @@ for i in idx:
         pre[n] = prefix_to_displacement(b, r, 0.10)
     for h in hs:
         t = time.time()
-        sc = common.Scorer(b, lifted.UniformMesh(h, offset=off), lifted.Params(ell_m=ell, K=K),
+        p = lifted.Params(ell_m=ell, K=K, cells=lifted.OpenFraction())
+        sc = common.Scorer(b, lifted.UniformMesh(h, offset=off), p,
                            demand=common.PopulationDemand())
         vals = {n: sc.perm(pre[n]) for n in names}
         print(f"{b.block_id} n={len(b.buildings)} K={K} ell={ell} h={h} off={off}: P0 {sc.P0:9.1f} enclosed {sc.enclosed0:.3f} "

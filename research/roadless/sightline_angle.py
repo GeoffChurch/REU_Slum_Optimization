@@ -7,8 +7,8 @@ variants of the sightline conductance that separate its two causes.
 Variants: uni; ss (ss100k2n2r30, the 48 lattice directions); nmax12, nmax24 (more lattice
 directions); k16 (16 walker headings); h025 (h 0.25); rays (96 uniformly spaced directions, each
 scanned along the rows of its own rotated copy of the raster); turn (the turning edges boosted
-too); both (rays + turn). Prototypes: UniformRays has no gradient (vjp zero) and runs on the
-CPU only, and `turn` swaps lifted.edges for the run.
+too: lifted.TurnBoosted); both (rays + turn). Prototype: UniformRays has no gradient (vjp zero)
+and runs on the CPU only.
 """
 from __future__ import annotations
 
@@ -71,34 +71,11 @@ class UniformRays:
                 out[k] += (self.beta * W[k, j]) * gj
         return out
 
+    def turning(self, grid, open_, K):
+        return [1.0] * K
+
     def vjp(self, grid, open_, K, A):
         return np.zeros(open_.shape)
-
-
-_EDGES = lifted.edges
-
-
-def turn_boosted_edges(grid, open_, p):
-    """lifted.edges with each turning edge (x, k)-(x, k+1) scaled by min(F_k(x), F_k+1(x)): the
-    boost scales the whole (x, theta) metric, so the persistence length stays ell."""
-    xp = p.solver.xp
-    _v, _th, _m, gap = lifted.axes(p.K)
-    for k, a, b, w in lifted.along_edges(grid, open_, p):
-        yield a, b, xp.full(len(a), k), xp.full(len(a), k), w
-    o = xp.asarray(open_, dtype=xp.float64).ravel()
-    free = o > 0
-    vol = o[free]
-    c = xp.arange(len(vol))
-    area = grid.cell_area(xp, free)
-    F = p.along.layers(grid, open_, p.K)
-
-    def at(k):
-        return np.ones(len(vol)) if np.isscalar(F[k]) else np.asarray(F[k]).ravel()[free]
-
-    for k in range(p.K):
-        k2 = (k + 1) % p.K
-        yield (c, c, xp.full(len(c), k), xp.full(len(c), k2),
-               vol * (area / (p.ell_m ** 2 * gap[k])) * np.minimum(at(k), at(k2)))
 
 
 def ss(nmax: int = 6) -> lifted.SoftSightline:
@@ -106,31 +83,29 @@ def ss(nmax: int = 6) -> lifted.SoftSightline:
 
 
 RAYS = UniformRays(100.0, 2.0, 30.0, 2.0, 96)
-# variant -> (along conductance, K, h, turning boosted)
+# variant -> (along conductance, K, h)
 VARIANTS = {
-    "uni": (lifted.Uniform(), 8, 0.5, False),
-    "ss": (ss(), 8, 0.5, False),
-    "nmax12": (ss(12), 8, 0.5, False),
-    "nmax24": (ss(24), 8, 0.5, False),
-    "k16": (ss(), 16, 0.5, False),
-    "h025": (ss(), 8, 0.25, False),
-    "rays": (RAYS, 8, 0.5, False),
-    "turn": (ss(), 8, 0.5, True),
-    "both": (RAYS, 8, 0.5, True),
+    "uni": (lifted.Uniform(), 8, 0.5),
+    "ss": (ss(), 8, 0.5),
+    "nmax12": (ss(12), 8, 0.5),
+    "nmax24": (ss(24), 8, 0.5),
+    "k16": (ss(), 16, 0.5),
+    "h025": (ss(), 8, 0.25),
+    "rays": (RAYS, 8, 0.5),
+    "turn": (lifted.TurnBoosted(ss()), 8, 0.5),
+    "both": (lifted.TurnBoosted(RAYS), 8, 0.5),
 }
 
 
 def main(names: list[str]) -> None:
     for name in names:
-        along, K, h, turn = VARIANTS[name]
-        lifted.edges = turn_boosted_edges if turn else _EDGES
-        p = lifted.Params(ell_m=3.0, K=K, along=along)
+        along, K, h = VARIANTS[name]
+        p = lifted.Params(ell_m=3.0, K=K, along=along, cells=lifted.OpenFraction())
         for W in WIDTHS:
             ps = np.array([channel(a, W, 40.0, h, p) for a in ANGLES])
             print(f"{name:7s} W {W:3.1f}  max/min {ps.max() / ps.min():5.2f}  P/P(0): "
                   + " ".join(f"{a:g}:{v:.2f}" for a, v in zip(ANGLES, ps / ps[0], strict=True)),
                   flush=True)
-    lifted.edges = _EDGES
 
 
 if __name__ == "__main__":

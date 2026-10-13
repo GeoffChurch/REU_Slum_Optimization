@@ -13,7 +13,7 @@ import lifted  # noqa: E402
 HERE = Path(__file__).resolve().parent
 t0 = time.time()
 [b] = common.build_blocks(["ZAF.9.3.1_1_5810"])
-p = lifted.Params(3.0, 8, solver=lifted.solver_of("cpu"))
+p = lifted.Params(3.0, 8, solver=lifted.solver_of("cpu"), cells=lifted.OpenFraction())
 g = lifted.UniformMesh(0.5, offset=lifted.OFFSET).build(b, p, common.POPULATIONS["area"])
 polys = np.asarray(b.buildings.outlines)
 w = common.POPULATIONS["area"].weights(polys)
