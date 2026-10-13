@@ -17,7 +17,9 @@ Presets now (NOTES, 2026-10-05 -- 06; D 0.05, J_2, uni):
 - **Hard blocks: `.p256w8x2.GS0.01cate1`** -- plus the greedy as a second polished track, polished
   only when its raw clearing is within 1% of SIMP's polished one. The 13 +0.0119 at 1.21x the
   default (the greedy unscored); identical to the default on all 46 held out.
-- **Cheap: greedy + polish** (polish_greedy.py, P64w8) -- the 13 -0.004 at 0.81x, the 46 -0.015.
+- **Cheap: greedy + polish** (polish_greedy.py, P64w8) -- against SIMP base, the 13 -0.004 at
+  0.81x, the 46 -0.015; against the default, the 46 -0.0185 [-0.022, -0.015] (never ahead) at
+  0.53x its time on one card.
 
 Closed (measured, NOTES): multi-rounding `.r<n>` (held out +0.001 at 2x; late `.r2l2` the same at
 1.58x); coarse-to-fine `.c0.75` (keeps gates at 0.85x, but with the polish dominated); coarse
