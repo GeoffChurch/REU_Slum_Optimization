@@ -56,8 +56,12 @@ items up front"), in the order proposed:
    margin of about +-0.08 on some large blocks.
 2. **Visualization**: the presets' clearings and the corridors they induce (the current through
    the opened space), side by side, so results can be looked at, not only scored. First page:
-   5810 (NOTES, "Visualization: block 5810"). Still to do: the test of why a level moves, each
-   home's term at two lattice offsets on 20543.
+   5810 (NOTES, "Visualization: block 5810"). Why a level moves (each home's term at two lattice
+   offsets on 20543, 38366, 17608): done (NOTES, "Uniform conductance with an effective width",
+   Q3). The homes whose demand sits in pockets joined to the street only by phantom passages
+   (4-adjacent cells whose open sub-samples do not touch) or sub-cell cracks carry it: under U, 2 --
+   5% of the people behind phantom passages hold 17 -- 42% of J_2's baseline, and the share moves
+   with the alignment (20543: 0.60 to 0.33 for all such homes).
 3. **The sightline metric and building transparency** (discussion): what each measures, where
    SIMP is weaker under sightline, and transparency as a model of the world against a device of
    the search (the translucent greedy). With it, the passable width, now implicit in h and the
@@ -153,15 +157,23 @@ items up front"), in the order proposed:
    school, especially since people do come in and out of it"): area sets both a building's
    injection and its displacement cost; the sources are already outside the buildings
    (Placement's ring of free cells within 1 m), which was the owner's other concern.
-   (3) **The conductance: pending the effective-width
-   study** (queued after the priority-weighted P test). The owner wants corridors to FORM in the
-   flow (a cleared building can open several), not the clearing to look like lanes, and asked for
-   a justified uniform: open space conducting more the farther it is from buildings. Variants: the
-   blurred openness (the share of open ground within r of a cell; linear in the clearing, so P
-   stays convex; a channel narrower than 2r conducts like width^2), the owner's distance form
-   (min(1, d/s), d to the nearest footprint), uni and sightline; promising ones stay in
-   consideration. Sightline was kept for the corridor pictures if its angle error is fixed (turn
-   boost and uniform rays). (4) **Exits: the region model** (owner: "we'd still only leak at the
+   (3) **The conductance: the effective-width study is done (owner's call)** (NOTES, "Uniform
+   conductance with an effective width"). The owner wants corridors to FORM in the flow (a cleared
+   building can open several), not the clearing to look like lanes, and asked for a justified
+   uniform: open space conducting more the farther it is from buildings. Built, lifted.Params.cells
+   (a Strategy): B_r, each sub-sample conducting by min(its openness, the open share within r) (P
+   stays convex, guarded; a gap below 2 r conducts like width^2), and D_s, min(1, d / s) (scoring
+   only), beside U, sightline (S) and its turning boost (S_t, lifted.TurnBoosted). B_r keeps U's
+   angle error, U's alignment on lanes and U's method order (tau 1.00 on P), but moves the flow only
+   a little onto lanes U's flow already uses (no new corridors at r up to 1.5 m), and SIMP under it
+   gains nothing over U's clearing on its own lens; D1 is the strongest uniform, with a worse angle
+   error (2.39 at 1 m against 1.66) and no gradient; S_t mends sightline's 1.5 -- 2 m lanes and its
+   streaks (keep it over S for the pictures). Every variant hands P_{1/2} and J_2 to the homes in
+   pockets behind phantom passages and sub-cell cracks (item 2) and makes a block's level several
+   times as sensitive to the lattice as U's: fix those pockets first (fine-lattice connectivity and
+   enclosed test, or a passable width) whatever the conductance. Untested: B_r beyond 1.5 m (what
+   would decide whether D1 is dominated).
+   (4) **Exits: the region model** (owner: "we'd still only leak at the
    outer boundary, so all current must exit ... some of the outer boundary might not leak at all
    and might have 0 conductance (like a railroad)"; "we can adjust boundary leakage, uniform
    leakage, and also building-boundary leakage"). Everything compiles into conductances: barriers

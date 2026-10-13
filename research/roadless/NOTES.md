@@ -3686,3 +3686,315 @@ row that differs (the in-place overwrite) unless its run is named in --replace, 
 left in git's history; a block whose footprints changed raises too. The optimizers still write in
 place (their no-overwrite guard is the other half of BACKLOG's item), so run the export after every
 batch.
+
+### Uniform conductance with an effective width (owner 2026-10-12: "conductance be some monotone function of the distance to the nearest footprint")
+
+BACKLOG 4, decision (3): uniform or sightline conductance. Under U a cell conducts by its open
+fraction, so a channel conducts in proportion to its width and a 1 m gap between shacks conducts per
+metre of width what the middle of a plaza does. The owner wants corridors to form in the flow (a
+cleared building can open several), not the clearing to look like lanes, and asked for a uniform
+conductance justified by open ground conducting more the farther it is from buildings ("resistance
+not just within buildings but radiate out from them, or just have conductance be some monotone
+function of the distance to the nearest footprint"; "any promising variants can remain in
+consideration, pending its results"). width.py and width_check.py (dfb5f3ea -- 13d64415);
+width_rows/ (the rows and maps ignored, the summaries committed). Every lens is reported for P,
+P_{1/2} (the equity view beside P, decided 2026-10-13) and J_2 (lens (c), the measure P_{1/2} stands
+in for).
+
+The variants. lifted.CellConductance, a Strategy beside the along conductance where the conductance
+is built (Params.cells, required): what an open cell conducts by, in place of its open fraction in
+its turning edges and, as the smallest over the cells a step touches, in its along edges. Which
+cells are in the operator does not change; every factor is above 0 there, at most the open fraction
+and growing as space is freed, so Rayleigh monotonicity holds.
+- U (OpenFraction): today's.
+- B_r (Blurred; r 0.5, 1, 1.5 m): each sub-sample of the fine lattice (h / 4) conducts by min(its
+  openness, B), B the open share of the sub-samples within r of it (outside the block counts open:
+  every ring of a kblock is a street), and a cell by the sum over its sub-samples, over 16. At a 0/1
+  state the min is openness x B. In the relaxation B is affine in the clearing fractions (a cell's
+  cleared part spread evenly over its footprint sub-samples, exact for a cell under one building),
+  so the factor is a sum of minimums of affine functions, concave, and P stays convex. The form the
+  brief wrote, B sampled at each cell's centre (as the factor, or min(o, B)), was built first and
+  dropped: a cell half in a narrow channel then conducts about as much as one wholly in it, so how
+  many cells a channel touches sets its conductance, the flicker the sub-cell fractions removed
+  ("Results so far"); on the corridor below eight sub-cell shifts of the lattice move P by up to
+  1.73x at W 1 m, against U's 1.12 (width.BlurCentre, kept as the diagnostic).
+- D_s (WallDistance; s 0.5, 1 m): each open sub-sample conducts by min(1, d / s), d its distance to
+  the nearest footprint sub-sample still standing (the fine lattice's distance transform, less half
+  a sub-sample), summed over the cell. The distances move with every clearing, so the factor is not
+  affine in the clearing fractions: scoring only, here. What SIMP would take: a fractional distance
+  (each footprint standing with weight 1 - x_j, a soft minimum or the expected distance) and its
+  vjp, run as a local method as SIMP is under sightline (not convex, no bound). B_r is its convex
+  relative: the disk's open share is a smooth ramp in the distance to a straight wall, 1/2 at it.
+- S: ss100k2n2r30, today's sightline. S_t (lifted.TurnBoosted): the same with every turning edge
+  times min(F_k, F_k+1) ("The sightline metric's angle error"), for scoring and maps (no vjp).
+lifted.conductance_of names each in a run: `<along>+<cells>` (uni+b1, uni+d0.5, ss100k2n2r30t).
+
+The guards (width_check.py), each failing under its fault (a patch in one process):
+- `identity`: U reproduces 57 numbers computed at 3f74f5fa, the commit before Params.cells, bit for
+  bit, on 38136, 19263 (three homes enclosed) and 19570 (one enclosed, two shadowed): the scorer's
+  baseline and placement, a random clearing's operator, P, J_2 and P_{1/2}, the relaxation's value
+  and gradient (SIMP q 3 on J_2, q 1 on P, eps 1e-4), the greedy's tension, current_map.flow, and
+  the sightline metric's layers and P. Fault `ulp` (U's factor one ulp up): 16 of the 19 per block
+  differ.
+- `operator`: U's edge families equal the open fractions' definition assembled independently, bit
+  for bit (the baseline and a random clearing, 38136 and 19570). Fault `b1` (U's factor B_1's).
+- `gradient`: B_r's relaxation gradient against central differences (r 0.5 -- 1.5, P and J_2, SIMP q
+  1 and 3; 38136, 19263, 19570): within 2.8e-6 of the largest at step 1e-5. At 1e-4 one difference
+  straddled a kink of the per-sub-sample min (building 5 of 38136: 1.1e-4 off, 4e-10 at 1e-5); the
+  factor is piecewise linear, each sub-sample's openness against its disk's. Fault `no-blur-vjp`
+  (the disk's term dropped): 0.2 -- 1.2 off.
+- `convex`: along 4 random segments across the box, every cell factor's second difference at most
+  8e-14 and P's at least 4.6e-3 of P (38136, 19263, every r). Fault `product` (openness x B, equal
+  at every 0/1 state): the factors' second differences up to 0.051 and P's down to -4.1e-3 of P, so
+  that form would cost SIMP its convexity and Frank-Wolfe its bound.
+
+**Q2: the corridor.** The W x 40 m corridor (checks.channel) with its walls made footprints 3 m
+thick and a dead end behind the demand (width.walled_channel, so a factor that looks past a cell
+sees walls, not the open street side of a block edge; its lattice is checks.channel's, and U's P
+equals the old check's bit for bit). P's max / min over the 13 angles 0 -- 45 deg (K 8, ell 3 m, h
+0.5):
+
+    W       U     B0.5  B1    B1.5  D0.5  D1    S     S_t
+    1 m     1.66  1.85  1.73  1.72  2.39  2.39  5.32  5.09
+    1.5 m   1.33  1.41  1.40  1.38  1.70  1.80  2.40  1.74
+    2 m     1.15  1.19  1.21  1.19  1.34  1.48  1.67  1.26
+    4 m     1.06  1.07  1.07  1.07  1.15  1.21  1.17  1.13
+
+U and S reproduce "The sightline metric's angle error" (1.66 / 1.33 / 1.15 / 1.06; 5.32 / 2.40 /
+1.67 / 1.17), S_t its turning-boosted column (5.08 / 1.73 / 1.26 / 1.13). B_r keeps about U's error
+(+0.06 -- +0.19 at 1 m, +0.01 -- +0.08 from 1.5 m); D_s adds +0.7 at 1 m and +0.2 -- +0.3 at 2 m:
+its factor ramps steeply across a narrow lane, and an oblique step's weight is the smallest over the
+cells it touches, the one nearest a wall. S_t mends sightline's 1.5 -- 2 m lanes, not its 1 m ones
+(the ray directions).
+
+Conduction (1 / P) over U's at the same width, a straight corridor at 0 deg (30 deg alike; S's and
+S_t's are boosts, not effective widths):
+
+    W        0.5   0.75  1     1.5   2     3     4     6
+    B0.5     0.58  0.72  0.76  0.82  0.85  0.90  0.92  0.95
+    B1       0.31  0.45  0.57  0.68  0.74  0.81  0.85  0.90
+    B1.5     0.21  0.31  0.40  0.56  0.65  0.74  0.79  0.86
+    D0.5     0.23  0.37  0.43  0.56  0.64  0.73  0.79  0.85
+    D1       0.12  0.19  0.22  0.31  0.39  0.52  0.61  0.71
+    S        1.16  1.23  4.59  5.38  5.94  7.16  8.43  10.8
+    S_t      1.16  1.23  4.62  5.52  6.26  8.09  10.2  14.5
+
+Below 2 r (2 s) the ratio about doubles with the width (from 0.5 to 1 m x1.8 -- 1.9 for B1, B1.5,
+D0.5 and D1): the lane conducts like width^2. Beyond, it nears 1 as 1 - 2 delta / W, delta the
+margin lost at each wall: at 6 m 0.16, 0.30, 0.42 m for B0.5, B1, B1.5 (the continuum's 2 r / 3 pi:
+0.11, 0.21, 0.32) and 0.46, 0.88 m for D0.5, D1 (s / 2: 0.25, 0.50); at 30 deg 0.20, 0.36, 0.48 and
+0.70, 1.22. The lattice adds 35 -- 85% to the continuum's margin, the smallest-over-a-step rule
+again. Pedestrian engineering's shy distance from a wall, about 0.5 m (Fruin; the HCM's effective
+width), lies between B1.5's margin and D0.5's, and the two have nearly the same response at 0 deg
+(0.21 / 0.40 / 0.65 / 0.86 against 0.23 / 0.43 / 0.64 / 0.85), D0.5 losing more at 30 deg. Viscous
+channel flow, the brief's second justification, would grow as W^3 (plane Poiseuille); the variants'
+width^2 below 2 r is a margin of fixed depth at each wall, a boundary layer, not a parabolic
+profile. Sightline has no width law but a threshold: its rays need a whole row of open cells, so a
+straight corridor gains x3.7 on U between 0.75 and 1 m.
+
+Alignment on the corridor (0 deg; the lattice shifted k / 8 of a cell on both axes, k 0 -- 7; P's
+max / min at W 0.75, 1, 1.5, 2 m): U 1.06, 1.12, 1.07, 1.05; B_r 1.07 -- 1.08, 1.07 -- 1.12, 1.05 --
+1.07, 1.03 -- 1.04 (as U, or better from 1.5 m); D_s 1.22, 1.11, 1.10, 1.12 -- 1.16; S 4.85, 1.85,
+1.56, 1.45 and S_t 4.85, 1.87, 1.58, 1.48 (the row threshold); B at the cell's centre 1.08 -- 1.78.
+The shift across the corridor does it; along it P moves 1.01 -- 1.10.
+
+**Q1: do corridors form in the flow?** On the sentinel (22422, 30848, 5810, 9712), under every
+variant, the flux per cell (current_map's layers: the sum over headings of |signed flux|) at
+baseline and under SIMP's default (the stored row), each against the no-buildings prior (every
+inside sub-sample open, the same homes' demand to the same edge, under the same variant), mapped as
+the atlas pages do (delta, the log of a cell's share of all walking over its share in the prior:
+width.py `maps`, PNGs in width_rows/maps/, ignored, unpublished). Three indices beside the maps
+(width._indices):
+- the open-lane lift, the share of the flux in cells at least 2 m (and 1 m) from a standing
+  footprint over those cells' share of the open area: 1 when walkers use open ground as they use the
+  rest, above 1 when they keep to lanes and plazas. Under U a cell conducts per metre of width alike
+  wherever it is, so the lift is where the geometry alone sends walkers; a variant that makes a
+  gap's middle conduct more than its edge raises it by construction. It measures the intended
+  effect, not its realism (the wiki's footpath-conductance page: a criterion a variant is built to
+  move cannot judge it); the question here is how much of the flow reorganises, not whether it
+  should.
+- the coherence of the net flux over a square of half-side 2 m (sum over cells of the resultant's
+  length over the sum of the lengths, flux-weighted): 1 for parallel streams, lower where they
+  split, merge or cross. It saturates near 1 on every block (0.96 -- 0.98: flow in a gap is parallel
+  to it).
+- the concentration: the share of the flux carried by the 10% of the open area carrying the most per
+  unit area. Corridors concentrate flow; so does any bottleneck.
+
+The open-lane lift at 2 m (summary_q1_indices.csv; base: nothing cleared, SIMP: its default):
+
+    block  field  U      B0.5   B1     B1.5   D0.5   D1     S      S_t
+    22422  base   0.885  0.890  0.893  0.896  0.900  0.914  0.934  0.925
+           SIMP   0.909  0.914  0.917  0.921  0.924  0.938  0.954  0.945
+    30848  base   0.832  0.847  0.858  0.869  0.879  0.925  0.983  0.986
+           SIMP   0.992  1.007  1.019  1.030  1.038  1.083  1.129  1.125
+    5810   base   1.070  1.091  1.105  1.118  1.131  1.187  1.252  1.233
+           SIMP   1.112  1.130  1.143  1.154  1.165  1.216  1.269  1.251
+    9712   base   0.940  0.948  0.954  0.959  0.964  0.986  1.023  1.004
+           SIMP   0.960  0.967  0.972  0.976  0.981  1.000  1.028  1.012
+
+The variants move the flow onto open ground in their order of strength, B_r least (+0.005 -- +0.05),
+D1 most of the uniforms (+0.03 -- +0.12), sightline most of all (+0.04 -- +0.18), and most on the
+dense blocks (30848, 5810); SIMP's clearing raises the lift under every variant by about what it
+does under U (30848 +0.16, the others +0.02 -- +0.04). The concentration follows (5810 at baseline:
+U 0.270, B1.5 0.281, D1 0.308, S 0.339, S_t 0.323; on 9712 sightline lowers it, 0.303 to 0.261) and
+the coherence does not move (within 0.006 of U's everywhere). The maps say why (5810's zoom,
+ZAF.9.3.1_1_5810_variants_zoom.png): under U the flow against the prior already follows the main
+alleys to the edge; B_r and D_s sharpen those same lanes and dim the gaps between them, D1 most, and
+add none; S and S_t draw the clearest network of lanes, S with axis-aligned streaks across the open
+field and the centre (its ray directions), S_t without them. So the uniforms make walkers keep to
+the lanes U already uses; corridors that U's flow lacks do not form under them at these radii.
+
+**Q3: grid alignment on blocks.** SIMP's default's level at the metric's lattice offset and at the
+shift that moved it most under U in offset_check.py's run (20543 and 38366: (0.12, 0.94); 17608:
+(0.62, 0.44)), every variant (width.py `score-all <id> shift`). The change from the metric's offset
+to the shift (summary_q3_levels.csv):
+
+    block  lens     U       B0.5    B1      B1.5    D0.5    D1      S       S_t
+    20543  P        -0.045  -0.145  -0.148  -0.146  -0.148  -0.179  -0.213  -0.228
+           P_{1/2}  -0.234  -0.488  -0.444  -0.412  -0.351  -0.261  -0.191  -0.167
+           J_2      -0.147  -0.414  -0.391  -0.370  -0.335  -0.295  -0.229  -0.206
+    38366  P        -0.009  -0.082  -0.077  -0.088  -0.062  -0.092  -0.120  -0.149
+           P_{1/2}  -0.085  -0.577  -0.631  -0.679  -0.572  -0.663  -0.652  -0.679
+           J_2      -0.093  -0.490  -0.536  -0.581  -0.520  -0.608  -0.636  -0.660
+    17608  P        -0.047  -0.098  -0.117  -0.116  -0.081  -0.076  -0.057  -0.057
+           P_{1/2}  -0.060  -0.059  -0.047  -0.039  -0.022  -0.017  -0.010  -0.009
+           J_2      -0.062  -0.077  -0.069  -0.056  -0.033  -0.026  -0.015  -0.012
+
+Every variant moves P more than U does (7 -- 17x on 38366, 3 -- 5x on 20543, 1.2 -- 2.5x on 17608).
+The equity lenses move 5 -- 8x U's on 38366 (P_{1/2}: 0.085 under U, 0.57 -- 0.68 under every
+variant, its lens at the shift down to 0.05 -- 0.27 from U's 0.46), up to 2.8x on 20543 (B_r and
+D_s; sightline moves P_{1/2} there less than U, 0.17 -- 0.19 against 0.23), and less than U on
+17608.
+
+Who carries it, per home (width.fine_bottleneck: at baseline, per cell, the widest path of open
+sub-samples to the street, 4-connected on the fine lattice, a sub-sample's clear width twice its
+distance to the nearest footprint; a cell is behind a sub-cell gap when that path is at most 0.5 m
+wide and narrower than the cell's own clear width; it is behind a phantom passage when there is no
+such path at all, its open sub-samples joined to the street only through the operator's cell graph,
+which links two 4-adjacent cells that each have an open sub-sample whether or not their open parts
+touch). On 38366 at the shift three homes reach escape times of 1,265 -- 2,193 under B0.5 (131 --
+219 under U; the median home 8.6): 22 -- 58% of each one's injection sits in cells behind a phantom
+passage, at a potential of 570 -- 588 under U and 6,007 -- 6,047 under B0.5, while the same homes'
+cells behind a real crack one sub-sample wide sit at 1 -- 49 under either. The pocket's potential
+rises 10.3x: the phantom link runs through cells whose open sub-samples hug a wall, where B0.5's
+disk is nearly all footprint, so the link conducts about a tenth of what U lets it. SIMP's default
+leaves those pockets as they are, and 38366's J_2 lens at the shift is 0.03 under B0.5 against U's
+0.37. Per block, the homes with over 5% of their injection behind a sub-cell gap or a phantom
+passage at either alignment are 15%, 15% and 10% of the population (20543, 38366, 17608), and those
+behind a phantom passage alone 2.4%, 3.9% and 4.7%. Their share of J_2's baseline, at the metric's
+offset and the shift (summary_q3_homes.csv):
+
+    block  homes behind      U            B0.5         B1.5         D1           S
+    20543  sub-cell or both  0.60 / 0.33  0.94 / 0.41  0.95 / 0.52  0.98 / 0.73  1.00 / 0.90
+           phantom only      0.42         0.91         0.91         0.94         0.95
+    38366  sub-cell or both  0.31 / 0.43  0.44 / 0.96  0.71 / 0.96  0.84 / 0.96  0.93 / 0.98
+           phantom only      0.17         0.27         0.48         0.58         0.66
+    17608  sub-cell or both  0.63 / 0.61  0.84 / 0.72  0.94 / 0.88  0.75 / 0.79  0.91 / 0.91
+           phantom only      0.42         0.65         0.68         0.51         0.26
+
+(phantom only: the share at the metric's offset; the three heaviest homes hold 0.30, 0.14 and 0.52
+of J_2's baseline under U, up to 0.69, 0.43 and 0.70 under B1.5.)
+
+The resolution floor's hypothesis ("The metric's resolution floor": homes behind gaps of order h
+carry the drift; BACKLOG 2's pending check): held, and sharpened. Under U the homes behind a
+sub-cell gap or a phantom passage, a sixth of the population or less, hold 0.31 -- 0.63 of J_2's
+baseline, and their share is what changes with the alignment (20543: 0.60 at the metric's offset,
+0.33 at the shift); those behind a phantom passage alone, 2 -- 5% of the people, hold 17 -- 42% of
+it. A phantom passage is the lattice's: a finer raster or a test of the open sub-samples touching
+would close it, and B's enclosed test, made on the same cell graph, counts its homes reachable. The
+variants do what they should at such a passage, make it conduct less, and so magnify its homes:
+under them those homes hold most of J_2's baseline (94 -- 99.7% on 20543, 91 -- 95% for those behind
+a phantom passage alone), and a block's level, P_{1/2}'s and J_2's most, turns on whether a clearing
+happens to open their pocket, at the alignment of the day. Any conductance change needs that fixed
+first: connectivity and B's enclosed test on the fine lattice (open sub-samples touching), or a
+passable width below which a gap is closed, so that a home whose only way out is a passage nobody
+walks is scored apart in B (i). On the corridor the variants' part of it is direct: at widths where
+a shift adds or drops a column of sub-samples, P's max / min over 16 shifts is U 2.53, 1.81, 1.67 at
+W 0.19, 0.30, 0.44 m, B_r 4.5 -- 4.9, 2.6 -- 2.7, 2.1 -- 2.2 and D_s 2.53, 2.82, 2.03 (back to 1.3
+-- 1.4 by 1.06 m, U 1.29; summary_q2_subcell.csv): below the disk's size a gap conducts like
+width^2, so a column gained or lost moves it by the square. Sightline's row threshold does worse: S
+and S_t 1.79, 10.8 and 6.4 at 0.30, 0.44 and 0.69 m.
+
+**Q4: what it changes.** On the 13 tuning blocks, the stored clearings (SIMP's default, the cheap
+preset) and item 4's road prefixes at area D 0.05 (the six methods; a road that reaches D 0.05 only)
+re-scored under every variant (summary_q4_*.csv). Under U the rows reproduce item 4's road prefixes
+to 9e-8 (90 rows) and its B re-scoring of the stored clearings to 3.2e-9 (30; up to 5.4e-4 from
+their stored preB Lens A, the shadowed homes' known shift). Kendall tau of the method order (B's
+order) with U's, median [min] over the 13:
+
+    lens     B0.5        B1          B1.5        D0.5        D1          S           S_t
+    P        1.00 [0.86] 1.00 [0.81] 1.00 [0.79] 0.93 [0.71] 0.93 [0.64] 0.86 [0.57] 0.86 [0.36]
+    P_{1/2}  0.93 [0.64] 0.93 [0.57] 0.90 [0.57] 0.90 [0.36] 0.86 [0.36] 0.86 [0.36] 0.71 [0.36]
+    J_2      0.93 [0.79] 0.93 [0.64] 0.87 [0.64] 0.93 [0.43] 0.86 [0.43] 0.79 [0.43] 0.79 [0.43]
+
+resistance_lp stays the best road on P on all 13 under U, B_r and D_s (11 under sightline), on
+P_{1/2} on 10 -- 11. SIMP's default leads the best road by more under every variant (median, P: U
+0.145, B_r 0.17 -- 0.19, D_s 0.21 -- 0.26, S 0.26, S_t 0.25; P_{1/2}: 0.24, 0.22 -- 0.31, 0.31 --
+0.33, 0.34, 0.20), the best road keeping 0.48 -- 0.58 of SIMP's lens. Under the equity lenses the
+roads fall while the clearings rise (median P_{1/2} of cycle_native 0.118 under U, 0.061 under B1.5,
+0.032 under S_t; SIMP's default 0.52, 0.72, 0.93): Q3's pockets again, which the stored clearings
+tend to open and a road's corridor mostly does not.
+
+**Q4: SIMP under B_r.** On the sentinel, SIMP base (fw0.q3.i10.t0.001.e0.0001.k1s1e-06) with
+objective P and free first (clear.free_first; none of the four has a home enclosed), area D 0.05,
+under U and under all three B_r (runs w-simp1-*, one card each: a run cost less than choosing a
+radius first), 1 -- 2 GPU-min a block, B_r 1.1 -- 1.6x U's time. Each clearing then scored under U
+and the three B_r (width.py `cross`, runs w-cross-*; each reproduces its own lens to 1e-10):
+
+    P lens       clearing:  U       B0.5    B1      B1.5      (rows: the conductance scored under)
+    22422  U                0.5889  0.5880  0.5890  0.5873
+           B1.5             0.8726  0.8723  0.8728  0.8723
+    30848  U                0.5679  0.5679  0.5682  0.5672
+           B1.5             0.6590  0.6606  0.6612  0.6606
+    5810   U                0.2558  0.2500  0.2492  0.2486
+           B1.5             0.2873  0.2836  0.2837  0.2841
+    9712   U                0.1378  0.1375  0.1368  0.1373
+           B1.5             0.1591  0.1589  0.1585  0.1593
+
+SIMP under B_r finds nothing better on B_r's own lens than SIMP under U does: its clearing minus
+U's, both under the same B_r, is -0.0047 -- +0.0020 over the 12 (block, radius) pairs, and on 5810
+U's clearing is ahead under every radius (by 0.003 -- 0.005). The four clearings of a block lie
+within 0.008 of each other under any conductance (P_{1/2} and J_2 alike), while the conductance
+moves the level by up to 0.28 (22422's P lens 0.59 under U, 0.87 under B1.5). The clearings differ
+more than they score: Jaccard with U's 0.84 -- 0.95 (B0.5), 0.78 -- 0.88 (B1), 0.75 -- 0.86 (B1.5),
+and B_r clears more buildings for the same D (5810: 346, 350, 353 against 302; 22422: 72, 74, 76
+against 70).
+
+**What looks promising, and what does not (the owner decides).**
+- B_r is the justified uniform that keeps the machinery: P convex (the guards), a gradient for SIMP,
+  the angle error about U's (1.72 -- 1.85 at 1 m against 1.66), U's alignment on lanes from 0.75 m,
+  a width^2 law below 2 r and a margin at each wall of 0.16, 0.30, 0.42 m on the lattice (B1.5's
+  near pedestrian engineering's 0.5 m), U's method order on P (tau 1.00) and nearly on the equity
+  lenses (0.87 -- 0.93). What it does to the flow is modest: walkers keep a little more to the lanes
+  U's flow already uses (the lift +0.005 -- +0.05) and no new lane forms. SIMP under it clears 5 --
+  25% other buildings (smaller ones; on 5810 deeper ones, farther from the street) for no gain even
+  on its own lens: on these four blocks an optimizer run under U serves it. B1.5 is the most
+  promising of the three, as the strongest; a radius of 2 -- 3 m is untested and is what would
+  decide whether B_r can reach D1's strength convexly.
+- D_s, the owner's literal form, is the strongest uniform (D1's lift +0.03 -- +0.12) but its angle
+  error is worse (2.39 at 1 m), it has no gradient (SIMP would need a fractional distance, above)
+  and it reorders the methods more. D0.5 is B1.5 at 0 deg with a worse angle error; D1 has no B_r as
+  strong, so neither is dominated until a larger B_r is scored beside D1.
+- S_t over S, for the corridor pictures (the turning-boost call): it mends sightline's 1.5 -- 2 m
+  lanes (1.74, 1.26 against 2.40, 1.67), its maps lose the streaks (5810's zoom) and it keeps the
+  clearest lanes of every variant (the lift +0.04 -- +0.16 on U); its 1 m lanes (5.09) and its
+  alignment at sub-metre widths (4.85 at 0.75 m, 10.8 at 0.44 m) stay, it has no gradient and it
+  reorders the methods most (P_{1/2}'s tau 0.71).
+- Not as they stand, any of them: every variant hands the equity lenses, P_{1/2} first, to the homes
+  in pockets behind phantom passages and sub-cell cracks (Q3), and makes a block's level several
+  times as sensitive to the lattice as under U (on 38366 P_{1/2} 5 -- 8x, P 7 -- 17x). That is an
+  effective width doing its job on a passage nobody walks, with the placement still counting the
+  pocket reachable. The pockets want fixing first whatever the conductance (fine-lattice
+  connectivity for the operator and B's enclosed test, or a passable width), and under U they
+  already hold 17 -- 42% of J_2's baseline on the three blocks while holding 2 -- 5% of the people.
+
+What is not tested: B_r beyond r 1.5 m; the greedy under B_r or D_s (Clearing.tension refuses a
+factor that looks past its cell); the pockets' fix itself.
+
+Compute: GPU 3.4 GPU-h of scoring (144 block-variant tasks, 22422 under S the longest at 6.4 min),
+0.38 for SIMP and 0.23 for the cross-scoring, with the first SIMP run's 2 min on four cards before
+it was resubmitted one card a variant: about 4.5 GPU-h. The CPU nodes' first scoring runs
+(w-o0-orion, w-o0-quadro2, 67 tasks at once) were cancelled after about 50 min (~55 core-h, no row
+kept): a field took 575 -- 1,094 s there (31 -- 36 memory-bound AMG solves a node) against ~50 s
+here, so 1558 would have needed ~13 h a variant. Here: the guards, the corridors (about 2,500
+solves, seconds in all), the smoke tests, the maps and the fine bottlenecks, about 6 CPU-h.
