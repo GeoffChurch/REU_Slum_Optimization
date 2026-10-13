@@ -50,7 +50,7 @@ sub-samples touching at a corner counts as open).
 
 `convex`: under the Aperture, P is convex in the clearing fractions (q 1): along CONVEX_LINES
 random segments, every along edge's width has second differences at most CONVEX_TOL (concave) and
-P's at least -CONVEX_TOL of P. Fault `product`: a track by the product of its sub-samples' factors
+P's at least -CONVEX_TOL of P. Fault `square`: a track by the square of its smallest factor
 (equal at every 0/1 state; not concave).
 
 `gradient`: the relaxation's gradient under the Aperture (relax.Relaxation.value_grad: SIMP q 1
@@ -508,14 +508,18 @@ def convex(ids: list[str]) -> list[str]:
     return bad
 
 
-def _product_means(flat, ax, xp):
+def _square_means(flat, ax, xp):
+    """A track by the square of its smallest factor (equal at every 0/1 state; convex, not
+    concave, between). A track by the product of its factors (width_check's `product`) is the
+    same kind of fault but leaves the eps world's system too ill-conditioned to solve (a closed
+    track's eps^9 -- eps^13: AMG-CG did not converge)."""
     acc = None
     for tr in ax.tracks:
         m = None
         for slot, sub in tr:
             v = flat[ax.base[slot] + sub]
-            m = v if m is None else m * v
-        acc = m if acc is None else acc + m
+            m = v if m is None else xp.minimum(m, v)
+        acc = m * m if acc is None else acc + m * m
     w = acc / len(ax.tracks)
     return w if ax.coarse is None else xp.where(ax.coarse, 1.0, w)
 
@@ -573,7 +577,7 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "channel": {"max-track": lambda: _patched(lifted, "_track_means", _max_track)},
     "cracks": {"smallest": lambda: _patched(lifted.Aperture, "widths", _smallest_widths)},
     "connect": {"diagonal-leak": lambda: _patched(lifted, "axis_tracks", _centre_tracks)},
-    "convex": {"product": lambda: _patched(lifted, "_track_means", _product_means)},
+    "convex": {"square": lambda: _patched(lifted, "_track_means", _square_means)},
     "gradient": {"no-spread": lambda: _patched(lifted, "_openness_vjp", _no_spread_vjp)},
 }
 

@@ -69,6 +69,7 @@ from scipy import ndimage
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import aperture_check  # noqa: E402
 import clear  # noqa: E402
 import clearings  # noqa: E402
 import common  # noqa: E402
@@ -195,7 +196,6 @@ def _parts(grid: lifted.Grid | lifted.CompositeGrid) -> np.ndarray:
 def _flood(grid: lifted.Grid) -> np.ndarray:
     """(cells flat) on the uniform grid: the cells the 4-connected flood fill of open sub-samples
     reaches from the ground cells' (aperture_check.flood)."""
-    import aperture_check
     return aperture_check.flood(grid)[0].ravel()
 
 
@@ -292,7 +292,7 @@ def base(b, device: str, token: str, rules: tuple[str, ...], tag: str) -> None:
           f"{ncell} cells, peak RSS {out.peak_rss_gb.iloc[0]:.1f} GB", flush=True)
 
 
-BASE_RULES_SMALL = ("T", "A", "Aw", "Aws")     # the small blocks here: every rule
+BASE_RULES_SMALL = ("T", "A", "Aw", "Aws", "Fws")    # the small blocks here: every rule
 
 
 def pockets_path(bid: str) -> Path:
