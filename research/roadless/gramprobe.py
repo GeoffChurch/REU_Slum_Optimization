@@ -49,7 +49,8 @@ def main(bid: str, along: str, d_max: float) -> None:
     p = lifted.Params(ell_m=3.0, K=8, along=lifted.along_of(along, scans),
                       solver=lifted.solver_of("gpu"))
     mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
-    c = clear.Clearing(b, mesh, p, population=common.POPULATIONS["area"])
+    c = clear.Clearing(b, mesh, p, population=common.POPULATIONS["area"],
+                       demand=common.PopulationDemand())
     clear.GpuSweep.prepare = _prepare(clear.GpuSweep.prepare)
     rnd = search.greedy_round("S0.01cat", clear.sweep_of("gpu"))
     gram = rnd.build.source.gram

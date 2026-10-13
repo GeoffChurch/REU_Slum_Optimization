@@ -14,7 +14,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 import pandas as pd
@@ -138,6 +138,80 @@ class AreaPopulation:
 POPULATIONS = {"count": CountPopulation(), "area": AreaPopulation()}
 
 
+class Demand(Protocol):
+    """What each home injects, the escape demand the solve carries: resolved once, where a run
+    is configured, and handed to the scorer, which asks nothing else of it (owner 2026-10-12, a
+    priority-weighted P; NOTES, "Priority-weighted P"). The population still sets the
+    displacement (a clearing's population share, clear.Clearing.cost) and B (i) (the population
+    share a clearing leaves enclosed): only the demand is reweighted."""
+
+    @property
+    def name(self) -> str: ...
+
+    def injection(self, w: NDArray[np.float64], u0: NDArray[np.float64],
+                  enclosed: NDArray[np.bool_]) -> NDArray[np.float64]:
+        """Per home, what it injects, from its population `w` and its escape time at baseline
+        `u0` under the population's own demand (nan where `enclosed`: an enclosed home injects
+        nothing whatever this returns, as lifted.Placement gives it no cell)."""
+        ...
+
+    def baseline(self, sc: Scorer, sol: lifted.Solution
+                 ) -> tuple[NDArray[np.float64], lifted.Solution]:
+        """(the injection per home, the baseline's solution under it), from `sol`, the
+        baseline's solution under the population's demand."""
+        ...
+
+
+@dataclass(frozen=True)
+class PopulationDemand:
+    """Each home injects its population: J_p = sum_i w_i u_i^p, and J_1 = P."""
+
+    @property
+    def name(self) -> str:
+        return "w"
+
+    def injection(self, w: NDArray[np.float64], u0: NDArray[np.float64],
+                  enclosed: NDArray[np.bool_]) -> NDArray[np.float64]:
+        return w
+
+    def baseline(self, sc: Scorer, sol: lifted.Solution
+                 ) -> tuple[NDArray[np.float64], lifted.Solution]:
+        return sc.w, sol
+
+
+@dataclass(frozen=True)
+class PriorityDemand:
+    """P_q (owner 2026-10-12: "first set the current emitted by deeper buildings quadratically
+    higher and then did P"): home i injects w_i a_i, a_i = u0_i^q / mean_w(u0^q), u0_i its escape
+    time at baseline under the population's demand and mean_w the population-weighted mean over
+    the homes not enclosed, so the total injection is the population's. The weights are fixed at
+    baseline, so P_q = f_q^T L^-1 f_q keeps P's properties: one self-adjoint solve, monotone in
+    the open space, convex in the clearing fractions. On independent paths (u_i = R_i w_i)
+    dP_q / dR_i goes as w_i^2 u0_i^(2q) and dJ_p / dR_i as w_i^2 u_i^(p - 1), so q = (p - 1) / 2
+    matches J_p to first order: q 1/2 J_2, q 1 J_3. At q 0 it is the population's demand,
+    injection for injection. (The brief's a_i = (u0_i / mean_w(u0))^q is this times a constant,
+    the same at q 0 and 1: the constant moves no lens and no clearing, but the total.) `q` is
+    required: it names the run (`name`)."""
+    q: float
+
+    @property
+    def name(self) -> str:
+        return f"pq{self.q:g}"
+
+    def injection(self, w: NDArray[np.float64], u0: NDArray[np.float64],
+                  enclosed: NDArray[np.bool_]) -> NDArray[np.float64]:
+        live = ~enclosed
+        uq = np.where(live, np.nan_to_num(u0), 1.0) ** self.q
+        mean = float((w[live] * uq[live]).sum() / w[live].sum())
+        return np.where(live, w * uq / mean, w)
+
+    def baseline(self, sc: Scorer, sol: lifted.Solution
+                 ) -> tuple[NDArray[np.float64], lifted.Solution]:
+        inj = self.injection(sc.w, sc.home_u_of(sol, sc.free0), sc.enclosed)
+        return inj, lifted.solve(sc.grid, sc.free0, sc.pl.field(inj, sc.grid.inside.shape),
+                                 sc.p)
+
+
 def displacement(block, roads, w: np.ndarray) -> float:
     """Population-weighted share displaced: sum_i c_i w_i / sum_i w_i, c_i the share of building
     i's outline the corridor takes (the project's overlap fraction)."""
@@ -236,18 +310,18 @@ def reached(pl: lifted.Placement, grid: lifted.Grid | lifted.CompositeGrid,
 
 class Scorer:
     def __init__(self, block, mesh: lifted.MeshSpec, p: lifted.Params, rule=None,
-                 population=None):
+                 population=None, *, demand: Demand):
         population = CountPopulation() if population is None else population
-        self._on(block, mesh.build(block, p, population), p, rule, population)
+        self._on(block, mesh.build(block, p, population), p, rule, population, demand)
 
     @classmethod
-    def on_grid(cls, block, grid, p: lifted.Params, population) -> Scorer:
+    def on_grid(cls, block, grid, p: lifted.Params, population, *, demand: Demand) -> Scorer:
         """A scorer on a grid already built (GoalMesh's rounds)."""
         sc = cls.__new__(cls)
-        sc._on(block, grid, p, None, population)
+        sc._on(block, grid, p, None, population, demand)
         return sc
 
-    def _on(self, block, grid, p: lifted.Params, rule, population) -> None:
+    def _on(self, block, grid, p: lifted.Params, rule, population, demand: Demand) -> None:
         rule = Carve() if rule is None else rule
         self.block, self.grid, self.p, self.rule = block, grid, p, rule
         self.polys = np.asarray(block.buildings.outlines)
@@ -259,10 +333,15 @@ class Scorer:
         # enclosed (`enclosed_left`), then by J over the rest (owner 2026-10-11, "B SGTM").
         self.w = population.weights(self.polys)
         self.pl = placement(self.grid, self.polys, p)
-        self.f = self.pl.field(self.w, self.grid.inside.shape)
         self.enclosed = self.pl.enclosed
         self.enclosed0 = float(self.w[self.enclosed].sum() / self.w.sum())
-        sol = lifted.solve(self.grid, self.free0, self.f, p)
+        sol = lifted.solve(self.grid, self.free0, self.pl.field(self.w, self.grid.inside.shape),
+                           p)
+        # what each home injects (Demand; the population's own, or reweighted from this
+        # baseline): `inj` per home, `f` per cell; u0 and P0 the baseline's under it
+        self.demand = demand
+        self.inj, sol = demand.baseline(self, sol)
+        self.f = self.pl.field(self.inj, self.grid.inside.shape)
         self.P0 = sol.P
         self.u0 = self.home_u_of(sol, self.free0)
 
@@ -271,7 +350,7 @@ class Scorer:
 
     def home_u_of(self, sol: lifted.Solution, free) -> np.ndarray:
         """Per building: its congested escape time u_i, the injection-weighted mean potential
-        over its cells (so sum_i w_i u_i = P). nan for the enclosed buildings."""
+        over its cells (so sum_i inj_i u_i = P). nan for the enclosed buildings."""
         ub = lifted.cell_mean_u(sol, free, self.p)
         return np.where(self.enclosed, np.nan, self.pl.home_u(ub.ravel()))
 
@@ -279,14 +358,15 @@ class Scorer:
         return self.home_u_of(lifted.solve(self.grid, free, self.f, self.p), free)
 
     def J(self, u: np.ndarray, power: float) -> float:
-        """J_p = sum_i w_i u_i^p over the buildings not enclosed (J_1 = P)."""
+        """J_p = sum_i inj_i u_i^p over the buildings not enclosed, inj the demand's injection
+        (J_1 = P; under the population's demand inj = w, the population)."""
         ok = ~self.enclosed
-        return float((self.w[ok] * u[ok] ** power).sum())
+        return float((self.inj[ok] * u[ok] ** power).sum())
 
     def adjoint_load(self, u_home: np.ndarray, power: float) -> np.ndarray:
         """The load of J_power's adjoint, dJ/du per cell (in the grid's shape): home i's
-        w_i power u_i^(power - 1) injected as its population is (the enclosed inject nothing)."""
-        return self.pl.field(self.w * power * np.nan_to_num(u_home) ** (power - 1.0),
+        inj_i power u_i^(power - 1) injected as its demand is (the enclosed inject nothing)."""
+        return self.pl.field(self.inj * power * np.nan_to_num(u_home) ** (power - 1.0),
                              self.grid.inside.shape)
 
     def enclosed_left(self, free) -> float:
@@ -378,8 +458,9 @@ class GoalMesh:
 def goal_indicator(block, grid, p: lifted.Params, population, power: float,
                    opening: float) -> np.ndarray:
     """Per cell: eta = E (s / h)^GOAL_ALPHA, E the cell's half of |w du dlam| over each of its
-    edges (u the baseline with the buildings `opening` open, lam its J_power adjoint)."""
-    sc = Scorer.on_grid(block, grid, p, population)
+    edges (u the baseline with the buildings `opening` open, lam its J_power adjoint), under
+    the population's own demand (the mesh is built before any run's demand)."""
+    sc = Scorer.on_grid(block, grid, p, population, demand=PopulationDemand())
     xp, K = p.solver.xp, p.K
     op = sc.free0 + opening * (grid.isub.mean(axis=-1) - sc.free0)
     sol = lifted.solve(grid, op, sc.f, p, rtol=GOAL_RTOL, host=False)

@@ -23,7 +23,8 @@ mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
 [b] = common.build_blocks([BID])
 scans = lifted.scans_of("gpu")
 base = lifted.Params(3.0, 8, solver=lifted.solver_of("gpu"))
-sc = common.Scorer(b, mesh, base, population=common.POPULATIONS["area"])
+sc = common.Scorer(b, mesh, base, population=common.POPULATIONS["area"],
+                   demand=common.PopulationDemand())
 g = sc.grid
 lab = g.label_sub(sc.polys)
 cost = sc.w / sc.w.sum()
@@ -55,7 +56,7 @@ sets = {n: np.asarray(c, dtype=int) for n, c in
 sets["sightline"] = take
 cross = {}
 for along in ("uni", SS):
-    c = relax._clearing(BID, "gpu", along, mesh)
+    c = relax._clearing(BID, "gpu", along, mesh, demand=common.PopulationDemand())
     rel = relax.Relaxation(c, 2.0)
     for name, cl in sets.items():
         r = np.zeros(c.n)

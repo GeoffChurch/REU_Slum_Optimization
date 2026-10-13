@@ -27,7 +27,7 @@ ARMS = {"cheap": "cheap preset", "default": "SIMP"}
 [b] = common.build_blocks([BID])
 p = lifted.Params(3.0, 8, solver=lifted.solver_of("gpu"))
 sc = common.Scorer(b, lifted.UniformMesh(0.5, offset=lifted.OFFSET), p,
-                   population=common.POPULATIONS["area"])
+                   population=common.POPULATIONS["area"], demand=common.PopulationDemand())
 g, polys = sc.grid, sc.polys
 lab = g.label_sub(polys)
 cost = sc.w / sc.w.sum()

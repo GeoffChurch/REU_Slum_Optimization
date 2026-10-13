@@ -1276,7 +1276,8 @@ def prune_block(b: Any, plan: SearchPlan, *,
     p = lifted.Params(3.0, 8, along=lifted.along_of(along, lifted.scans_of(device)),
                       solver=lifted.solver_of(device))
     mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
-    c = Clearing(b, mesh, p, population=common.POPULATIONS["area"])
+    c = Clearing(b, mesh, p, population=common.POPULATIONS["area"],
+                 demand=common.PopulationDemand())
     J0, P0 = c.sc.J(c.sc.u0, power), c.sc.P0
     t0 = time.time()
     built = plan.build(block_id=b.block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max,

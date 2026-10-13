@@ -28,7 +28,7 @@ def main(bid: str, h: float, along: str, solver: str, picker: str) -> None:
     mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
     c = Clearing(b, mesh, lifted.Params(3.0, 8, along=lifted.along_of(along, scans),
                                      solver=lifted.solver_of(solver)),
-                 population=common.POPULATIONS["area"])
+                 population=common.POPULATIONS["area"], demand=common.PopulationDemand())
     pr.disable()
     print(f"setup {time.time() - t0:.1f}s", flush=True)
     pstats.Stats(pr).sort_stats("cumulative").print_stats(20)

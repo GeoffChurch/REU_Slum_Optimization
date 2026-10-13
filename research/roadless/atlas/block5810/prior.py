@@ -16,7 +16,7 @@ OUT = Path(sys.argv[1])
 [b] = common.build_blocks(["ZAF.9.3.1_1_5810"])
 base = lifted.Params(3.0, 8, solver=lifted.solver_of("gpu"))
 sc = common.Scorer(b, lifted.UniformMesh(0.5, offset=lifted.OFFSET), base,
-                   population=common.POPULATIONS["area"])
+                   population=common.POPULATIONS["area"], demand=common.PopulationDemand())
 g = sc.grid
 open_all = g.isub.mean(axis=-1)
 out = {}

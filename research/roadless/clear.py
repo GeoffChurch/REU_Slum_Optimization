@@ -95,10 +95,12 @@ class Tension:
 
 class Clearing:
     def __init__(self, block, mesh: lifted.MeshSpec, p: lifted.Params, population=None,
-                 rtol: float = RTOL_TENSION, search: lifted.AlongConductance | None = None):
+                 rtol: float = RTOL_TENSION, search: lifted.AlongConductance | None = None, *,
+                 demand: common.Demand):
         """`search`: the along-conductance the TENSION ranks under (e.g. more translucent
-        buildings, so counterfactual corridors show in the gradient); scoring stays `p`."""
-        self.sc = common.Scorer(block, mesh, p, population=population)
+        buildings, so counterfactual corridors show in the gradient); scoring stays `p`.
+        `demand`: what each home injects (common.Demand); the cost stays the population's."""
+        self.sc = common.Scorer(block, mesh, p, population=population, demand=demand)
         self.cost = self.sc.w / self.sc.w.sum()        # population share of each building
         self.p = p
         self.ps = p if search is None else dataclasses.replace(p, along=search)
@@ -203,7 +205,8 @@ def loo(i: int, h: float, pop: str = "count", power: float = 1.0) -> None:
     blocks = common.build_blocks(common.recipients())
     b = blocks[i]
     mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
-    c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8), population=common.POPULATIONS[pop])
+    c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8), population=common.POPULATIONS[pop],
+                 demand=common.PopulationDemand())
     sc = c.sc
     P0 = sc.J(sc.u0, power)
     t = time.time()
@@ -576,7 +579,8 @@ class GpuSweep:
 class Catchment:
     """No solves: trace the round's flow downhill and give each candidate the share of each
     home's flow that passes through its cells. H_ij = sum_h c_h v_i(h) v_j(h), with c_h the
-    home's weight in J_power (w_h u_h^power). The sweep runs where `sweep` says."""
+    home's weight in J_power (inj_h u_h^power, inj the demand's injection). The sweep runs where
+    `sweep` says."""
     sweep: Sweep
 
     @property
@@ -584,6 +588,14 @@ class Catchment:
         return "cat"
 
     def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray:
+        V = self.shares(c, t, cand)
+        wt = t.system.xp.asarray(c.sc.inj * np.nan_to_num(t.home_u) ** power)
+        return t.solver.to_host((V * wt[:, None]).T @ V)
+
+    def shares(self, c: Clearing, t: Tension, cand: list[int]):
+        """v_j(h) on the device, (homes x candidates): the share of home h's injected flow in
+        the tension's state that passes through candidate j's cells on its way to ground (0 for
+        a home none of whose injection is on a kept unknown)."""
         sy, K, xp = t.system, t.K, t.system.xp
         spm = t.solver.sparse
         A = sy.A
@@ -593,14 +605,14 @@ class Catchment:
         assert len(sy.unk_cell) == c.bfree.shape[1]     # eps world: free cell = inside
         pos = -xp.ones(sy.n, dtype=xp.int64)
         pos[keep] = xp.arange(len(keep))
-        # per home, its injection on each kept unknown (sy.load's: S_cj w_j by the axis's
+        # per home, its injection on each kept unknown (sy.load's: S_cj inj_j by the axis's
         # angular share), so a cell several homes inject into splits its load among them
         Sc = c.sc.pl.S.tocoo()
         unk = sy.unk_cell[sy.cell.ravel()[xp.asarray(Sc.row)]]         # -1 on ground
         on = unk >= 0
         at = pos[(unk[on][:, None] * K + xp.arange(K)[None, :]).ravel()]
         home = xp.repeat(xp.asarray(Sc.col)[on], K)
-        load = (xp.asarray(Sc.data * c.sc.w[Sc.col])[on][:, None]
+        load = (xp.asarray(Sc.data * c.sc.inj[Sc.col])[on][:, None]
                 * xp.asarray(lifted.axes(K)[2] / np.pi)[None, :]).ravel()
         kept = at >= 0
         inj = xp.bincount(home[kept], load[kept], minlength=c.n)
@@ -620,9 +632,7 @@ class Catchment:
             C = min(step, len(cand) - s0)
             sel = (cols >= s0) & (cols < s0 + C)
             V[:, s0:s0 + C] = Hown @ run(rows[sel], cols[sel] - s0, C)
-        V = xp.where(inj[:, None] > 0, V / xp.where(inj > 0, inj, 1.0)[:, None], 0.0)
-        wt = xp.asarray(c.sc.w * np.nan_to_num(t.home_u) ** power)
-        return t.solver.to_host((V * wt[:, None]).T @ V)
+        return xp.where(inj[:, None] > 0, V / xp.where(inj > 0, inj, 1.0)[:, None], 0.0)
 
 
 def _spread(gain: np.ndarray, cost: np.ndarray, H: np.ndarray, need: float,
@@ -657,7 +667,7 @@ def greedy_block(b, rnd: engine.Round, h: float, d_max: float, out: Path, popula
     step; `cleared` lists the step's buildings in pick order."""
     mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
     c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8, along=along, solver=solver),
-                 population=population, search=search)
+                 population=population, search=search, demand=common.PopulationDemand())
     sc = c.sc
     J0 = sc.J(sc.u0, power)
     P0 = sc.P0

@@ -16,7 +16,8 @@ def mono(i: int, h: float) -> None:
     rng = np.random.default_rng(0)
     for rule in (common.Carve(), common.Obliterate()):
         mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
-        sc = common.Scorer(b, mesh, lifted.Params(ell_m=3.0, K=16), rule=rule)
+        sc = common.Scorer(b, mesh, lifted.Params(ell_m=3.0, K=16), rule=rule,
+                           demand=common.PopulationDemand())
         worst = 0.0
         steps = 0
         for n in ("cycle_native", "resistance_lp"):
@@ -40,7 +41,8 @@ def cross(idx: list[int], h: float) -> None:
     p = lifted.Params(ell_m=3.0, K=16)
     for i in idx:
         b = blocks[i]
-        sc = common.Scorer(b, lifted.UniformMesh(h, offset=lifted.OFFSET), p)
+        sc = common.Scorer(b, lifted.UniformMesh(h, offset=lifted.OFFSET), p,
+                           demand=common.PopulationDemand())
         sol = lifted.solve(sc.grid, sc.free0, sc.f, p)
         d0 = lifted.crossing(sc.grid, sc.free0, sol, p)
         r = prefix_to_displacement(b, propose(arms["cycle_native"], b).roads, 0.10)

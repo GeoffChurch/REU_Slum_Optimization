@@ -13,8 +13,8 @@ for every clearing and a lower bound on J_eps bounds every real clearing. Gradie
 gradient is shared equally among the cells attaining it (a supergradient of the min, so a
 subgradient of J: the gap stays a valid bound). Linear step: a fractional knapsack (the batch
 pickers' rule, best gain per unit population up to D). Step size: a parabola through J(0),
-J'(0) = -gap and J(1), checked. Rounding: clear buildings by decreasing x while they fit,
-then score exactly.
+J'(0) = -gap and J(1), checked, and shorter steps when neither it nor the full step descends
+(FW_BACKOFF). Rounding: clear buildings by decreasing x while they fit, then score exactly.
 
     CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/relax.py one|path <ids,|all> <p> <cpu|gpu> <plan> <along> [workers] [budget]
 
@@ -288,6 +288,14 @@ def round_sampled(x: np.ndarray, cost: np.ndarray, budget: float, rng: np.random
 
 # Pair moves draw from the PAIR_POOL most promising buildings to add and to close.
 PAIR_POOL = 64
+# frank_wolfe: when neither the parabola's step nor the full one descends, the step shrinks by
+# FW_BACKOFF down to FW_STEP_FLOOR before it stops. J is nonsmooth (edge weights are minimums of
+# open fractions, their gradient a subgradient shared among tied cells), and a direction from a
+# subgradient can ascend at its first step yet descend at a shorter one: without backing off
+# 41132 at eps 1e-4 stopped at iteration 8 with a third of J still in its gap. Every lower bound
+# stays valid (any subgradient's), so going on only raises the bound and lowers J.
+FW_BACKOFF = 4.0
+FW_STEP_FLOOR = 1e-3
 
 
 def frank_wolfe(rel: Relaxation, budget: float, iters: int, log=print) -> dict:
@@ -316,7 +324,15 @@ def frank_wolfe(rel: Relaxation, budget: float, iters: int, log=print) -> dict:
                 gam, Jg = 1.0, J1
         else:
             Jg = J1
-        if Jg >= J:                                     # no progress along d: stop
+        if Jg >= J:                                     # neither descends: back off along d
+            gam = min(gam, 1.0) / FW_BACKOFF
+            while gam >= FW_STEP_FLOOR:
+                Jg = rel.value(x + gam * d)
+                if Jg < J:
+                    log(f"    it {it:2d} backed off to step {gam:.3g}")
+                    break
+                gam /= FW_BACKOFF
+        if Jg >= J:                                     # no progress at any step tried: stop
             break
         x = x + gam * d
         J, grad = rel.value_grad(x)
@@ -687,20 +703,26 @@ def simp(rel: Relaxation, x0: np.ndarray, budget: float,
     return x
 
 
-def _clearing(bid: str, device: str, along: str, mesh: lifted.MeshSpec) -> Clearing:
+def _clearing(bid: str, device: str, along: str, mesh: lifted.MeshSpec, *,
+              demand: common.Demand) -> Clearing:
     """`along`: the metric's conductance, or <metric>@<search>: SIMP's gradient under the search
-    one (as the greedy's translucent search), every score under the metric."""
+    one (as the greedy's translucent search), every score under the metric. `demand`: what each
+    home injects (common.Demand); the area population sets the cost whatever it is."""
     [b] = common.build_blocks([bid])
     scans = lifted.scans_of(device)
     specs = along.split("@")
     p = lifted.Params(3.0, 8, along=lifted.along_of(specs[0], scans),
                       solver=lifted.solver_of(device))
     return Clearing(b, mesh, p, population=common.POPULATIONS["area"],
-                    search=lifted.along_of(specs[1], scans) if len(specs) == 2 else None)
+                    search=lifted.along_of(specs[1], scans) if len(specs) == 2 else None,
+                    demand=demand)
 
 
-def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: float) -> dict:
-    c = _clearing(bid, device, along, plan.mesh)
+def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: float, *,
+        demand: common.Demand) -> dict:
+    """SIMP at one budget on `bid`, J_power under `demand` (common.Demand: J_1 is P_q under a
+    common.PriorityDemand), the cost the area population's."""
+    c = _clearing(bid, device, along, plan.mesh, demand=demand)
     rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
     log = lambda s: print(f"{bid} {s}", flush=True)  # noqa: E731
     t0 = time.time()
@@ -713,7 +735,7 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
                                   f"fw, .c, .C, .m, .g and .G are not built for held buildings: "
                                   f"{plan.name}")
     xlo = np.where(held, 1.0, XMIN)
-    out = dict(block=bid, n=c.n, power=power, plan=plan.name, along=along)
+    out = dict(block=bid, n=c.n, power=power, demand=demand.name, plan=plan.name, along=along)
     if plan.fw > 0:
         fw = frank_wolfe(rel, budget, plan.fw, log=log)
         x = fw["x"]
@@ -757,8 +779,8 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
     xs = x
     if plan.coarse_all > 0:
         coarse = lifted.UniformMesh(plan.coarse_all, offset=lifted.OFFSET)
-        rel_c = Relaxation(_clearing(bid, device, along, coarse), power, rtol=plan.rtol,
-                           eps=plan.eps)
+        rel_c = Relaxation(_clearing(bid, device, along, coarse, demand=demand), power,
+                           rtol=plan.rtol, eps=plan.eps)
         log(f"  all stages at h {plan.coarse_all:g}: {rel_c.c.sc.grid.inside.sum()} cells, "
             f"fine {c.sc.grid.inside.sum()}; {starts} start(s)")
         for k in range(starts):
@@ -781,7 +803,7 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
             stages = plan.stages
             if plan.coarse > 0:
                 coarse = lifted.UniformMesh(plan.coarse, offset=lifted.OFFSET)
-                rel_c = Relaxation(_clearing(bid, device, along, coarse), power,
+                rel_c = Relaxation(_clearing(bid, device, along, coarse, demand=demand), power,
                                    rtol=plan.rtol, eps=plan.eps)
                 log(f"  coarse h {plan.coarse:g}: {rel_c.c.sc.grid.inside.sum()} cells, fine "
                     f"{c.sc.grid.inside.sum()}")
@@ -827,7 +849,8 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
 PATH_DS = tuple(round(0.01 * k, 2) for k in range(1, 16))
 
 
-def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.DataFrame:
+def path(bid: str, power: float, device: str, plan: Plan, along: str, *,
+         demand: common.Demand) -> pd.DataFrame:
     """Nested SIMP: for D in PATH_DS, everything cleared so far held at 1, the rest reset to an
     even share of the remaining budget and the full q continuation rerun (warm-starting the
     rest at q = qmax traps them: a building SIMP has switched off, x = XMIN, has gradient
@@ -841,7 +864,7 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str) -> pd.Data
             or plan.seed or plan.track):
         raise ValueError(f"coarse grids, polish and multi-start are not built for path: "
                          f"{plan.name}")
-    c = _clearing(bid, device, along, plan.mesh)
+    c = _clearing(bid, device, along, plan.mesh, demand=demand)
     rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
     J0, P0 = rel.J0, c.sc.P0
     rows = [dict(block=bid, n=c.n, step=0, D=0.0, perm=0.0, perm1=0.0, cleared=[], P0=P0,
@@ -884,16 +907,18 @@ _CFG: dict = {}
 
 
 def _run(bid: str) -> str | None:
-    """`bid` if it failed (reported, and main exits non-zero at the end)."""
+    """`bid` if it failed (reported, and main exits non-zero at the end). The rows (named by
+    the power alone) are the population's own demand's; pweight.py runs priority-weighted P."""
     mode, power, device, plan, along, budget = (_CFG[k] for k in (
         "mode", "power", "device", "plan", "along", "budget"))
+    demand = common.PopulationDemand()
     try:
         if mode == "one":
-            pd.DataFrame([one(bid, power, device, plan, along, budget)]).to_parquet(
+            pd.DataFrame([one(bid, power, device, plan, along, budget, demand=demand)]).to_parquet(
                 rows_of(plan, along, budget) / f"{bid}_p{power:g}.parquet")
         else:
             out = rows_dir(f"SIMP{plan.name}", 0.5, "area", power, along) / f"{bid}.parquet"
-            path(bid, power, device, plan, along).to_parquet(out)
+            path(bid, power, device, plan, along, demand=demand).to_parquet(out)
             print(f"{time.strftime('%H:%M:%S')} {bid} path done", flush=True)
     except Exception as e:
         print(f"{bid} FAILED {type(e).__name__}: {e}"[:300], flush=True)

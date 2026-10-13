@@ -22,7 +22,8 @@ t0 = time.time()
 [b] = common.build_blocks([BID])
 p = lifted.Params(3.0, 8, solver=lifted.solver_of("gpu"))
 mesh = common.mesh_of("0.5a5x8")
-sc = common.Scorer(b, mesh, p, population=common.POPULATIONS["area"])
+sc = common.Scorer(b, mesh, p, population=common.POPULATIONS["area"],
+                   demand=common.PopulationDemand())
 g = sc.grid
 side = (2.0 ** g.level)                                  # in fine cells
 print(f"{len(g.level)} cells, scorer {time.time() - t0:.0f} s", flush=True)

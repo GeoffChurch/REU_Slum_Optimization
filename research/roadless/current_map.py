@@ -109,7 +109,8 @@ def main(bid: str, arms: list[str], device: str, zoom: bool) -> None:
     scans, solver = lifted.scans_of(device), lifted.solver_of(device)
     base = lifted.Params(3.0, 8, solver=solver)
     mesh = lifted.UniformMesh(H, offset=lifted.OFFSET)
-    sc = common.Scorer(b, mesh, base, population=common.POPULATIONS["area"])
+    sc = common.Scorer(b, mesh, base, population=common.POPULATIONS["area"],
+                       demand=common.PopulationDemand())
     g, polys = sc.grid, sc.polys
     lab = g.label_sub(polys)
     cost = sc.w / sc.w.sum()

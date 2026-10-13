@@ -54,7 +54,7 @@ def main(bid: str, power: float, device: str, picker_spec: str, tries: int, widt
          along: str, budget: float, mesh: lifted.MeshSpec, pairs: bool) -> None:
     out = (rows_of(picker_spec, tries, width, pairs, mesh, along, budget)
            / f"{bid}_p{power:g}.parquet")
-    c = relax._clearing(bid, device, along, mesh)
+    c = relax._clearing(bid, device, along, mesh, demand=common.PopulationDemand())
     rnd = search.greedy_round(picker_spec, clear.sweep_of(device))
     t0 = time.time()
     # B's first stage: the crossings that free the enclosed homes, the greedy's start (its D

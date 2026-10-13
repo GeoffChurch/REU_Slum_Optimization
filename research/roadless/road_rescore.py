@@ -606,12 +606,14 @@ def score(rows: Path, lineup: tuple[str, ...], scratch: Path, mesh_token: str, p
               f"{len(todo)} networks", flush=True)
         with GpuWatch(every=1.0) as gw:
             t0 = time.perf_counter()
-            c = clear.Clearing(b, mesh, p, population=common.POPULATIONS["area"])
+            c = clear.Clearing(b, mesh, p, population=common.POPULATIONS["area"],
+                               demand=common.PopulationDemand())
             t_area = time.perf_counter() - t0
             scorers = {"area": c.sc}
             if "count" in pops:
                 scorers["count"] = common.Scorer.on_grid(b, c.sc.grid, p,
-                                                         common.CountPopulation())
+                                                         common.CountPopulation(),
+                                                         demand=common.PopulationDemand())
             t_setup = time.perf_counter() - t0
             print(f"  scorers in {t_setup:.0f}s (grid, area scorer and clearing {t_area:.0f}s), "
                   f"{int(c.sc.grid.inside.sum())} cells", flush=True)

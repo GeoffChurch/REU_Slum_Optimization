@@ -32,7 +32,7 @@ def one(bid: str) -> dict:
     rem = cleared_through(g, int(stop))
     mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
     sc = common.Scorer(b, mesh, lifted.Params(ell_m=3.0, K=8),
-                       population=common.POPULATIONS[_CFG["pop"]])
+                       population=common.POPULATIONS[_CFG["pop"]], demand=common.PopulationDemand())
     gr = sc.grid
     op = (gr.isub & (~gr.bsub | gr.sub_of(shapely.union_all(sc.polys[rem])))).mean(axis=-1)
     u = sc.home_u(op)

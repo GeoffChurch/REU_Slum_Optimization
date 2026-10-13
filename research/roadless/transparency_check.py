@@ -646,7 +646,8 @@ def _cpu_scorer(b: Block) -> common.Scorer:
     p = lifted.Params(ell_m=rr.ELL_M, K=rr.K, along=lifted.along_of(rr.ALONG,
                                                                     lifted.scans_of("cpu")),
                       solver=lifted.solver_of("cpu"))
-    return common.Scorer(b, tr.FREE.mesh, p, population=common.AreaPopulation())
+    return common.Scorer(b, tr.FREE.mesh, p, population=common.AreaPopulation(),
+                         demand=common.PopulationDemand())
 
 
 def _freed(sc: common.Scorer, roads: gpd.GeoDataFrame) -> NDArray[np.bool_]:

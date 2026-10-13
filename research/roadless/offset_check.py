@@ -41,7 +41,8 @@ def main(bid: str, power: float, device: str, along: str, clearings: str, h: flo
     rows = []
     for off in OFFSETS:
         t0 = time.time()
-        c = relax._clearing(bid, device, along, lifted.UniformMesh(h, offset=off))
+        c = relax._clearing(bid, device, along, lifted.UniformMesh(h, offset=off),
+                            demand=common.PopulationDemand())
         rel = relax.Relaxation(c, power)
         for name, cleared in zip(todo.name, todo.cleared, strict=True):
             r = np.zeros(c.n)

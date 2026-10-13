@@ -12,7 +12,8 @@ blocks = common.build_blocks(common.recipients())
 for i in [int(a) for a in sys.argv[1].split(",")]:
     b = blocks[i]
     p = lifted.Params(ell_m=3.0, K=8)
-    sc = common.Scorer(b, lifted.UniformMesh(0.5, offset=lifted.OFFSET), p)
+    sc = common.Scorer(b, lifted.UniformMesh(0.5, offset=lifted.OFFSET), p,
+                       demand=common.PopulationDemand())
     tau = sc.w * sc.u0                                      # per home, sums to P0
     tau = tau[tau > 0]                                      # (nan: enclosed)
     s = np.sort(tau)[::-1]

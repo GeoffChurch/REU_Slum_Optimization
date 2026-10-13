@@ -41,7 +41,7 @@ def main(ids: list[str], arm: str, pop: str = "count", power: float = 1.0,
         corr = gpd.GeoSeries([road_corridor(pre)])
         mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
         sc = common.Scorer(b, mesh, lifted.Params(ell_m=3.0, K=8),
-                           population=common.POPULATIONS[pop])
+                           population=common.POPULATIONS[pop], demand=common.PopulationDemand())
         lp = sc.perm(pre)
         # the round each cleared building went in (colours it when there are too many to number)
         rnd = np.concatenate([np.full(len(js), st) for st, js in

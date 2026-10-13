@@ -58,7 +58,8 @@ def _one(i: int) -> None:
     p = lifted.Params(ell_m=ell, K=K)
     population = common.POPULATIONS[pop]
     mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
-    carve = common.Scorer(b, mesh, p, rule=common.Carve(), population=population)
+    carve = common.Scorer(b, mesh, p, rule=common.Carve(), population=population,
+                          demand=common.PopulationDemand())
     w = carve.w
     n = len(b.buildings)
     rows = []

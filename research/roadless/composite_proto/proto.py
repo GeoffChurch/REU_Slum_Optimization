@@ -168,7 +168,7 @@ if __name__ == "__main__":
     p = lifted.Params(3.0, 8, along=lifted.Uniform(), solver=lifted.CpuAMG())
     [b] = common.build_blocks([bid])
     sc = common.Scorer(b, lifted.UniformMesh(0.5, offset=lifted.OFFSET), p,
-                       population=common.POPULATIONS["area"])
+                       population=common.POPULATIONS["area"], demand=common.PopulationDemand())
     lab = sc.grid.label_sub(sc.polys)
     g = sc.grid
     cost = sc.w / sc.w.sum()

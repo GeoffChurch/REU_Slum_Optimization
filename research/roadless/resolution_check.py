@@ -49,7 +49,7 @@ def main(bid: str, power: float, device: str, along: str, clearings: str, tokens
     for token in tokens:
         mesh = common.mesh_of(token)
         t0 = time.time()
-        c = relax._clearing(bid, device, along, mesh)
+        c = relax._clearing(bid, device, along, mesh, demand=common.PopulationDemand())
         rel = relax.Relaxation(c, power)
         cells = int(c.sc.grid.inside.sum())
         for name, cleared in zip(todo.name, todo.cleared):

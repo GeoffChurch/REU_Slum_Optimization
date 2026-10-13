@@ -53,7 +53,8 @@ def main(idx: int) -> None:
     rng = np.random.default_rng(0)
     for along in ALONGS[1:]:
         p = lifted.Params(ell_m=3.0, K=8, along=along)
-        sc = common.Scorer(b, lifted.UniformMesh(0.5, offset=lifted.OFFSET), p)
+        sc = common.Scorer(b, lifted.UniformMesh(0.5, offset=lifted.OFFSET), p,
+                           demand=common.PopulationDemand())
         order = rng.permutation(len(sc.polys))
         lab = sc.grid.label_sub(sc.polys)
         prev, rises = sc.P0, 0.0
