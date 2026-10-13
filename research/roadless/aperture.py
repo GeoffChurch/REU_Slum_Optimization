@@ -18,6 +18,7 @@ and J_2 (lens (c)).
     uv run python $S base-all <ids,|@file> <procs>       # here: small blocks whole, pockets
     uv run python $S base-local <ids,|@file> <procs> <T,...>   # here: large blocks' base
     uv run python $S moves <ids,|@file> <procs>          # here: Q2's demand moves by cause
+    uv run python $S pockets-composite <ids,|@file> <procs>   # here: oversized blocks' pockets
     uv run python $S score <id> <rule> <offset> <cpu|gpu> 0.5   # Q3, Q4: one block's fields
     uv run python $S score-plan <id> <cpu|gpu>           # ... every pair score_plan names
     uv run python $S tars <dir> <ids,>                   # a tar per block of score's inputs
@@ -62,6 +63,7 @@ from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
+import scipy.sparse as sp
 from scipy import ndimage
 
 HERE = Path(__file__).resolve().parent
@@ -305,6 +307,112 @@ def pockets(b) -> None:
     rr.write_parquet(out, pockets_path(b.block_id))
     print(f"{time.strftime('%H:%M:%S')} {b.block_id} pockets in {time.time() - t0:.0f}s",
           flush=True)
+
+
+def composite_flood(g: lifted.CompositeGrid) -> np.ndarray:
+    """(cells,) on a composite mesh: the cells the 4-connected flood fill of open sub-samples
+    reaches from the ground cells' (the uniform grid's flood, aperture_check.flood): a node per
+    sub-sample, a coarse cell's sixteen all open (it is wholly open), sub-samples joined within a
+    cell and across a cell's sides to its neighbours' facing ones (a coarse neighbour by any of
+    its own), found at every fine-lattice position along each side."""
+    from scipy.sparse.csgraph import connected_components
+    S, n = g.S, len(g.level)
+    S2 = S * S
+    op = (g.isub & ~g.bsub).reshape(n, S2)
+    r_ = np.arange(S2) // S
+    c_ = np.arange(S2) % S
+    a, b = [], []
+    for s in range(S2):                                   # within a cell
+        for t in ((s + 1) if c_[s] < S - 1 else -1, (s + S) if r_[s] < S - 1 else -1):
+            if t >= 0:
+                ok = op[:, s] & op[:, t]
+                cells = np.flatnonzero(ok)
+                a.append(cells * S2 + s)
+                b.append(cells * S2 + t)
+    # sides: (row offset, col offset) of the probe line just outside, and the facing sub-samples
+    # of the cell (own) and of a neighbour at the same scale (other), by position along the side
+    sides = (("right", lambda k, rs: (g.i0 + k, g.j0 + rs), [(i, S - 1) for i in range(S)],
+              [(i, 0) for i in range(S)]),
+             ("up", lambda k, rs: (g.i0 + rs, g.j0 + k), [(S - 1, j) for j in range(S)],
+              [(0, j) for j in range(S)]))
+    for _side, probe, own, other in sides:
+        for lev in np.unique(g.level):
+            cells = np.flatnonzero(g.level == lev)
+            r = 1 << int(lev)
+            for k in range(r):                            # every fine position along the side
+                py, px = probe(k, r)
+                q = g._locate(py[cells].astype(float), px[cells].astype(float))
+                hit = q >= 0
+                cc, qq = cells[hit], q[hit]
+                if lev == 0:
+                    fine_q = g.level[qq] == 0
+                    for (oi, oj), (ti, tj) in zip(own, other, strict=True):
+                        so, st = oi * S + oj, ti * S + tj
+                        m = fine_q & op[cc, so] & op[qq, st]
+                        a.append(cc[m] * S2 + so)
+                        b.append(qq[m] * S2 + st)
+                        m2 = ~fine_q & op[cc, so]           # a coarse neighbour: any of its own
+                        a.append(cc[m2] * S2 + so)
+                        b.append(qq[m2] * S2)
+                else:                                     # a coarse cell: by its first sub-sample
+                    fine_q = g.level[qq] == 0
+                    for ti, tj in other:
+                        st = ti * S + tj
+                        m = fine_q & op[qq, st]
+                        a.append(cc[m] * S2)
+                        b.append(qq[m] * S2 + st)
+                    a.append(cc[~fine_q] * S2)
+                    b.append(qq[~fine_q] * S2)
+    a_, b_ = np.concatenate(a), np.concatenate(b)
+    N = n * S2
+    _nc, lab = connected_components(sp.coo_matrix((np.ones(len(a_), dtype=np.int8), (a_, b_)),
+                                                  shape=(N, N)), directed=False)
+    lab = lab.reshape(n, S2)
+    seed = np.zeros(int(lab.max()) + 1, dtype=bool)
+    seed[lab[g.ground][op[g.ground]]] = True
+    return (seed[lab] & op).any(axis=1)
+
+
+def pockets_composite(b) -> None:
+    """Q1's pockets on an oversized block, on its composite mesh (OVERSIZED_MESH) under today's
+    rule: per home the share of its injection in cells the flood fill does not reach (behind a
+    phantom passage, `phantom`); the sub-cell gaps' widths (fine_bottleneck's distance transform)
+    are not computed here (`behind` nan). Rows aperture_rows/pockets/<id>.parquet."""
+    t0 = time.time()
+    p = params(RULES["T"], "cpu")
+    g = common.mesh_of(OVERSIZED_MESH).build(b, p, AREA)
+    polys = np.asarray(b.buildings.outlines)
+    pl = common.placement(g, polys, p)
+    fl = composite_flood(g)
+    ff = g.ff0.ravel()
+    phantom = np.asarray(pl.S[(ff > 0) & ~fl].sum(axis=0)).ravel()
+    out = pd.DataFrame(dict(block=b.block_id, home=np.arange(len(polys)), behind=np.nan,
+                            phantom=np.where(pl.enclosed, np.nan, phantom))).assign(
+        t=time.time() - t0)
+    pockets_path(b.block_id).parent.mkdir(parents=True, exist_ok=True)
+    rr.write_parquet(out, pockets_path(b.block_id))
+    print(f"{time.strftime('%H:%M:%S')} {b.block_id} composite pockets in "
+          f"{time.time() - t0:.0f}s", flush=True)
+
+
+def _pockets_ov_one(bid: str) -> str | None:
+    if pockets_path(bid).exists():
+        return None
+    try:
+        [b] = common.build_blocks([bid])
+        pockets_composite(b)
+    except Exception as e:                  # noqa: BLE001 -- reported, the run goes on
+        print(f"{bid} FAILED {type(e).__name__}: {str(e)[:300]}", flush=True)
+        return bid
+    return None
+
+
+def pockets_ov(ids: list[str], procs: int) -> None:
+    rr._check_single_threaded()
+    with multiprocessing.get_context("fork").Pool(procs, maxtasksperchild=1) as pool:
+        failed = [f for f in pool.imap_unordered(_pockets_ov_one, ids) if f]
+    if failed:
+        raise SystemExit(f"{len(failed)} blocks failed: {', '.join(failed)}")
 
 
 def moves_path(bid: str) -> Path:
@@ -871,6 +979,8 @@ def main(argv: list[str]) -> None:
         base(b, a[1], token, rules)
     elif cmd == "base-all":
         base_all(_ids(a[0]), int(a[1]))
+    elif cmd == "pockets-composite":
+        pockets_ov(_ids(a[0]), int(a[1]))
     elif cmd == "moves":
         moves_all(_ids(a[0]), int(a[1]))
     elif cmd == "base-local":
