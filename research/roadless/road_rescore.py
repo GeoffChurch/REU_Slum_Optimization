@@ -590,7 +590,7 @@ def score(rows: Path, lineup: tuple[str, ...], scratch: Path, mesh_token: str, p
     if "area" not in pops:
         raise SystemExit("score builds the area scorer (the clearings' check) on every mesh")
     cond = lifted.conductance_of(ALONG, lifted.scans_of(DEVICE))
-    p = lifted.Params(ell_m=ELL_M, K=K, along=cond.along, cells=cond.cells,
+    p = lifted.Params(ell_m=ELL_M, K=K, along=cond.along, cells=cond.cells, steps=cond.steps,
                       solver=lifted.solver_of(DEVICE))
     for pop in pops:
         score_dir(rows, mesh_token, pop).mkdir(parents=True, exist_ok=True)

@@ -36,7 +36,8 @@ def angle() -> None:
         for ell in (1.0, 3.0, 10.0):
             for W in (2.0, 4.0):
                 ps = [channel(a, W, 40.0, 0.5, lifted.Params(ell_m=ell, K=K,
-                                                             cells=lifted.OpenFraction()))
+                                                             cells=lifted.OpenFraction(),
+                                                             steps=lifted.SmallestCell()))
                       for a in range(0, 91, 5)]
                 ps = np.array(ps)
                 print(f"K={K:2d} ell={ell:4.1f} W={W:3.1f}  P min {ps.min():8.3f} max "

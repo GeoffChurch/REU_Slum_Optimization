@@ -169,7 +169,7 @@ def rescore(store: Store, block_ids: Sequence[str], specs: Sequence[str]) -> Non
             if key not in scorers:
                 scans = lifted.scans_of("cpu")
                 cond = lifted.conductance_of(info.along, scans)
-                p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells,
+                p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells, steps=cond.steps,
                                   solver=lifted.solver_of("cpu"))
                 search = lifted.along_of(info.search_along, scans) if info.search_along else None
                 scorers[key] = clear.Clearing(

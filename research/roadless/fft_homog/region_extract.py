@@ -28,7 +28,8 @@ print(f"{rc.BID}: {len(polys)} buildings, area {b.boundary.area / 1e6:.3f} km^2"
 
 with rc.Monitor("extract: uniform h 0.5 grid, demand, labels"):
     t = time.time()
-    p = lifted.Params(3.0, 8, solver=lifted.solver_of("cpu"), cells=lifted.OpenFraction())
+    p = lifted.Params(3.0, 8, solver=lifted.solver_of("cpu"), cells=lifted.OpenFraction(),
+                      steps=lifted.SmallestCell())
     g = lifted.UniformMesh(rc.H, offset=lifted.OFFSET).build(b, p, common.POPULATIONS["area"])
     print(f"grid {g.inside.shape} ({g.inside.size / 1e6:.1f}M px), inside "
           f"{int(g.inside.sum()) / 1e6:.2f}M, ground {int(g.ground.sum())}, "

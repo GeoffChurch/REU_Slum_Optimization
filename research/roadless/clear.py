@@ -39,8 +39,7 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 from numba import njit
-from scipy import ndimage
-from scipy.sparse.csgraph import connected_components, dijkstra
+from scipy.sparse.csgraph import dijkstra
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -100,7 +99,21 @@ class Clearing:
         """`search`: the along-conductance the TENSION ranks under (e.g. more translucent
         buildings, so counterfactual corridors show in the gradient); scoring stays `p`.
         `demand`: what each home injects (common.Demand); the cost stays the population's."""
-        self.sc = common.Scorer(block, mesh, p, population=population, demand=demand)
+        self._on(common.Scorer(block, mesh, p, population=population, demand=demand), p, rtol,
+                 search)
+
+    @classmethod
+    def on_scorer(cls, sc: common.Scorer, *, rtol: float,
+                  search: lifted.AlongConductance | None) -> Clearing:
+        """A clearing over a scorer already built (its grid, physics `sc.p`, population and
+        demand): no second baseline solve."""
+        c = cls.__new__(cls)
+        c._on(sc, sc.p, rtol, search)
+        return c
+
+    def _on(self, sc: common.Scorer, p: lifted.Params, rtol: float,
+            search: lifted.AlongConductance | None) -> None:
+        self.sc = sc
         self.cost = self.sc.w / self.sc.w.sum()        # population share of each building
         self.p = p
         self.ps = p if search is None else dataclasses.replace(p, along=search)
@@ -210,7 +223,8 @@ def loo(i: int, h: float, pop: str = "count", power: float = 1.0) -> None:
     blocks = common.build_blocks(common.recipients())
     b = blocks[i]
     mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
-    c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8, cells=lifted.OpenFraction()),
+    c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8, cells=lifted.OpenFraction(),
+                                        steps=lifted.SmallestCell()),
                  population=common.POPULATIONS[pop], demand=common.PopulationDemand())
     sc = c.sc
     P0 = sc.J(sc.u0, power)
@@ -259,14 +273,11 @@ FREE_STEP = 1e-12   # free_first: every step through the region graph costs this
 
 @dataclass(frozen=True, eq=False)
 class RegionGraph:
-    """free_first's graph at baseline, on the uniform raster: regions 0 .. ncomp - 1 the
-    4-connected components of open space (Grid.reach's structure), then the pieces of the
-    buildings, each building's cells split into 4-connected pieces (`owner`: piece -> building).
-    A cell is in its component if open and in the piece of every building covering part of it,
-    and two regions are adjacent (a -> b, both ways) when they share a cell or sit in 4-adjacent
-    cells. A building is entered and left through one piece: clearing it opens every piece, but
-    the raster joins them only where they touch. The street steps into `entry`: the components
-    holding a ground cell and the pieces covering one (cleared, it is open ground)."""
+    """free_first's graph at baseline (lifted.Regions, built by the metric's step rule, p.steps:
+    lifted.Grid.regions_smallest under today's, lifted._track_regions under the Aperture):
+    regions 0 .. ncomp - 1 the components of open space, then the regions a clearing enters, each
+    with its `owner` building (`owner`: region - ncomp -> building), adjacent (a -> b, both ways)
+    where a clearing joins them; the street steps into `entry`."""
     ncomp: int
     owner: np.ndarray
     a: np.ndarray
@@ -277,44 +288,11 @@ class RegionGraph:
 
     @classmethod
     def of(cls, c: Clearing) -> RegionGraph:
-        """Adjacency is R^T A4 R off the diagonal, A4 the cells' 4-adjacency plus the identity;
-        a building's incidences (building, cell) form one piece where M A4 M^T joins them (M:
-        incidences x cells)."""
         g = c.sc.grid
-        ny, nx = g.inside.shape
-        ncell = ny * nx
         open0 = (c.open_(np.zeros(c.n, dtype=bool)) > 0).ravel()
-        lab, ncomp = ndimage.label(open0.reshape(ny, nx))
-        lab = lab.ravel()
-        oc = np.flatnonzero(open0)
-        idx = np.arange(ncell).reshape(ny, nx)
-        p = np.concatenate([idx[:, :-1].ravel(), idx[:-1].ravel()])    # a cell and the one to
-        q = np.concatenate([idx[:, 1:].ravel(), idx[1:].ravel()])      # its right or below it
-        A4 = sp.csr_matrix((np.ones(ncell + 2 * len(p)),
-                            (np.concatenate([idx.ravel(), p, q]),
-                             np.concatenate([idx.ravel(), q, p]))), shape=(ncell, ncell))
-        bc = c.bf.tocoo()
-        bcell = np.flatnonzero(g.inside)[bc.col]           # inside-cell ids -> flat raster ids
-        ninc = len(bcell)
-        M = sp.csr_matrix((np.ones(ninc), (np.arange(ninc), bcell)), shape=(ninc, ncell))
-        touch = (M @ A4 @ M.T).tocoo()
-        same = bc.row[touch.row] == bc.row[touch.col]      # touching incidences of one building
-        npiece, piece = connected_components(
-            sp.csr_matrix((np.ones(int(same.sum())), (touch.row[same], touch.col[same])),
-                          shape=(ninc, ninc)), directed=False)
-        owner = np.empty(npiece, dtype=np.int64)
-        owner[piece] = bc.row
-        R = sp.csr_matrix((np.ones(len(oc) + ninc),
-                           (np.concatenate([oc, bcell]),
-                            np.concatenate([lab[oc] - 1, ncomp + piece]))),
-                          shape=(ncell, ncomp + npiece))
-        adj = (R.T @ A4 @ R).tocoo()
-        off = adj.row != adj.col
-        ground = g.ground.ravel()
-        entry = np.concatenate([np.unique(lab[open0 & ground]) - 1,
-                                ncomp + np.unique(piece[ground[bcell]])])
-        return cls(ncomp=int(ncomp), owner=owner, a=adj.row[off], b=adj.col[off], entry=entry,
-                   R=R, open0=open0)
+        rg = c.p.steps.regions(g, open0, c.bf, c.lab.reshape(g.inside.size, -1), c.p)
+        return cls(ncomp=rg.ncomp, owner=rg.owner, a=rg.a, b=rg.b, entry=rg.entry, R=rg.R,
+                   open0=open0)
 
     def sources(self, near: np.ndarray) -> np.ndarray:
         """The regions a home is freed through, from its near cells (flat): the components of
@@ -348,11 +326,7 @@ def free_first(c: Clearing, *, budget: float, held: np.ndarray) -> np.ndarray:
     if not sc.enclosed.any():
         return held.copy()
     g, bid = sc.grid, sc.block.block_id
-    if not isinstance(g, lifted.Grid):
-        raise NotImplementedError(
-            f"{bid}: free_first's region graph is the uniform raster's 4-connected cells "
-            f"(Grid.reach's); a {type(g).__name__} has cells of several sizes and no raster")
-    rg = RegionGraph.of(c)
+    rg = RegionGraph.of(c)          # the step rule's (today's raises on a CompositeGrid)
     street = rg.ncomp + len(rg.owner)                       # the street's node, after them
     a = np.concatenate([rg.a, np.full(len(rg.entry), street)])
     b = np.concatenate([rg.b, rg.entry])
@@ -672,7 +646,8 @@ def greedy_block(b, rnd: engine.Round, h: float, d_max: float, out: Path, popula
     step; `cleared` lists the step's buildings in pick order."""
     mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
     c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8, along=along, solver=solver,
-                                        cells=lifted.OpenFraction()),
+                                        cells=lifted.OpenFraction(),
+                                        steps=lifted.SmallestCell()),
                  population=population, search=search, demand=common.PopulationDemand())
     sc = c.sc
     J0 = sc.J(sc.u0, power)

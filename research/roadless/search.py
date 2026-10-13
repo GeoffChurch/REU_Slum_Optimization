@@ -1274,7 +1274,7 @@ def prune_block(b: Any, plan: SearchPlan, *,
                 polish_of: Callable[[Clearing, float], Graded], power: float,
                 along: str, device: str, d_max: float) -> pd.DataFrame:
     cond = lifted.conductance_of(along, lifted.scans_of(device))
-    p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells,
+    p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells, steps=cond.steps,
                       solver=lifted.solver_of(device))
     mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
     c = Clearing(b, mesh, p, population=common.POPULATIONS["area"],

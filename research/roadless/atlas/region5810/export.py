@@ -20,7 +20,8 @@ OUT = Path(sys.argv[1])
 mode = sys.argv[2]
 t0 = time.time()
 [b] = common.build_blocks([BID])
-p = lifted.Params(3.0, 8, solver=lifted.solver_of("gpu"), cells=lifted.OpenFraction())
+p = lifted.Params(3.0, 8, solver=lifted.solver_of("gpu"), cells=lifted.OpenFraction(),
+                  steps=lifted.SmallestCell())
 mesh = common.mesh_of("0.5a5x8")
 sc = common.Scorer(b, mesh, p, population=common.POPULATIONS["area"],
                    demand=common.PopulationDemand())

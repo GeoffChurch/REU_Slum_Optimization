@@ -124,7 +124,7 @@ WIDTHS_SUBCELL = (0.19, 0.3, 0.44, 0.69, 1.06)   # ... at widths between two cou
 
 def params(spec: str, device: str) -> lifted.Params:
     cond = lifted.conductance_of(spec, lifted.scans_of(device))
-    return lifted.Params(ELL_M, K, along=cond.along, cells=cond.cells,
+    return lifted.Params(ELL_M, K, along=cond.along, cells=cond.cells, steps=cond.steps,
                          solver=lifted.solver_of(device))
 
 
@@ -190,6 +190,13 @@ class BlurCentre:
     def vjp(self, grid, open_, A, solver):
         raise NotImplementedError(f"{self.name}: a diagnostic, no gradient")
 
+    def sub_factor(self, grid, open_, solver):
+        raise NotImplementedError(f"{self.name}: sampled at the cell's centre, no factor per "
+                                  "sub-sample for an Aperture's tracks")
+
+    def sub_vjp(self, grid, open_, A, solver):
+        raise NotImplementedError(f"{self.name}: a diagnostic, no gradient")
+
 
 # ------------------------------------------------------------------ the channel (Q2)
 
@@ -239,7 +246,8 @@ CENTRE = {f"{kind}{r:g}": BlurCentre(r, kind == "bc") for kind in ("bc", "bb")
 def _channel_params(variant: str) -> lifted.Params:
     if variant in CENTRE:
         return lifted.Params(ELL_M, K, along=lifted.Uniform(), solver=lifted.CpuAMG(),
-                             cells=CENTRE[variant])
+                             cells=CENTRE[variant],
+                             steps=lifted.SmallestCell())
     return params(VARIANTS[variant], "cpu")
 
 

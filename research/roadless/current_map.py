@@ -109,7 +109,8 @@ def arm_of(spec: str, bid: str, cost: np.ndarray) -> Arm:
 def main(bid: str, arms: list[str], device: str, zoom: bool) -> None:
     [b] = common.build_blocks([bid])
     scans, solver = lifted.scans_of(device), lifted.solver_of(device)
-    base = lifted.Params(3.0, 8, solver=solver, cells=lifted.OpenFraction())
+    base = lifted.Params(3.0, 8, solver=solver, cells=lifted.OpenFraction(),
+                         steps=lifted.SmallestCell())
     mesh = lifted.UniformMesh(H, offset=lifted.OFFSET)
     sc = common.Scorer(b, mesh, base, population=common.POPULATIONS["area"],
                        demand=common.PopulationDemand())

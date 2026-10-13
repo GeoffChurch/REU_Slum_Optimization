@@ -70,7 +70,8 @@ POP = common.PopulationDemand()
 def _params(along: lifted.AlongConductance) -> lifted.Params:
     """The metric's physics on the CPU (relax._clearing's), U's cells. (At 3f74f5fa, for
     `reference`, the same without `cells`: the field did not exist.)"""
-    return lifted.Params(3.0, 8, along=along, solver=lifted.CpuAMG(), cells=lifted.OpenFraction())
+    return lifted.Params(3.0, 8, along=along, solver=lifted.CpuAMG(), cells=lifted.OpenFraction(),
+                         steps=lifted.SmallestCell())
 
 
 @contextmanager

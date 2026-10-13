@@ -32,7 +32,8 @@ def one(bid: str) -> dict:
     hi = int(g[g.D >= 0.10 - 1e-9].step.iloc[0])
     lo = hi - 1
     mesh = lifted.UniformMesh(H_FINE, offset=lifted.OFFSET)
-    c = Clearing(_B[bid], mesh, lifted.Params(3.0, 8, cells=lifted.OpenFraction()),
+    c = Clearing(_B[bid], mesh, lifted.Params(3.0, 8, cells=lifted.OpenFraction(),
+                                              steps=lifted.SmallestCell()),
                  population=common.POPULATIONS["area"],
                  demand=common.PopulationDemand())
     sc = c.sc

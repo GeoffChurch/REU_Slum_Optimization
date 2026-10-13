@@ -13,7 +13,8 @@ import lifted  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 RUN = Path("research/roadless/clear_rows_S0.01cat_h0.5_area_p2")
-p = lifted.Params(3.0, 8, solver=lifted.solver_of("cpu"), cells=lifted.OpenFraction())
+p = lifted.Params(3.0, 8, solver=lifted.solver_of("cpu"), cells=lifted.OpenFraction(),
+                  steps=lifted.SmallestCell())
 for bid in ("ZAF.9.3.1_1_22422", "ZAF.9.3.1_1_30848"):
     [b] = common.build_blocks([bid])
     g = lifted.UniformMesh(0.5, offset=lifted.OFFSET).build(b, p, common.POPULATIONS["area"])

@@ -644,7 +644,7 @@ def _cpu_scorer(b: Block) -> common.Scorer:
     import road_rescore as rr
     import transparency_run as tr
     cond = lifted.conductance_of(rr.ALONG, lifted.scans_of("cpu"))
-    p = lifted.Params(ell_m=rr.ELL_M, K=rr.K, along=cond.along, cells=cond.cells,
+    p = lifted.Params(ell_m=rr.ELL_M, K=rr.K, along=cond.along, cells=cond.cells, steps=cond.steps,
                       solver=lifted.solver_of("cpu"))
     return common.Scorer(b, tr.FREE.mesh, p, population=common.AreaPopulation(),
                          demand=common.PopulationDemand())

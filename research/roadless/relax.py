@@ -156,14 +156,14 @@ class Relaxation:
         pat = g.pattern(K, xp)
         _v, _th, _m, gap = lifted.axes(K)
         gc = xp.zeros(o.size)                           # dJ / d(cell factor) per grid cell
+        # dJ / d(each step's width share), as p.steps reads it: SmallestCell adds dJ / d kap to
+        # gc (each edge's coefficient shared among the cells at its min), an Aperture keeps it
+        # per sub-sample (shared among those at each track's min) for open_grad below
+        steps = p.steps.gradient(g, o, kap, p, gc)
         Fl = p.along.layers(g, op_eps, K)
         dF = None                                       # dJ / d(layer factor), if any vary
-        for k in range(K):
-            a, b, line, const = pat.along[k]           # const: a fully open edge's weight
-            cells = [a, b, *list(line)]
-            vals = xp.stack([kap[q] for q in cells])
-            frac = vals.min(axis=0)
-            act = vals <= frac[None, :]                  # the cells attaining the min
+        for k, frac in enumerate(p.steps.widths(g, o, kap, p)):
+            a, b, _line, const = pat.along[k]          # const: a fully open edge's weight
             ca, cb = cell[a], cell[b]
             q = (uk[ca, k] - uk[cb, k]) * (lk[ca, k] - lk[cb, k])
             if np.isscalar(Fl[k]):
@@ -176,19 +176,21 @@ class Relaxation:
                     dF = xp.zeros((K, o.size))
                 dF[k] += xp.bincount(xp.where(fa <= fb, a, b), -q * frac * const,
                                      minlength=o.size)
-            coef = -q * const * boost / act.sum(axis=0)
-            for i, qc in enumerate(cells):
-                gc += xp.bincount(qc[act[i]], coef[act[i]], minlength=o.size)
+            steps.add(k, -q * const * boost)
         free = xp.flatnonzero(o > 0)
         area = g.cell_area(xp, o > 0)
         for k in range(K):
             k2 = (k + 1) % K
             q = (uk[:, k] - uk[:, k2]) * (lk[:, k] - lk[:, k2])
             gc[free] += -q * (area / (p.ell_m ** 2 * gap[k]))
-        # dJ / d(open): through the cell factors (OpenFraction's vjp: gc itself), plus the along
+        # dJ / d(open): through the cell factors (OpenFraction's vjp: gc itself), through what
+        # the step widths read below the cells (an Aperture's sub-samples), plus the along
         # factors' own response to opening
         gc = xp.asarray(p.cells.vjp(g, o.reshape(op_eps.shape), gc.reshape(op_eps.shape),
                                     p.solver)).ravel()
+        below = steps.open_grad()
+        if below is not None:
+            gc += xp.asarray(below).ravel()
         if dF is not None:
             gc += xp.asarray(p.along.vjp(g, op_eps, K, dF.reshape(K, *op_eps.shape))).ravel()
         grad = (1.0 - self.eps) * (c.bf @ p.solver.to_host(gc)[self.inside])
@@ -720,7 +722,7 @@ def _clearing(bid: str, device: str, along: str, mesh: lifted.MeshSpec, *,
     scans = lifted.scans_of(device)
     specs = along.split("@")
     cond = lifted.conductance_of(specs[0], scans)
-    p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells,
+    p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells, steps=cond.steps,
                       solver=lifted.solver_of(device))
     return Clearing(b, mesh, p, population=common.POPULATIONS["area"],
                     search=lifted.along_of(specs[1], scans) if len(specs) == 2 else None,

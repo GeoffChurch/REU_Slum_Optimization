@@ -40,7 +40,8 @@ def main(ids: list[str], arm: str, pop: str = "count", power: float = 1.0,
         pre = common.prefix_to(b, propose(arms[arm], b).roads, 0.10, w)
         corr = gpd.GeoSeries([road_corridor(pre)])
         mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
-        sc = common.Scorer(b, mesh, lifted.Params(ell_m=3.0, K=8, cells=lifted.OpenFraction()),
+        sc = common.Scorer(b, mesh, lifted.Params(ell_m=3.0, K=8, cells=lifted.OpenFraction(),
+                                                  steps=lifted.SmallestCell()),
                            population=common.POPULATIONS[pop], demand=common.PopulationDemand())
         lp = sc.perm(pre)
         # the round each cleared building went in (colours it when there are too many to number)
