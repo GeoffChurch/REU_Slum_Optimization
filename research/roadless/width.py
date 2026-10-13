@@ -13,7 +13,8 @@ power 1), J_2 (lens (c)) and P_{1/2} (common.PriorityDemand(0.5), power 1).
 
     S=research/roadless/width.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S channel <procs>                  # Q2, the width response, the alignment
-    uv run python $S score <id> <variant> <offset>    # Q1, Q3, Q4: one task (cluster.py cpu)
+    uv run python $S score <id> <variant> <offset> <cpu|gpu>     # Q1, Q3, Q4: one block, variant
+    uv run python $S score-all <id> <0|shift> <cpu|gpu>          # ... every variant in turn
     uv run python $S simp <id> <variant>              # Q4: SIMP base, objective P, free first
     uv run python $S cross <id> <variant>             # Q4: the SIMP clearings under a variant
     uv run python $S tars <dir> <ids,> <score|cross>  # a tar per block of a task's inputs
@@ -29,10 +30,11 @@ B_r for the alignment only (the blurred openness sampled at each cell's centre, 
 without it: the form the brief wrote). Rows width_rows/channel.parquet.
 
 `score`: one block under one variant on the lattice at OFFSETS[offset]: the baseline, the stored
-clearings (STORED, through clearings.Store), item 4's road prefixes at area D 0.05 (ROADS; offset
-0 only) and the no-buildings prior (every inside sub-sample open, the homes' demand as placed),
-each under the three lenses with B (i) and the escape-time tails; on the sentinel at offset 0 the
-flows of the baseline, SIMP's default and the prior (the flux per cell) and their corridor indices
+clearings (STORED, through clearings.Store) and item 4's road prefixes at area D 0.05 (ROADS;
+offset 0 only), each under the three lenses with B (i) and the escape-time tails; on the sentinel
+at offset 0 also the no-buildings prior (every inside sub-sample open, the homes' demand as
+placed), and the flows of the baseline, SIMP's default and the prior (the flux per cell) and their
+corridor indices
 (`_indices`); per home its escape time at baseline and under SIMP's default, and its bottleneck
 width (`_bottleneck`). Rows width_rows/score/o<offset>/<variant>/<id>.parquet, homes
 width_rows/homes/o<offset>/<variant>/<id>.parquet, flows width_rows/flows/<variant>/<id>.parquet.
@@ -90,7 +92,6 @@ ROADS = ("clearance", "clearance_looped", "cycle_native", "cycle_native_betweenn
 ROAD_ROWS = HERE / "road_rows"               # item 4's rows; its networks under scratch/
 BUDGET = relax.D_LENS                        # area D 0.05
 SCORE_RTOL = clear.RTOL_SCORE                # every score: the optimizers' exact one
-DEVICE = "cpu"                               # score: the CPU nodes
 POP = common.PopulationDemand()
 PQ = common.PriorityDemand(0.5)
 LENSES = ("P", "J2", "Pq0.5")
@@ -304,10 +305,12 @@ def _flux(g: lifted.Grid, o: np.ndarray, p: lifted.Params, sol: lifted.Solution)
     uk = np.zeros((len(free), p.K))
     uk[sol.unk_cell >= 0] = sol.u.reshape(-1, p.K)
     S, Jx, Jy = np.zeros(N), np.zeros(N), np.zeros(N)
+    th = p.solver.to_host
     for i, (ca, cb, _ka, _kb, w) in enumerate(lifted.edges(g, o, p)):
         if i >= p.K:                            # the turning families carry no flux
             break
-        q = p.solver.to_host(w) * (uk[ca, i] - uk[cb, i])
+        ca, cb = th(ca), th(cb)
+        q = th(w) * (uk[ca, i] - uk[cb, i])
         fa, fb = free[ca], free[cb]
         half = 0.5 * (np.bincount(fa, q, minlength=N) + np.bincount(fb, q, minlength=N))
         S += np.abs(half)
@@ -392,13 +395,12 @@ def flows_path(variant: str, bid: str) -> Path:
     return ROWS / "flows" / variant / f"{bid}.parquet"
 
 
-def score(bid: str, variant: str, off: int) -> None:
-    """One block under one variant at OFFSETS[off] (the module's docstring)."""
+def score(b, variant: str, off: int, device: str) -> None:
+    """One block under one variant at OFFSETS[off], on `device` (the module's docstring)."""
     rr._check_single_threaded()
     t0 = time.time()
-    spec = VARIANTS[variant]
-    [b] = common.build_blocks([bid])
-    p = params(spec, DEVICE)
+    spec, bid = VARIANTS[variant], b.block_id
+    p = params(spec, device)
     sc = common.Scorer(b, lifted.UniformMesh(H, offset=OFFSETS[off]), p,
                        population=common.POPULATIONS["area"], demand=POP)
     g, n = sc.grid, len(sc.polys)
@@ -419,9 +421,10 @@ def score(bid: str, variant: str, off: int) -> None:
     if off == 0:
         for name, (o, D) in _road_fields(b, g, bid).items():
             fields[name] = ("road", o, D)
-    fields["prior"] = ("prior", g.isub.mean(axis=-1), np.nan)
-    t_setup = time.time() - t0
     flows = bid in SENTINEL and off == 0
+    if flows:                                   # Q1's no-buildings prior
+        fields["prior"] = ("prior", g.isub.mean(axis=-1), np.nan)
+    t_setup = time.time() - t0
     rows, kept = [], {}
     u_default = None
     for name, (kind, o, D) in fields.items():
@@ -430,8 +433,8 @@ def score(bid: str, variant: str, off: int) -> None:
         s1 = lifted.solve(g, o, sc.f, p, system=sy, rtol=SCORE_RTOL)
         u = sc.home_u_of(s1, o)
         sq = lifted.solve(g, o, f_q, p, system=sy, rtol=SCORE_RTOL)
-        row = dict(block=bid, variant=variant, spec=spec, offset=off, field=name, kind=kind,
-                   D=D, enclosed=sc.enclosed_left(o), P=s1.P, Pq=sq.P,
+        row = dict(block=bid, variant=variant, spec=spec, offset=off, device=device, field=name,
+                   kind=kind, D=D, enclosed=sc.enclosed_left(o), P=s1.P, Pq=sq.P,
                    L_P=1.0 - s1.P / sc.P0, L_J2=sc.perm_p(u, 2.0),
                    **{"L_Pq0.5": 1.0 - sq.P / sol_q.P},
                    umed=float(np.nanmedian(u) / np.nanmedian(sc.u0)),
@@ -468,6 +471,20 @@ def score(bid: str, variant: str, off: int) -> None:
         rr.write_parquet(fl, flows_path(variant, bid))
     print(f"{time.strftime('%H:%M:%S')} {bid} {variant} o{off} done in {time.time() - t0:.0f}s, "
           f"peak RSS {setup['peak_rss_gb']:.1f} GB", flush=True)
+
+
+def score_all(bid: str, which: str, device: str) -> None:
+    """`score` under every variant whose rows are not here yet, one block built once: at the
+    metric's offset (`which` 0) or at the block's shift of ALIGN (`shift`)."""
+    off = 0 if which == "0" else ALIGN[bid] if which == "shift" else -1
+    if off < 0:
+        raise SystemExit(f"score_all at 0 or shift, not {which!r}")
+    [b] = common.build_blocks([bid])
+    for variant in VARIANTS:
+        if score_path(off, variant, bid).exists():
+            print(f"{bid} {variant} o{off}: rows here already", flush=True)
+            continue
+        score(b, variant, off, device)
 
 
 # ------------------------------------------------------------------ SIMP under a variant (Q4)
@@ -866,7 +883,10 @@ def main(argv: list[str]) -> None:
     if cmd == "channel":
         channel(int(a[0]))
     elif cmd == "score":
-        score(a[0], a[1], int(a[2]))
+        [b] = common.build_blocks([a[0]])
+        score(b, a[1], int(a[2]), a[3])
+    elif cmd == "score-all":
+        score_all(a[0], a[1], a[2])
     elif cmd == "simp":
         simp(a[0], a[1])
     elif cmd == "cross":
