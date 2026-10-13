@@ -135,13 +135,21 @@ items up front"), in the order proposed:
    shipped permeability's own quantity on the open-space raster; the equity view beside it is J_2
    or, if it can replace J_2, a priority-weighted P (injections w_i (u0_i)^q at baseline escape
    times, one solve and still convex; q = (p - 1)/2 matches J_p to first order on independent
-   paths, so q 1/2 is J_2's analogue and q 1, injection growing with depth^2, J_3's): the test on
-   the 220 small blocks is queued (NOTES, "Priority-weighted P"). (2) **Area population for
-   buildings** ("area for buildings makes the most sense ... relocate individual homes rather
-   than demolishing well-designed large community infrastructure like a school, especially since
-   people do come in and out of it"): area sets both a building's injection and its displacement
-   cost; the sources are already outside the buildings (Placement's ring of free cells within
-   1 m), which was the owner's other concern. (3) **The conductance: pending the effective-width
+   paths, so q 1/2 is J_2's analogue and q 1, injection growing with depth^2, J_3's). Tested on
+   the 220 small blocks (NOTES, "Priority-weighted P"; SIMP base with free first, area D 0.05, all
+   four objectives): P_{1/2}'s clearing is not behind J_2's on J_2's lens (+0.0009 [-0.0013,
+   +0.0036]), and at the p95 home it is +0.0011 [-0.0028, +0.0050003], 3e-7 past the
+   pre-registered 0.005, so as written it does not replace J_2 (**owner's call**: the miss is
+   inside the bootstrap's Monte Carlo noise). It is better than J_2 at the max home (-0.020) and
+   worse at the median (+0.005), clears deeper, gives up 0.0028 of P (J_2 0.0015) and carries a
+   certified bound (0.16 above its clearing, nearly all of it the grey relaxation's); P_1
+   overshoots (J_2's lens -0.009, the p95 home +0.007) and P fails both (-0.006, +0.016).
+   (2) **Area population for buildings** ("area for buildings makes the most sense ... relocate
+   individual homes rather than demolishing well-designed large community infrastructure like a
+   school, especially since people do come in and out of it"): area sets both a building's
+   injection and its displacement cost; the sources are already outside the buildings
+   (Placement's ring of free cells within 1 m), which was the owner's other concern.
+   (3) **The conductance: pending the effective-width
    study** (queued after the priority-weighted P test). The owner wants corridors to FORM in the
    flow (a cleared building can open several), not the clearing to look like lanes, and asked for
    a justified uniform: open space conducting more the farther it is from buildings. Variants: the
@@ -232,8 +240,8 @@ can be done after we've done the entire website/README/examples revamp"):
   blocks, 3.5 MB in git, read through `clearings.py`, which refuses a block whose footprints no
   longer match their fingerprint; the 12 blocks' pre-B rows the free-first runs overwrote were
   recovered from run road-b's shipped inputs (`D0.05.p2@road-b`). Still to do: the optimizers'
-  no-overwrite guard (in the consolidated pass), and a re-export once the priority-weighted P run
-  finishes (`clearings_export.py export`).
+  no-overwrite guard (in the consolidated pass). The re-export after the priority-weighted P run
+  is done (2026-10-13: its four runs on all 220 blocks, the store 61,351 rows).
 - **`.superpowers/sdd/`'s reports** (6.6 MB since July, git-ignored): checked for findings not
   recorded elsewhere, those filed, the finished plans' workspaces deleted. Done 2026-10-13: five
   July footpath-conductance findings went to the wiki

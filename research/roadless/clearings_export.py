@@ -20,7 +20,7 @@ its runs, parses the settings their names encode and reads one file into core ro
     GreedyFamily     clear_rows_<picker>_h<h>[_area][_p<power>][_<along>[@<search>]]/<block>.parquet:
                      the greedy and the searches that write its format (nested rows `cleared`,
                      or a whole clearing a row `clearing`)
-    PweightFamily    pweight_rows/simp/<objective>/<block>.parquet (priority-weighted P; in flight)
+    PweightFamily    pweight_rows/simp/<objective>/<block>.parquet (priority-weighted P)
     CollectedFamily  the clearings the studies gathered into one parquet (fine_clearings, ...): a
                      run for each (file, name), whose note says how many of its sets equal a set
                      of a stored run

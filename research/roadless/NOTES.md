@@ -3506,6 +3506,98 @@ scoring here, 8 processes. Smoke on 41132 (138 buildings, the 220's median) here
 247 s an arm, the bound 11 min, peak RSS 0.7 GB, the scoring 49 s; 5618 (759 buildings, the
 largest) 34 min for SIMP on P and 47 on J_2.
 
+Run (2026-10-13), at the criteria's commit (1d7f25e): pw-orion (116 blocks) and pw-quadro2 (104),
+1,540 tasks, all passed, 406 task-h: SIMP 125.5 (P 28.3, J_2 40.3, P_{1/2} 28.7, P_1 28.3), the
+bound 280.4 (P 97.2, P_{1/2} 92.1, P_1 91.2), 2.2x the four SIMP runs together; 5 h 44 min on orion
+and 6 h 40 min on quadro2 (33 -- 36 and 32 at once, whole cores). The longest task, the bound for P
+on 63718 (372 buildings), 5.5 h: late iterations ~750 s each, 4x its P_q bounds on the same block
+(not inspected); 5618's bounds 2.6 h. Peak RSS 2.44 GB. The scoring here, 8 processes, 3.7 CPU-h
+(5618 8 min).
+- Checks. The scorer reproduces every clearing's own lens, the optimizer's exact score, within
+  2.3e-9. The nodes' clearings are this machine's: 41132's four (quadro2) cleared set for cleared
+  set, their lenses within 4.3e-13, its bound for P within 3e-7; 52727's P and J_2 (quadro2) and
+  5618's (orion) within 7.2e-11. B (i): 24 of the 220 have homes enclosed at baseline, free first
+  frees every one on every arm (D 0.0007 -- 0.0139 a block), and no clearing leaves anyone
+  enclosed, so (c) holds for every comparison. Every rounded clearing's lens is below its bound, on
+  all 220, for all three. Frank-Wolfe ran its 40 iterations on all but 4 (P), 3 (P_{1/2}) and 8
+  (P_1) blocks (26 -- 29 at the least).
+- Every clearing under every lens, median over the blocks (u: escape time relative to baseline,
+  lower is better; means in summary_lens.csv):
+
+      clearing   P       J_2     P_{1/2} P_1     umed    u95     umax
+      P          0.3945  0.4121  0.4443  0.4710  0.654   0.558   0.571
+      J_2        0.3966  0.4191  0.4516  0.4877  0.686   0.549   0.531
+      P_{1/2}    0.3927  0.4206  0.4576  0.4968  0.689   0.555   0.523
+      P_1        0.3846  0.4115  0.4567  0.5002  0.703   0.556   0.501
+
+  Each objective's clearing leads its own lens's median but P's (J_2's clearing's median P lens is
+  above P's own; paired, P's own leads by +0.0015 [-0.0001, +0.0032]) and J_2's (P_{1/2}'s
+  clearing's median J_2 lens is above J_2's own; paired, in 1).
+- 1. P_{1/2}'s clearing minus J_2's, paired means [95% interval]: the J_2 lens +0.0009 [-0.0013,
+  +0.0036] (ahead on 87 blocks; the same clearing on 47): (a) holds. The p95 home's relative
+  escape time +0.0011 [-0.0028, +0.0050003]: (b) fails, its upper end 3e-7 above +0.005. Never
+  behind on B (i): (c) holds. **As written, P_{1/2} does not replace J_2**: it misses (b) by 3e-7
+  of relative escape time. Description, not verdict: that end moves by about 5e-5 with the
+  bootstrap's draws (under 20 other seeds 0.00485 -- 0.00500, above 0.005 under 1; with 200,000
+  draws 0.00493), so the miss is inside the interval's own Monte Carlo error: the owner's call, as
+  cycle_native's 0.00015 on the sentinel's guard was. Beside it: the median home +0.0054 [+0.0007,
+  +0.0099] (P_{1/2} worse there), the max home -0.0197 [-0.0353, -0.0072] (better); on P against
+  P's clearing it gives up 0.0028 [0.0010, 0.0046], where J_2's clearing gives up 0.0015 [-0.0001,
+  +0.0032]; J_2's clearing sits 0.0076 [0.0051, 0.0108] below P_{1/2}'s on P_{1/2}'s own lens. P
+  itself (q 0) under the same test fails both: the J_2 lens -0.0060 [-0.0089, -0.0031], u95
+  +0.0156 [+0.0114, +0.0197]. The weighting does the work: q 1/2 closes P's gap to J_2 on J_2's
+  lens entirely and 93% of it at the p95 home.
+- 2. P_1's clearing minus J_2's: the J_2 lens -0.0093 [-0.0135, -0.0050], u95 +0.0070 [+0.0014,
+  +0.0132]: (a) and (b) both fail. It overshoots toward the deepest homes: the max home -0.0293
+  [-0.0467, -0.0144] (better than J_2's), the median home +0.0293 [+0.0229, +0.0363] (worse), and
+  it gives up 0.0168 [0.0136, 0.0207] of P against P's clearing. The first-order matching holds in
+  order and about in place on real blocks, shared paths and all: at the median home P is ahead of
+  J_2 (-0.021) and P_{1/2} and P_1 behind it (+0.005, +0.029); at the max home P is behind (+0.031)
+  and P_{1/2} and P_1 ahead (-0.020, -0.029); on J_2's lens and at the p95 home q 1/2 lands within
+  0.0011 of J_2, where q 0 and q 1 both fall behind it (-0.006 and -0.009 on the lens, +0.016 and
+  +0.007 at the p95 home).
+- 3. The bound against the rounded clearing, medians [quartiles] over the 220 (the bound's own
+  slack: its value minus the relaxation's at the last iterate; grey: the relaxed optimum's share of
+  buildings partly cleared):
+
+      objective  rounded  bound   gap                      slack   grey
+      P          0.3945   0.5833  0.1749 [0.1473, 0.2137]  0.0111  0.65
+      P_{1/2}    0.4576   0.6436  0.1619 [0.1319, 0.1996]  0.0090  0.62
+      P_1        0.5002   0.6874  0.1469 [0.1074, 0.1780]  0.0079  0.59
+      J_2        0.4191   none (not convex)
+
+  The gap is 24 -- 32% of the bound and nearly all of it the relaxation's, not the Frank-Wolfe's
+  (slack ~0.01): the relaxed optimum is grey, partial clearing everywhere, as relax220 found at D
+  0.10 (0.15 above the greedy there). What the convexity buys: a certificate that no clearing
+  within D beats SIMP's by more than 0.15 -- 0.17 of the lens on the median block, valid everywhere
+  (every rounded clearing below it), but loose, since it bounds the grey relaxation, not 0/1
+  clearings; J_2 has none. It cost 280 task-h.
+- 4. How far apart and where. The Jaccard overlap of the cleared sets, median [quartiles]: P--J_2
+  0.69 [0.56, 0.84], P--P_{1/2} 0.64 [0.50, 0.75], P--P_1 0.50 [0.38, 0.62], J_2--P_{1/2} 0.73
+  [0.54, 0.88], J_2--P_1 0.57 [0.43, 0.70], P_{1/2}--P_1 0.67 [0.53, 0.84]; the same clearing as
+  J_2's on 49 blocks (P), 47 (P_{1/2}) and 21 (P_1). J_2's nearest clearing is P_{1/2}'s. Depth,
+  relative to the block's mean escape time at baseline, median over blocks (each against P's,
+  paired mean [interval]): served (the homes whose flow crosses the cleared buildings) P 1.64, J_2
+  1.69 (+0.057 [+0.041, +0.076]), P_{1/2} 1.74 (+0.140 [+0.112, +0.177]), P_1 1.84 (+0.251 [+0.212,
+  +0.305]); own P 1.00, J_2 1.07 (+0.091 [+0.065, +0.123]), P_{1/2} 1.14 (+0.215 [+0.172, +0.271]),
+  P_1 1.28 (+0.389 [+0.327, +0.473]). The weighted objectives clear deeper, P_{1/2} deeper than J_2
+  and P_1 deeper still, with as many buildings (a median of 10; P_1 9).
+
+What the 220 say: P_{1/2} lands on J_2. On J_2's own lens its clearing is not behind J_2's own
+optimizer (+0.0009 [-0.0013, +0.0036]), and at the p95 home it is within the 0.005 margin but for
+3e-7 at the interval's end, so as written it does not replace J_2, by a miss inside the bootstrap's
+noise (the owner's call). Where it differs from J_2 it leans further into the tail (better at the
+max home by 0.020, worse at the median by 0.005, its clearings deeper), gives up a little more P
+(0.0028 against J_2's 0.0015), and alone of the two carries a certified bound (0.16 above its
+clearing on the median block, nearly all of it the grey relaxation's). P_1, the literal
+"quadratically higher", overshoots: worse than J_2 on J_2's lens and the p95 home, best of all at
+the max home, worst at the median. P itself fails J_2's test on both counts, so the match is the
+weighting's doing, and the first-order rule q = (p - 1) / 2 holds about in place on blocks with
+shared paths. Committed: pweight_rows/summary_{lens,questions,bound,describe,cost}.csv (the rows
+are in the ignored pweight_rows/ parquet), and the four runs' clearings in the stored clearings
+(clearings_export.py export: clearings/pweight_rows/simp/, all 220 blocks each, the store now
+61,351 rows).
+
 ### The stored clearings, committed (owner 2026-10-13: "Yes to everything")
 
 BACKLOG's "The stored clearings made durable". The optimizers' rows (relax_rows/, polish_rows/,
