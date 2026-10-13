@@ -4084,8 +4084,8 @@ The choices (lifted.Band, lifted.PartRule), each variant selectable and named:
   (PartRule.through) a piece joins the cell's component only if its building, cleared alone, joins
   the anchor's part, and a home is freed through the cell only by a piece whose clearing makes it
   one part: its node reaching the street is no way out while it takes no demand. That last was
-  found when free first raised on 24240 and 45267 (a home whose only near cells reaching the street
-  were split, its crossing clearing nothing); the `free` guard below.
+  found when free first raised on 24240, 45267 and 63612 (a home whose only near cells reaching the
+  street were split, its crossing clearing nothing); the `free` guard below.
 
 The corridor (width.walled_channel: W x 40 m, walls footprints 3 m thick, a dead end behind the
 demand), demand on the cells each rule reaches, as Placement allows; P's max / min:
@@ -4176,8 +4176,8 @@ clear width) or a phantom passage:
     60 large     median        0.13   0.026  0.19  0.24  0.26  0.020  0.005  0.033 0.034 0.035
                  90th pct      0.22   0.056  0.42  0.63  0.65  0.038  0.009  0.084 0.22  0.22
                  pooled        0.13   0.031                    0.022  0.006
-    21 oversized median                                        0.007  0.002  0.008 0.007 0.007
-                 pooled                                        0.008  0.002
+    22 oversized median                                        0.007  0.002  0.008 0.009 0.009
+                 pooled                                        0.010  0.002
 
 (people: the homes over the threshold, as a share of the block's people; demand: the share of the
 block's demand that sits behind; P, P_1/2, J_2: those homes' share of each baseline; pooled: over
@@ -4186,48 +4186,49 @@ have over 5% of their demand behind a sub-cell gap or a phantom passage, and the
 third of P and of the equity lenses' baselines at the median block, three quarters at the 90th
 percentile: a pocket home's escape time is long, and P_{1/2} and J_2 weight it. Behind phantom
 passages alone, the defect the fix removes, are 4.1% of the small blocks' people (2.2% of the
-large, 0.8% of the oversized), holding a median 3.6 -- 4.0% of the lenses and up to 0.89 of P and
-0.998 of J_2 (small blocks; large 0.26 and 0.64). 63612, the last oversized block, is still in the
-cluster's queue.
+large, 1.0% of the oversized), holding a median 3.6 -- 4.0% of the lenses and up to 0.89 of P and
+0.998 of J_2 (small blocks; large 0.26 and 0.64).
 
 **Q2: what the fix does at baseline** (Fws against today's on every block; A, Aw and Aws in
 summary_q2_pooled.csv).
 
 - Enclosed: Fws encloses 112 homes on the small blocks against today's 63 (49 new, on 19 blocks,
-  0.09% of their people), 62 against 24 on the large (38 on 17 blocks, 0.02%) and 3 against 1 on
-  the oversized (2 on 45267); every home today's encloses stays enclosed. All but three new ones
-  are enclosed by the geometry, every open sub-sample near them joined to the street only through
-  phantom passages; the three (one small block, two large) by the split-cell rule, their only way
-  out a corner contact. Free first frees every one within D 0.05: on 35 small blocks for 64
-  buildings, a median D 0.0031 a block, at most 0.0164 (today's rule: 24 blocks, 38 buildings,
+  0.09% of their people), 62 against 24 on the large (38 on 17 blocks, 0.02%) and 11 against 8 on
+  the oversized (3 on 45267 and 63612); every home today's encloses stays enclosed. All but three
+  new ones are enclosed by the geometry, every open sub-sample near them joined to the street only
+  through phantom passages; the three (one small block, two large) by the split-cell rule, their
+  only way out a corner contact. Free first frees every one within D 0.05: on 35 small blocks for
+  64 buildings, a median D 0.0031 a block, at most 0.0164 (today's rule: 24 blocks, 38 buildings,
   0.0044, 0.0156); on 23 large blocks for 49 (0.00045, at most 0.0082; today's 12 and 20, 0.0008);
-  on 45267 for 3, D 0.0004 (today's region graph raises on the composite).
+  on 45267 and 63612 for 3 and 8, D 0.0004 and 0.0024 (today's region graph raises on the
+  composite).
 - Demand moved (the share of the demand Fws places on other cells than today's, pooled over the
-  people): 1.33% on the small blocks, 0.78% on the large, 0.34% on the oversized (median per block
+  people): 1.33% on the small blocks, 0.78% on the large, 0.38% on the oversized (median per block
   0.9, 0.7 and 0.3%; Aws 5.3% and 4.5%). Of it, on the uniform blocks, 1.02% and 0.53% comes off
   cells behind phantom passages, to the home's cells with a way out (all of Q1's phantom demand),
   and 0.31% and 0.25% off split cells, which take none (Aws also moves 4.3% and 4.0% off the wall
   slivers it cuts off).
-- Split cells: 10,982 on the small blocks, 26,718 on the large, 11,488 on the oversized; today's
+- Split cells: 10,982 on the small blocks, 26,718 on the large, 12,973 on the oversized; today's
   placement puts 0.38%, 0.30% and 0.18% of the demand in them.
 - The levels (Fws over today's, median, 10th -- 90th percentile and extremes): small blocks P0
   0.988 (0.91 -- 1.12; 0.17 -- 1.84), P_{1/2} 1.000 (0.88 -- 1.27; 0.03 -- 8.98), J_2 0.985
   (0.78 -- 1.39; 0.01 -- 11.8); large P0 0.994 (0.96 -- 1.05), P_{1/2} 0.994 (0.91 -- 1.26;
-  0.49 -- 2.13), J_2 0.988 (0.89 -- 1.27; 0.44 -- 2.16); oversized 0.994, 0.998 and 0.993 (J_2
-  0.67 -- 17.1). A level moves past 1.5x either way on 42 of the 301 blocks.
+  0.49 -- 2.13), J_2 0.988 (0.89 -- 1.27; 0.44 -- 2.16); oversized 0.995, 0.998 and 0.993 (J_2
+  0.67 -- 17.1). A level moves past 1.5x either way on 43 of the 302 blocks.
 - What moves them (summary_q2_levels, q2_level_tops; aperture_rows/behind keeps each home's
   shares). Where a level falls past 1/1.5 (J_2 on 20 blocks), on 16 the homes behind phantom
   passages and those Fws encloses carry 69 -- 120% of the fall: the defect's own homes, scored at
   their real distance or apart (43304's J_2 baseline 0.01x, 17608's 0.44x); on the other four
   (17027, 17033, 23597, 43817) homes partly in cracks carry it, where I read the narrow lanes'
   oblique steps, which today's rule conducts at a quarter to a half of their width [inferred].
-  Where a level rises past 1.5x (J_2 on 20 blocks and 28051), it is real cracks: on 13 of them the
-  three homes that rise most carry 64 -- 102% of the rise, their escape times 2 -- 100x today's
-  (44274: 55, 164, 283 to 2,949, 2,592, 2,270; 45876: 12 to 1,211), with 21 -- 100% (median 50%) of
-  their injection in cells whose way out is a crack of at most 0.25 m, one or two sub-samples; on
-  the other seven the rise is spread over homes with 10 -- 25% of it there. Today's rule hid these
-  behind its own defect (a crack cell's steps reach through the walls beside it at the cell's open
-  fraction); Fws conducts a 12.5 cm crack as 12.5 cm, which under U is a long, slow exit.
+  Where a level rises past 1.5x (J_2 on 20 uniform blocks, and on 28051 and 63612 of the
+  oversized), it is real cracks: on 13 of the 20 the three homes that rise most carry 64 -- 102% of
+  the rise, their escape times 2 -- 100x today's (44274: 55, 164, 283 to 2,949, 2,592, 2,270;
+  45876: 12 to 1,211), with 21 -- 100% (median 50%) of their injection in cells whose way out is a
+  crack of at most 0.25 m, one or two sub-samples; on the other seven the rise is spread over homes
+  with 10 -- 25% of it there. Today's rule hid these behind its own defect (a crack cell's steps
+  reach through the walls beside it at the cell's open fraction); Fws conducts a 12.5 cm crack as
+  12.5 cm, which under U is a long, slow exit.
 
 **Q3: drift and angle.** SIMP's default at the metric's offset and at the block's shift
 (width.ALIGN, the shift that moved each most), the lens's change:
@@ -4310,7 +4311,7 @@ against 0.5700. Jaccard with today's clearing 0.73 (P) and 0.54 (J_2); 330 and 5
   split cell's minor part as never open (conservative: a clearing that would join it is not seen
   through it).
 
-Compute: GPU about 4.5 GPU-h on the cluster, at most 4 cards (the baselines of the 23 large blocks
+Compute: GPU about 4.8 GPU-h on the cluster, at most 4 cards (the baselines of the 23 large blocks
 too big to run here and the 22 oversized, T with A, Aw and Aws or with Fws: ap-base-*; the drift
 and tuning blocks' fields under T, Aw, Aws and Fws: ap-score*), nothing on the CPU nodes. Here,
 single-threaded, at most 8 processes: the small blocks' and 37 large blocks' baselines (10.8 CPU-h,
