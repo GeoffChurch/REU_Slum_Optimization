@@ -3395,3 +3395,113 @@ The stage was decided after the held-out results, so this is the claims re-teste
 method. Committed: transparency_rows/free/arms.csv, plans.csv, reused.csv, check_lead.csv and
 summary_{records,rules,claim,lens,versus,versus_rules}.csv (the rows and networks are in the ignored
 transparency_rows/free/ parquet and scratch).
+
+### Priority-weighted P (owner 2026-10-12: "Let's see how weighted P behaves. It would be nice if it could replace J_2")
+
+BACKLOG 4's metric decisions: P is the roadless headline, with an equity view beside it, J_2 or, if
+it can replace J_2, a priority-weighted P (owner 2026-10-12: "what would happen if you first set the
+current emitted by deeper buildings quadratically higher and then did P? Would you get something
+like J_2?"). pweight.py and pweight_check.py (7c91250); pweight_rows/ (the rows ignored, the
+summaries committed).
+
+The quantity. P_q: home i injects w_i a_i, a_i = u0_i^q / mean_w(u0^q), u0_i its escape time at
+baseline (nothing cleared, the same grid and model, area population w) and mean_w the
+population-weighted mean over the homes not enclosed, so the total injection is the population's;
+P_q = f_q^T L^-1 f_q, its lens 1 - P_q / P_q0. The weights are fixed at baseline, so P_q keeps P's
+properties: one self-adjoint solve, monotone in the open space, convex in the clearing fractions
+(the relaxation's Frank-Wolfe gap certifies a bound). The displacement stays the population's: only
+the demand is reweighted. (The brief wrote a_i = (u0_i / mean_w(u0))^q, which is this times a
+constant at each q, equal at q 0 and 1. A constant scales P_q and P_q0 alike, so it moves no lens
+and no clearing, only the total injection, which the brief also asks to keep, and which this keeps
+at every q.) The reasoning to test, not assume: on independent paths (u_i = R_i w_i) dJ_p / dR_i
+goes as w_i^2 u_i^(p - 1) and dP_q / dR_i as w_i^2 u0_i^(2q), the injection entering P twice, so q =
+(p - 1) / 2 matches J_p to first order: q 1/2 is J_2's analogue, q 1 (the owner's "quadratically
+higher", escape time growing about as depth^2) J_3's. Shared paths break the independence; the test
+measures how much.
+
+The code. common.Demand, a Strategy beside the population, resolved where a run is configured and
+handed to the scorer (common.Scorer's `demand`, required): PopulationDemand (each home injects its
+population: every run before this one, injection for injection) and PriorityDemand(q) (q required,
+and in the run's name: Pq0.5, Pq1). The scorer's J, its adjoint load and its baseline read the
+demand's injection; the cost (clear.Clearing.cost, the displacement), B (i) and free first read the
+population; clear.Catchment's load and weights read the injection (the population's on every
+existing path). Every scorer and clearing built anywhere now names its demand, the population's
+everywhere but here. Editing common.py changes free_roads.CODE, and with it FreeEnclosed's identity
+and tag; no held road changes. relax.frank_wolfe now backs off when neither its parabola's step nor
+the full step descends (the step quartered down to 1e-3) before it stops: J is nonsmooth (an edge
+weight is a minimum of open fractions, its gradient a subgradient shared among tied cells), and on
+41132 at eps 1e-4 the old rule stopped at iteration 8 with a third of J in its gap (bound 0.634)
+where a step of 0.05 descends; with the back-off its 40 iterations reach a bound of 0.486 (relaxed
+0.476, the gap left 2%; in relax220's eps 1e-2 world, 0.512). Every iterate's lower bound is valid,
+so going on can only raise the bound and lower J; the fw<n> plans run as before up to where they
+used to stop.
+
+The test. The 220 small blocks (common.recipients()), h 0.5, uni, area population, B's placement
+(enclosed homes scored apart). One optimizer for every objective: SIMP base
+(fw0.q3.i10.t0.001.e0.0001.k1s1e-06, the presets' base plan) with free first (relax.one), on the
+CPU, at area D 0.05. Four arms: P (J_1), J_2, P_{1/2} and P_1. D 0.10 is not run: a SIMP run is one
+budget, and a second budget is a second run. For the three convex objectives the certified bound:
+relax.frank_wolfe from x = 0 with nothing held, so it bounds every clearing within D, free first or
+not; 40 iterations (relax220_p1's count), solves to 1e-4 (the bound 1e-5's to 3e-6 on 41132, in
+0.85x the time), in SIMP base's eps world (1e-4: J_eps <= J for every 0/1 clearing, and tighter than
+relax220's 1e-2). Every arm's clearing is scored under every objective (pweight.py `score`: one
+scorer, one system per clearing, one solve per demand): the lenses of P, J_2 (lens (c), 1 - (J_2 /
+J_2,0)^(1/2)), P_{1/2} and P_1; each home's escape time under the population's demand relative to
+baseline at the median, p95 and max home (umed, u95, umax: tails.py's ratios of quantiles; lower is
+better); B (i). For the description: the Jaccard overlap of the cleared sets, and how deep the
+cleared buildings sit, relative to the block's population-weighted mean escape time at baseline:
+served (the baseline escape time of the homes whose flow passes through them in the clearing,
+flow-weighted: clear.Catchment's shares in the tension's eps world) and own (their own homes',
+area-weighted).
+
+The guards (pweight_check.py), each passing on the code and failing under its fault (a patch in one
+process), on 19263 (three homes enclosed at baseline) and 38136 (the smallest block):
+- `identity`, P_0 is P exactly: PriorityDemand(0)'s injection, field, baseline P0 and escape times,
+  and P's and J_2's values on a random clearing within D 0.05, are the population's bit for bit
+  (every system seeded alike: pyamg's setup draws from numpy's global RNG, which otherwise moves a
+  solve by ~1e-11). Fault `no-population`, the injection a_i alone: all six differ on both blocks.
+- `total`: the injection's total and the field's are the population's within 2.2e-16 relative at q
+  1/2, 1 and 2 (a from 0.105 -- 1.81 at q 1/2, 0.009 -- 2.79 at q 1 and 0.000 -- 5.27 at q 2 on
+  19263). Fault `brief`, the brief's literal a_i = (u0_i / mean_w(u0))^q: the total off by 4.5 --
+  7.6% at q 1/2 and 30 -- 47% at q 2, kept at q 1.
+- `displacement`: Clearing.cost, the population, B (i) at baseline (19263's 0.0235) and of a random
+  clearing, and that clearing's area displacement under J_2, P_{1/2} and P_1 are P's, bit for bit.
+  Fault `cost-from-demand`, the cost from the injection: the cost and displacement differ under
+  P_{1/2} and P_1 on both blocks (the random set's D 0.031 -- 0.065 against P's 0.050).
+- `gradient`: the relaxation's gradient of P_{1/2}, P_1 and P at a random fractional clearing (x in
+  [0.1, 0.4]), SIMP's q 1 and 3, eps 1e-4, against central differences (step 1e-4, solves to 1e-9
+  from zero, so P is second-order accurate) on six buildings: within 4.7e-8 of the largest gradient
+  on both. Fault `J-population`, J weighting the population while the solve injects the priority
+  demand (lam = u is then not J's adjoint): 24 -- 45% off for P_{1/2} and P_1 (P, whose injection is
+  the population, unmoved) on 38136.
+
+The questions and their criteria, fixed before any result (this commit precedes every run of the
+arms). The smoke runs before it, on 41132 here, timed the items and ran the code path end to end,
+scoring and report included, on that one block: its numbers were seen before this commit, after the
+criteria below were written. Over the 220, paired by block, each interval a Bayesian bootstrap's
+95% (transparency_run.boot_weights over the 220: 10,000 Dirichlet(1, ..., 1) draws seeded 20261012,
+one matrix for every comparison):
+1. Can P_{1/2} replace J_2? P_{1/2}'s clearing against J_2's, on J_2's own terms: (a) the J_2 lens,
+   the mean difference's interval inside [-0.005, +0.005] or above it, read as its lower end at
+   -0.005 or above (an interval that straddles +0.005 is better than one inside, and passes); (b)
+   the p95 home's relative escape time (u95), the mean difference's interval's upper end at +0.005
+   or below (lower is better: the same test mirrored); (c) B's order: P_{1/2}'s clearing leaves more
+   population enclosed than J_2's on no block. It can if (a) -- (c) all hold. Reported beside it:
+   what P_{1/2} gives up on P against P's clearing (the P lens, mean and interval), the median and
+   max homes, J_2's clearing under P_{1/2}'s own lens, and P itself (q 0) under the same test: if
+   P's own clearing passes too, matching J_2 says nothing for the weighting.
+2. Where does P_1 land? The same table and test.
+3. What the convexity buys: per block, the bound (an upper bound on the lens of every clearing
+   within D) minus the rounded clearing's own lens, for P, P_{1/2} and P_1: median and quartiles,
+   with the Frank-Wolfe gap left at the end beside it (the bound's own slack, not the clearing's);
+   J_2 has none.
+4. Description: the pairwise Jaccard (median, quartiles); the served and own depths per arm (median
+   over blocks), and each weighted arm's against P's (mean difference, interval).
+pweight.report computes them.
+
+Compute: one task per (block, item) on orion and quadro2 (cluster.py's `cpu` kind), single-threaded,
+every item of a block on one node: simp-<arm> for the four arms and fw-<arm> for the three convex
+ones, 1,540 tasks, the blocks split by an estimate of their cost (orion 116, quadro2 104); the
+scoring here, 8 processes. Smoke on 41132 (138 buildings, the 220's median) here: SIMP base 152 --
+247 s an arm, the bound 11 min, peak RSS 0.7 GB, the scoring 49 s; 5618 (759 buildings, the
+largest) 34 min for SIMP on P and 47 on J_2.
