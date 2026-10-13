@@ -17,8 +17,7 @@ def mono(i: int, h: float) -> None:
     for rule in (common.Carve(), common.Obliterate()):
         mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
         sc = common.Scorer(b, mesh, lifted.Params(ell_m=3.0, K=16,
-                                                  cells=lifted.OpenFraction(),
-                                                  steps=lifted.SmallestCell()), rule=rule,
+                                                  cells=lifted.OpenFraction()), rule=rule,
                            demand=common.PopulationDemand())
         worst = 0.0
         steps = 0
@@ -40,8 +39,7 @@ def mono(i: int, h: float) -> None:
 def cross(idx: list[int], h: float) -> None:
     blocks = common.build_blocks(common.recipients())
     arms = common.arms()
-    p = lifted.Params(ell_m=3.0, K=16, cells=lifted.OpenFraction(),
-                      steps=lifted.SmallestCell())
+    p = lifted.Params(ell_m=3.0, K=16, cells=lifted.OpenFraction())
     for i in idx:
         b = blocks[i]
         sc = common.Scorer(b, lifted.UniformMesh(h, offset=lifted.OFFSET), p,
@@ -57,8 +55,7 @@ def cross(idx: list[int], h: float) -> None:
 
 def cross_channel() -> None:
     from shapely.geometry import LineString, Polygon
-    p = lifted.Params(ell_m=3.0, K=16, cells=lifted.OpenFraction(),
-                      steps=lifted.SmallestCell())
+    p = lifted.Params(ell_m=3.0, K=16, cells=lifted.OpenFraction())
     for a in (0, 20, 45):
         th = np.radians(a); e = np.array([np.cos(th), np.sin(th)]); n = np.array([-e[1], e[0]])
         W, Lc = 4.0, 30.0

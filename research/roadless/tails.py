@@ -31,8 +31,7 @@ def one(bid: str) -> dict:
     stop = g[g.D >= 0.10 - 1e-9].step.iloc[0]
     rem = cleared_through(g, int(stop))
     mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
-    sc = common.Scorer(b, mesh, lifted.Params(ell_m=3.0, K=8, cells=lifted.OpenFraction(),
-                                              steps=lifted.SmallestCell()),
+    sc = common.Scorer(b, mesh, lifted.Params(ell_m=3.0, K=8, cells=lifted.OpenFraction()),
                        population=common.POPULATIONS[_CFG["pop"]], demand=common.PopulationDemand())
     gr = sc.grid
     op = (gr.isub & (~gr.bsub | gr.sub_of(shapely.union_all(sc.polys[rem])))).mean(axis=-1)

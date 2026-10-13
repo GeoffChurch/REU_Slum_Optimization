@@ -7,7 +7,7 @@ P_q: home i injects w_i a_i, a_i = u0_i^q / mean_w(u0^q) (common.PriorityDemand)
 time at baseline under the population's own demand; P_q = f_q^T L^-1 f_q, its lens 1 - P_q / P_q0.
 Four objectives (OBJECTIVES: P, J_2, P_{1/2}, P_1), one optimizer for all: SIMP base (PLAN, the
 presets' base plan) with free first (relax.one), on the CPU, at area D 0.05 (BUDGET), on the 220
-small blocks (common.recipients()), h 0.5, uni, area population, B's placement. For the convex
+small blocks (common.recipients()), h 0.5, ALONG, area population, B's placement. For the convex
 ones (power 1 under a fixed demand) the relaxation's Frank-Wolfe bound too: relax.frank_wolfe from
 x = 0 with nothing held, in SIMP base's eps world, so it bounds every clearing within the budget.
 `score` scores every clearing under every objective, with each home's escape time under the
@@ -21,9 +21,10 @@ result, and writes the summaries.
     uv run python $S report
 
 An item is simp-<objective> (SIMP base) or fw-<objective> (the bound; convex objectives only), an
-objective P, J<p> (J_p) or Pq<q> (P_q): ITEMS. Rows: pweight_rows/<simp|fw>/<objective>/<id>.parquet
-and pweight_rows/score/<id>.parquet (ignored); the summaries pweight_rows/summary_*.csv
-(committed).
+objective P, J<p> (J_p) or Pq<q> (P_q): ITEMS. Rows: ROWS/<simp|fw>/<objective>/<id>.parquet and
+ROWS/score/<id>.parquet (ignored); the summaries ROWS/summary_*.csv (committed). ROWS is
+pweight_rows/<ALONG>: the study's own runs, under the step rule before the face aperture (uni),
+are pweight_rows/<simp|fw|score>/ and pweight_rows/summary_*.csv.
 """
 from __future__ import annotations
 
@@ -50,13 +51,13 @@ import road_rescore as rr  # noqa: E402
 # Everything that can change a number is here, and named in the rows (the run's identity).
 PLAN = relax.plan_of("fw0.q3.i10.t0.001.e0.0001.k1s1e-06")    # SIMP base: the presets' base plan
 BUDGET = relax.D_LENS          # area D 0.05 (one SIMP run is one budget: D 0.10 would be a second)
-ALONG = "uni"
+ALONG = "uni+apwfs"            # the conductance (lifted.conductance_of)
 DEVICE = "cpu"
 FW_ITERS = 40                  # the bound's Frank-Wolfe iterations (as relax220_p1's fw40) ...
 FW_RTOL = 1e-4                 # ... and its solves' tolerance (on 41132 its bound is 1e-5's to
                                # 3e-6 at iteration 15, in 0.85x the time)
 SCORE_RTOL = clear.RTOL_SCORE  # every score: the optimizers' exact one
-ROWS = HERE / "pweight_rows"
+ROWS = HERE / "pweight_rows" / ALONG     # every row and summary, by the conductance
 MARGIN = 0.005                 # questions 1 and 2: within this of J_2's clearing
 
 
@@ -270,7 +271,7 @@ def report() -> None:
     """The four questions (NOTES, "Priority-weighted P": the criteria, fixed before any result)
     on the 220, paired by block, Bayesian-bootstrap 95% intervals (transparency_run.boot_weights:
     10,000 Dirichlet(1, ..., 1) draws over the blocks, seeded, one matrix for every comparison).
-    Writes pweight_rows/summary_{lens,questions,bound,describe,cost}.csv."""
+    Writes ROWS/summary_{lens,questions,bound,describe,cost}.csv."""
     from transparency_run import boot_weights
     pd.set_option("display.width", 200)
     blocks = tuple(common.recipients())

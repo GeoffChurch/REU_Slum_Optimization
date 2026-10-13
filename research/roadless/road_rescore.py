@@ -76,7 +76,7 @@ ROADLESS = common.REPO / "research" / "roadless"
 BUDGETS = (0.02, 0.05, 0.10, 0.15, 0.20)     # displacement budgets of the canonical prefixes
 ELL_M = 3.0                                  # turning length (m)
 K = 8                                        # headings
-ALONG = "uni"                                # the conductance (lifted.conductance_of)
+ALONG = "uni+apwfs"                          # the conductance (lifted.conductance_of)
 DEVICE = "gpu"                               # solver and scans (lifted.solver_of / scans_of)
 SCORE_RTOL = 1e-5                            # clear.RTOL_SCORE: the stored clearings' exact score
 CLEARING_POWER = 2.0                         # the stored clearings' objective (J_2)
@@ -590,7 +590,7 @@ def score(rows: Path, lineup: tuple[str, ...], scratch: Path, mesh_token: str, p
     if "area" not in pops:
         raise SystemExit("score builds the area scorer (the clearings' check) on every mesh")
     cond = lifted.conductance_of(ALONG, lifted.scans_of(DEVICE))
-    p = lifted.Params(ell_m=ELL_M, K=K, along=cond.along, cells=cond.cells, steps=cond.steps,
+    p = lifted.Params(ell_m=ELL_M, K=K, along=cond.along, cells=cond.cells,
                       solver=lifted.solver_of(DEVICE))
     for pop in pops:
         score_dir(rows, mesh_token, pop).mkdir(parents=True, exist_ok=True)

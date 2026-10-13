@@ -42,8 +42,7 @@ def one(bid: str) -> list[dict]:
     rows = []
     for name, (h, ell, off) in SETTINGS.items():
         t = time.time()
-        p = lifted.Params(ell_m=ell, K=8, cells=lifted.OpenFraction(),
-                          steps=lifted.SmallestCell())
+        p = lifted.Params(ell_m=ell, K=8, cells=lifted.OpenFraction())
         sc = common.Scorer(b, lifted.UniformMesh(h, offset=off), p,
                            demand=common.PopulationDemand())
         gr = sc.grid

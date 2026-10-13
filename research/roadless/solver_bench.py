@@ -21,14 +21,12 @@ def main(bid: str, hs: list[float]) -> None:
     polys = np.asarray(b.buildings.outlines)
     for h in hs:
         g = lifted.Grid.of(b.boundary, polys, list(b.streets.geometry), h)
-        reach = lifted.grounded(g, g.ff0, lifted.Params(3.0, 8, cells=lifted.OpenFraction(),
-                                                        steps=lifted.SmallestCell()))
+        reach = lifted.grounded(g, g.ff0, lifted.Params(3.0, 8, cells=lifted.OpenFraction()))
         f = lifted.Placement.of(g, polys, reach, ring_m=lifted.RING_M).field(
             np.ones(len(polys)), g.inside.shape)
         ref = None
         for name in ("cpu", "gpu"):
-            p = lifted.Params(3.0, 8, solver=lifted.solver_of(name), cells=lifted.OpenFraction(),
-                              steps=lifted.SmallestCell())
+            p = lifted.Params(3.0, 8, solver=lifted.solver_of(name), cells=lifted.OpenFraction())
             t = time.time()
             sy = lifted.System(g, g.ff0, p)
             ts = time.time() - t

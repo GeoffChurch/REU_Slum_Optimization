@@ -27,8 +27,7 @@ def main(bid: str, h: float, along: str, solver: str, picker: str) -> None:
     pr.enable()
     mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
     c = Clearing(b, mesh, lifted.Params(3.0, 8, along=lifted.along_of(along, scans),
-                                     solver=lifted.solver_of(solver), cells=lifted.OpenFraction(),
-                                     steps=lifted.SmallestCell()),
+                                     solver=lifted.solver_of(solver), cells=lifted.OpenFraction()),
                  population=common.POPULATIONS["area"], demand=common.PopulationDemand())
     pr.disable()
     print(f"setup {time.time() - t0:.1f}s", flush=True)

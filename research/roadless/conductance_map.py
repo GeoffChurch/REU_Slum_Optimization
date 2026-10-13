@@ -103,7 +103,7 @@ def main(bid: str, picker: str) -> None:
     ext = (g.x0 - g.h / 2, g.x0 + (g.inside.shape[1] - 0.5) * g.h,
            g.y0 - g.h / 2, g.y0 + (g.inside.shape[0] - 0.5) * g.h)
     # zoom: the window render_clear uses (around the median building the greedy cleared by 10%)
-    rows = pd.read_parquet(rows_dir(picker, 0.5, "area", 2.0) / f"{bid}.parquet")
+    rows = pd.read_parquet(rows_dir(picker, 0.5, "area", 2.0, "uni") / f"{bid}.parquet")
     stop = rows[rows.D >= 0.10 - 1e-9].step.min()
     cl = polys[cleared_through(rows, int(stop))]
     mx = float(np.median([p.centroid.x for p in cl]))
@@ -166,7 +166,7 @@ def sightline(bid: str, picker: str) -> None:
     rgb[~clear] = 1.0
     ext = (g.x0 - g.h / 2, g.x0 + (g.inside.shape[1] - 0.5) * g.h,
            g.y0 - g.h / 2, g.y0 + (g.inside.shape[0] - 0.5) * g.h)
-    rows = pd.read_parquet(rows_dir(picker, 0.5, "area", 2.0) / f"{bid}.parquet")
+    rows = pd.read_parquet(rows_dir(picker, 0.5, "area", 2.0, "uni") / f"{bid}.parquet")
     stop = rows[rows.D >= 0.10 - 1e-9].step.min()
     cl = polys[cleared_through(rows, int(stop))]
     mx = float(np.median([p.centroid.x for p in cl]))

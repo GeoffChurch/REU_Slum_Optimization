@@ -13,14 +13,15 @@ screen against exact leave-one-out on one step.
 Free first (B's first stage, `free_first`). Under B a clearing is scored first by the population
 it leaves enclosed, so the optimizers (relax.py, polish_greedy.py) first clear crossings that
 free the homes enclosed at baseline, cheapest per unit of population, found on a graph of the
-open components and the buildings' 4-connected pieces and checked by the metric's own test,
+open components and the buildings' pieces (lifted.regions) and checked by the metric's own test,
 then hold them cleared through the search with the rest of the budget.
 
     PYTHONPATH=. uv run python research/roadless/clear.py loo <block idx> [h]
-    PYTHONPATH=. uv run python research/roadless/clear.py run <workers> <picker> <h> <d_max> <pop> <p> <along> <solver>
-    PYTHONPATH=. uv run python research/roadless/clear.py some <workers> <picker> <h> <d_max> <pop> <p> <along> <solver> <ids,>
+    PYTHONPATH=. uv run python research/roadless/clear.py run <workers> <picker> <h> <d_max> <pop> <p> <cond> <solver>
+    PYTHONPATH=. uv run python research/roadless/clear.py some <workers> <picker> <h> <d_max> <pop> <p> <cond> <solver> <ids,>
 
-picker: M4 | B0.01g3 | S0.01cat; along: uni | sl<beta> | ss<beta>k<kappa>[n<hill>r<r0>];
+picker: M4 | B0.01g3 | S0.01cat; cond: the conductance (lifted.conductance_of: uni+apwfs,
+ss<beta>k<kappa>[n<hill>r<r0>]+apwfs, ...)[@<the tension's along-conductance>];
 solver: cpu | gpu, the device of the solves, sightline scans and catchment sweep (gpu needs
 CUDA_PATH, e.g. /usr)
 """
@@ -223,8 +224,7 @@ def loo(i: int, h: float, pop: str = "count", power: float = 1.0) -> None:
     blocks = common.build_blocks(common.recipients())
     b = blocks[i]
     mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
-    c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8, cells=lifted.OpenFraction(),
-                                        steps=lifted.SmallestCell()),
+    c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8, cells=lifted.OpenFraction()),
                  population=common.POPULATIONS[pop], demand=common.PopulationDemand())
     sc = c.sc
     P0 = sc.J(sc.u0, power)
@@ -273,11 +273,10 @@ FREE_STEP = 1e-12   # free_first: every step through the region graph costs this
 
 @dataclass(frozen=True, eq=False)
 class RegionGraph:
-    """free_first's graph at baseline (lifted.Regions, built by the metric's step rule, p.steps:
-    lifted.Grid.regions_smallest under today's, lifted._track_regions under the Aperture):
-    regions 0 .. ncomp - 1 the components of open space, then the regions a clearing enters, each
-    with its `owner` building (`owner`: region - ncomp -> building), adjacent (a -> b, both ways)
-    where a clearing joins them; the street steps into `entry`."""
+    """free_first's graph at baseline (lifted.Regions, built by lifted.regions from the
+    operator's own steps): regions 0 .. ncomp - 1 the components of open space, then the regions
+    a clearing enters, each with its `owner` building (`owner`: region - ncomp -> building),
+    adjacent (a -> b, both ways) where a clearing joins them; the street steps into `entry`."""
     ncomp: int
     owner: np.ndarray
     a: np.ndarray
@@ -290,14 +289,14 @@ class RegionGraph:
     def of(cls, c: Clearing) -> RegionGraph:
         g = c.sc.grid
         open0 = (c.open_(np.zeros(c.n, dtype=bool)) > 0).ravel()
-        rg = c.p.steps.regions(g, open0, c.bf, c.lab.reshape(g.inside.size, -1), c.p)
+        rg = lifted.regions(g, open0, c.bf, c.lab.reshape(g.inside.size, -1), c.p)
         return cls(ncomp=rg.ncomp, owner=rg.owner, a=rg.a, b=rg.b, entry=rg.entry, R=rg.R)
 
     def sources(self, near: np.ndarray) -> np.ndarray:
         """The regions a home is freed through, from its near cells (flat): the component of
-        each one that can take demand at baseline (open, and not split under lifted.AnchorPart),
-        and for the others the pieces lifted.Regions.R lists there (a closed cell's covering
-        pieces; a split cell's, those whose clearing alone makes its parts one)."""
+        each one that can take demand at baseline (open, and not split), and for the others the
+        pieces lifted.Regions.R lists there (a closed cell's covering pieces; a split cell's,
+        those whose clearing alone makes its parts one)."""
         sub = self.R[near].tocsr()
         has = sub[:, :self.ncomp].getnnz(axis=1) > 0
         return np.unique(np.concatenate([sub[has][:, :self.ncomp].indices, sub[~has].indices]))
@@ -327,7 +326,7 @@ def free_first(c: Clearing, *, budget: float, held: np.ndarray) -> np.ndarray:
     if not sc.enclosed.any():
         return held.copy()
     g, bid = sc.grid, sc.block.block_id
-    rg = RegionGraph.of(c)          # the step rule's (today's raises on a CompositeGrid)
+    rg = RegionGraph.of(c)          # on any mesh
     street = rg.ncomp + len(rg.owner)                       # the street's node, after them
     a = np.concatenate([rg.a, np.full(len(rg.entry), street)])
     b = np.concatenate([rg.b, rg.entry])
@@ -641,14 +640,13 @@ def _spread(gain: np.ndarray, cost: np.ndarray, H: np.ndarray, need: float,
 
 
 def greedy_block(b, rnd: engine.Round, h: float, d_max: float, out: Path, population,
-                 power: float, along: lifted.AlongConductance, solver: lifted.Solver,
-                 search: lifted.AlongConductance | None = None) -> None:
-    """The greedy to d_max. Records perm (in J_power) and perm1 (the p = 1 score) at every
-    step; `cleared` lists the step's buildings in pick order."""
+                 power: float, cond: lifted.Conductance, solver: lifted.Solver,
+                 search: lifted.AlongConductance | None) -> None:
+    """The greedy to d_max under the conductance `cond`. Records perm (in J_power) and perm1
+    (the p = 1 score) at every step; `cleared` lists the step's buildings in pick order."""
     mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
-    c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8, along=along, solver=solver,
-                                        cells=lifted.OpenFraction(),
-                                        steps=lifted.SmallestCell()),
+    c = Clearing(b, mesh, lifted.Params(ell_m=3.0, K=8, along=cond.along, solver=solver,
+                                        cells=cond.cells),
                  population=population, search=search, demand=common.PopulationDemand())
     sc = c.sc
     J0 = sc.J(sc.u0, power)
@@ -678,7 +676,7 @@ def _one(i: int) -> str | None:
         return None
     try:
         greedy_block(b, _CFG["picker"], _CFG["h"], _CFG["d_max"], out,
-                     common.POPULATIONS[_CFG["pop"]], _CFG["power"], _CFG["along"], _CFG["solver"],
+                     common.POPULATIONS[_CFG["pop"]], _CFG["power"], _CFG["cond"], _CFG["solver"],
                      _CFG["search"])
     except Exception as e:
         ours = [f for f in traceback.extract_tb(e.__traceback__) if "roadless" in f.filename]
@@ -703,23 +701,26 @@ def sweep_of(spec: str) -> Sweep:
     raise ValueError(f"unknown sweep {spec!r}")
 
 
-def rows_dir(picker: str, h: float, pop: str, power: float = 1.0, along: str = "uni") -> Path:
+def rows_dir(picker: str, h: float, pop: str, power: float, along: str) -> Path:
+    """The rows of a greedy-format run, `along` its conductance's name (lifted.conductance_of's,
+    [@<search along>]): a run before the face aperture (2026-10-13) named its along-conductance
+    alone, `uni` by leaving it out."""
     return HERE / (f"clear_rows_{picker}_h{h:g}" + ("" if pop == "count" else f"_{pop}")
                    + ("" if power == 1.0 else f"_p{power:g}")
                    + ("" if along == "uni" else f"_{along}"))
 
 
 def run(workers: int, picker: engine.Round, h: float, d_max: float, pop: str, power: float,
-        along: lifted.AlongConductance, solver: lifted.Solver,
-        search: lifted.AlongConductance | None, ids: list[str] | None = None) -> None:
+        cond: lifted.Conductance, solver: lifted.Solver,
+        search: lifted.AlongConductance | None, ids: list[str] | None) -> None:
     """All 220 study blocks, largest first, or just `ids`. `search`: the tension's
-    along-conductance when it differs from the scoring one (rows dir `<along>@<search>`)."""
+    along-conductance when it differs from the scoring one (rows dir `<cond>@<search>`)."""
     import multiprocessing
     global _BLOCKS, _CFG
     d = rows_dir(picker.name, h, pop, power,
-                 along.name + ("" if search is None else f"@{search.name}"))
+                 cond.name + ("" if search is None else f"@{search.name}"))
     d.mkdir(exist_ok=True)
-    _CFG = dict(picker=picker, h=h, d_max=d_max, dir=d, pop=pop, power=power, along=along,
+    _CFG = dict(picker=picker, h=h, d_max=d_max, dir=d, pop=pop, power=power, cond=cond,
                 solver=solver, search=search)
     _BLOCKS = common.build_blocks(common.recipients() if ids is None else ids)
     with multiprocessing.get_context("fork").Pool(workers, maxtasksperchild=4) as pool:
@@ -737,12 +738,13 @@ if __name__ == "__main__":
                   sys.argv[4] if len(sys.argv) > 4 else "count",
                   float(sys.argv[5]) if len(sys.argv) > 5 else 1.0)
     elif sys.argv[1] in ("run", "some"):
-        # run <workers> <picker> <h> <d_max> <pop> <p> <along>[@<search along>] <solver> [ids,]
+        # run <workers> <picker> <h> <d_max> <pop> <p> <conductance>[@<search along>] <solver>
+        # [ids,]
         scans = lifted.scans_of(sys.argv[9])
         specs = sys.argv[8].split("@")
         clear.run(int(sys.argv[2]), engine.greedy_round(sys.argv[3], clear.sweep_of(sys.argv[9])),
                   float(sys.argv[4]), float(sys.argv[5]),
-                  sys.argv[6], float(sys.argv[7]), lifted.along_of(specs[0], scans),
+                  sys.argv[6], float(sys.argv[7]), lifted.conductance_of(specs[0], scans),
                   lifted.solver_of(sys.argv[9]),
                   lifted.along_of(specs[1], scans) if len(specs) == 2 else None,
                   sys.argv[10].split(",") if sys.argv[1] == "some" else None)

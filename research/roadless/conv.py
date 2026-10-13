@@ -19,8 +19,7 @@ for i in idx:
         pre[n] = prefix_to_displacement(b, r, 0.10)
     for h in hs:
         t = time.time()
-        p = lifted.Params(ell_m=ell, K=K, cells=lifted.OpenFraction(),
-                          steps=lifted.SmallestCell())
+        p = lifted.Params(ell_m=ell, K=K, cells=lifted.OpenFraction())
         sc = common.Scorer(b, lifted.UniformMesh(h, offset=off), p,
                            demand=common.PopulationDemand())
         vals = {n: sc.perm(pre[n]) for n in names}

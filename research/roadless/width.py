@@ -3,13 +3,16 @@ metric decisions, (3); owner 2026-10-12: "resistance not just within buildings b
 from them, or just have conductance be some monotone function of the distance to the nearest
 footprint"; NOTES, "Uniform conductance with an effective width").
 
-The variants (VARIANTS: a name and its lifted.conductance_of spec, the spec in every row): U `uni`
-(a cell by its open fraction, today's); B_r `uni+b<r>` (lifted.Blurred: min(o, the open share of
-the disk of radius r m), r 0.5, 1, 1.5); D_s `uni+d<s>` (lifted.WallDistance: min(1, d / s) per
-open sub-sample, d to the nearest footprint, s 0.5, 1); S `ss100k2n2r30` (the sightline metric as
-today); S_t `ss100k2n2r30t` (lifted.TurnBoosted: its boost on the turning edges too). h 0.5,
-ell 3 m, K 8, area population, B's placement. Three lenses (LENSES): P (the population's demand,
-power 1), J_2 (lens (c)) and P_{1/2} (common.PriorityDemand(0.5), power 1).
+The variants (VARIANTS: a name and its lifted.conductance_of spec, the spec in every row): U
+`uni+apwfs` (a cell by its open fraction); B_r `uni+b<r>+apwfs` (lifted.Blurred: min(o, the open
+share of the disk of radius r m), r 0.5, 1, 1.5); D_s `uni+d<s>+apwfs` (lifted.WallDistance:
+min(1, d / s) per open sub-sample, d to the nearest footprint, s 0.5, 1); S `ss100k2n2r30+apwfs`
+(the sightline metric); S_t `ss100k2n2r30t+apwfs` (lifted.TurnBoosted: its boost on the turning
+edges too). h 0.5, ell 3 m, K 8, area population, B's placement. Three lenses (LENSES): P (the
+population's demand, power 1), J_2 (lens (c)) and P_{1/2} (common.PriorityDemand(0.5), power 1).
+Rows and summaries under ROWS, width_rows/<lifted.APERTURE>/; the study's own (NOTES, "Uniform
+conductance with an effective width"), under the step rule before the face aperture, are
+width_rows' channel.parquet, score/, homes/, flows/, simp/, cross/, maps/ and summary_*.csv.
 
     S=research/roadless/width.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S channel <procs>                  # Q2, the width response, the alignment
@@ -25,10 +28,9 @@ power 1), J_2 (lens (c)) and P_{1/2} (common.PriorityDemand(0.5), power 1).
 error" with its walls footprints (walled_channel: a dead end behind the demand, the street at the
 far end, the lattice checks.channel's), at the angles of sightline_angle.ANGLES and the widths
 WIDTHS_ANGLE (Q2); at 0 and 30 deg over WIDTHS (how conduction grows with width); and at 0 deg
-under ALIGN_SHIFTS lattice offsets (how much a sub-cell shift moves P), with BlurCentre beside
-B_r for the alignment only (the blurred openness sampled at each cell's centre, with the min and
-without it: the form the brief wrote); and at WIDTHS_SUBCELL under SUBCELL_SHIFTS offsets, widths
-where a shift adds or drops a column of sub-samples. Rows width_rows/channel.parquet.
+under ALIGN_SHIFTS lattice offsets (how much a sub-cell shift moves P); and at WIDTHS_SUBCELL
+under SUBCELL_SHIFTS offsets, widths where a shift adds or drops a column of sub-samples. Rows
+ROWS/channel.parquet.
 
 `score`: one block under one variant on the lattice at OFFSETS[offset]: the baseline, the stored
 clearings (STORED, through clearings.Store) and item 4's road prefixes at area D 0.05 (ROADS;
@@ -37,13 +39,13 @@ at offset 0 also the no-buildings prior (every inside sub-sample open, the homes
 placed), and the flows of the baseline, SIMP's default and the prior (the flux per cell) and their
 corridor indices
 (`_indices`); per home its escape time at baseline and under SIMP's default, and its bottleneck
-width (`_bottleneck`). Rows width_rows/score/o<offset>/<variant>/<id>.parquet, homes
-width_rows/homes/o<offset>/<variant>/<id>.parquet, flows width_rows/flows/<variant>/<id>.parquet.
+width (`_bottleneck`). Rows ROWS/score/o<offset>/<variant>/<id>.parquet, homes
+ROWS/homes/o<offset>/<variant>/<id>.parquet, flows ROWS/flows/<variant>/<id>.parquet.
 
 `simp`: relax.one at SIMP_PLAN (SIMP base), objective P (the population's demand, power 1), area
 D 0.05, free first (clear.free_first), under the variant, on the GPU; rows
-width_rows/simp/<variant>/<id>.parquet. `cross`: every variant's SIMP clearing of a block scored
-under one of CROSS, on the GPU; rows width_rows/cross/<variant>/<id>.parquet.
+ROWS/simp/<variant>/<id>.parquet. `cross`: every variant's SIMP clearing of a block scored under
+one of CROSS, on the GPU; rows ROWS/cross/<variant>/<id>.parquet.
 """
 from __future__ import annotations
 
@@ -52,7 +54,6 @@ import socket
 import sys
 import tarfile
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 
@@ -73,8 +74,9 @@ from simp_compare import TUNING  # noqa: E402
 
 # ------------------------------------------------------------------ the run's configuration
 # Everything that can change a number is here, and named in the rows (the run's identity).
-VARIANTS = {"U": "uni", "B0.5": "uni+b0.5", "B1": "uni+b1", "B1.5": "uni+b1.5",
-            "D0.5": "uni+d0.5", "D1": "uni+d1", "S": "ss100k2n2r30", "St": "ss100k2n2r30t"}
+VARIANTS = {"U": "uni+apwfs", "B0.5": "uni+b0.5+apwfs", "B1": "uni+b1+apwfs",
+            "B1.5": "uni+b1.5+apwfs", "D0.5": "uni+d0.5+apwfs", "D1": "uni+d1+apwfs",
+            "S": "ss100k2n2r30+apwfs", "St": "ss100k2n2r30t+apwfs"}
 H = 0.5
 ELL_M = 3.0
 K = 8
@@ -105,7 +107,7 @@ OPEN_M = (1.0, 2.0)        # the open-lane share: flux in cells at least this fa
 COHERENCE_M = 2.0          # the coherence's neighbourhood: a square of this half-side
 TOP = 0.10                 # the concentration: the flux share of the top 10% of the open area
 WIDTH_STEPS = (0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0)   # bottleneck widths tried (m)
-ROWS = HERE / "width_rows"
+ROWS = HERE / "width_rows" / lifted.APERTURE   # every row and summary, by the step rule
 
 # the channel checks
 L_C = 40.0
@@ -124,78 +126,8 @@ WIDTHS_SUBCELL = (0.19, 0.3, 0.44, 0.69, 1.06)   # ... at widths between two cou
 
 def params(spec: str, device: str) -> lifted.Params:
     cond = lifted.conductance_of(spec, lifted.scans_of(device))
-    return lifted.Params(ELL_M, K, along=cond.along, cells=cond.cells, steps=cond.steps,
+    return lifted.Params(ELL_M, K, along=cond.along, cells=cond.cells,
                          solver=lifted.solver_of(device))
-
-
-class _CentreDisk(NamedTuple):
-    """A disk of radius r about a cell's centre on the fine lattice: (dr, lo, hi) the sub-samples
-    (the cell's first fine row + dr, its first fine column + lo .. hi); `n` how many, `pad` the
-    margin a raster needs."""
-    rows: tuple[tuple[int, int, int], ...]
-    n: int
-    pad: int
-
-
-def _centre_disk(r_m: float, h: float, S: int) -> _CentreDisk:
-    rho, c0 = r_m * S / h, (S - 1) / 2
-    rows = []
-    for dr in range(int(np.floor(c0 - rho)) - 1, int(np.ceil(c0 + rho)) + 2):
-        a = dr - c0
-        if a * a > rho * rho:
-            continue
-        half = np.sqrt(rho * rho - a * a)
-        lo, hi = int(np.ceil(c0 - half - 1e-9)), int(np.floor(c0 + half + 1e-9))
-        if lo <= hi:
-            rows.append((dr, lo, hi))
-    pad = max(max(-dr, dr - S + 2, -lo, hi - S + 2) for dr, lo, hi in rows) + 1
-    return _CentreDisk(rows=tuple(rows), n=sum(hi - lo + 1 for _, lo, hi in rows), pad=pad)
-
-
-@dataclass(frozen=True)
-class BlurCentre:
-    """A diagnostic for the channel's alignment check only: the blurred openness B sampled at
-    each cell's centre (the open share of the fine lattice's sub-samples within r_m of it), the
-    cell's factor min(o, B) (`with_min`) or B itself on every open cell (the brief's literal
-    form). Not lifted.Blurred, which integrates min(open, B) over each cell's sub-samples: NOTES
-    has why. Numpy only, no gradient."""
-    r_m: float
-    with_min: bool
-
-    @property
-    def name(self) -> str:
-        return f"{'bc' if self.with_min else 'bb'}{self.r_m:g}"
-
-    @property
-    def pointwise(self) -> bool:
-        return False
-
-    def factor(self, grid, open_, solver):
-        S, (ny, nx) = grid.S, grid.inside.shape
-        o = open_.reshape(ny, nx)
-        Z = lifted._closed(grid, o, np)
-        disk = _centre_disk(self.r_m, grid.h, S)
-        P = disk.pad
-        C = np.zeros((ny * S + 2 * P, nx * S + 2 * P + 1))
-        C[P:P + ny * S, P + 1:P + 1 + nx * S] = Z
-        C = np.cumsum(C, axis=1)
-        closed = np.zeros((ny, nx))
-        for dr, lo, hi in disk.rows:
-            R = slice(P + dr, P + dr + ny * S, S)
-            closed += C[R, P + hi + 1:P + hi + 1 + nx * S:S] - C[R, P + lo:P + lo + nx * S:S]
-        B = 1.0 - closed / disk.n
-        k = np.minimum(o, B) if self.with_min else np.where(o > 0, B, 0.0)
-        return k.reshape(open_.shape)
-
-    def vjp(self, grid, open_, A, solver):
-        raise NotImplementedError(f"{self.name}: a diagnostic, no gradient")
-
-    def sub_factor(self, grid, open_, solver):
-        raise NotImplementedError(f"{self.name}: sampled at the cell's centre, no factor per "
-                                  "sub-sample for an Aperture's tracks")
-
-    def sub_vjp(self, grid, open_, A, solver):
-        raise NotImplementedError(f"{self.name}: a diagnostic, no gradient")
 
 
 # ------------------------------------------------------------------ the channel (Q2)
@@ -233,22 +165,10 @@ def walled_channel(alpha_deg: float, W: float, h: float,
 
 class ChannelJob(NamedTuple):
     check: str          # angle | width | align | subcell
-    variant: str        # a VARIANTS key, or one of CENTRE (BlurCentre)
+    variant: str        # a VARIANTS key
     W: float
     angle: float
     shift: int          # align, subcell: k of ALIGN_SHIFTS, SUBCELL_SHIFTS (0: the metric's)
-
-
-CENTRE = {f"{kind}{r:g}": BlurCentre(r, kind == "bc") for kind in ("bc", "bb")
-          for r in (0.5, 1.0, 1.5)}       # the alignment check's diagnostics
-
-
-def _channel_params(variant: str) -> lifted.Params:
-    if variant in CENTRE:
-        return lifted.Params(ELL_M, K, along=lifted.Uniform(), solver=lifted.CpuAMG(),
-                             cells=CENTRE[variant],
-                             steps=lifted.SmallestCell())
-    return params(VARIANTS[variant], "cpu")
 
 
 def _channel_one(job: ChannelJob) -> dict:
@@ -256,18 +176,18 @@ def _channel_one(job: ChannelJob) -> dict:
     offset = ((lifted.OFFSET[0] + k) % 1.0, (lifted.OFFSET[1] + k) % 1.0)
     grid, f = walled_channel(job.angle, job.W, H, offset)
     t0 = time.time()
-    P = lifted.solve(grid, grid.ff0, f, _channel_params(job.variant)).P
+    P = lifted.solve(grid, grid.ff0, f, params(VARIANTS[job.variant], "cpu")).P
     return dict(job._asdict(), P=P, t=time.time() - t0)
 
 
 def channel(procs: int) -> None:
-    """Every channel job, `procs` processes; rows width_rows/channel.parquet."""
+    """Every channel job, `procs` processes; rows ROWS/channel.parquet."""
     rr._check_single_threaded()
     names = list(VARIANTS)
     jobs = ([ChannelJob("angle", v, W, a, 0) for v in names for W in WIDTHS_ANGLE for a in ANGLES]
             + [ChannelJob("width", v, W, a, 0) for v in names for W in WIDTHS for a in (0, 30)]
             + [ChannelJob("align", v, W, 0.0, s)
-               for v in (*names, *CENTRE) for W in WIDTHS_ALIGN
+               for v in names for W in WIDTHS_ALIGN
                for s in range(ALIGN_SHIFTS)]
             + [ChannelJob("subcell", v, W, 0.0, s) for v in names for W in WIDTHS_SUBCELL
                for s in range(SUBCELL_SHIFTS)])
@@ -604,7 +524,7 @@ def _delta(y: np.ndarray, prior: np.ndarray) -> np.ndarray:
 def maps(ids: list[str]) -> None:
     """Per sentinel block: one PNG a variant (the baseline's flow against the no-buildings prior,
     SIMP's default's against it, and the flux SIMP's default adds or takes away), and one of
-    every variant's baseline against the prior side by side; width_rows/maps/ (ignored)."""
+    every variant's baseline against the prior side by side; ROWS/maps/ (ignored)."""
     import geopandas as gpd
     import matplotlib
     matplotlib.use("Agg")
@@ -718,7 +638,7 @@ REACH_TOL = 1e-9                                # a road prefix reaches D 0.05 a
 
 
 def report() -> None:
-    """Every question's tables, written to width_rows/summary_*.csv (committed)."""
+    """Every question's tables, written to ROWS/summary_*.csv (committed)."""
     from scipy.stats import kendalltau
     pd.set_option("display.width", 220)
     names = list(VARIANTS)
@@ -734,7 +654,7 @@ def report() -> None:
     t = pd.DataFrame(rel).pivot(index=["angle", "variant"], columns="W", values="C_over_U")
     _summary("q2_width", t.reindex([(ang, v) for ang in (0, 30) for v in names]).reset_index())
     al = ch[ch.check == "align"].groupby(["variant", "W"]).P.agg(lambda s: s.max() / s.min())
-    _summary("q2_align", al.unstack().reindex([*names, *CENTRE]).reset_index())
+    _summary("q2_align", al.unstack().reindex(names).reset_index())
     sub = ch[ch.check == "subcell"].groupby(["variant", "W"]).P.agg(lambda s: s.max() / s.min())
     _summary("q2_subcell", sub.unstack().reindex(names).reset_index())
     sc = _read("score")

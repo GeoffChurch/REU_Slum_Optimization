@@ -3,27 +3,30 @@
 process, no file edited): a guard passes on the code as it is and must fail under its fault.
 
     S=research/roadless/width_check.py   # from the repo root, PYTHONPATH=., single-threaded
-    uv run python $S reference <ids,>    # (run once, at 3f74f5fa: writes REFERENCE)
+    uv run python $S reference <ids,>    # (run once, at bd1704dc: writes REFERENCE)
     uv run python $S identity <ids,> [fault]
     uv run python $S operator <ids,> [fault]
     uv run python $S gradient <ids,> [fault]
     uv run python $S convex <ids,> [fault]
 
-`identity`: U (lifted.OpenFraction) reproduces the code before the cells strategy bit for bit.
-`numbers` computes, on the CPU with every system seeded alike (pyamg's setup draws from numpy's
-global RNG), the scorer's baseline (P0, J_2's, every home's escape time, the injection field,
-the placement), a random clearing's operator (the CSR arrays), P, J_2 and P_{1/2}, the
-relaxation's value and gradient (SIMP q 3 on J_2 and q 1 on P, eps 1e-4), the greedy's tension,
-current_map.flow's fields, and the sightline metric's (ss100k2n2r30) baseline and clearing;
-each a float's repr or an array's SHA-256. REFERENCE holds them as computed at 3f74f5fa, the
-commit before Params.cells (`reference`, run there with `_params` building Params without the
-field, which did not exist). Fault `ulp`: OpenFraction's factor moved up by one ulp.
+`identity`: U (lifted.OpenFraction) under the face aperture reproduces the code that adopted it
+bit for bit. `numbers` computes, on the CPU with every system seeded alike (pyamg's setup draws
+from numpy's global RNG), the scorer's baseline (P0, J_2's, every home's escape time, the
+injection field, the placement), a random clearing's operator (the CSR arrays), P, J_2 and
+P_{1/2}, the relaxation's value and gradient (SIMP q 3 on J_2 and q 1 on P, eps 1e-4), the
+greedy's tension, current_map.flow's fields, and the sightline metric's (ss100k2n2r30) baseline
+and clearing; each a float's repr or an array's SHA-256. REFERENCE holds them as computed at
+bd1704dc, where the step rule was a Strategy (`reference`, run there with `_params` selecting
+the face aperture, steps=lifted.steps_of("apwfs"), uni+apwfs). Fault `ulp`: OpenFraction's
+factor moved up by one ulp.
 
-`operator`: the operator under U is the one the open fractions give: every along edge's weight
-the smallest open fraction over the cells its step touches, every turning edge's its cell's,
-assembled here from those definitions (`_reference_edges`) and compared with lifted.edges's
-families, bit for bit, on the baseline and a random clearing. Fault `b1`: OpenFraction's factor
-B_1's (lifted.Blurred(1)).
+`operator`: the operator under U is the one the open fractions give: every turning edge's weight
+its cell's open fraction times h^2 / (ell^2 dtheta), assembled here (`_turning_edges`) and
+compared with lifted.edges's turning families bit for bit, and every sub-sample's factor, which
+the steps' tracks read, its openness (`_openness`: open 1, outside the block 0, on a footprint
+its cell's cleared share of its footprint) against OpenFraction.sub_factor within OPENNESS_TOL;
+on the baseline and a random clearing. Fault `b1`: OpenFraction's factor B_1's
+(lifted.Blurred(1)).
 
 `gradient`: the relaxation's gradient under B_r (relax.Relaxation.value_sgrad with Params.cells
 Blurred(r) for r in GRAD_R), SIMP's q 1 and 3, P and J_2, eps 1e-4, at a random fractional
@@ -59,7 +62,7 @@ import current_map  # noqa: E402
 import lifted  # noqa: E402
 import relax  # noqa: E402
 
-REFERENCE = HERE / "width_rows" / "identity_reference.csv"
+REFERENCE = HERE / "width_rows" / "identity_reference_fws.csv"
 SEED = 20261013
 BUDGET = relax.D_LENS
 EPS = 1e-4                # SIMP base's eps world (relax.plan_of(...e0.0001...))
@@ -68,10 +71,9 @@ POP = common.PopulationDemand()
 
 
 def _params(along: lifted.AlongConductance) -> lifted.Params:
-    """The metric's physics on the CPU (relax._clearing's), U's cells. (At 3f74f5fa, for
-    `reference`, the same without `cells`: the field did not exist.)"""
-    return lifted.Params(3.0, 8, along=along, solver=lifted.CpuAMG(), cells=lifted.OpenFraction(),
-                         steps=lifted.SmallestCell())
+    """The metric's physics on the CPU (relax._clearing's), U's cells. (At bd1704dc, for
+    `reference`, the same with steps=lifted.steps_of("apwfs"): the step rule was a Strategy.)"""
+    return lifted.Params(3.0, 8, along=along, solver=lifted.CpuAMG(), cells=lifted.OpenFraction())
 
 
 @contextmanager
@@ -182,33 +184,39 @@ def identity(ids: list[str]) -> list[str]:
         if set(got) != set(want):
             raise SystemExit(f"{bid}: quantities {sorted(set(got) ^ set(want))} on one side only")
         off = [k for k in want if got[k] != want[k]]
-        print(f"{bid}: {len(want) - len(off)} of {len(want)} numbers as at 3f74f5fa, bit for bit"
+        print(f"{bid}: {len(want) - len(off)} of {len(want)} numbers as at bd1704dc, bit for bit"
               + (f"; differ: {off}" if off else ""), flush=True)
         if off:
             bad.append(bid)
     return bad
 
 
-def _reference_edges(g: lifted.Grid, o: np.ndarray, p: lifted.Params):
-    """The operator's families as the open fractions define them, assembled here (not by
-    lifted): an along edge's weight m_k / |v_k|^2 times the smallest open fraction over the cells
-    its step touches, kept where that is above 0; a turning edge's its cell's open fraction times
-    h^2 / (ell^2 dtheta)."""
+def _turning_edges(g: lifted.Grid, o: np.ndarray, p: lifted.Params):
+    """The turning families as the open fractions define them, assembled here (not by lifted):
+    in every open cell, (k, k+1)'s weight its open fraction times h^2 / (ell^2 dtheta)."""
     of = o.ravel()
-    cell = -np.ones(of.size, dtype=np.int64)
-    cell[of > 0] = np.arange(int((of > 0).sum()))
-    pat = g.pattern(p.K, np)
-    for k in range(p.K):
-        a, b, line, wk = pat.along[k]
-        frac = np.minimum(of[a], of[b])
-        for li in line:
-            frac = np.minimum(frac, of[li])
-        ok = frac > 0
-        yield cell[a[ok]], cell[b[ok]], frac[ok] * wk
     _v, _th, _m, gap = lifted.axes(p.K)
     vol = of[of > 0]
     for k in range(p.K):
         yield np.arange(len(vol)), np.arange(len(vol)), vol * (g.h * g.h / (p.ell_m ** 2 * gap[k]))
+
+
+OPENNESS_TOL = 1e-15     # lifted computes a footprint sub-sample's openness as 1 - (1 - share)
+
+
+def _openness(c: clear.Clearing, removed: np.ndarray) -> np.ndarray:
+    """(cells, S*S) each sub-sample's openness at the 0/1 state `removed`, from the geometry (not
+    lifted's): 1 inside the block and off every footprint, 0 outside it, and on a footprint its
+    cell's cleared share of its footprint sub-samples (the cleared part of a cell spread evenly
+    over its footprint: exact for a cell under one building)."""
+    g = c.sc.grid
+    n = g.inside.size
+    isub = g.isub.reshape(n, -1)
+    cov = isub & g.bsub.reshape(n, -1)
+    lab = c.lab.reshape(n, -1)
+    gone = cov & (lab >= 0) & removed[np.maximum(lab, 0)]
+    share = gone.sum(axis=1) / np.maximum(cov.sum(axis=1), 1)
+    return np.where(cov, share[:, None], (isub & ~cov).astype(float))
 
 
 def operator(ids: list[str]) -> list[str]:
@@ -217,15 +225,19 @@ def operator(ids: list[str]) -> list[str]:
         [b] = common.build_blocks([bid])
         c = _clearing(b, lifted.Uniform(), POP)
         x = _random_clearing(c, np.random.default_rng(SEED))
-        for label, o in (("baseline", c.sc.free0), ("clearing", c.open_(x))):
-            fam = list(lifted.edges(c.sc.grid, o, c.p))
-            ref = list(_reference_edges(c.sc.grid, o, c.p))
-            same = len(fam) == len(ref) and all(
+        for label, removed in (("baseline", np.zeros(c.n, dtype=bool)), ("clearing", x)):
+            o = c.open_(removed)
+            turn = list(lifted.edges(c.sc.grid, o, c.p))[c.p.K:]
+            ref = list(_turning_edges(c.sc.grid, o, c.p))
+            same = len(turn) == len(ref) and all(
                 np.array_equal(ca, ra) and np.array_equal(cb, rb) and np.array_equal(w, rw)
-                for (ca, cb, _ka, _kb, w), (ra, rb, rw) in zip(fam, ref, strict=True))
-            print(f"{bid} {label}: U's {len(fam)} edge families against the open fractions' "
-                  f"definition, bit for bit: {same}", flush=True)
-            if not same:
+                for (ca, cb, _ka, _kb, w), (ra, rb, rw) in zip(turn, ref, strict=True))
+            off = float(np.abs(c.p.cells.sub_factor(c.sc.grid, o, c.p.solver)
+                               - _openness(c, removed)).max())
+            print(f"{bid} {label}: U's {len(turn)} turning families against the open fractions' "
+                  f"definition, bit for bit: {same}; every sub-sample's factor its openness, "
+                  f"within {off:.1e}", flush=True)
+            if not (same and off <= OPENNESS_TOL):
                 bad.append(f"{bid} {label}")
     return bad
 
@@ -233,9 +245,12 @@ def operator(ids: list[str]) -> list[str]:
 GRAD_R = (0.5, 1.0, 1.5)
 GRAD_BUILDINGS = 6
 GRAD_Q = (1.0, 3.0)
-FD_STEP = 1e-5           # B_r's factor is piecewise linear with many kinks (each sub-sample's
-                         # openness against its disk's): at 1e-4 a central difference on 38136
-                         # straddled one (building 5, b0.5 q 1: 1.1e-4 off; 4e-10 at 1e-5)
+FD_STEP = 3e-7           # B_r's factor is piecewise linear with many kinks (each sub-sample's
+                         # openness against its disk's; under the face aperture each track's min
+                         # too): at 1e-4 a central difference on 38136 straddled one (building 5,
+                         # b0.5 q 1: 1.1e-4 off; 4e-10 at 1e-5), at 1e-5 another (building 5,
+                         # b1.5 J_2 q 1: 1.1e-5, 9.4e-6, 4.4e-6, 1.0e-7 off at 1e-5, 3e-6, 1e-6,
+                         # 3e-7; the other five 2e-10 -- 1e-7 at every step)
 FD_RTOL = 1e-9
 GRAD_TOL = 1e-5
 

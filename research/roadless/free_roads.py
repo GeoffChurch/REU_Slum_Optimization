@@ -58,7 +58,6 @@ import geopandas as gpd
 import numpy as np
 import shapely
 from numpy.typing import NDArray
-from scipy import ndimage
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
@@ -83,8 +82,7 @@ CODE = source_hash(Path(__file__), Path(common.__file__), Path(lifted.__file__))
 # The reach of open space (lifted.grounded, Grid.reach) reads only the solver's device, here the
 # CPU; Params' physics fields (turning length, headings, along-conductance) are its defaults, which
 # enter no reach and so no held road.
-REACH_P = lifted.Params(solver=lifted.CpuAMG(), cells=lifted.OpenFraction(),
-                        steps=lifted.SmallestCell())
+REACH_P = lifted.Params(solver=lifted.CpuAMG(), cells=lifted.OpenFraction())
 
 
 class Population(Protocol):
@@ -305,19 +303,22 @@ def _routing(block: Block, graph: RoutingGraph, width_m: float, w: NDArray[np.fl
 def _targets(grid: lifted.Grid, pl: lifted.Placement, graph: RoutingGraph, g: _Graph,
              homes: NDArray[np.intp], reach: float) -> dict[int, _Targets]:
     """Per home, its targets: the cells that free it are its near cells (lifted.Placement.near)
-    and the open pockets those touch (4-connected open space, as Grid.reach labels it); a node or
-    an edge within `reach` of an inside sub-sample of one of them is a target."""
+    and the open pockets of those that can take demand (their components of the operator's cell
+    graph, lifted.components; a split cell takes none, lifted.demand_cells); a node or an edge
+    within `reach` of an inside sub-sample of one of them is a target."""
     ny, nx = grid.inside.shape
-    open0 = (grid.ff0 > 0).ravel()
-    label = ndimage.label(open0.reshape(ny, nx))[0].ravel()
+    o0 = grid.ff0.ravel()
+    F0 = REACH_P.cells.sub_factor(grid, grid.ff0, REACH_P.solver)
+    takes = lifted.demand_cells(grid, o0 > 0, F0)
+    comp = lifted.components(grid, o0, REACH_P)
     near = pl.near.tocsc()
     t = ((np.arange(grid.S) + 0.5) / grid.S - 0.5) * grid.h       # Grid._sub_xy's offsets
     ox, oy = np.meshgrid(t, t)
     out: dict[int, _Targets] = {}
     for h in homes:
         cells = near.indices[near.indptr[h]:near.indptr[h + 1]]
-        pockets = np.unique(label[cells][open0[cells]])
-        cells = np.union1d(cells, np.flatnonzero(np.isin(label, pockets[pockets > 0])))
+        pockets = np.unique(comp[cells][takes[cells]])
+        cells = np.union1d(cells, np.flatnonzero(np.isin(comp, pockets)))
         rr, cc = np.divmod(cells, nx)
         xs = grid.xy[rr, cc, 0][:, None] + ox.ravel()[None, :]
         ys = grid.xy[rr, cc, 1][:, None] + oy.ravel()[None, :]

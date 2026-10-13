@@ -181,24 +181,28 @@ items up front"), in the order proposed:
    the flow only a little onto lanes U's flow already uses (no new corridors at r up to 1.5 m), and
    SIMP under it gains nothing over U's clearing on its own lens. The variants stay selectable
    (pruning in the consolidated pass). **The grid fix: done** (owner 2026-10-13, "LGTM"; NOTES,
-   "The grid fix: steps that conduct by their open width"): lifted.StepWidth (Params.steps), a step
-   conducting by the share of its width open from cell centre to cell centre, read on the
-   sub-samples; the candidate, Fws (`uni+apwfs`), traces an axis-aligned step across its face and
-   lets a split cell conduct through one part only. Its reach is the flood fill of open
-   sub-samples, so the phantom passages are gone; it encloses 0.09% of the small blocks' people
-   (0.02% of the large), freed first for a median D 0.0031, moves 1.3% of the demand, takes the
-   levels' lattice drift from up to 0.23 to at most 0.027 and the corridor's angle error at 1 m
-   from 1.66 to 1.21, and keeps the method order (tau median 1.00 on every lens on the 13; SIMP's
-   default leads on 10 -- 12, resistance_lp the best road). **Next** (the owner's call): adopt Fws
-   and delete SmallestCell (recommended; A, Aw and Aws are beaten except on narrow points, NOTES),
-   then, before any re-scoring, the passable width, which now looks needed: Fws conducts a real
-   crack of 1 -- 2 sub-samples (12.5 -- 25 cm) at its sampled width, and a home with most of its
-   demand in one gets up to 54x today's escape time, which the equity lenses follow (J_2's baseline
-   up to 11.8x on 44274, 17x on 28051; on 1558 the clearance roads pass resistance_lp on P_{1/2}
-   and J_2 by opening three such homes). A gap nobody walks through is a wall, not a slow exit;
-   closing gaps under about 0.5 m would enclose such homes (free first) or move their demand to
-   their open side, a modelling and a convexity question (a hard opening moves with every clearing;
-   a B_r-like soft one keeps P convex).
+   "The grid fix: steps that conduct by their open width"): a step conducting by the share of its
+   width open from cell centre to cell centre, read on the sub-samples; the candidate, Fws
+   (`uni+apwfs`), traces an axis-aligned step across its face and lets a split cell conduct
+   through one part only. Its reach is the flood fill of open sub-samples, so the phantom passages
+   are gone; it encloses 0.09% of the small blocks' people (0.02% of the large), freed first for a
+   median D 0.0031, moves 1.3% of the demand, takes the levels' lattice drift from up to 0.23 to
+   at most 0.027 and the corridor's angle error at 1 m from 1.66 to 1.21, and keeps the method
+   order (tau median 1.00 on every lens on the 13; SIMP's default leads on 10 -- 12,
+   resistance_lp the best road). **Adopted** (owner 2026-10-13: "We can adopt Fws and delete the
+   losing methods"; NOTES, the section's last paragraph): Fws is the operator's one step rule
+   (lifted.step_widths), the rule before it (SmallestCell) and A, Aw and Aws deleted, and every
+   conductance's name ends in `+apwfs` (uni+apwfs), so no row of the old rule is read as the new
+   one's; the stored clearings stand, their scores are the old rule's until the consolidated pass
+   re-scores them. **Still open: the passable width** (the owner is weighing it; not started),
+   before any re-scoring, which now looks needed: Fws conducts a real crack of 1 -- 2 sub-samples
+   (12.5 -- 25 cm) at its sampled width, and a home with most of its demand in one gets up to 54x
+   the old rule's escape time, which the equity lenses follow (J_2's baseline up to 11.8x on 44274,
+   17x on 28051; on 1558 the clearance roads pass resistance_lp on P_{1/2} and J_2 by opening three
+   such homes). A gap nobody walks through is a wall, not a slow exit; closing gaps under about
+   0.5 m would enclose such homes (free first) or move their demand to their open side, a modelling
+   and a convexity question (a hard opening moves with every clearing; a B_r-like soft one keeps P
+   convex).
    (4) **Exits: the region model** (owner: "we'd still only leak at the
    outer boundary, so all current must exit ... some of the outer boundary might not leak at all
    and might have 0 conductance (like a railroad)"; "we can adjust boundary leakage, uniform

@@ -22,8 +22,7 @@ OUT = Path(sys.argv[1])
 mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
 [b] = common.build_blocks([BID])
 scans = lifted.scans_of("gpu")
-base = lifted.Params(3.0, 8, solver=lifted.solver_of("gpu"), cells=lifted.OpenFraction(),
-                     steps=lifted.SmallestCell())
+base = lifted.Params(3.0, 8, solver=lifted.solver_of("gpu"), cells=lifted.OpenFraction())
 sc = common.Scorer(b, mesh, base, population=common.POPULATIONS["area"],
                    demand=common.PopulationDemand())
 g = sc.grid
@@ -56,7 +55,7 @@ sets = {n: np.asarray(c, dtype=int) for n, c in
         if n in ("cheap", "default")}
 sets["sightline"] = take
 cross = {}
-for along in ("uni", SS):
+for along in ("uni+apwfs", SS + "+apwfs"):
     c = relax._clearing(BID, "gpu", along, mesh, demand=common.PopulationDemand())
     rel = relax.Relaxation(c, 2.0)
     for name, cl in sets.items():

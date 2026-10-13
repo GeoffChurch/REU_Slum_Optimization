@@ -55,8 +55,7 @@ def _one(i: int) -> None:
     t0 = time.time()
     pcfg = load_permeability_config(common.REPO / "conf")
     ctx = EgressContext.of(b, pcfg.params)
-    p = lifted.Params(ell_m=ell, K=K, cells=lifted.OpenFraction(),
-                      steps=lifted.SmallestCell())
+    p = lifted.Params(ell_m=ell, K=K, cells=lifted.OpenFraction())
     population = common.POPULATIONS[pop]
     mesh = lifted.UniformMesh(h, offset=lifted.OFFSET)
     carve = common.Scorer(b, mesh, p, rule=common.Carve(), population=population,

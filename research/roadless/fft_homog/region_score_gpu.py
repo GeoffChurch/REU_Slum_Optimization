@@ -53,7 +53,7 @@ if __name__ == "__main__":
     gpu = GpuPeak()
     with rc.Monitor("gpu scoring: Clearing on h0.5a5x8 (grid, baseline solve)"):
         t = time.time()
-        c = relax._clearing(rc.BID, "gpu", "uni", common.mesh_of("0.5a5x8"),
+        c = relax._clearing(rc.BID, "gpu", "uni+apwfs", common.mesh_of("0.5a5x8"),
                             demand=common.PopulationDemand())
         rel = relax.Relaxation(c, 2.0)
     print(f"{len(c.sc.grid.level)} cells, J0 {rel.J0:.8g}, {time.time() - t:.0f} s", flush=True)

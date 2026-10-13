@@ -35,8 +35,7 @@ def main(idx: int) -> None:
     print("(1) channel L 60 m: P x W (Uniform ~ const; Sightline should fall as W grows)")
     for ang in (0.0, 30.0):
         for along in ALONGS:
-            p = lifted.Params(ell_m=3.0, K=8, along=along, cells=lifted.OpenFraction(),
-                              steps=lifted.SmallestCell())
+            p = lifted.Params(ell_m=3.0, K=8, along=along, cells=lifted.OpenFraction())
             out = []
             for W in (1.0, 2.0, 4.0, 8.0):
                 g = channel(W, angle_deg=ang)
@@ -53,8 +52,7 @@ def main(idx: int) -> None:
           "sets of buildings (must not rise)")
     rng = np.random.default_rng(0)
     for along in ALONGS[1:]:
-        p = lifted.Params(ell_m=3.0, K=8, along=along, cells=lifted.OpenFraction(),
-                          steps=lifted.SmallestCell())
+        p = lifted.Params(ell_m=3.0, K=8, along=along, cells=lifted.OpenFraction())
         sc = common.Scorer(b, lifted.UniformMesh(0.5, offset=lifted.OFFSET), p,
                            demand=common.PopulationDemand())
         order = rng.permutation(len(sc.polys))
@@ -70,13 +68,11 @@ def main(idx: int) -> None:
               f"  (one solve {time.time() - t:.1f}s)", flush=True)
     t = time.time()
     lifted.operator(sc.grid, sc.grid.ff0, lifted.Params(3.0, 8, ALONGS[0],
-                                                        cells=lifted.OpenFraction(),
-                                                        steps=lifted.SmallestCell()))
+                                                        cells=lifted.OpenFraction()))
     t0 = time.time() - t
     t = time.time()
     lifted.operator(sc.grid, sc.grid.ff0, lifted.Params(3.0, 8, ALONGS[2],
-                                                        cells=lifted.OpenFraction(),
-                                                        steps=lifted.SmallestCell()))
+                                                        cells=lifted.OpenFraction()))
     print(f"\n(3) operator build: Uniform {t0:.1f}s, Sightline {time.time() - t:.1f}s")
 
 

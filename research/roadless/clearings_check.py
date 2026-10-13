@@ -22,11 +22,14 @@ seen over, and every disagreement.
 
 `rescore`: on each block, each run's committed clearing read through the reader (the fingerprint
 checked), scored again by today's scorer on the CPU (clear.Clearing under the run's own settings:
-its along-conductance, mesh, population and power, B's placement, the population's demand) and
-set beside the row's own D, Lens A (`perm`) and enclosed share. `run@step` names a nested run's
-row: a number, `last` or `mid` (a single-budget run is step 1, written `run` alone). A row made
-before lifted.Placement (metric preB) scores today without the homes the nearest-building rule
-had given a neighbour; where the block has none, it must match, and where it has, it moves.
+its along-conductance, every cell by its open fraction, mesh, population and power, B's
+placement, the population's demand) and set beside the row's own D, Lens A (`perm`) and enclosed
+share. `run@step` names a nested run's row: a number, `last` or `mid` (a single-budget run is
+step 1, written `run` alone). A row made before lifted.Placement (metric preB) scores today
+without the homes the nearest-building rule had given a neighbour; where the block has none, it
+must match, and where it has, it moves. Every committed row (preB and B) was scored under the step
+rule before the face aperture (2026-10-13), so its Lens A moves too: a DIFFERS here measures the
+rule's change, not a fault, until the store holds rows scored under the aperture.
 """
 from __future__ import annotations
 
@@ -168,9 +171,8 @@ def rescore(store: Store, block_ids: Sequence[str], specs: Sequence[str]) -> Non
             key = (info.along, info.search_along, info.mesh, info.population)
             if key not in scorers:
                 scans = lifted.scans_of("cpu")
-                cond = lifted.conductance_of(info.along, scans)
-                p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells, steps=cond.steps,
-                                  solver=lifted.solver_of("cpu"))
+                p = lifted.Params(3.0, 8, along=lifted.along_of(info.along, scans),
+                                  cells=lifted.OpenFraction(), solver=lifted.solver_of("cpu"))
                 search = lifted.along_of(info.search_along, scans) if info.search_along else None
                 scorers[key] = clear.Clearing(
                     block, common.mesh_of(info.mesh.removeprefix("h")), p,

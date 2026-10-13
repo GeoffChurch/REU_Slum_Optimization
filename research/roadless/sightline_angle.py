@@ -100,8 +100,7 @@ VARIANTS = {
 def main(names: list[str]) -> None:
     for name in names:
         along, K, h = VARIANTS[name]
-        p = lifted.Params(ell_m=3.0, K=K, along=along, cells=lifted.OpenFraction(),
-                          steps=lifted.SmallestCell())
+        p = lifted.Params(ell_m=3.0, K=K, along=along, cells=lifted.OpenFraction())
         for W in WIDTHS:
             ps = np.array([channel(a, W, 40.0, h, p) for a in ANGLES])
             print(f"{name:7s} W {W:3.1f}  max/min {ps.max() / ps.min():5.2f}  P/P(0): "

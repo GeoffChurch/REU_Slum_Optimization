@@ -1,18 +1,19 @@
 """The clearing problem as one convex program, solved by Frank-Wolfe.
 
 Clear a fraction x_j in [0, 1] of each building: a cell's open fraction is ff0 + sum_j x_j
-(the share of the cell building j covers), so it is affine in x. Each edge weight is a minimum
-of cell factors (lifted.Params.cells: the open fractions themselves, or lifted.Blurred's sum over
-a cell's sub-samples of min(openness, B), B affine in the open field), concave in x, and by the
-Dirichlet principle P(w) = max_u 2 f^T u - sum_e w_e (du_e)^2 is a maximum of functions affine
-and non-increasing in w. So P(x) is convex,
+(the share of the cell building j covers), so it is affine in x. Each step's weight is a mean
+over its tracks of the smallest sub-sample factor on each (lifted.step_widths: U's openness,
+affine in x, or lifted.Blurred's min(openness, B), B affine in the open field), each turning
+edge's its cell's factor (the open fraction, or Blurred's sum of that min over its
+sub-samples), all concave in x, and by the Dirichlet principle P(w) = max_u 2 f^T u -
+sum_e w_e (du_e)^2 is a maximum of functions affine and non-increasing in w. So P(x) is convex,
 and so is min P(x) s.t. sum_j c_j x_j <= D, 0 <= x <= 1 (c_j the population share). J_p for
 p != 1 is not convex; Frank-Wolfe is then a local method and the gap is not a bound.
 
 Objective: J_p in the eps world (buildings as eps material, as the tension), so J_eps <= J
 for every clearing and a lower bound on J_eps bounds every real clearing. Gradient: dJ/dw_e =
--du_e dlam_e (lam the adjoint; u for p 1); where w_e is a min over several cells, the
-gradient is shared equally among the cells attaining it (a supergradient of the min, so a
+-du_e dlam_e (lam the adjoint; u for p 1); where a track's min is attained by several
+sub-samples, its share is split equally among them (a supergradient of the min, so a
 subgradient of J: the gap stays a valid bound). Linear step: a fractional knapsack (the batch
 pickers' rule, best gain per unit population up to D). Step size: a parabola through J(0),
 J'(0) = -gap and J(1), checked, and shorter steps when neither it nor the full step descends
@@ -151,18 +152,16 @@ class Relaxation:
         K = p.K
         uk, lk = _cells_axes(sy, sol.u, K), _cells_axes(sy, lam, K)
         o = xp.asarray(op_eps).ravel()
-        kap = lifted.cell_factor(g, o, p)               # what each cell conducts by (p.cells)
         cell, _nf = lifted._free_ids(o, xp)
         pat = g.pattern(K, xp)
         _v, _th, _m, gap = lifted.axes(K)
         gc = xp.zeros(o.size)                           # dJ / d(cell factor) per grid cell
-        # dJ / d(each step's width share), as p.steps reads it: SmallestCell adds dJ / d kap to
-        # gc (each edge's coefficient shared among the cells at its min), an Aperture keeps it
-        # per sub-sample (shared among those at each track's min) for open_grad below
-        steps = p.steps.gradient(g, o, kap, p, gc)
+        # dJ / d(each step's width share), kept per sub-sample (shared among those at each
+        # track's min) for open_grad below
+        steps = lifted.step_gradient(g, o, p)
         Fl = p.along.layers(g, op_eps, K)
         dF = None                                       # dJ / d(layer factor), if any vary
-        for k, frac in enumerate(p.steps.widths(g, o, kap, p)):
+        for k, frac in enumerate(lifted.step_widths(g, o, p)):
             a, b, _line, const = pat.along[k]          # const: a fully open edge's weight
             ca, cb = cell[a], cell[b]
             q = (uk[ca, k] - uk[cb, k]) * (lk[ca, k] - lk[cb, k])
@@ -184,13 +183,11 @@ class Relaxation:
             q = (uk[:, k] - uk[:, k2]) * (lk[:, k] - lk[:, k2])
             gc[free] += -q * (area / (p.ell_m ** 2 * gap[k]))
         # dJ / d(open): through the cell factors (OpenFraction's vjp: gc itself), through what
-        # the step widths read below the cells (an Aperture's sub-samples), plus the along
-        # factors' own response to opening
+        # the step widths read below the cells (the sub-samples), plus the along factors' own
+        # response to opening
         gc = xp.asarray(p.cells.vjp(g, o.reshape(op_eps.shape), gc.reshape(op_eps.shape),
                                     p.solver)).ravel()
-        below = steps.open_grad()
-        if below is not None:
-            gc += xp.asarray(below).ravel()
+        gc += xp.asarray(steps.open_grad()).ravel()
         if dF is not None:
             gc += xp.asarray(p.along.vjp(g, op_eps, K, dF.reshape(K, *op_eps.shape))).ravel()
         grad = (1.0 - self.eps) * (c.bf @ p.solver.to_host(gc)[self.inside])
@@ -714,7 +711,7 @@ def simp(rel: Relaxation, x0: np.ndarray, budget: float,
 
 def _clearing(bid: str, device: str, along: str, mesh: lifted.MeshSpec, *,
               demand: common.Demand) -> Clearing:
-    """`along`: the metric's conductance (lifted.conductance_of: `<along>[+<cells>]`), or
+    """`along`: the metric's conductance (lifted.conductance_of: `<along>[+<cells>]+apwfs`), or
     <metric>@<search>: SIMP's gradient under the search one's along-conductance (as the greedy's
     translucent search), every score under the metric. `demand`: what each home injects
     (common.Demand); the area population sets the cost whatever it is."""
@@ -722,8 +719,7 @@ def _clearing(bid: str, device: str, along: str, mesh: lifted.MeshSpec, *,
     scans = lifted.scans_of(device)
     specs = along.split("@")
     cond = lifted.conductance_of(specs[0], scans)
-    p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells, steps=cond.steps,
-                      solver=lifted.solver_of(device))
+    p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells, solver=lifted.solver_of(device))
     return Clearing(b, mesh, p, population=common.POPULATIONS["area"],
                     search=lifted.along_of(specs[1], scans) if len(specs) == 2 else None,
                     demand=demand)

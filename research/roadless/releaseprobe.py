@@ -3,7 +3,7 @@ result? The translucent greedy on one block, once as it is and once with the rel
 each in a fresh process; every step's D, perm, perm1 and clearing order must be equal. Prints the
 verdict and exits non-zero on any difference.
 
-    python -u research/roadless/releaseprobe.py <id> <along>[@<search>] <d_max>
+    python -u research/roadless/releaseprobe.py <id> <conductance>[@<search along>] <d_max>
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def variant(bid: str, along: str, d_max: float, out: Path, release: bool) -> Non
     specs = along.split("@")
     (b,) = common.build_blocks([bid])
     clear.greedy_block(b, search.greedy_round("S0.01cat", clear.sweep_of("gpu")), 0.5, d_max, out,
-                       common.POPULATIONS["area"], 2.0, lifted.along_of(specs[0], scans),
+                       common.POPULATIONS["area"], 2.0, lifted.conductance_of(specs[0], scans),
                        lifted.solver_of("gpu"),
                        lifted.along_of(specs[1], scans) if len(specs) == 2 else None)
 

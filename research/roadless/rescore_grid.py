@@ -27,13 +27,12 @@ _CFG: dict = {}
 
 
 def one(bid: str) -> dict:
-    g = pd.read_parquet(rows_dir(_CFG["picker"], _CFG["h"], "area", POWER)
+    g = pd.read_parquet(rows_dir(_CFG["picker"], _CFG["h"], "area", POWER, "uni")
                         / f"{bid}.parquet").sort_values("step")
     hi = int(g[g.D >= 0.10 - 1e-9].step.iloc[0])
     lo = hi - 1
     mesh = lifted.UniformMesh(H_FINE, offset=lifted.OFFSET)
-    c = Clearing(_B[bid], mesh, lifted.Params(3.0, 8, cells=lifted.OpenFraction(),
-                                              steps=lifted.SmallestCell()),
+    c = Clearing(_B[bid], mesh, lifted.Params(3.0, 8, cells=lifted.OpenFraction()),
                  population=common.POPULATIONS["area"],
                  demand=common.PopulationDemand())
     sc = c.sc
@@ -50,7 +49,7 @@ def one(bid: str) -> dict:
     t = (0.10 - D[lo]) / (D[hi] - D[lo])
     out = dict(block=bid, A=(1 - t) * vals[lo][0] + t * vals[hi][0],
                A1=(1 - t) * vals[lo][1] + t * vals[hi][1])
-    f = pd.read_parquet(rows_dir(_CFG["picker"], H_FINE, "area", POWER)
+    f = pd.read_parquet(rows_dir(_CFG["picker"], H_FINE, "area", POWER, "uni")
                         / f"{bid}.parquet").sort_values("D")
     out.update(fine_A=float(np.interp(0.10, f.D, f.perm)),
                fine_A1=float(np.interp(0.10, f.D, f.perm1)))
@@ -61,8 +60,8 @@ def one(bid: str) -> dict:
 def main(picker: str, h: float, workers: int) -> None:
     global _B, _CFG
     _CFG = dict(picker=picker, h=h)
-    done = sorted(p.stem for p in rows_dir(picker, h, "area", POWER).glob("*.parquet"))
-    fine = {p.stem for p in rows_dir(picker, H_FINE, "area", POWER).glob("*.parquet")}
+    done = sorted(p.stem for p in rows_dir(picker, h, "area", POWER, "uni").glob("*.parquet"))
+    fine = {p.stem for p in rows_dir(picker, H_FINE, "area", POWER, "uni").glob("*.parquet")}
     ids = [i for i in done if i in fine]
     _B = {b.block_id: b for b in common.build_blocks(ids)}
     with multiprocessing.get_context("fork").Pool(workers) as pool:

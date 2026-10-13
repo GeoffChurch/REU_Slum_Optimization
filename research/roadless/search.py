@@ -31,7 +31,7 @@ relax.py's rows of that plan, power and conductance): the seed is the first move
 and checked against SIMP's own score of it, so a swing from it finishes SIMP's answer.
 
     CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/search.py <ids,> <spec> <p> \
-        <cpu|gpu> <along> <d_max>
+        <cpu|gpu> <conductance> <d_max>
 
 spec: GP<grow>x<greedy picker>r<restore share per round>[m<shortlist>], e.g.
 GP3xS0.01catr0.005m8; FL<same>c<cap on the conditional adds' scorings>, e.g.
@@ -1274,8 +1274,7 @@ def prune_block(b: Any, plan: SearchPlan, *,
                 polish_of: Callable[[Clearing, float], Graded], power: float,
                 along: str, device: str, d_max: float) -> pd.DataFrame:
     cond = lifted.conductance_of(along, lifted.scans_of(device))
-    p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells, steps=cond.steps,
-                      solver=lifted.solver_of(device))
+    p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells, solver=lifted.solver_of(device))
     mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
     c = Clearing(b, mesh, p, population=common.POPULATIONS["area"],
                  demand=common.PopulationDemand())
