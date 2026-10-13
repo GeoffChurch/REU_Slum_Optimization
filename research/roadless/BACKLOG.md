@@ -229,7 +229,14 @@ can be done after we've done the entire website/README/examples revamp"):
 - **The stored clearings made durable**: each clearing's core (preset, block, cleared building
   ids, D, Lens A, enclosed share) committed; rows no longer overwritten in place.
 - **`.superpowers/sdd/`'s reports** (6.6 MB since July, git-ignored): checked for findings not
-  recorded elsewhere, those filed, the finished plans' workspaces deleted.
+  recorded elsewhere, those filed, the finished plans' workspaces deleted. Done 2026-10-13: five
+  July footpath-conductance findings went to the wiki
+  (`pages/reblock/footpath-conductance-from-parcel-geometry.md`), the other fifteen were already
+  in git; 6.6 MB down to the three active study workspaces. Three citations now dangle (main's
+  OT note -> `transfer-idea-feasibility.md`; `tests/test_permeability.py` -> `task-1-report.md`;
+  `conf/permeability.yaml` and `reblock.permeability`'s docstring -> scratch scripts long gone);
+  each citing text carries its substance. Fix them with the site revamp: editing
+  `reblock.permeability` misses the derive cache of every method that imports it.
 - **The vulnerability score** (free first in reverse: the least rubble that would wall a
   connected home in, a min cut): after the site/README/examples revamp.
 
