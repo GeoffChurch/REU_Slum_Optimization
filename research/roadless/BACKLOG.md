@@ -227,7 +227,13 @@ can be done after we've done the entire website/README/examples revamp"):
   dominance re-checked under P first, each to the wiki's dead-end record; the add/remove
   search's next rows go with them.
 - **The stored clearings made durable**: each clearing's core (preset, block, cleared building
-  ids, D, Lens A, enclosed share) committed; rows no longer overwritten in place.
+  ids, D, Lens A, enclosed share) committed; rows no longer overwritten in place. Done 2026-10-13
+  (NOTES, "The stored clearings, committed"): `research/roadless/clearings/`, 151 runs on 303
+  blocks, 3.5 MB in git, read through `clearings.py`, which refuses a block whose footprints no
+  longer match their fingerprint; the 12 blocks' pre-B rows the free-first runs overwrote were
+  recovered from run road-b's shipped inputs (`D0.05.p2@road-b`). Still to do: the optimizers'
+  no-overwrite guard (in the consolidated pass), and a re-export once the priority-weighted P run
+  finishes (`clearings_export.py export`).
 - **`.superpowers/sdd/`'s reports** (6.6 MB since July, git-ignored): checked for findings not
   recorded elsewhere, those filed, the finished plans' workspaces deleted. Done 2026-10-13: five
   July footpath-conductance findings went to the wiki
