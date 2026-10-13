@@ -286,8 +286,11 @@ can be done after we've done the entire website/README/examples revamp"):
   blocks, 3.5 MB in git, read through `clearings.py`, which refuses a block whose footprints no
   longer match their fingerprint; the 12 blocks' pre-B rows the free-first runs overwrote were
   recovered from run road-b's shipped inputs (`D0.05.p2@road-b`). Still to do: the optimizers'
-  no-overwrite guard (in the consolidated pass). The re-export after the priority-weighted P run
-  is done (2026-10-13: its four runs on all 220 blocks, the store 61,351 rows).
+  no-overwrite guard (in the consolidated pass), and, before any re-run under Fws, the scripts
+  that write rows without naming the metric keyed by it (study.py, which resumes into its old
+  rows; rescore.py, tails.py, the atlas and fft exports), so the old rule's rows and the new
+  cannot mix. The re-export after the priority-weighted P run is done (2026-10-13: its four runs
+  on all 220 blocks, the store 61,351 rows).
 - **`.superpowers/sdd/`'s reports** (6.6 MB since July, git-ignored): checked for findings not
   recorded elsewhere, those filed, the finished plans' workspaces deleted. Done 2026-10-13: five
   July footpath-conductance findings went to the wiki
