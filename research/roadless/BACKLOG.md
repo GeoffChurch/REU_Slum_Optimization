@@ -216,6 +216,23 @@ items up front"), in the order proposed:
    road_rescore's arms), as B's order implies, and re-score item 4's lineup with it. It changes a
    network only on a block with homes enclosed at baseline (12 of the 60 large blocks).
 
+Owner's decisions on the other open items (2026-10-13: "Yes to everything, except vulnerability
+can be done after we've done the entire website/README/examples revamp"):
+- **Re-scoring waits for the metric.** The free-first default for the road methods (item 5's
+  TODO), the oversized blocks and the arterial (item 4), free first for the plain greedy and the
+  composite and the small blocks' stored rows (item 3), and the measurement gaps (one-card timing
+  of the whole lineup with setup, S0.005cat's real clearing with the polish, the sightline
+  lineup) run once, in one consolidated pass under the final metric (item 4's decisions).
+- **In that pass, prune the dominated variants**: the speed-quality review's 17 (2026-10-12),
+  dominance re-checked under P first, each to the wiki's dead-end record; the add/remove
+  search's next rows go with them.
+- **The stored clearings made durable**: each clearing's core (preset, block, cleared building
+  ids, D, Lens A, enclosed share) committed; rows no longer overwritten in place.
+- **`.superpowers/sdd/`'s reports** (6.6 MB since July, git-ignored): checked for findings not
+  recorded elsewhere, those filed, the finished plans' workspaces deleted.
+- **The vulnerability score** (free first in reverse: the least rubble that would wall a
+  connected home in, a min cut): after the site/README/examples revamp.
+
 Open:
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
