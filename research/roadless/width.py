@@ -27,7 +27,8 @@ far end, the lattice checks.channel's), at the angles of sightline_angle.ANGLES 
 WIDTHS_ANGLE (Q2); at 0 and 30 deg over WIDTHS (how conduction grows with width); and at 0 deg
 under ALIGN_SHIFTS lattice offsets (how much a sub-cell shift moves P), with BlurCentre beside
 B_r for the alignment only (the blurred openness sampled at each cell's centre, with the min and
-without it: the form the brief wrote). Rows width_rows/channel.parquet.
+without it: the form the brief wrote); and at WIDTHS_SUBCELL under SUBCELL_SHIFTS offsets, widths
+where a shift adds or drops a column of sub-samples. Rows width_rows/channel.parquet.
 
 `score`: one block under one variant on the lattice at OFFSETS[offset]: the baseline, the stored
 clearings (STORED, through clearings.Store) and item 4's road prefixes at area D 0.05 (ROADS;
@@ -114,6 +115,9 @@ WIDTHS_ANGLE = (1.0, 1.5, 2.0, 4.0)
 WIDTHS = (0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0)
 ALIGN_SHIFTS = 8           # lattice offsets k / 8 of a cell (k = 0 .. 7) on both axes
 WIDTHS_ALIGN = (0.75, 1.0, 1.5, 2.0)
+SUBCELL_SHIFTS = 16        # the sub-cell check: k / 16 of a cell, so a shift can add or drop a
+                           # column of sub-samples ...
+WIDTHS_SUBCELL = (0.19, 0.3, 0.44, 0.69, 1.06)   # ... at widths between two counts of them
 
 
 # ------------------------------------------------------------------ conductances
@@ -221,11 +225,11 @@ def walled_channel(alpha_deg: float, W: float, h: float,
 
 
 class ChannelJob(NamedTuple):
-    check: str          # angle | width | align
+    check: str          # angle | width | align | subcell
     variant: str        # a VARIANTS key, or one of CENTRE (BlurCentre)
     W: float
     angle: float
-    shift: int          # align: k of ALIGN_SHIFTS (0: the metric's offset)
+    shift: int          # align, subcell: k of ALIGN_SHIFTS, SUBCELL_SHIFTS (0: the metric's)
 
 
 CENTRE = {f"{kind}{r:g}": BlurCentre(r, kind == "bc") for kind in ("bc", "bb")
@@ -240,7 +244,7 @@ def _channel_params(variant: str) -> lifted.Params:
 
 
 def _channel_one(job: ChannelJob) -> dict:
-    k = job.shift / ALIGN_SHIFTS
+    k = job.shift / (SUBCELL_SHIFTS if job.check == "subcell" else ALIGN_SHIFTS)
     offset = ((lifted.OFFSET[0] + k) % 1.0, (lifted.OFFSET[1] + k) % 1.0)
     grid, f = walled_channel(job.angle, job.W, H, offset)
     t0 = time.time()
@@ -256,7 +260,9 @@ def channel(procs: int) -> None:
             + [ChannelJob("width", v, W, a, 0) for v in names for W in WIDTHS for a in (0, 30)]
             + [ChannelJob("align", v, W, 0.0, s)
                for v in (*names, *CENTRE) for W in WIDTHS_ALIGN
-               for s in range(ALIGN_SHIFTS)])
+               for s in range(ALIGN_SHIFTS)]
+            + [ChannelJob("subcell", v, W, 0.0, s) for v in names for W in WIDTHS_SUBCELL
+               for s in range(SUBCELL_SHIFTS)])
     t0 = time.time()
     with multiprocessing.get_context("fork").Pool(procs) as pool:
         rows = pool.map(_channel_one, jobs, chunksize=1)
@@ -721,6 +727,8 @@ def report() -> None:
     _summary("q2_width", t.reindex([(ang, v) for ang in (0, 30) for v in names]).reset_index())
     al = ch[ch.check == "align"].groupby(["variant", "W"]).P.agg(lambda s: s.max() / s.min())
     _summary("q2_align", al.unstack().reindex([*names, *CENTRE]).reset_index())
+    sub = ch[ch.check == "subcell"].groupby(["variant", "W"]).P.agg(lambda s: s.max() / s.min())
+    _summary("q2_subcell", sub.unstack().reindex(names).reset_index())
     sc = _read("score")
     if sc.empty:
         return
