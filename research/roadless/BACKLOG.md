@@ -129,6 +129,21 @@ items up front"), in the order proposed:
    +0.152 where (i) ties, on 55, at least +0.047; on (i) on the other 5). Open: the 23
    oversized blocks (cycle_desire's cost and memory go with area) and the arterial (its
    `max_roads: 60` keeps it short of Lens A).
+   **The metric decisions** (owner 2026-10-12, walking through four: the escape-time functional,
+   the population, the conductance, the exits). (1) **P as the headline** ("leaning toward P with
+   J_2 as a side report"): one solve, monotone, convex in the clearing (a certified bound), the
+   shipped permeability's own quantity on the open-space raster; the equity view beside it is J_2
+   or, if it can replace J_2, a priority-weighted P (injections w_i (u0_i)^q at baseline escape
+   times, one solve and still convex; q = (p - 1)/2 matches J_p to first order on independent
+   paths, so q 1/2 is J_2's analogue and q 1, injection growing with depth^2, J_3's): the test on
+   the 220 small blocks is queued (NOTES, "Priority-weighted P"). (2) **Area population for
+   buildings** ("area for buildings makes the most sense ... relocate individual homes rather
+   than demolishing well-designed large community infrastructure like a school, especially since
+   people do come in and out of it"): area sets both a building's injection and its displacement
+   cost; the sources are already outside the buildings (Placement's ring of free cells within
+   1 m), which was the owner's other concern. (3) uni or sightline conductance and (4) what counts
+   as an exit: open. For the site: present both families, powers of the escape time (J_p) and
+   priority-weighted P, under established names.
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights
