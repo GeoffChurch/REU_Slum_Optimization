@@ -1,0 +1,4 @@
+size,blocks,homes,pocket_pop,pocket_demand,pocket_homes,phantom_pop,phantom_demand,phantom_homes
+large,60,100700,0.134815,0.0305618,14672,0.0218244,0.00552409,2290
+oversized,21,39802,,,0,0.00830625,0.00198573,441
+small,220,38176,0.249561,0.0600103,9654,0.0413723,0.0111737,1532

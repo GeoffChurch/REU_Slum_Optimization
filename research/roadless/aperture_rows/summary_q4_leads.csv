@@ -1,0 +1,13 @@
+rule,lens,leader,leader_blocks,leader_T,best_road,best_road_blocks,simp_minus_best
+Aw,L_J2,simp_default,1,simp_default,resistance_lp,1,0.164475
+Aw,L_P,simp_default,1,simp_default,resistance_lp,1,0.132583
+Aw,L_Pq0.5,simp_default,1,simp_default,resistance_lp,1,0.182368
+Aws,L_J2,simp_default,11,simp_default,resistance_lp,11,0.136919
+Aws,L_P,simp_default,12,simp_default,resistance_lp,11,0.12409
+Aws,L_Pq0.5,simp_default,11,simp_default,resistance_lp,10,0.152323
+Fws,L_J2,simp_default,11,simp_default,resistance_lp,11,0.165257
+Fws,L_P,simp_default,12,simp_default,resistance_lp,11,0.132307
+Fws,L_Pq0.5,simp_default,10,simp_default,resistance_lp,9,0.131124
+T,L_J2,simp_default,1,simp_default,resistance_lp,1,0.165483
+T,L_P,simp_default,1,simp_default,resistance_lp,1,0.145455
+T,L_Pq0.5,simp_default,1,simp_default,resistance_lp,1,0.143402

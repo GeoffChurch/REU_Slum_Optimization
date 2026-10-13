@@ -4008,3 +4008,312 @@ faithfully, the face apertures of a cut-cell scheme where today's rule uses the 
 fractions), so a phantom passage conducts nothing and B's enclosed test and Placement, reading the
 same steps, see it; a passable width stays a separate choice, after the fix if real cracks still
 matter (BACKLOG 4, decision (3)).
+
+### The grid fix: steps that conduct by their open width (owner 2026-10-13: "LGTM")
+
+BACKLOG 4, decision (3)'s "Next", and item 2 (why a block's level drifts with the lattice). Today a
+step conducts by the smallest open fraction of the cells it touches (lifted.SmallestCell): how much
+of each cell is open, not whether the open parts meet, so two 4-adjacent cells whose open
+sub-samples do not touch are joined (a phantom passage), and a home whose only way out is one is
+scored reachable at a huge escape time ("Uniform conductance with an effective width", Q3). The fix
+the owner approved: a step conducts by the share of its width open all the way from one cell's
+centre to the next, read on the sub-samples (4 x 4 a cell). aperture.py and aperture_check.py
+(9f131a0f -- c81cd667); aperture_rows/ (the rows ignored, the summaries committed). h 0.5, ell 3 m,
+K 8, area population, B's placement; every lens for P, P_{1/2} and J_2.
+
+The rule. lifted.StepWidth, a Strategy where a step's weight is built (Params.steps, required and
+keyword-only, named in the run's conductance as `<along>[+<cells>][+<steps>]`: uni+apwfs):
+SmallestCell (today's, unnamed) and Aperture. A step along v_k conducts m_k / |v_k|^2 times the
+mean over its tracks, each track by the smallest per-sub-sample factor on it
+(CellConductance.sub_factor: U's openness; B_r's min(openness, B) and D_s's ramped openness port as
+they are, D_s still without a gradient; width.BlurCentre raises). Under fractional clearing a
+sub-sample's openness is affine in the clearing (a cell's cleared share spread evenly over its
+footprint sub-samples, exact for a cell under one building, as B_r has it), so a track, a minimum
+of affine functions, is concave, the step too, and P stays convex and monotone; the gradient shares
+a track's coefficient among the sub-samples tied at its minimum. Turning edges keep the cell's open
+fraction. The rule is the operator's cell graph, so B's reach (Placement's allowed cells,
+lifted.placeable), the enclosed test, free first and the scorer all read it. A field costs about
+1.2x today's to set up and solve (median, small blocks 6.5 s against 5.0, large 207 s against 174,
+on the CPU).
+
+The choices (lifted.Band, lifted.PartRule), each variant selectable and named:
+- The band of an oblique step: the edge's own share of the cross-section, h / |v_k| (the bands of
+  parallel edges tile the plane: A, `ap`), or the cell's width h (six tracks on a diagonal step,
+  eight on a knight step, overlapping their neighbours': Aw, `apw`). A is the best on an open
+  oblique channel (0.71 -- 0.98 of m_k W against the wide band's 0.65 -- 0.96), but a wall sliver
+  one sub-sample wide falls between its bands and is cut off: on the corridor below, P at 0 deg
+  moves 1.78 -- 1.91x over eight shifts (today's 1.05 -- 1.12) and a third of the demand cells are
+  not reached.
+- The tracing: each track the exact supercover of its segment (the sub-samples whose interior it
+  crosses, in rational arithmetic: axis_tracks), at half-integer offsets across the band, so no
+  track passes a lattice corner and each is a 4-connected chain (traced through sub-sample centres,
+  a diagonal track would cross two sub-samples touching at a corner: the connect guard's fault). An
+  axis-aligned step's tracks ran from one centre to the next (A, Aw, Aws), as the brief has it;
+  that cuts a one-sub-sample sliver along a wall off its neighbours (in a cell whose centre is
+  footprint no axis-aligned track can cross the half cell on its side), which on the corridor's
+  walls leaves up to 22% of the demand cells unreached and moves P at 0 deg 1.09 -- 1.22x over
+  eight shifts. The face tracing (Band's `face`: Fws, `apwfs`) takes an axis-aligned step's tracks
+  across the face only, the four pairs of sub-samples facing each other (the cut-cell face aperture
+  itself; within a cell its node joins its open part, which AnchorPart keeps one part), oblique
+  steps keeping the wide band's centre-to-centre tracks. Its reach is then exactly the 4-connected
+  flood fill of the sub-samples it reads (the connect guard).
+- Split cells, whose open sub-samples form parts that do not touch (two buildings meeting at a
+  corner inside the cell): the cell's one node joins them whatever the tracks say (JoinParts: A,
+  Aw), or only the part holding its anchor conducts, a sub-sample of its largest part at baseline,
+  and the cell takes no demand nor frees a home (AnchorPart: Aws, Fws, the `s`). The parts are the
+  field's own at every 0/1 state (a lookup over the 65,536 patterns of a 4 x 4 cell); opening space
+  only grows the anchor's part, so the operator stays monotone, and in the eps world every cell is
+  one part, so the relaxation is untouched. Few people's demand sits in them (0.38% of the demand
+  on the small blocks under today's placement, 0.30% on the large), but their joins matter: a
+  corner contact joined a pocket to the street (19537's J_2 baseline 5.8x today's under Aw; 3776's
+  home 92 6.3x its escape time), so the joins are cut rather than the cells split into a node a
+  part, which would make the mesh's cells parts that merge as clearings open footprints. A mask
+  fixed at baseline was built first and dropped (the open guard caught a cleared wall's minor part
+  staying closed).
+- The composite mesh: direct. A step with a coarse end conducts by 1 (every cell within a step of a
+  coarse cell is wholly open: AdaptiveMesh keeps h within d0 > the ground band of every footprint);
+  a step between fine cells reads its tracks. On 6310, a5x8 against uniform h 0.5: P0 within 0.13%
+  under both rules (today's 36,661 / 36,613; Aw 36,253 / 36,204), the same home enclosed and the
+  same crossing freeing it.
+- Free first's region graph under the aperture (lifted._track_regions; today's,
+  Grid.regions_smallest, raises on the composite): the components by the rule's own steps; a
+  building's pieces, its cells joined by steps some track of which only it blocks; adjacency only
+  where a clearing really joins two regions, read off each track's blocking buildings at baseline
+  (one building: its piece in an end cell, or a gadget owned by it for a crossing through cells
+  neither end holds; two, each with a piece in an end cell: those pieces). In a split cell
+  (PartRule.through) a piece joins the cell's component only if its building, cleared alone, joins
+  the anchor's part, and a home is freed through the cell only by a piece whose clearing makes it
+  one part: its node reaching the street is no way out while it takes no demand. That last was
+  found when free first raised on 24240 and 45267 (a home whose only near cells reaching the street
+  were split, its crossing clearing nothing); the `free` guard below.
+
+The corridor (width.walled_channel: W x 40 m, walls footprints 3 m thick, a dead end behind the
+demand), demand on the cells each rule reaches, as Placement allows; P's max / min:
+
+    angle, 13 angles 0 -- 45 deg     T      A      Aw     Aws    Fws
+    W 1 m                            1.66   1.54   1.22   1.22   1.21
+    1.5 m                            1.33   1.82   1.12   1.12   1.10
+    2 m                              1.15   1.83   1.11   1.11   1.09
+    4 m                              1.06   1.77   1.07   1.07   1.03
+    alignment, 0 deg, 8 shifts
+    0.75 m                           1.06   1.91   1.22   1.22   1.06
+    1 m                              1.12   1.78   1.19   1.19   1.12
+    1.5 m                            1.07   1.85   1.12   1.12   1.07
+    2 m                              1.05   1.86   1.09   1.09   1.05
+    sub-cell, 0 deg, 16 shifts
+    0.19 m                           2.53   2.05   2.05   2.05   2.05
+    0.30 m                           1.81   1.54   1.54   1.54   1.54
+    0.44 m                           1.67   1.51   1.65   1.65   1.49
+    0.69 m                           1.34   2.38   1.42   1.42   1.35
+    1.06 m                           1.29   2.09   1.39   1.39   1.30
+
+Fws reaches every demand cell at every angle and shift, as today's rule does; A, Aw and Aws leave
+7 -- 33% of them unreached (wall slivers). Fws is the best of the apertures everywhere and against
+today's rule better on the angle check (1.21 against 1.66 at 1 m: today's oblique steps take the
+smallest open fraction of four cells, conducting 0.27 -- 0.89 of m_k W on an open channel, the
+aperture 0.65 -- 0.96) and below half a metre (2.05 against 2.53 at 0.19 m, 1.49 against 1.67 at
+0.44 m), and within 0.01 of it on the alignment checks from 0.69 m. What is left at 0.19 -- 0.30 m
+is the sampling itself: a channel one or two sub-samples wide reads as one or as two (half or all
+of its conductance) as the lattice shifts. Relative to today's, the aperture conducts a 30 deg
+channel 2.13x as well at 0.5 m, 1.46x at 1 m, 1.13x at 2 m, 1.02x at 6 m (at 0 deg alike, 0.95 at
+0.5 m).
+
+The guards (aperture_check.py), each failing under its fault (a patch in one process):
+- `identity`: with today's rule selected, width_check's 57 numbers (computed at 3f74f5fa, before
+  the cells strategy and the step rule) reproduce bit for bit on 38136, 19263 and 19570, the
+  relaxation's value and gradient among them (relax's along term now goes through SmallestCell's
+  accumulator). Fault `ulp` (SmallestCell's widths one ulp up): 15 of 19 differ on 38136.
+- `open`: an open field gives today's operator: on three synthetic rectangles every sub-sample
+  open, lifted.edges under each aperture equals today's family for family, bit for bit; on 38136,
+  19263 and 19570 with every footprint open, every edge whose cells are wholly open (216,219,
+  316,323 and 522,582) has today's weight bit for bit (the 3,774 -- 5,089 under Fws at the block's
+  ragged edge differ, as the rule intends). Fault `sum` (a step by the sum of its tracks): every
+  rule fails.
+- `channel`: a straight open channel aligned with an axis conducts m_k W per metre in layer k
+  exactly at the axis-aligned lattice angles under every rule, and at the oblique ones within 0.2 m
+  a wall (W_eff in [W - 0.4, W]: 0.65 m at 1 m and 45 deg, the worst). Fault `max-track` (a step by
+  its best track): W_eff up to 1.118 m on a 1 m channel.
+- `cracks`: on pairs of cells, open sub-samples that do not touch conduct nothing (rows and columns
+  that do not meet across a face, an open half far from it, corners away from each other on a
+  diagonal step: today's rule 0.06 -- 0.50); a crack one sub-sample wide from centre to centre
+  conducts 1/4. Fault `smallest` (today's widths): four of the seven cases fail.
+- `connect`: on the sentinel (22422, 30848, 5810, 9712) and the drift blocks (20543, 38366, 17608),
+  against the 4-connected flood fill of open sub-samples from the ground cells. Today's rule
+  reaches 87 -- 2,474 cells the flood fill does not (its phantom passages; 17 -- 662 of them
+  through a split cell's node). Under Fws the reach is exactly the flood fill of the sub-samples it
+  reads (split cells' minor parts closed: 0 cells differ on all seven), so every disagreement with
+  the plain flood fill is a cell it reaches only through a split cell's minor part (9 -- 119 a
+  block). A, Aw and Aws reach no cell the flood fill does not except through a split cell's node (A
+  and Aw: up to 414; Aws none) and miss 2,950 -- 17,586, the wall slivers (93 -- 99%: a cell whose
+  2 x 2 centre is footprint) and cells behind a bent passage. Fault `diagonal-leak` (tracks through
+  sub-sample centres, so two sub-samples touching at a corner pass): every rule fails on 17608 and
+  38366 (Fws's reach 915 and 194 cells off the flood fill's).
+- `convex`: along four random lines through the clearing box, every step width concave (second
+  differences at most 2.6e-15) and P convex (at least 4.6e-3 of P) on 38136, 19263 and 19570, every
+  aperture. Fault `square` (a track by the square of its smallest factor, equal at every 0/1
+  state): P's second difference down to -5.2e-3 (the widths' up to 5.1e-2) of P. (width_check's
+  `product` form left the eps world's system too ill-conditioned to solve.)
+- `gradient`: the relaxation's gradient (SIMP q 1 and 3, P and J_2, eps 1e-4) against central
+  differences on six buildings of each of the three blocks: within 1.8e-6 of the largest over the
+  48 checks (Fws 2.1e-7). Fault `no-spread` (the openness's vjp without its spread over a cell's
+  footprint sub-samples): 7.1e-2 -- 8.7e-2 of the largest off, all 16 checks on 38136.
+- `free`: free first (budget 1, nothing held) under Aws and Fws on 24240 frees every home enclosed
+  at baseline it takes a crossing for, by the metric's own test (home 1639, enclosed under both,
+  freed by one building for D 0.0001). Fault `split-source` (every open cell taken to take demand
+  in the region graph): its crossing clears nothing, and free first raises under both.
+
+**Q1: how common the pockets are today.** Under today's rule at baseline (width.fine_bottleneck on
+the uniform grid; on the 22 oversized blocks the composite mesh, phantom passages only:
+aperture.composite_flood), a home is behind a pocket when over 5% of its injection sits in cells
+behind a sub-cell gap (a bottleneck to the street of at most 0.5 m, narrower than the cell's own
+clear width) or a phantom passage:
+
+    today's rule, baseline     behind a pocket                 behind a phantom passage only
+                               people demand P     P_1/2 J_2   people demand P     P_1/2 J_2
+    220 small    median        0.22   0.044  0.31  0.35  0.37  0.030  0.006  0.036 0.040 0.040
+                 90th pct      0.40   0.10   0.62  0.74  0.77  0.083  0.022  0.16  0.26  0.28
+                 pooled        0.25   0.060                    0.041  0.011
+    60 large     median        0.13   0.026  0.19  0.24  0.26  0.020  0.005  0.033 0.034 0.035
+                 90th pct      0.22   0.056  0.42  0.63  0.65  0.038  0.009  0.084 0.22  0.22
+                 pooled        0.13   0.031                    0.022  0.006
+    21 oversized median                                        0.007  0.002  0.008 0.007 0.007
+                 pooled                                        0.008  0.002
+
+(people: the homes over the threshold, as a share of the block's people; demand: the share of the
+block's demand that sits behind; P, P_1/2, J_2: those homes' share of each baseline; pooled: over
+every block's people.) A quarter of the small blocks' people and an eighth of the large blocks'
+have over 5% of their demand behind a sub-cell gap or a phantom passage, and they hold about a
+third of P and of the equity lenses' baselines at the median block, three quarters at the 90th
+percentile: a pocket home's escape time is long, and P_{1/2} and J_2 weight it. Behind phantom
+passages alone, the defect the fix removes, are 4.1% of the small blocks' people (2.2% of the
+large, 0.8% of the oversized), holding a median 3.6 -- 4.0% of the lenses and up to 0.89 of P and
+0.998 of J_2 (small blocks; large 0.26 and 0.64). 63612, the last oversized block, is still in the
+cluster's queue.
+
+**Q2: what the fix does at baseline** (Fws against today's on every block; A, Aw and Aws in
+summary_q2_pooled.csv).
+
+- Enclosed: Fws encloses 112 homes on the small blocks against today's 63 (49 new, on 19 blocks,
+  0.09% of their people), 62 against 24 on the large (38 on 17 blocks, 0.02%) and 3 against 1 on
+  the oversized (2 on 45267); every home today's encloses stays enclosed. All but three new ones
+  are enclosed by the geometry, every open sub-sample near them joined to the street only through
+  phantom passages; the three (one small block, two large) by the split-cell rule, their only way
+  out a corner contact. Free first frees every one within D 0.05: on 35 small blocks for 64
+  buildings, a median D 0.0031 a block, at most 0.0164 (today's rule: 24 blocks, 38 buildings,
+  0.0044, 0.0156); on 23 large blocks for 49 (0.00045, at most 0.0082; today's 12 and 20, 0.0008);
+  on 45267 for 3, D 0.0004 (today's region graph raises on the composite).
+- Demand moved (the share of the demand Fws places on other cells than today's, pooled over the
+  people): 1.33% on the small blocks, 0.78% on the large, 0.34% on the oversized (median per block
+  0.9, 0.7 and 0.3%; Aws 5.3% and 4.5%). Of it, on the uniform blocks, 1.02% and 0.53% comes off
+  cells behind phantom passages, to the home's cells with a way out (all of Q1's phantom demand),
+  and 0.31% and 0.25% off split cells, which take none (Aws also moves 4.3% and 4.0% off the wall
+  slivers it cuts off).
+- Split cells: 10,982 on the small blocks, 26,718 on the large, 11,488 on the oversized; today's
+  placement puts 0.38%, 0.30% and 0.18% of the demand in them.
+- The levels (Fws over today's, median, 10th -- 90th percentile and extremes): small blocks P0
+  0.988 (0.91 -- 1.12; 0.17 -- 1.84), P_{1/2} 1.000 (0.88 -- 1.27; 0.03 -- 8.98), J_2 0.985
+  (0.78 -- 1.39; 0.01 -- 11.8); large P0 0.994 (0.96 -- 1.05), P_{1/2} 0.994 (0.91 -- 1.26;
+  0.49 -- 2.13), J_2 0.988 (0.89 -- 1.27; 0.44 -- 2.16); oversized 0.994, 0.998 and 0.993 (J_2
+  0.67 -- 17.1). A level moves past 1.5x either way on 42 of the 301 blocks.
+- What moves them (summary_q2_levels, q2_level_tops; aperture_rows/behind keeps each home's
+  shares). Where a level falls past 1/1.5 (J_2 on 20 blocks), on 16 the homes behind phantom
+  passages and those Fws encloses carry 69 -- 120% of the fall: the defect's own homes, scored at
+  their real distance or apart (43304's J_2 baseline 0.01x, 17608's 0.44x); on the other four
+  (17027, 17033, 23597, 43817) homes partly in cracks carry it, where I read the narrow lanes'
+  oblique steps, which today's rule conducts at a quarter to a half of their width [inferred].
+  Where a level rises past 1.5x (J_2 on 20 blocks and 28051), it is real cracks: on 13 of them the
+  three homes that rise most carry 64 -- 102% of the rise, their escape times 2 -- 100x today's
+  (44274: 55, 164, 283 to 2,949, 2,592, 2,270; 45876: 12 to 1,211), with 21 -- 100% (median 50%) of
+  their injection in cells whose way out is a crack of at most 0.25 m, one or two sub-samples; on
+  the other seven the rise is spread over homes with 10 -- 25% of it there. Today's rule hid these
+  behind its own defect (a crack cell's steps reach through the walls beside it at the cell's open
+  fraction); Fws conducts a 12.5 cm crack as 12.5 cm, which under U is a long, slow exit.
+
+**Q3: drift and angle.** SIMP's default at the metric's offset and at the block's shift
+(width.ALIGN, the shift that moved each most), the lens's change:
+
+    lens change      P                        P_{1/2}                  J_2
+                     T       Aws     Fws      T       Aws     Fws      T       Aws     Fws
+    20543 (o2)       -0.0455 +0.0010 +0.0008  -0.2339 +0.0024 +0.0018  -0.1468 +0.0012 +0.0007
+    38366 (o2)       -0.0088 -0.0025 -0.0021  -0.0848 -0.0021 -0.0055  -0.0928 -0.0020 -0.0045
+    17608 (o3)       -0.0469 +0.0037 +0.0094  -0.0601 +0.0144 +0.0215  -0.0621 +0.0240 +0.0266
+
+The aperture takes the drift away: Fws's lens moves by at most 0.009 (P), 0.022 (P_{1/2}) and 0.027
+(J_2) between the alignments, today's by up to 0.047, 0.234 and 0.147 (Aw on 17608: +0.11, +0.07,
++0.12, its corner contacts). Today's was carried by the homes behind phantom passages: on 20543
+they held 0.41 and 0.42 of P_{1/2}'s and J_2's baselines at the metric's offset and 0.04 at the
+shift; on 38366 (per home, summary_q3_homes and q3_top) 70 of them, 3.9% of the people, carry 69
+and 77% of the absolute change of the homes' terms, home 1497 alone 17 -- 31%. Under Fws the
+largest single home carries 4 -- 10% on 38366 and the phantom group 8 -- 17%. What is left is
+spread over the block: the candidate, homes whose share of injection behind a crack of at most 0.25
+m moves with the alignment by over 5 points (a crack's sampled width snapping; 8 -- 14% of the
+people on the three blocks), carries 8 -- 21% of the absolute change, about its share of the
+people, and the rest 65 -- 83%. So the drift that remains is the lattice's ordinary resolution
+(BACKLOG 1: alignment moves a large block's level by up to 0.16 under today's rule; here 0.027 at
+most), not snapping cracks, though the corridor shows the snapping where a crack is all there is (a
+0.19 m channel's P moves 2.05x over 16 shifts). What the cracks carry is level: on 17608 under Fws
+one home with most of its demand in a crack holds 0.52 of P_{1/2}'s and 0.56 of J_2's baseline
+(0.18 and 0.19 under today's rule), and three homes 0.58 -- 0.65.
+
+**Q4: what it changes.** On the 13 tuning blocks, SIMP's default and the cheap preset
+(clearings.Store.cleared; with free first redone under the rule where a clearing leaves a home it
+encloses: 1558's default 2 buildings, D +0.0005; 23597's two 1, +0.0001; 30848's two 1, +0.0002)
+and item 4's road prefixes at D 0.05, scored under the aperture against today's rows (width.py's U,
+the same code path; my rerun of today's matches them within 3e-7 on the three drift blocks, both
+alignments), in B's order (enclosed population first, then the lens):
+
+Kendall tau against today's order: median 1.00 on every lens (Aws 1.00, 0.94, 1.00), below 1 on
+five blocks: 1558 (0.67 on P, 0.56 on P_{1/2}, 0.61 on J_2; under Aws 1.00, 0.94, 1.00), 23597 and
+30848 (0.72 -- 0.83, as under Aws), 38616 (0.72 -- 0.89) and 9717 (0.94 on P_{1/2}). SIMP's default
+leads on 12, 10 and 11 of the 13 (P, P_{1/2}, J_2; today 12, 11, 11), the cheap preset on the rest;
+resistance_lp is the best road on 11, 9 and 11 (today 12, 10, 11); SIMP's default leads the best
+road by a median 0.132, 0.131 and 0.165 (today 0.145, 0.238, 0.195), at least 0.056. 1558's reorder
+is the cracks again: three homes with 70 -- 87% of their injection behind 12.5 -- 25 cm cracks rise
+from escape times 82 -- 109 to 647 -- 864 and carry 92% of P_{1/2}'s rise to 2.13x, so whatever
+opens them scores: clearance and clearance_looped go from 0.07 -- 0.10 to 0.62 -- 0.63 on P_{1/2}
+and from 0.06 -- 0.08 to 0.42 -- 0.44 on J_2, past resistance_lp (0.16 to 0.07, 0.13 to 0.06), and
+the cheap preset passes SIMP's default (0.81 against 0.76 on P_{1/2}). On 38616 every road but
+euclidean_grid rises the same way on P_{1/2} (0.18 -- 0.27 to 0.55 -- 0.59).
+
+**SIMP under the aperture** (the gradient's check, on 19537 with its 16 homes Fws encloses, 4
+today; SIMP base fw0.q3.i10.t0.001.e0.0001.k1s1e-06, free first, area D 0.05, CPU): on P its
+clearing scores 0.6336 (free first 6 buildings, D 0.0150), today's stored SIMP clearing under Fws
+0.6093 leaving 0.16% of the people enclosed, 0.6107 with them freed first (D 0.0527); on J_2 0.5866
+against 0.5700. Jaccard with today's clearing 0.73 (P) and 0.54 (J_2); 330 and 557 s.
+
+**What is left, and the recommendation (the owner decides).**
+- Adopt Fws (uni+apwfs) and delete SmallestCell. Fws removes the phantom passages exactly (its
+  reach is the flood fill of the sub-samples it reads), takes the levels' lattice drift from up to
+  0.23 to at most 0.027, cuts the angle error at 1 m from 1.66 to 1.21 and ties today's alignment
+  on walled lanes, keeps the method order (tau median 1.00 on every lens) and SIMP's lead, and
+  keeps P convex with a working gradient, at about 1.2x the time. Today's rule is ahead only on
+  that time, and every stored score was computed under it: they move (Q2), and re-scoring belongs
+  to the consolidated pass.
+- A, Aw and Aws: Aw is dominated by Aws (alike on the corridor, its corner contacts on the blocks:
+  17608's drift 0.11, 19537's J_2 5.8x); Aws by Fws everywhere but 17608's P drift (0.0037 against
+  0.0094), which it buys by cutting the wall slivers off (5.3% of the demand moved against 1.3%,
+  7 -- 33% of the corridor's demand cells unreached); A is the best on an open oblique channel
+  (W_eff 0.71 -- 0.98 of W against 0.65 -- 0.96) and the worst with walls (1.78 -- 1.91x at 0 deg).
+  Recommendation: keep Fws only; A's open-channel edge and Aws's sliver cut go to the dead-end
+  record.
+- The passable width still looks needed, and more than before. Fws conducts a real crack at its
+  sampled width, and a home with most of its demand in a 12.5 -- 25 cm crack gets an escape time up
+  to 54x today's, which the equity lenses then follow (44274's J_2 baseline 11.8x, 28051's 17x; on
+  1558 the method order). Today's rule hid this behind its defect, Aws by accident. A crack nobody
+  walks through is enclosure, not a slow exit: closing gaps under about 0.5 m encloses these homes
+  (free first then frees them, first in B's order) or moves their demand to their open side, and
+  touches Q1's pockets (a quarter of the small blocks' people have over 5% of their demand behind
+  such gaps). It is a modelling choice and a convexity question: a hard opening of the open set
+  moves with every clearing (scoring only, as D_s), a B_r-like soft one would keep P convex.
+- Not done: SIMP re-optimized under the aperture past the one-block check (the consolidated pass);
+  the composite's free first under today's rule (still raises); free first's region graph reads a
+  split cell's minor part as never open (conservative: a clearing that would join it is not seen
+  through it).
+
+Compute: GPU about 4.5 GPU-h on the cluster, at most 4 cards (the baselines of the 23 large blocks
+too big to run here and the 22 oversized, T with A, Aw and Aws or with Fws: ap-base-*; the drift
+and tuning blocks' fields under T, Aw, Aws and Fws: ap-score*), nothing on the CPU nodes. Here,
+single-threaded, at most 8 processes: the small blocks' and 37 large blocks' baselines (10.8 CPU-h,
+plus about 2 lost when a pool read aperture_check as edited under it), the moves and pockets (2.7),
+the corridor (900 solves, under a minute), the guards (about 5), SIMP on 19537 (0.25) and the
+report: about 20 CPU-h.

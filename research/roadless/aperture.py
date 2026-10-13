@@ -55,10 +55,11 @@ per home (P, P_{1/2}, J_2 terms at baseline and under SIMP's default) aperture_r
 
 `report`: the summaries, aperture_rows/summary_<name>.csv (committed; the rows are not): Q1
 q1_blocks, q1 (spreads by size: small, large, oversized), q1_pooled (the people over every block);
-Q2 q2_blocks (CANDIDATE per block), q2 (spreads by rule and size), q2_pooled, q2_levels (the blocks
-whose level moves past LEVEL_FACTOR: the change by what the homes sit behind); Q3 q3_angle,
-q3_align, q3_subcell, q3_width (the corridor), q3_levels, q3_homes, q3_top (the drift blocks); Q4
-q4_tau, q4_leads, q4_stored; and simp.
+Q2 q2_blocks (CANDIDATE per block), q2 (spreads by rule and size), q2_pooled, q2_levels and
+q2_level_tops (the blocks whose level moves past LEVEL_FACTOR: the change by what the homes sit
+behind, and its three largest movers); Q3 q3_angle, q3_align, q3_subcell, q3_width (the
+corridor), q3_levels, q3_homes, q3_top (the drift blocks); Q4 q4_tau, q4_leads, q4_stored; and
+simp.
 """
 from __future__ import annotations
 
@@ -842,15 +843,18 @@ def _drift_groups(c0: dict[str, np.ndarray], ck: dict[str, np.ndarray]) -> np.nd
     return grp
 
 
-def _level_homes(base_: pd.DataFrame, homes: pd.DataFrame, rule: str) -> pd.DataFrame:
+def _level_homes(base_: pd.DataFrame, homes: pd.DataFrame, rule: str
+                 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Q2, on the uniform blocks whose baseline under `rule` moves past LEVEL_FACTOR from
     today's (either way) on any lens: per lens, the change of the homes' terms grouped by what
     each sits behind under today's rule at the metric's offset (`_crack_groups`), the homes
     `rule` encloses apart (their terms leaving the lens): per group its homes and population,
-    its share of today's level and of the change."""
+    its share of today's level and of the change; and per lens the three homes whose terms move
+    most the change's way: their share of it, their escape times under both rules (P's; under
+    P_{1/2} its own) and their crack shares."""
     lv = base_[base_.rule.isin(["T", rule])].pivot(index="block", columns="rule",
                                                     values=["P0", "Pq0", "J2_0"])
-    out = []
+    out, tops = [], []
     for bid in lv.index:
         ratio = {c: float(lv.loc[bid, (c, rule)] / lv.loc[bid, (c, "T")])
                  for c in ("P0", "Pq0", "J2_0")}
@@ -861,11 +865,13 @@ def _level_homes(base_: pd.DataFrame, homes: pd.DataFrame, rule: str) -> pd.Data
         g = homes[homes.block == bid]
         hT, hR = (g[g.rule == x].set_index("home").sort_index() for x in ("T", rule))
         w = hT.w.to_numpy()
-        grp = _crack_groups(_cells_behind(bid, 0))
+        cells = _cells_behind(bid, 0)
+        grp = _crack_groups(cells)
         grp[hR.enclosed.to_numpy() & ~hT.enclosed.to_numpy()] = "enclosed by the rule"
         for lens, col in (("P", "P0"), ("Pq", "Pq0"), ("J2", "J2_0")):
-            t = {}
+            t, u = {}, {}
             for x, h in (("T", hT), (rule, hR)):
+                u[x] = (h.u_q if lens == "Pq" else h.u0).to_numpy()
                 if lens == "Pq":
                     t[x] = (h.inj_q * h.u_q.fillna(0.0)).to_numpy()
                 else:
@@ -877,7 +883,16 @@ def _level_homes(base_: pd.DataFrame, homes: pd.DataFrame, rule: str) -> pd.Data
                                 homes=int(m.sum()), population=float(w[m].sum() / w.sum()),
                                 T_share=float(t["T"][m].sum() / t["T"].sum()),
                                 change_share=float(d[m].sum() / d.sum())))
-    return pd.DataFrame(out)
+            top = np.argsort(-np.sign(d.sum()) * d)[:3]
+            tops.append(dict(block=bid, rule=rule, lens=lens, ratio=ratio[col],
+                             top3_share=float(d[top].sum() / d.sum()),
+                             homes=" ".join(map(str, top)),
+                             u_T=" ".join(f"{x:.0f}" for x in u["T"][top]),
+                             u_rule=" ".join(f"{x:.0f}" for x in u[rule][top]),
+                             crack=" ".join(f"{x:.2f}" for x in cells["crack"][top]),
+                             top3_crack_min=float(np.nanmin(cells["crack"][top]))
+                             if np.isfinite(cells["crack"][top]).any() else np.nan))
+    return pd.DataFrame(out), pd.DataFrame(tops)
 
 
 def _drift_homes(sh: pd.DataFrame, cells: dict) -> pd.DataFrame:
@@ -1080,7 +1095,9 @@ def report() -> None:
                              free_D_max=float(g.free_D.max()),
                              free_left_max=float(g.free_left.max())))
         _summary("q2_pooled", pd.DataFrame(pool))
-        _summary("q2_levels", _level_homes(base_, homes, CANDIDATE))
+        groups, tops = _level_homes(base_, homes, CANDIDATE)
+        _summary("q2_levels", groups)
+        _summary("q2_level_tops", tops)
         cols = [c for c in ("new", "new_pop", "new_by_rule", "new_by_rule_pop", "freed", "moved",
                             "moved_pop", "moved_demand", "moved_pocket", "moved_pocket_pop",
                             "moved_pocket_demand", "moved_sliver", "moved_sliver_demand", "split",

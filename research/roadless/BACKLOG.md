@@ -63,7 +63,11 @@ items up front"), in the order proposed:
    joined to the street only by phantom passages (4-adjacent cells whose open sub-samples do not
    touch) or sub-cell cracks carry it: under U, 2 -- 5% of the people behind phantom passages hold
    17 -- 42% of J_2's baseline, and the share moves with the alignment (20543: 0.60 to 0.33 for all
-   such homes).
+   such homes). The grid fix (NOTES, "The grid fix: steps that conduct by their open width") takes
+   it away: under the face aperture (Fws) SIMP's default's lens moves by at most 0.009 (P), 0.022
+   (P_{1/2}) and 0.027 (J_2) between the two alignments, against 0.047, 0.234 and 0.147 today, and
+   what is left is spread over the block (the homes whose crack exposure moves with the alignment
+   carry about their share of the people): the lattice's ordinary resolution (item 1).
 3. **The sightline metric and building transparency** (discussion): what each measures, where SIMP
    is weaker under sightline, and transparency as a model of the world against a device of the
    search (the translucent greedy). With it, the passable width, now implicit in h and the
@@ -176,18 +180,25 @@ items up front"), in the order proposed:
    principled alternative changes no decision: B_r keeps U's method order (tau 1.00 on P), moves
    the flow only a little onto lanes U's flow already uses (no new corridors at r up to 1.5 m), and
    SIMP under it gains nothing over U's clearing on its own lens. The variants stay selectable
-   (pruning in the consolidated pass). **Next: the grid fix** (owner 2026-10-13, "LGTM"), before
-   any re-scoring: every variant, U included, hands P_{1/2} and J_2 to the homes in pockets behind
-   phantom passages (4-adjacent cells whose open sub-samples do not touch) and sub-cell cracks
-   (item 2). A step conducts today by the smallest open fraction of the cells it touches, how much
-   of each cell is open, not whether the open parts meet; the fix makes it conduct by the share of
-   its width open all the way from cell centre to cell centre, read on the sub-samples: U
-   discretized faithfully (as a cut-cell scheme's face apertures), no new parameter, still convex;
-   a phantom passage conducts nothing, so B's enclosed test and Placement, reading the same steps,
-   score its homes apart or place their demand where there is a way out. A passable width (gaps
-   under about 0.5 m closed) stays a separate modelling choice, after the fix if real cracks still
-   matter. Queued: how common the pockets are on every block, the homes newly enclosed and free
-   first's cost, the drift and angle checks, the method order.
+   (pruning in the consolidated pass). **The grid fix: done** (owner 2026-10-13, "LGTM"; NOTES,
+   "The grid fix: steps that conduct by their open width"): lifted.StepWidth (Params.steps), a step
+   conducting by the share of its width open from cell centre to cell centre, read on the
+   sub-samples; the candidate, Fws (`uni+apwfs`), traces an axis-aligned step across its face and
+   lets a split cell conduct through one part only. Its reach is the flood fill of open
+   sub-samples, so the phantom passages are gone; it encloses 0.09% of the small blocks' people
+   (0.02% of the large), freed first for a median D 0.0031, moves 1.3% of the demand, takes the
+   levels' lattice drift from up to 0.23 to at most 0.027 and the corridor's angle error at 1 m
+   from 1.66 to 1.21, and keeps the method order (tau median 1.00 on every lens on the 13; SIMP's
+   default leads on 10 -- 12, resistance_lp the best road). **Next** (the owner's call): adopt Fws
+   and delete SmallestCell (recommended; A, Aw and Aws are beaten except on narrow points, NOTES),
+   then, before any re-scoring, the passable width, which now looks needed: Fws conducts a real
+   crack of 1 -- 2 sub-samples (12.5 -- 25 cm) at its sampled width, and a home with most of its
+   demand in one gets up to 54x today's escape time, which the equity lenses follow (J_2's baseline
+   up to 11.8x on 44274, 17x on 28051; on 1558 the clearance roads pass resistance_lp on P_{1/2}
+   and J_2 by opening three such homes). A gap nobody walks through is a wall, not a slow exit;
+   closing gaps under about 0.5 m would enclose such homes (free first) or move their demand to
+   their open side, a modelling and a convexity question (a hard opening moves with every clearing;
+   a B_r-like soft one keeps P convex).
    (4) **Exits: the region model** (owner: "we'd still only leak at the
    outer boundary, so all current must exit ... some of the outer boundary might not leak at all
    and might have 0 conductance (like a railroad)"; "we can adjust boundary leakage, uniform
