@@ -81,6 +81,8 @@ import width_check  # noqa: E402
 RULES = tuple(lifted.steps_of(t) for t in ("ap", "apw", "apws", "apwfs"))
 SPLIT_RULES = ("aps", "apws", "apwfs")     # `connect`: the rules whose split cells conduct
                                            # through one part
+FACE_RULES = ("apwfs",)                    # ... and whose axis steps read faces, the anchor part
+                                           # too: its reach is the flood fill's of what it reads
 SEED = 20261013
 EPS = 1e-4                # SIMP base's eps world
 H = 0.5
@@ -366,12 +368,17 @@ def _smallest_widths(self, grid, o, kap, p):
 
 # ------------------------------------------------------------------ connect
 
-def flood(g: lifted.Grid) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def flood(g: lifted.Grid, keep: np.ndarray | None = None
+          ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """The 4-connected flood fill of open sub-samples from the ground cells'
-    (width.fine_bottleneck's connectivity): (per cell, reached; the fine lattice's component
-    labels; per label, whether it holds a ground cell's open sub-sample)."""
+    (width.fine_bottleneck's connectivity), over the sub-samples `keep` (cells, S*S) only if
+    given: (per cell, reached; the fine lattice's component labels; per label, whether it holds a
+    ground cell's open sub-sample)."""
     S = g.S
-    opened = lifted._fine(g.isub & ~g.bsub, S)
+    op = g.isub & ~g.bsub
+    if keep is not None:
+        op = op & keep.reshape(op.shape).astype(bool)
+    opened = lifted._fine(op, S)
     gr = lifted._fine(np.repeat(g.ground[..., None], S * S, axis=-1), S)
     lab, n = ndimage.label(opened)
     ok = np.zeros(n + 1, dtype=bool)
@@ -429,6 +436,18 @@ def connect(ids: list[str]) -> list[str]:
         for rule in (lifted.SmallestCell(), *RULES):
             reach = lifted.grounded(g, g.ff0, _params(rule))
             d = classify(g, reach)
+            if rule.name in FACE_RULES:
+                # its axis-aligned steps join exactly the cells whose read sub-samples touch
+                # across a face, and its cells' read parts are each one: its reach is the flood
+                # fill of the sub-samples it reads (split cells' minor parts closed), exactly
+                keep = rule.parts.keep(_params(rule).cells.sub_factor(
+                    g, g.ff0, lifted.CpuAMG()), g, np)
+                exact = int((reach != flood(g, keep)[0]).sum())
+                print(f"{bid} {rule.name}: reach against the flood fill of the sub-samples it "
+                      f"reads: {exact} cells differ -> {'ok' if exact == 0 else 'FAILS'}",
+                      flush=True)
+                if exact:
+                    bad.append(f"{bid} {rule.name} exact")
             # a rule whose split cells conduct through one part joins nothing the flood fill does
             # not: no cell only it reaches; one whose node joins the parts, only those explained
             ok = d["op_only"] == (0 if rule.name in SPLIT_RULES else d["op_only_explained"])
