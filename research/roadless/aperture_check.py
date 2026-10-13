@@ -78,7 +78,10 @@ import lifted  # noqa: E402
 import relax  # noqa: E402
 import width_check  # noqa: E402
 
-RULES = (lifted.Aperture(wide=False), lifted.Aperture(wide=True))
+RULES = (lifted.Aperture(wide=False, parts=lifted.JoinParts()),
+         lifted.Aperture(wide=True, parts=lifted.JoinParts()),
+         lifted.Aperture(wide=True, parts=lifted.AnchorPart()))
+SPLIT_RULES = ("aps", "apws")     # `connect`: the rules whose split cells conduct through one part
 SEED = 20261013
 EPS = 1e-4                # SIMP base's eps world
 H = 0.5
@@ -427,7 +430,9 @@ def connect(ids: list[str]) -> list[str]:
         for rule in (lifted.SmallestCell(), *RULES):
             reach = lifted.grounded(g, g.ff0, _params(rule))
             d = classify(g, reach)
-            ok = d["op_only"] == d["op_only_explained"]
+            # a rule whose split cells conduct through one part joins nothing the flood fill does
+            # not: no cell only it reaches; one whose node joins the parts, only those explained
+            ok = d["op_only"] == (0 if rule.name in SPLIT_RULES else d["op_only_explained"])
             verdict = ("ok" if ok else "FAILS") if rule.name else (
                 "not required: the rest are its phantom passages")
             print(f"{bid} {_label(rule)}: reach {d['reach']}, flood fill {d['flood']}; only the "

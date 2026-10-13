@@ -289,8 +289,9 @@ class Carve:
 def placement(grid: lifted.Grid | lifted.CompositeGrid, polys: NDArray[np.object_],
               p: lifted.Params) -> lifted.Placement:
     """The metric's demand placement on `grid` (lifted.Placement), against the open space that
-    reaches the street at baseline: its `enclosed` homes are B's enclosed homes."""
-    return lifted.Placement.of(grid, polys, lifted.grounded(grid, grid.ff0, p),
+    reaches the street at baseline (lifted.placeable, the step rule's): its `enclosed` homes are
+    B's enclosed homes."""
+    return lifted.Placement.of(grid, polys, lifted.placeable(grid, grid.ff0, p),
                                ring_m=lifted.RING_M)
 
 
@@ -304,8 +305,9 @@ def carved(grid: lifted.Grid | lifted.CompositeGrid,
 def reached(pl: lifted.Placement, grid: lifted.Grid | lifted.CompositeGrid,
             free: NDArray[np.float64], p: lifted.Params) -> NDArray[np.bool_]:
     """Per home: enclosed at baseline and freed in the field `free`, some cell within RING_M of
-    its outline open and street-connected there (lifted.Placement.reached)."""
-    return pl.reached(lifted.grounded(grid, free, p))
+    its outline open and street-connected there (lifted.Placement.reached; lifted.placeable,
+    the step rule's)."""
+    return pl.reached(lifted.placeable(grid, free, p))
 
 
 class Scorer:

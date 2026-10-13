@@ -2058,7 +2058,9 @@ class StepWidth(Protocol):
     read the cells' factors; open_grad() is the rest, dJ / d o per cell through what they read
     below the cells (None if nothing).
     reach(grid, o, p): (the grid's shape) device mask, the open cells in a component of the
-    operator's cell graph holding a ground cell.
+    operator's cell graph holding a ground cell. placeable(grid, o, p): (the grid's shape) host
+    mask, the reached cells that may take a home's demand and free an enclosed home (Placement's
+    `allowed`, Placement.reached's reach).
     regions(grid, open0, bf, lab, p): free first's Regions at baseline (open0 flat, the cells open
     at baseline; bf (buildings x inside cells) the share of each cell each building covers; lab
     (cells, S*S) the building holding each sub-sample, -1 none)."""
@@ -2071,6 +2073,8 @@ class StepWidth(Protocol):
     def gradient(self, grid: Grid | CompositeGrid, o, kap, p: Params, gc): ...
 
     def reach(self, grid: Grid | CompositeGrid, o, p: Params): ...
+
+    def placeable(self, grid: Grid | CompositeGrid, o, p: Params) -> NDArray[np.bool_]: ...
 
     def regions(self, grid: Grid | CompositeGrid, open0: NDArray[np.bool_], bf: sp.csr_matrix,
                 lab: NDArray[np.int64], p: Params) -> Regions: ...
@@ -2102,6 +2106,9 @@ class SmallestCell:
 
     def reach(self, grid, o, p):
         return grid.reach_smallest(o, p)
+
+    def placeable(self, grid, o, p):
+        return p.solver.to_host(self.reach(grid, o, p))
 
     def regions(self, grid, open0, bf, lab, p):
         return grid.regions_smallest(open0, bf)
@@ -2200,6 +2207,129 @@ def axis_tracks(dx: int, dy: int, S: int, wide: bool) -> Tracks:
     return Tracks(cells=tuple(cells), tracks=tuple(tracks))
 
 
+@functools.cache
+def _parts_lut(S: int) -> tuple[NDArray[np.int64], NDArray[np.int64], NDArray[np.int64]]:
+    """Over every S x S pattern of open sub-samples m (bit s: the sub-sample (s // S, s % S)):
+    how many 4-connected parts it holds; per sub-sample s, the bits of the part holding it (0
+    where s is not open), flat (m S^2 + s); and m's popcount."""
+    S2 = S * S
+    n = 1 << S2
+    weights = 1 << np.arange(S2)
+    bits = (np.arange(n)[:, None] >> np.arange(S2)[None, :]) & 1
+    nparts = np.zeros(n, dtype=np.int64)
+    part_of = np.zeros((n, S2), dtype=np.int64)
+    for m in range(1, n):
+        lab, k = ndimage.label(bits[m].reshape(S, S))
+        lab = lab.ravel()
+        nparts[m] = k
+        comp = np.bincount(lab, weights=weights, minlength=k + 1).astype(np.int64)
+        part_of[m] = np.where(lab > 0, comp[lab], 0)
+    return nparts, part_of.ravel(), bits.sum(axis=1)
+
+
+def _open_code(F, xp):
+    """(cells,) each cell's pattern of open sub-samples (factor above 0), as _parts_lut's index."""
+    S2 = F.shape[1]
+    return ((F > 0).astype(xp.int64) << xp.arange(S2, dtype=xp.int64)[None, :]).sum(axis=1)
+
+
+def part_anchors(grid: Grid | CompositeGrid) -> NDArray[np.int64]:
+    """(cells flat) on the host, kept per grid: each cell's anchor, the first sub-sample of its
+    largest part of open sub-samples at baseline (-1 where none is open)."""
+    key = ("part anchors",)
+    if key not in grid.cache:
+        S2 = grid.S * grid.S
+        nparts, part_of, popc = _parts_lut(grid.S)
+        code = _open_code((grid.isub & ~grid.bsub).reshape(-1, S2), np)
+        size = popc[part_of[code[:, None] * S2 + np.arange(S2)[None, :]]]
+        grid.cache[key] = np.where(code > 0, np.argmax(size, axis=1), -1)
+    return grid.cache[key]
+
+
+class PartRule(Protocol):
+    """What an Aperture makes of a split cell, one whose open sub-samples form two parts or more
+    that do not touch (4-connected within the cell; NOTES, "The grid fix"): the cell has one node,
+    so its parts are joined whatever the tracks say. keep(F, grid, xp): from the per-sub-sample
+    factors F (cells, S*S) of the field, the share of each the tracks read (1 or 0; the same map
+    on their gradient); placeable(reach, F, grid): of the reached cells (host, the grid's shape),
+    those that may take a home's demand and free an enclosed home (F host); codes(code, F, grid):
+    free first's per-sub-sample codes (building, -1 open, -2 never open) at baseline, the
+    sub-samples the tracks do not read made never open. `name`: its part of the rule's name."""
+
+    @property
+    def name(self) -> str: ...
+
+    def keep(self, F, grid: Grid | CompositeGrid, xp): ...
+
+    def placeable(self, reach: NDArray[np.bool_], F: NDArray[np.float64],
+                  grid: Grid | CompositeGrid) -> NDArray[np.bool_]: ...
+
+    def codes(self, code: NDArray[np.int64], F: NDArray[np.float64],
+              grid: Grid | CompositeGrid) -> NDArray[np.int64]: ...
+
+
+@dataclass(frozen=True)
+class JoinParts:
+    """A split cell's one node joins its parts (the step rule alone: two buildings meeting at a
+    corner inside a cell still join the open space on either side, through the node)."""
+
+    @property
+    def name(self) -> str:
+        return ""
+
+    def keep(self, F, grid, xp):
+        return 1.0
+
+    def placeable(self, reach, F, grid):
+        return reach
+
+    def codes(self, code, F, grid):
+        return code
+
+
+@dataclass(frozen=True)
+class AnchorPart:
+    """A split cell conducts through one part only, the one holding its anchor (part_anchors: a
+    sub-sample of its largest part at baseline), its other parts closed to every track; and a cell
+    split in the field takes no demand nor frees a home (its node would speak for parts on the far
+    side of a wall). Opening space only grows the anchor's part, so the operator stays monotone in
+    the clearing; at baseline and every 0/1 state the parts are the field's own (a clearing that
+    joins them makes them one again), and in the eps world (relax.py: every sub-sample above 0)
+    each cell is one part, so the widths' concavity is untouched. In place of a node per part,
+    which would make the mesh's cells parts that merge as clearings open footprints. A cell with
+    no open sub-sample at baseline has no anchor: its parts, if a clearing opens several, join."""
+
+    @property
+    def name(self) -> str:
+        return "s"
+
+    def _luts(self, grid, xp):
+        key = ("part luts", xp.__name__)
+        if key not in grid.cache:
+            nparts, part_of, _popc = _parts_lut(grid.S)
+            grid.cache[key] = (xp.asarray(nparts), xp.asarray(part_of),
+                               xp.asarray(part_anchors(grid)))
+        return grid.cache[key]
+
+    def keep(self, F, grid, xp):
+        S2 = F.shape[1]
+        _nparts, part_of, anchor = self._luts(grid, xp)
+        code = _open_code(F, xp)
+        kept = xp.where(anchor >= 0, part_of[code * S2 + xp.maximum(anchor, 0)], code)
+        return ((kept[:, None] >> xp.arange(S2, dtype=xp.int64)[None, :]) & 1).astype(xp.float64)
+
+    def placeable(self, reach, F, grid):
+        nparts, _part_of, _anchor = self._luts(grid, np)
+        return reach & (nparts[_open_code(F, np)].reshape(reach.shape) < 2)
+
+    def codes(self, code, F, grid):
+        n, S2 = F.shape
+        drop = (F > 0) & (self.keep(F, grid, np) == 0)
+        out = code.copy()
+        out[:n * S2][drop.ravel()] = -2
+        return out
+
+
 class _ApAxis(NamedTuple):
     """One axis's tracks on a grid (Aperture): `base` per slot (Tracks.cells) the cell of every
     edge of Pattern.along[k], times S*S (the dummy cell, past the last, where a slot falls outside
@@ -2248,30 +2378,42 @@ class Aperture:
     concave, and P stays convex and monotone; the gradient shares each track's coefficient among
     the sub-samples tied at its minimum, as SmallestCell's does among cells. On a CompositeGrid a
     step with a coarse end conducts by 1: every cell within a step of a coarse cell is wholly open
-    (AdaptiveMesh's d0 > the ground band)."""
+    (AdaptiveMesh's d0 > the ground band). `parts`: what a split cell, whose open sub-samples
+    form parts that do not touch, conducts by (PartRule: its one node joins them, or only its
+    anchor's part conducts)."""
     wide: bool
+    parts: PartRule
 
     @property
     def name(self) -> str:
-        return "apw" if self.wide else "ap"
+        return ("apw" if self.wide else "ap") + self.parts.name
 
     def _flat(self, grid, o, p):
+        """(the factors the tracks read, (cells + 1) x S*S flat, the dummy cell's 0; the parts'
+        keep, by which they and their gradient are scaled)."""
         xp, S2 = p.solver.xp, grid.S * grid.S
-        phi = p.cells.sub_factor(grid, o.reshape(grid.inside.shape), p.solver)
-        return xp.concatenate([phi.ravel(), xp.zeros(S2)])
+        F = p.cells.sub_factor(grid, o.reshape(grid.inside.shape), p.solver)
+        keep = self.parts.keep(F, grid, xp)
+        return xp.concatenate([(F * keep).ravel(), xp.zeros(S2)]), keep
 
     def widths(self, grid, o, kap, p):
         xp = p.solver.xp
-        flat = self._flat(grid, o, p)
+        flat, _keep = self._flat(grid, o, p)
         for ax in _ap_axes(grid, p.K, self.wide, xp):
             yield _track_means(flat, ax, xp)
 
     def gradient(self, grid, o, kap, p, gc):
-        return _ApertureGrad(grid, o, p, _ap_axes(grid, p.K, self.wide, p.solver.xp),
-                             self._flat(grid, o, p))
+        flat, keep = self._flat(grid, o, p)
+        return _ApertureGrad(grid, o, p, _ap_axes(grid, p.K, self.wide, p.solver.xp), flat,
+                             keep)
 
     def reach(self, grid, o, p):
         return _reach_by_edges(grid, o, p, self.widths(grid, o.ravel(), None, p))
+
+    def placeable(self, grid, o, p):
+        F = p.cells.sub_factor(grid, o.reshape(grid.inside.shape), p.solver)
+        return self.parts.placeable(p.solver.to_host(self.reach(grid, o, p)),
+                                    p.solver.to_host(F), grid)
 
     def regions(self, grid, open0, bf, lab, p):
         return _track_regions(grid, open0, bf, lab, p, self)
@@ -2282,8 +2424,9 @@ class _ApertureGrad:
     equally among the sub-samples tied at its minimum, into dJ / d(sub-sample factor); open_grad
     takes that through p.cells.sub_vjp to dJ / d o."""
 
-    def __init__(self, grid, o, p: Params, axes_: list[_ApAxis], flat):
+    def __init__(self, grid, o, p: Params, axes_: list[_ApAxis], flat, keep):
         self.grid, self.o, self.p, self.axes, self.flat = grid, o, p, axes_, flat
+        self.keep = keep
         self.G = p.solver.xp.zeros(flat.size)
 
     def add(self, k: int, coef) -> None:
@@ -2303,8 +2446,8 @@ class _ApertureGrad:
     def open_grad(self):
         g, S2 = self.grid, self.grid.S * self.grid.S
         n = g.inside.size
-        return self.p.cells.sub_vjp(g, self.o.reshape(g.inside.shape),
-                                    self.G[:n * S2].reshape(n, S2), self.p.solver).ravel()
+        A = self.G[:n * S2].reshape(n, S2) * self.keep
+        return self.p.cells.sub_vjp(g, self.o.reshape(g.inside.shape), A, self.p.solver).ravel()
 
 
 def _reach_by_edges(grid: Grid | CompositeGrid, o, p: Params, widths):
@@ -2383,7 +2526,9 @@ def _track_regions(grid: Grid | CompositeGrid, open0: NDArray[np.bool_], bf: sp.
     # each sub-sample's building (>= 0), open (-1) or outside the block (-2); the dummy cell -2
     isub = grid.isub.reshape(n, S2)
     code = np.where(isub, np.where(lab >= 0, lab, -1), -2).astype(np.int64)
-    code = np.concatenate([code.ravel(), np.full(S2, -2, dtype=np.int64)])
+    F0 = th(p.cells.sub_factor(grid, o0.reshape(grid.inside.shape), p.solver))
+    code = rule.parts.codes(np.concatenate([code.ravel(), np.full(S2, -2, dtype=np.int64)]), F0,
+                            grid)
     big = np.iinfo(np.int64).max
     # incidences (building, cell): one per pair, from bf (buildings x inside cells)
     bc = bf.tocoo()
@@ -2526,12 +2671,13 @@ def _track_regions(grid: Grid | CompositeGrid, open0: NDArray[np.bool_], bf: sp.
 
 
 def steps_of(token: str) -> StepWidth:
-    """`ap` -> Aperture (the edge's own band); `apw` -> Aperture (the cell's width)."""
-    if token == "ap":
-        return Aperture(wide=False)
-    if token == "apw":
-        return Aperture(wide=True)
-    raise ValueError(f"unknown step width {token!r}: ap or apw")
+    """`ap[w][s]` -> Aperture: the band the edge's own share (`ap`) or the cell's width (`apw`);
+    a split cell's parts joined by its node, or (`s`) only its anchor's part conducting
+    (AnchorPart)."""
+    m = re.fullmatch(r"ap(w?)(s?)", token)
+    if m is None:
+        raise ValueError(f"unknown step width {token!r}: ap[w][s]")
+    return Aperture(wide=bool(m[1]), parts=AnchorPart() if m[2] else JoinParts())
 
 
 class Conductance(NamedTuple):
@@ -3084,6 +3230,13 @@ def grounded(grid: Grid | CompositeGrid, open_: NDArray[np.float64],
              p: Params) -> NDArray[np.bool_]:
     """Open cells with a path to the street (ground cells included), on the host."""
     return p.solver.to_host(grid.reach(p.solver.xp.asarray(open_, dtype=float), p))
+
+
+def placeable(grid: Grid | CompositeGrid, open_: NDArray[np.float64],
+              p: Params) -> NDArray[np.bool_]:
+    """The grounded cells that may take a home's demand and free an enclosed home (StepWidth's
+    `placeable`: today's every one), on the host."""
+    return p.steps.placeable(grid, p.solver.xp.asarray(open_, dtype=float), p)
 
 
 def master_operator(grid: Grid, p: Params):

@@ -334,7 +334,7 @@ def free_first(c: Clearing, *, budget: float, held: np.ndarray) -> np.ndarray:
     src = {int(h): rg.sources(near.indices[near.indptr[h]:near.indptr[h + 1]])
            for h in np.flatnonzero(sc.enclosed)}
     held = held.copy()
-    left = sc.enclosed & ~sc.pl.reached(lifted.grounded(g, c.open_(held), c.p))
+    left = sc.enclosed & ~common.reached(sc.pl, g, c.open_(held), c.p)
     spent, k = 0.0, 0
     while left.any():
         enter = np.concatenate([np.zeros(rg.ncomp),
@@ -361,7 +361,7 @@ def free_first(c: Clearing, *, budget: float, held: np.ndarray) -> np.ndarray:
         if best is None:
             break
         held[best.cleared] = True
-        freed = sc.pl.reached(lifted.grounded(g, c.open_(held), c.p))
+        freed = common.reached(sc.pl, g, c.open_(held), c.p)
         if not freed[best.home]:
             raise RuntimeError(f"{bid}: home {best.home}'s crossing {best.cleared} does not free "
                                "it: the region graph claimed a path the raster does not have")

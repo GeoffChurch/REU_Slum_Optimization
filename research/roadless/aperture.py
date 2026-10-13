@@ -7,14 +7,16 @@ sub-samples do not touch are joined (a phantom passage). The fix (lifted.Apertur
 conduct by the share of its width open all the way from one cell's centre to the next, read on the
 sub-samples. RULES names the rules compared (a name and its lifted.conductance_of spec, the spec in
 every row): T `uni` (today's), A `uni+ap` (the aperture, each step's band its own share of the
-cross-section, h / |v_k|) and Aw `uni+apw` (the band the cell's width h). h 0.5, ell 3 m, K 8, area
-population, B's placement; lenses P (power 1), P_{1/2} (common.PriorityDemand(0.5), power 1) and
-J_2 (lens (c)).
+cross-section, h / |v_k|), Aw `uni+apw` (the band the cell's width h) and Aws `uni+apws` (Aw, a
+split cell conducting through one part only: lifted.AnchorPart). h 0.5, ell 3 m, K 8,
+area population, B's placement; lenses P (power 1), P_{1/2} (common.PriorityDemand(0.5), power 1)
+and J_2 (lens (c)).
 
     S=research/roadless/aperture.py      # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S channel <procs>                     # Q3: the corridor (angle, alignment)
     uv run python $S base <id> <cpu|gpu> <mesh> <T,...>  # Q1, Q2: one block at baseline
     uv run python $S base-all <ids,|@file> <procs>       # here: small blocks whole, pockets
+    uv run python $S base-local <ids,|@file> <procs> <T,...>   # here: large blocks' base
     uv run python $S score <id> <rule> <offset> <cpu|gpu> 0.5   # Q3, Q4: one block's fields
     uv run python $S score-plan <id> <cpu|gpu>           # ... every pair score_plan names
     uv run python $S tars <dir> <ids,>                   # a tar per block of score's inputs
@@ -74,7 +76,7 @@ from simp_compare import TUNING  # noqa: E402
 
 # ------------------------------------------------------------------ the run's configuration
 # Everything that can change a number is here, and named in the rows (the run's identity).
-RULES = {"T": "uni", "A": "uni+ap", "Aw": "uni+apw"}
+RULES = {"T": "uni", "A": "uni+ap", "Aw": "uni+apw", "Aws": "uni+apws"}
 H = 0.5
 ELL_M = 3.0
 K = 8
@@ -223,7 +225,7 @@ def base(b, device: str, token: str, rules: tuple[str, ...]) -> None:
         c = clear.Clearing.on_scorer(sc, rtol=clear.RTOL_TENSION, search=None)
         try:
             held = clear.free_first(c, budget=BUDGET, held=np.zeros(c.n, dtype=bool))
-            left = sc.enclosed & ~sc.pl.reached(lifted.grounded(grid, c.open_(held), p))
+            left = sc.enclosed & ~common.reached(sc.pl, grid, c.open_(held), p)
             free_D, free_n = float(c.cost[held].sum()), int(held.sum())
             free_left = float(sc.w[left].sum() / sc.w.sum())
             free_ids = " ".join(map(str, np.flatnonzero(held)))
@@ -282,8 +284,7 @@ def base(b, device: str, token: str, rules: tuple[str, ...]) -> None:
           f"{ncell} cells, peak RSS {out.peak_rss_gb.iloc[0]:.1f} GB", flush=True)
 
 
-BASE_RULES_SMALL = ("T", "A", "Aw")     # the small blocks here: every rule
-BASE_RULES_LARGE = ("T", "Aw")          # the large ones on the cluster: today's and the choice
+BASE_RULES_SMALL = ("T", "A", "Aw", "Aws")     # the small blocks here: every rule
 
 
 def pockets_path(bid: str) -> Path:
@@ -319,6 +320,29 @@ def _local_one(job: tuple[str, bool]) -> str | None:
         print(f"{bid} FAILED {type(e).__name__}: {str(e)[:300]}", flush=True)
         return bid
     return None
+
+
+def _base_cpu(job: tuple[str, tuple[str, ...]]) -> str | None:
+    """A pool's task: `base` on the CPU under `rules` (a large block that fits this machine's
+    memory); the block's id if it failed."""
+    bid, rules = job
+    if base_path(bid).exists():
+        return None
+    try:
+        [b] = common.build_blocks([bid])
+        base(b, "cpu", mesh_token_of(bid), rules)
+    except Exception as e:                  # noqa: BLE001 -- reported, the run goes on
+        print(f"{bid} FAILED {type(e).__name__}: {str(e)[:300]}", flush=True)
+        return bid
+    return None
+
+
+def base_local(ids: list[str], procs: int, rules: tuple[str, ...]) -> None:
+    rr._check_single_threaded()
+    with multiprocessing.get_context("fork").Pool(procs, maxtasksperchild=1) as pool:
+        failed = [f for f in pool.imap_unordered(_base_cpu, [(i, rules) for i in ids]) if f]
+    if failed:
+        raise SystemExit(f"{len(failed)} blocks failed: {', '.join(failed)}")
 
 
 def base_all(ids: list[str], procs: int) -> None:
@@ -417,8 +441,8 @@ def score(b, rule: str, off: int, device: str) -> None:
           f"peak RSS {setup['peak_rss_gb']:.1f} GB", flush=True)
 
 
-SCORE_PLAN_RULES = ("T", "A", "Aw")     # the drift blocks: every rule at both alignments
-SCORE_RULE = "Aw"                        # the other tuning blocks: the chosen band at offset 0
+SCORE_PLAN_RULES = ("T", "A", "Aw", "Aws")     # the drift blocks: every rule at both alignments
+SCORE_RULE = "Aws"                       # the other tuning blocks: the candidate at offset 0
                                          # (today's fields are width.py's U rows)
 
 
@@ -686,7 +710,7 @@ def report() -> None:
             _summary("q1_blocks", q1)
             cols = [c for c in q1.columns if c not in ("block", "size", "homes")]
             _summary("q1", _spread(q1, ["size"], cols))
-        q2 = pd.concat([_q2(base_, homes, r) for r in ("A", "Aw")], ignore_index=True)
+        q2 = pd.concat([_q2(base_, homes, r) for r in ("A", "Aw", "Aws")], ignore_index=True)
         q2.insert(1, "size", _size_class(q2.block))
         _summary("q2_blocks", q2)
         cols = ["new", "new_pop", "new_by_rule", "new_by_rule_pop", "freed", "moved", "moved_pop",
@@ -776,6 +800,11 @@ def main(argv: list[str]) -> None:
         base(b, a[1], token, rules)
     elif cmd == "base-all":
         base_all(_ids(a[0]), int(a[1]))
+    elif cmd == "base-local":
+        rules = tuple(a[2].split(","))
+        if rules[0] != "T" or not set(rules) <= set(RULES):
+            raise SystemExit(f"rules {rules}: today's (T) first, then any of {list(RULES)}")
+        base_local(_ids(a[0]), int(a[1]), rules)
     elif cmd == "score":
         if a[4] != "0.5":
             raise SystemExit("score runs on uniform h 0.5 (its mesh token)")
