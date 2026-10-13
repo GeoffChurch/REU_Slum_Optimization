@@ -441,7 +441,8 @@ def score(b, rule: str, off: int, device: str) -> None:
           f"peak RSS {setup['peak_rss_gb']:.1f} GB", flush=True)
 
 
-SCORE_PLAN_RULES = ("T", "A", "Aw", "Aws")     # the drift blocks: every rule at both alignments
+SCORE_PLAN_RULES = ("T", "Aw", "Aws")   # the drift blocks at both alignments (A, behind on the
+                                        # corridor and the small blocks, at baseline only)
 SCORE_RULE = "Aws"                       # the other tuning blocks: the candidate at offset 0
                                          # (today's fields are width.py's U rows)
 
