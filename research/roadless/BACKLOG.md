@@ -141,9 +141,32 @@ items up front"), in the order proposed:
    than demolishing well-designed large community infrastructure like a school, especially since
    people do come in and out of it"): area sets both a building's injection and its displacement
    cost; the sources are already outside the buildings (Placement's ring of free cells within
-   1 m), which was the owner's other concern. (3) uni or sightline conductance and (4) what counts
-   as an exit: open. For the site: present both families, powers of the escape time (J_p) and
-   priority-weighted P, under established names.
+   1 m), which was the owner's other concern. (3) **The conductance: pending the effective-width
+   study** (queued after the priority-weighted P test). The owner wants corridors to FORM in the
+   flow (a cleared building can open several), not the clearing to look like lanes, and asked for
+   a justified uniform: open space conducting more the farther it is from buildings. Variants: the
+   blurred openness (the share of open ground within r of a cell; linear in the clearing, so P
+   stays convex; a channel narrower than 2r conducts like width^2), the owner's distance form
+   (min(1, d/s), d to the nearest footprint), uni and sightline; promising ones stay in
+   consideration. Sightline was kept for the corridor pictures if its angle error is fixed (turn
+   boost and uniform rays). (4) **Exits: the region model** (owner: "we'd still only leak at the
+   outer boundary, so all current must exit ... some of the outer boundary might not leak at all
+   and might have 0 conductance (like a railroad)"; "we can adjust boundary leakage, uniform
+   leakage, and also building-boundary leakage"). Everything compiles into conductances: barriers
+   (railways, water) at zero except at crossings; holes plain open space; inside, the
+   conductance formula of (3), a street boost an option only (the owner hopes it is not needed);
+   exits are leaks to ground with three adjustable families: the region's outer boundary where it
+   is a real road (none where it is a barrier); uniform (a walker arrives anywhere at a constant
+   rate, trips of a typical length lambda; in the small-leak limit P's clearing-dependent part is
+   everyone-to-everywhere, each home's term its mean effective resistance to the region); and
+   building-boundary (destinations at buildings' rings, by area population, closer to everyone
+   reaching everyone). Internal leaks only on open space connected at baseline (B's enclosed homes
+   stay enclosed). Why internal leaks: boundary-only escape is the volume-to-point problem, whose
+   optima are trees (constructal), so at city scale tendrils reaching in rather than
+   interconnection. Per-block exits are the model's fast limit (a one-block region whose whole
+   edge leaks), kept for the benchmark suites. The test on 5810's region is queued after the
+   effective-width study. For the site: present both families, powers of the escape time (J_p)
+   and priority-weighted P, under established names.
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights
