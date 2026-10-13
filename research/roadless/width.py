@@ -15,7 +15,8 @@ power 1), J_2 (lens (c)) and P_{1/2} (common.PriorityDemand(0.5), power 1).
     uv run python $S channel <procs>                  # Q2, the width response, the alignment
     uv run python $S score <id> <variant> <offset>    # Q1, Q3, Q4: one task (cluster.py cpu)
     uv run python $S simp <id> <variant>              # Q4: SIMP base, objective P, free first
-    uv run python $S tars <dir> <ids,>                # a tar per block of the road prefixes
+    uv run python $S cross <id> <variant>             # Q4: the SIMP clearings under a variant
+    uv run python $S tars <dir> <ids,> <score|cross>  # a tar per block of a task's inputs
     uv run python $S maps <ids,>                      # Q1: the maps (PNGs), from the flows
     uv run python $S report                           # every question's tables, the summaries
 
@@ -38,7 +39,8 @@ width_rows/homes/o<offset>/<variant>/<id>.parquet, flows width_rows/flows/<varia
 
 `simp`: relax.one at SIMP_PLAN (SIMP base), objective P (the population's demand, power 1), area
 D 0.05, free first (clear.free_first), under the variant, on the GPU; rows
-width_rows/simp/<variant>/<id>.parquet.
+width_rows/simp/<variant>/<id>.parquet. `cross`: every variant's SIMP clearing of a block scored
+under one of CROSS, on the GPU; rows width_rows/cross/<variant>/<id>.parquet.
 """
 from __future__ import annotations
 
@@ -94,6 +96,8 @@ PQ = common.PriorityDemand(0.5)
 LENSES = ("P", "J2", "Pq0.5")
 SIMP_PLAN = relax.plan_of("fw0.q3.i10.t0.001.e0.0001.k1s1e-06")    # SIMP base
 SIMP_DEVICE = "gpu"
+CROSS = ("U", "B0.5", "B1", "B1.5")         # the conductances the SIMP clearings are scored under
+CROSS_DEVICE = "gpu"                        # cross: minutes on a card, the CPU nodes busy scoring
 # corridor indices (`_indices`)
 OPEN_M = (1.0, 2.0)        # the open-lane share: flux in cells at least this far from a footprint
 COHERENCE_M = 2.0          # the coherence's neighbourhood: a square of this half-side
@@ -487,13 +491,19 @@ def simp(bid: str, variant: str) -> None:
 
 # ------------------------------------------------------------------ the cluster's inputs
 
-def tars(out: Path, ids: list[str]) -> None:
-    """Per block, what `score` reads that git does not carry, at its repo paths: item 4's prefix
-    rows and ordered networks of ROADS (the stored clearings are committed)."""
+def tars(out: Path, ids: list[str], what: str) -> None:
+    """Per block, what a task reads that git does not carry, at its repo paths: for `score`, item
+    4's prefix rows and ordered networks of ROADS (the stored clearings are committed); for
+    `cross`, every variant's SIMP rows."""
     out.mkdir(parents=True, exist_ok=True)
     for bid in ids:
-        members = [rr.prefix_dir(ROAD_ROWS) / f"{bid}__{m}.parquet" for m in ROADS]
-        members += [rr.ordered_path(ROAD_ROWS / "scratch", bid, m) for m in ROADS]
+        if what == "score":
+            members = [rr.prefix_dir(ROAD_ROWS) / f"{bid}__{m}.parquet" for m in ROADS]
+            members += [rr.ordered_path(ROAD_ROWS / "scratch", bid, m) for m in ROADS]
+        elif what == "cross":
+            members = [simp_path(v, bid) for v in VARIANTS if simp_path(v, bid).exists()]
+        else:
+            raise SystemExit(f"tars for score or cross, not {what!r}")
         absent = [str(m) for m in members if not m.exists()]
         if absent:
             raise SystemExit(f"{bid}: {len(absent)} inputs absent, e.g. {absent[0]}")
@@ -520,7 +530,7 @@ def cross(bid: str, variant: str) -> None:
     if not runs:
         raise SystemExit(f"{bid}: no SIMP clearing under any variant")
     [b] = common.build_blocks([bid])
-    p = params(VARIANTS[variant], DEVICE)
+    p = params(VARIANTS[variant], CROSS_DEVICE)
     sc = common.Scorer(b, lifted.UniformMesh(H, offset=OFFSETS[0]), p,
                        population=common.POPULATIONS["area"], demand=POP)
     g, n = sc.grid, len(sc.polys)
@@ -862,7 +872,7 @@ def main(argv: list[str]) -> None:
     elif cmd == "cross":
         cross(a[0], a[1])
     elif cmd == "tars":
-        tars(Path(a[0]), a[1].split(","))
+        tars(Path(a[0]), a[1].split(","), a[2])
     elif cmd == "maps":
         maps(a[0].split(","))
     elif cmd == "report":
