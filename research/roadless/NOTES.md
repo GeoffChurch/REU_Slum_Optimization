@@ -3586,17 +3586,17 @@ on 63718 (372 buildings), 5.5 h: late iterations ~750 s each, 4x its P_q bounds 
 What the 220 say: P_{1/2} lands on J_2. On J_2's own lens its clearing is not behind J_2's own
 optimizer (+0.0009 [-0.0013, +0.0036]), and at the p95 home it is within the 0.005 margin but for
 3e-7 at the interval's end, so as written it does not replace J_2, by a miss inside the bootstrap's
-noise (the owner's call). Where it differs from J_2 it leans further into the tail (better at the
-max home by 0.020, worse at the median by 0.005, its clearings deeper), gives up a little more P
-(0.0028 against J_2's 0.0015), and alone of the two carries a certified bound (0.16 above its
-clearing on the median block, nearly all of it the grey relaxation's). P_1, the literal
-"quadratically higher", overshoots: worse than J_2 on J_2's lens and the p95 home, best of all at
-the max home, worst at the median. P itself fails J_2's test on both counts, so the match is the
-weighting's doing, and the first-order rule q = (p - 1) / 2 holds about in place on blocks with
-shared paths. Committed: pweight_rows/summary_{lens,questions,bound,describe,cost}.csv (the rows
-are in the ignored pweight_rows/ parquet), and the four runs' clearings in the stored clearings
-(clearings_export.py export: clearings/pweight_rows/simp/, all 220 blocks each, the store now
-61,351 rows).
+noise (the owner's call, made 2026-10-13: P_{1/2} is the equity view beside P). Where it differs
+from J_2 it leans further into the tail (better at the max home by 0.020, worse at the median by
+0.005, its clearings deeper), gives up a little more P (0.0028 against J_2's 0.0015), and alone of
+the two carries a certified bound (0.16 above its clearing on the median block, nearly all of it
+the grey relaxation's). P_1, the literal "quadratically higher", overshoots: worse than J_2 on
+J_2's lens and the p95 home, best of all at the max home, worst at the median. P itself fails J_2's
+test on both counts, so the match is the weighting's doing, and the first-order rule
+q = (p - 1) / 2 holds about in place on blocks with shared paths. Committed:
+pweight_rows/summary_{lens,questions,bound,describe,cost}.csv (the rows are in the ignored
+pweight_rows/ parquet), and the four runs' clearings in the stored clearings (clearings_export.py
+export: clearings/pweight_rows/simp/, all 220 blocks each, the store now 61,351 rows).
 
 ### The stored clearings, committed (owner 2026-10-13: "Yes to everything")
 

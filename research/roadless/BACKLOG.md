@@ -139,11 +139,15 @@ items up front"), in the order proposed:
    the 220 small blocks (NOTES, "Priority-weighted P"; SIMP base with free first, area D 0.05, all
    four objectives): P_{1/2}'s clearing is not behind J_2's on J_2's lens (+0.0009 [-0.0013,
    +0.0036]), and at the p95 home it is +0.0011 [-0.0028, +0.0050003], 3e-7 past the
-   pre-registered 0.005, so as written it does not replace J_2 (**owner's call**: the miss is
-   inside the bootstrap's Monte Carlo noise). It is better than J_2 at the max home (-0.020) and
-   worse at the median (+0.005), clears deeper, gives up 0.0028 of P (J_2 0.0015) and carries a
+   pre-registered 0.005, so as written it does not replace J_2; the miss is inside the
+   bootstrap's Monte Carlo noise (0.00493 with 200,000 draws). It is better than J_2 at the max
+   home (-0.020) and worse at the median (+0.005), clears deeper, gives up 0.0028 of P (J_2
+   0.0015), takes one solve a step to J_2's two (SIMP base 28.7 task-h to 40.3) and carries a
    certified bound (0.16 above its clearing, nearly all of it the grey relaxation's); P_1
    overshoots (J_2's lens -0.009, the p95 home +0.007) and P fails both (-0.006, +0.016).
+   **Decided (owner 2026-10-13): P_{1/2} is the equity view beside P** ("we can make P_{1/2} the
+   equity view beside P"). J_2 stays in the site's account of the two families, as the
+   established measure P_{1/2} stands in for.
    (2) **Area population for buildings** ("area for buildings makes the most sense ... relocate
    individual homes rather than demolishing well-designed large community infrastructure like a
    school, especially since people do come in and out of it"): area sets both a building's
