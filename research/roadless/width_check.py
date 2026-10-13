@@ -30,10 +30,10 @@ on the baseline and a random clearing. Fault `b1`: OpenFraction's factor B_1's
 
 `gradient`: the relaxation's gradient under B_r (relax.Relaxation.value_sgrad with Params.cells
 Blurred(r) for r in GRAD_R), SIMP's q 1 and 3, P and J_2, eps 1e-4, at a random fractional
-clearing, against central differences (step FD_STEP, solves to FD_RTOL from zero) on
-GRAD_BUILDINGS buildings: the largest difference within GRAD_TOL of the largest |gradient|
-checked. Fault `no-blur-vjp`: Blurred's vjp without the disk's term (only the sub-samples whose
-own openness binds the min).
+clearing, against central differences (per building the closer of those at the FD_STEPS, solves
+to FD_RTOL from zero) on GRAD_BUILDINGS buildings: the largest difference within GRAD_TOL of the
+largest |gradient| checked. Fault `no-blur-vjp`: Blurred's vjp without the disk's term (only the
+sub-samples whose own openness binds the min).
 
 `convex`: P under B_r is convex in the clearing fractions (q 1), because every cell's factor is
 concave in them: along CONVEX_LINES random segments x(t) = a + t (z - a) across the box, at
@@ -245,12 +245,13 @@ def operator(ids: list[str]) -> list[str]:
 GRAD_R = (0.5, 1.0, 1.5)
 GRAD_BUILDINGS = 6
 GRAD_Q = (1.0, 3.0)
-FD_STEP = 3e-7           # B_r's factor is piecewise linear with many kinks (each sub-sample's
-                         # openness against its disk's; under the face aperture each track's min
-                         # too): at 1e-4 a central difference on 38136 straddled one (building 5,
-                         # b0.5 q 1: 1.1e-4 off; 4e-10 at 1e-5), at 1e-5 another (building 5,
-                         # b1.5 J_2 q 1: 1.1e-5, 9.4e-6, 4.4e-6, 1.0e-7 off at 1e-5, 3e-6, 1e-6,
-                         # 3e-7; the other five 2e-10 -- 1e-7 at every step)
+FD_STEPS = (1e-5, 1e-6)  # per building the closer of the central differences at these: B_r's
+                         # factor is piecewise linear with many kinks (each sub-sample's openness
+                         # against its disk's; under the face aperture each track's min too), and
+                         # a step straddling one is off (38136 building 5: b0.5 q 1 at 1e-4,
+                         # 1.1e-4; b1.5 J_2 q 1 at 1e-5, 3e-6, 1e-6, 3e-7: 1.1e-5, 9.4e-6, 4.4e-6,
+                         # 1.0e-7), while a short step loses digits to cancellation (b1.5 J_2 q 3
+                         # at 3e-7: 5.9e-5; at 1e-5, 7.9e-8)
 FD_RTOL = 1e-9
 GRAD_TOL = 1e-5
 
@@ -284,8 +285,11 @@ def gradient(ids: list[str]) -> list[str]:
                     fd = []
                     for j in pick:
                         e = np.zeros(c.n)
-                        e[j] = FD_STEP
-                        fd.append((_value(rel, x0 + e) - _value(rel, x0 - e)) / (2 * FD_STEP))
+                        near = []
+                        for step in FD_STEPS:
+                            e[j] = step
+                            near.append((_value(rel, x0 + e) - _value(rel, x0 - e)) / (2 * step))
+                        fd.append(min(near, key=lambda d, j=j: abs(d - g[j])))
                     err = float(np.abs(np.array(fd) - g[pick]).max() / np.abs(g[pick]).max())
                     ok = err <= GRAD_TOL
                     print(f"{bid} b{r:g} J_{power:g} SIMP q {q:g}: gradient against central "

@@ -4318,3 +4318,59 @@ single-threaded, at most 8 processes: the small blocks' and 37 large blocks' bas
 plus about 2 lost when a pool read aperture_check as edited under it), the moves and pockets (2.7),
 the corridor (900 solves, under a minute), the guards (about 5), SIMP on 19537 (0.25) and the
 report: about 20 CPU-h.
+
+**Adopted (owner 2026-10-13: "We can adopt Fws and delete the losing methods").** Fws is the
+operator's one step rule, folded into it with no Strategy left (03f7eb49, dba7e320 -- afa00a02):
+lifted.step_widths (a step by the mean over its tracks of the smallest per-sub-sample factor on
+each), step_gradient, reach, placeable, components, demand_cells and regions (free first's graph),
+axis_tracks across the face for an axis-aligned step and centre to centre across the cell's width
+for an oblique one, and the anchor-part rule, as plain functions. Deleted: SmallestCell with its
+gradient accumulator and the 4-connected reach and region graph (Grid.reach_smallest and
+regions_smallest, the composite's raising stub), A, Aw and Aws (the edge-share band, the
+centre-to-centre tracing of axis-aligned steps, JoinParts), Params.steps and the StepWidth
+Strategy, width.BlurCentre (sampled at a cell's centre, it has no per-sub-sample factor, so no step
+width: it cannot run) and aperture.py (the rules' comparison: its summaries stay in aperture_rows/,
+its code at bd1704dc). TurnBoosted (S_t) runs as it was: it boosts the turning edges, which the
+step rule does not touch (on 38136 P0 10.14 against S's 15.85; its vjp still raises). GpuAMG's
+master operator is now the aperture's on the open field, so a GPU solve can move at its tolerance
+from the study's (a step whose every track leaves the block is no longer in the aggregation's
+pattern) [inferred: not run on a card]. free_roads' targets take the pockets of the operator's
+components, through the near cells that can take demand, where they took 4-connected open cells.
+The identity: every conductance name ends in `+apwfs` (lifted.APERTURE: uni+apwfs, uni+b1+apwfs,
+ss100k2n2r30t+apwfs) and conductance_of raises on any other, so nothing written under the old rule
+(uni, uni+b1, ss...) or the study's A, Aw and Aws (ap, apw, apws) is read as the new rule's:
+relax's, search's, polish's, road_rescore's and transparency's rows take the new name in their
+paths; clear.py's greedy names its rows by the conductance; pweight's and width.py's rows, keyed by
+objective and variant, move under pweight_rows/uni+apwfs/ and width_rows/apwfs/; free_roads.CODE
+hashes lifted.py, so FreeEnclosed's identity and tag moved. The stored clearings (the decisions)
+stand; their `perm` is the old rule's (clearings_check's rescore now scores them under the aperture
+and says so), and the export's along pattern matches no `+apwfs` name, so a run under the aperture
+raises there rather than export as one of the old rule's (teaching it the name belongs to the
+consolidated pass). The guards, re-run after the deletion, each failing under its fault: identity
+(width_check's 57 numbers under uni+apwfs, recorded at bd1704dc before any edit,
+width_rows/identity_reference_fws.csv: bit for bit on 38136, 19263 and 19570; fault `ulp`, every
+width above 0 one ulp up: 16 of 19 differ on each; the old rule's reference retired); open (now
+against the uniform operator assembled in the guard: the synthetic rectangles family for family,
+and with every footprint open the steps whose tracks' cells are wholly open, 216,025 -- 522,400 a
+block, of width exactly 1; fault `sum`); channel (W_eff 0.65 -- 1 of W at the oblique angles, exact
+at the axis-aligned; fault `max-track`: 19 of 24 fail); cracks (fault `open-fraction`, each track
+by the smallest open fraction of the cells it crosses, the phantom passage: 4 of 7 fail); connect
+(the reach equals the flood fill of the sub-samples it reads on all seven blocks, the plain flood
+fill reaching 9 -- 119 cells more through split cells' minor parts; fault `diagonal-leak`: 5 -- 915
+cells off); convex (the widths' second differences at most 2.2e-15, P's at least 4.6e-3 of P; fault
+`square`: P's down to -8.3e-3); gradient (within 3.3e-7 of the largest; fault `no-spread`: 6.6e-2
+-- 1.2e-1); free (24240's home 1639 freed for D 0.0001; fault `split-source` raises). width_check,
+under the aperture now: `operator` checks U's turning edges (bit for bit) and per-sub-sample
+openness (within 5.6e-17) against the open fractions' definition (fault `b1`); `convex` (B_r's cell
+factors' second differences at most 1.1e-13; fault `product`); `gradient` (B_r) within 4.4e-6 of
+the largest over its 36 checks, against the closer of the central differences at steps 1e-5 and
+1e-6 (fault `no-blur-vjp`: 3.7e-3 -- 3.8e-2): at 1e-5 alone one check straddled a kink of a track's
+minimum (38136, B_1.5, J_2, q 1, building 5: 1.1e-5, 9.4e-6, 4.4e-6, 1.0e-7 off at steps 1e-5,
+3e-6, 1e-6, 3e-7), at 3e-7 alone two lost digits to cancellation (up to 5.9e-5).
+transparency_check's free-roads guard on its ten blocks: 41 homes enclosed at baseline under the
+aperture (21 under the old rule; 41673's 5 became 18), every one freed, by 32 roads, each freeing
+its home by the scorer's test (D area at most 0.019, on 41673). tests/test_clearings.py: 34 pass.
+Compute here, single-threaded, at most 8 processes: about 7.5 CPU-h, nothing on the cluster. The
+passable width stays open (the owner is weighing it): closing gaps under a width needs only the
+sub-samples it folds into the footprints beside them (Grid.bsub and label_sub, all the operator
+reads of the footprints), not the operator.
