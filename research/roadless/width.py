@@ -606,7 +606,7 @@ def maps(ids: list[str]) -> None:
         kept = np.delete(polys, x)
         ny, nx = g.inside.shape
         ext = (g.x0 - g.h / 2, g.x0 + (nx - 0.5) * g.h, g.y0 - g.h / 2, g.y0 + (ny - 0.5) * g.h)
-        scale = 14.0 / max(ny, nx) * max(ny, nx) / max(nx, 1)
+        aspect = ny / nx
         base: dict[str, np.ndarray] = {}
 
         def draw(ax, v, title, cleared_outline: bool, **kw):
@@ -633,7 +633,7 @@ def maps(ids: list[str]) -> None:
             lim = float(np.nanquantile(np.abs(d0), 0.99))
             dS = S["simp_default"] - S["baseline"]
             dlim = float(np.nanquantile(np.abs(dS), 0.995))
-            fig, axes = plt.subplots(1, 3, figsize=(3 * 11, 11 * ny / nx * scale + 1))
+            fig, axes = plt.subplots(1, 3, figsize=(3 * 11, 11 * aspect + 2))
             kw = dict(cmap="RdBu_r", vmin=-lim, vmax=lim)
             ims = [draw(axes[0], d0, f"{variant} ({VARIANTS[variant]}): baseline flow against "
                         "the no-buildings prior,\nlog of its share over the prior's (red: more "
@@ -650,7 +650,7 @@ def maps(ids: list[str]) -> None:
             fig.savefig(out / f"{bid}_{variant}.png", dpi=110)
             plt.close(fig)
             print(out / f"{bid}_{variant}.png", flush=True)
-        fig, axes = plt.subplots(2, 4, figsize=(4 * 9, 2 * 9 * ny / nx * scale + 1))
+        fig, axes = plt.subplots(2, 4, figsize=(4 * 9, 2 * 9 * aspect + 2))
         for ax, (variant, d0) in zip(axes.ravel(), base.items(), strict=True):
             lim = float(np.nanquantile(np.abs(d0), 0.99))
             im = draw(ax, d0, f"{variant}: baseline against the prior", False, cmap="RdBu_r",
