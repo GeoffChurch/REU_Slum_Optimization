@@ -29,7 +29,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROWS = HERE / "gap_rows" / "runtime" / "cudss"
 REPS = 3
-WITH = ("nvmath-python[cu12]==1.0.0", "nvidia-cudss-cu12", "cupy-cuda12x", "scipy", "numpy",
+WITH = ("nvmath-python[cu12]==1.0.0", "nvidia-cudss-cu12", "cupy-cuda12x[ctk]", "scipy", "numpy",
         "pandas", "pyarrow")
 INNER = "GAP_CUDSS_INNER"
 
