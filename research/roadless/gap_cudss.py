@@ -96,9 +96,11 @@ def inner(bid: str) -> None:
         del lu
         # cuDSS on the device (host operands: nvmath moves them; blocking, so each call's time
         # is its own)
-        w = 1.0 + 1e-3 * np.cos(np.arange(A.nnz))
+        # new values on the same structure arrays (a symmetric change: an entry's factor a
+        # function of its row and column alike), as a state of the same pattern would bring
+        rows_of = np.repeat(np.arange(n), np.diff(A.indptr))
+        w = 1.0 + 1e-3 * np.cos(rows_of + A.indices.astype(np.int64))
         A2 = sp.csr_matrix((A.data * w, A.indices, A.indptr), shape=A.shape)
-        A2 = ((A2 + A2.T) * 0.5).tocsr()
         opts = DirectSolverOptions(sparse_system_type=DirectSolverMatrixType.SPD, blocking=True)
         for rep in range(REPS):
             t0 = time.time()
