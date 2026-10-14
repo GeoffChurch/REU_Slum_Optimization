@@ -649,15 +649,26 @@ def full_cells(fm: FullMesh, *, lumped: bool) -> FullCells:
 
 # ------------------------------------------------------------------ the fixed mesh, cached
 
+_CACHE_FORMAT = 2      # what a cached mesh's file holds (in its key; a storage detail, no score's):
+                       # 2 the baseline's grown complex beside the mesh
+
+
 class Fixed(NamedTuple):
     """A block's fixed mesh and what its baseline fixes (module docstring): the mesh, the demand
     on the triangles reaching the street with every footprint standing (gap_flow.demand_on; per
-    point its triangle `ptri`, -1 in the band) and each home's ring (gap_flow.ring_of)."""
+    point its triangle `ptri`, -1 in the band), each home's ring (gap_flow.ring_of) and the
+    complex grown as the form grows its footprints with every footprint standing (`cx0`, its
+    arrays: gap_complex.complex_arrays), free first's baseline."""
     fm: FullMesh
     dem: gf.PointDemand
     ptri: NDArray[np.int64]
     ring: gf.Ring
+    cx0: dict[str, NDArray[Any]]
     t_build: float
+
+    def complex0(self, spec: gc.Spec) -> gc.Complex:
+        """Free first's baseline complex (gap_complex.free_first's cx0)."""
+        return gc.complex_of_arrays(self.cx0, spec)
 
     @staticmethod
     def key(block, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width) -> str:
@@ -670,7 +681,7 @@ class Fixed(NamedTuple):
             streets=hashlib.sha256(shapely.to_wkb(geo.streets)).hexdigest(),
             boundary=hashlib.sha256(shapely.to_wkb(geo.boundary)).hexdigest(),
             spec=spec.name, flow=fs.name, sigma=fs.sigma, offset=fs.offset, form=form.name,
-            code=CODE)
+            code=CODE, format=_CACHE_FORMAT)
         return hashlib.sha256(json.dumps(ident, sort_keys=True).encode()).hexdigest()[:24]
 
     @classmethod
@@ -697,7 +708,9 @@ class Fixed(NamedTuple):
         ptri = -np.ones(len(dem.xy), dtype=np.int64)
         ptri[:nin] = ids[np.arange(nin) // fs.quad]
         ring = gf.ring_of(geo, spec.ring_m, fm.xy, fm.tri, band_open)
-        fx = cls(fm=fm, dem=dem, ptri=ptri, ring=ring, t_build=time.time() - t0)
+        cx0 = gc.complex_arrays(gc.build(geo, spec, np.ones(len(geo.polys), dtype=bool),
+                                         carve=None, grow=form.grow))
+        fx = cls(fm=fm, dem=dem, ptri=ptri, ring=ring, cx0=cx0, t_build=time.time() - t0)
         cls._store(fx, path)
         return fx
 
@@ -721,6 +734,7 @@ class Fixed(NamedTuple):
             arrs[f"{name}_data"], arrs[f"{name}_indices"] = M.data, M.indices
             arrs[f"{name}_indptr"], arrs[f"{name}_shape"] = M.indptr, np.array(M.shape)
         arrs["ring_band"] = ring.band
+        arrs.update({f"cx_{name}": a for name, a in fx.cx0.items()})
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f"{path.stem}.{os.getpid()}.tmp.npz")
         np.savez(tmp, **arrs)
@@ -743,6 +757,7 @@ class Fixed(NamedTuple):
                              walled=z["dem_walled"], shadowed=z["dem_shadowed"])
         return cls(fm=fm, dem=dem, ptri=z["ptri"],
                    ring=gf.Ring(tri=csr("ring_tri"), band=z["ring_band"]),
+                   cx0={name[3:]: z[name] for name in z.files if name.startswith("cx_")},
                    t_build=float(t_build))
 
 
@@ -1238,7 +1253,8 @@ class Model:
         its filtration width (module docstring), checked home for home by the flow model's own
         reach: its walled-in homes at baseline, and those it leaves walled in."""
         fr = gc.free_first(self.geo, self.spec, w=self.form.filtration_w, grow=self.form.grow,
-                           budget=budget, cost=self.cost_, pop=self.pop, held0=held, cx0=None)
+                           budget=budget, cost=self.cost_, pop=self.pop, held0=held,
+                           cx0=self.fx.complex0(self.spec))
         bid = self.block.block_id
         if not np.array_equal(fr.target, self.walled0):
             raise RuntimeError(f"{bid}: the complex walls in homes "

@@ -54,8 +54,9 @@ the width w, the growth and the budget are each call's, required.
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import numpy as np
 import scipy.sparse as sp
@@ -148,6 +149,33 @@ class Complex:
     @property
     def nt(self) -> int:
         return len(self.tri)
+
+
+_ARRAYS = ("xy", "tri", "area", "fill", "pa", "pb", "pu", "pv", "ap", "exit", "street_faces",
+           "street_v", "standing")
+
+
+def complex_arrays(cx: Complex) -> dict[str, NDArray[Any]]:
+    """A complex's arrays, to store (gap_clear.Fixed keeps the baseline's for free first): every
+    field but its spec and its triangles' geometries (`complex_of_arrays` makes them again)."""
+    vb = cx.vb.tocsr()
+    out: dict[str, NDArray[Any]] = {name: getattr(cx, name) for name in _ARRAYS}
+    out.update(vb_data=vb.data, vb_indices=vb.indices, vb_indptr=vb.indptr,
+               vb_shape=np.array(vb.shape),
+               band_open=np.frombuffer(shapely.to_wkb(cx.band_open), dtype=np.uint8),
+               grow=np.array(cx.grow))
+    return out
+
+
+def complex_of_arrays(z: Mapping[str, NDArray[Any]], spec: Spec) -> Complex:
+    """The complex `complex_arrays` stored (on `spec`, the one it was built on)."""
+    xy, tri = z["xy"], z["tri"]
+    return Complex(spec=spec, **{name: z[name] for name in _ARRAYS},
+                   tri_geom=shapely.polygons(xy[tri]),
+                   vb=sp.csr_matrix((z["vb_data"], z["vb_indices"], z["vb_indptr"]),
+                                    shape=tuple(z["vb_shape"])),
+                   band_open=shapely.from_wkb(z["band_open"].tobytes()),
+                   grow=float(z["grow"]))
 
 
 def obstacles(geo: Geometry, standing: NDArray[np.bool_], *, carve,
