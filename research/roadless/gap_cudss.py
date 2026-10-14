@@ -51,10 +51,19 @@ def _preload() -> None:
     libnvJitLink)."""
     import ctypes
     import glob
-    for name in ("nvjitlink", "cusparse", "cudss"):
-        for d in sys.path:
-            for lib in sorted(glob.glob(f"{d}/nvidia/{name}/lib/lib*.so*")):
+    libs = sorted({lib for d in sys.path for lib in glob.glob(f"{d}/nvidia/*/lib/lib*.so*")})
+    for _round in range(len(libs)):            # each round loads those whose dependencies are in
+        left = []
+        for lib in libs:
+            try:
                 ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
+            except OSError:
+                left.append(lib)
+        if len(left) in (0, len(libs)):
+            break
+        libs = left
+    print(f"preloaded the CUDA wheels' libraries ({len(left)} not loaded: {left[:3]})",
+          flush=True)
 
 
 def inner(bid: str) -> None:
