@@ -222,14 +222,14 @@ items up front"), in the order proposed:
    break its ties. Vehicle access is its own reading of the same filtration (a home's exit width is
    its widest path's bottleneck to the street; turning is not modelled), reported over W, since the
    widest-path study found reblocking pays for vehicles only above about 4.5 m with the ranking
-   rotating with W; when to add it is the owner's (with the switch or with the vulnerability
-   score). A GPU path is added only where measured faster: the complex's systems are planar and
-   factor directly on a core (SuperLU 1.5 s at 690k unknowns, against pyamg's 16 -- 69 s a solve),
-   and today's cost is the mesh rebuilt for every clearing, which a GPU cannot help. **Next**, the
-   runtime's first phase: a clearing as a conductance change on one fixed mesh, the scorer, free
-   first and the optimizers' seam on it, calibrated against the rebuild and timed; then the
-   remaining ports and the retirement (each retired variant to the wiki's dead-end record with its
-   numbers), the region test on the complex, and the consolidated pass.
+   rotating with W; it comes with the vulnerability score (owner 2026-10-14: "Later, with
+   vulnerability"). A GPU path is added only where measured faster: the complex's systems are
+   planar and factor directly on a core (SuperLU 1.5 s at 690k unknowns, against pyamg's 16 -- 69 s
+   a solve), and today's cost is the mesh rebuilt for every clearing, which a GPU cannot help.
+   **Next**, the runtime's first phase: a clearing as a conductance change on one fixed mesh, the
+   scorer, free first and the optimizers' seam on it, calibrated against the rebuild and timed;
+   then the remaining ports and the retirement (each retired variant to the wiki's dead-end record
+   with its numbers), the region test on the complex, and the consolidated pass.
    (4) **Exits: the region model** (owner: "we'd still only leak at the
    outer boundary, so all current must exit ... some of the outer boundary might not leak at all
    and might have 0 conductance (like a railroad)"; "we can adjust boundary leakage, uniform
@@ -327,8 +327,10 @@ can be done after we've done the entire website/README/examples revamp"):
   `conf/permeability.yaml` and `reblock.permeability`'s docstring -> scratch scripts long gone);
   each citing text carries its substance. Fix them with the site revamp: editing
   `reblock.permeability` misses the derive cache of every method that imports it.
-- **The vulnerability score** (free first in reverse: the least rubble that would wall a
-  connected home in, a min cut): after the site/README/examples revamp.
+- **The vulnerability score** (free first in reverse: the least rubble that would wall a connected
+  home in, a min cut): after the site/README/examples revamp. With it (owner 2026-10-14), vehicle
+  access read from the gap complex's filtration: the people within a stretcher's carry of where a
+  vehicle of width W reaches, over W (item 4, decision 3).
 
 Open:
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
