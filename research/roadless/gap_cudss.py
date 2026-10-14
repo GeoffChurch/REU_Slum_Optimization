@@ -5,7 +5,10 @@ dependency of the project: the task runs this file again in an ephemeral environ
 --with ..., uv's cache), nothing added to pyproject.toml or uv.lock.
 
     uv run python research/roadless/cluster.py submit blocks <run> --with <A_<id>.npz> <id> -- \\
-        research/roadless/gap_cudss.py {id}
+        research/roadless/gap_cudss.py {id} 0.5
+
+(`0.5`: the raster grid cluster.py sizes the task's card by, as every blocks run names it; unused
+here.)
 
 The systems (gap_rows/runtime's dumps, `A<name>` CSR, `b<name>`, `p<name>` the runtime's
 elimination order): `x` a random 0/1 clearing at area D 0.05 (an exact score's), `e` the eps
