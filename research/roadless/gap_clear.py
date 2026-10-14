@@ -48,6 +48,7 @@ import gap_complex as gc
 import gap_flow as gf
 import relax
 
+SLIVER_M2 = 1e-8       # a triangle of the full mesh under this area (m^2) is dropped
 CROSS_MIN = 0.05       # a passage across a face boundary whose circumcentres are in the wrong
                        # order: each centre's distance to the edge clipped at this x |e|
 
@@ -146,6 +147,10 @@ def full_mesh(geo: gc.Geometry, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width) 
     good = (tri[:, 0] != tri[:, 1]) & (tri[:, 1] != tri[:, 2]) & (tri[:, 2] != tri[:, 0])
     tri, face = tri[good], face[good]
     cr = gf._cross(xy[tri[:, 0]], xy[tri[:, 1]], xy[tri[:, 2]])
+    # micro-slivers where two offset arcs nearly meet (areas 1e-19 -- 1e-10 m^2, two vertices
+    # 1e-5 m apart: on 43347 an edge then lay in four triangles): dropped
+    keep = np.abs(cr) > 2.0 * SLIVER_M2
+    tri, face, cr = tri[keep], face[keep], cr[keep]
     tri[cr < 0] = tri[cr < 0][:, [0, 2, 1]]
     nv0, nt = len(xy), len(tri)
     nbr = gc._neighbours(tri, nv0)
