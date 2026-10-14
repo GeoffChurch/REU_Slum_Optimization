@@ -393,6 +393,15 @@ def _kendall(a: np.ndarray, b: np.ndarray) -> float:
     return float(kendalltau(a, b).statistic)
 
 
+def _b_rank(enclosed: pd.Series, lens: pd.Series) -> np.ndarray:
+    """Each clearing's place in B's order: the population it leaves walled in first (less is
+    better), then the lens (more is better)."""
+    order = np.lexsort((-lens.to_numpy(), enclosed.to_numpy()))
+    rank = np.empty(len(order))
+    rank[order] = np.arange(len(order))
+    return rank
+
+
 def report() -> None:
     """ROWS' summaries, gap_rows/summary_runtime_<name>.csv (committed; the rows are not)."""
     out = HERE / "gap_rows"
@@ -427,9 +436,10 @@ def report() -> None:
                 for k in keys:
                     row[f"{k}_{lens}_cx"] = g.loc[k, lens]
                     row[f"{k}_{lens}_raster"] = r.loc[k, lens]
-                if len(keys) >= 2:
-                    row[f"tau_{lens}"] = _kendall(g.loc[keys, lens].to_numpy(),
-                                                  r.loc[keys, lens].to_numpy())
+                if len(keys) >= 2:      # the clearings' order in B's order, metric against metric
+                    row[f"tau_{lens}"] = _kendall(
+                        _b_rank(g.loc[keys, "enclosed"], g.loc[keys, lens]),
+                        _b_rank(r.loc[keys, "enclosed"], r.loc[keys, lens]))
             for k in keys:
                 row[f"{k}_enclosed_cx"] = g.loc[k, "enclosed"]
                 row[f"{k}_enclosed_raster"] = r.loc[k, "enclosed"]
