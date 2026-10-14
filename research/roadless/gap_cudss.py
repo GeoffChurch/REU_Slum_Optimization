@@ -96,11 +96,18 @@ def inner(bid: str) -> None:
         del lu
         # cuDSS on the device (host operands: nvmath moves them; blocking, so each call's time
         # is its own)
-        # new values on the same structure arrays (a symmetric change: an entry's factor a
-        # function of its row and column alike), as a state of the same pattern would bring
+        # new values on the same structure arrays, as a state of the same pattern brings: every
+        # conductance (an off-diagonal, symmetric: its factor a function of its row and column
+        # alike) changed, the diagonal with them so each row keeps its conductance to ground (a
+        # weighted Laplacian still: SPD; scaling the diagonal too left a row short of dominance
+        # and the pilot's Cholesky a NaN)
         rows_of = np.repeat(np.arange(n), np.diff(A.indptr))
-        w = 1.0 + 1e-3 * np.cos(rows_of + A.indices.astype(np.int64))
-        A2 = sp.csr_matrix((A.data * w, A.indices, A.indptr), shape=A.shape)
+        off = rows_of != A.indices
+        w = np.where(off, 1.0 + 1e-3 * np.cos(rows_of + A.indices.astype(np.int64)), 1.0)
+        data2 = A.data * w
+        delta = np.bincount(rows_of[off], weights=(data2 - A.data)[off], minlength=n)
+        data2[~off] -= delta[rows_of[~off]]
+        A2 = sp.csr_matrix((data2, A.indices, A.indptr), shape=A.shape)
         opts = DirectSolverOptions(sparse_system_type=DirectSolverMatrixType.SPD, blocking=True)
         for rep in range(REPS):
             t0 = time.time()
