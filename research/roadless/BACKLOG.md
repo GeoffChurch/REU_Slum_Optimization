@@ -230,8 +230,8 @@ items up front"), in the order proposed:
    fixed mesh a block (every outline and its w / 2 offset noded at 0.1 mm, the footprints'
    interiors and the shy distance's zone strips meshed with the open ground, every face boundary
    split until the mesh is Delaunay, so no weight is clipped; cached by identity), a clearing a
-   re-weighting of its passages with no GEOS call; the scorer, free first on the complex grown by
-   w / 2, and the optimizers' seam (seam.py's Protocols, the metric resolved where a run is
+   re-weighting of its passages with no GEOS call; the scorer, free first on the complex grown by w
+   / 2, and the optimizers' seam (seam.py's Protocols, the metric resolved where a run is
    configured: metrics.metric_of), the raster and the complex both behind it, the raster's numbers
    bit for bit as before; the metric `cx+shy0.5+s0.125r1b1+R0.5g4x2q4`, its rows under that name.
    Against the rebuild: the baselines within 2.3e-4 on 16 of 18 blocks and every clearing's lenses
@@ -244,13 +244,21 @@ items up front"), in the order proposed:
    11 -- 13x) and 2 -- 13 GB. The factorization is 57 -- 81% of the time; cuDSS on one H100
    refactors the same systems 240 -- 290x faster than SuperLU once a pattern's plan (16 -- 40 s) is
    made, about 3x on an exact score and 5x on a SIMP iteration as the host's work stands: a GPU
-   path, and with it a new dependency (nvmath-python, cuDSS), is the owner's decision. **Next**,
-   the second phase: the remaining ports (road re-scoring, pweight, the atlas and corridor
-   pictures, clearings_check, the exports, the translucent search), the speed (the GPU decision;
-   the polish's moves scored exactly rather than in the eps world, over half of SIMP's time on
-   5810; the eps world's interiors; the host's assembly, reach and gradient), the dominance
-   measurement and the retirement (each retired variant to the wiki's dead-end record with its
-   numbers), the region test on the complex, and the consolidated pass.
+   path. **Decided (owner 2026-10-14)**: the GPU path ("Yes, add a GPU path": cuDSS through
+   nvmath-python in the `gpu` group, the factorization a Strategy chosen where a run is configured,
+   SuperLU on a core and cuDSS on a GPU), and the raster kept for the cross-checks, then retired
+   ("we can keep the raster for the cross-checks and then retire it"), its speed and each retired
+   variant to the wiki's dead-end record with their numbers. **Next**: phase 2a, the speed (the GPU
+   path; assembly on one fixed pattern; the polish's moves scored exactly rather than in the eps
+   world, over half of SIMP's time on 5810; the eps world's interiors; the host's reach and
+   gradient) and the run's identity (the code's constants in the metric's name, the stored rows
+   migrated); phase 2b, the remaining ports (road re-scoring, pweight, the atlas and corridor
+   pictures, clearings_check, the exports, the translucent search if it is on the frontier) and the
+   cross-checks against the raster; phase 3, the retirement; then the region test on the complex
+   and the consolidated pass. A lead before that pass: the search's weakness on the complex (the
+   tension ranks the buildings sharing a zone at Spearman +0.83 against +0.97 alone, and the
+   complex's own polish climbs from the raster's clearings), tried with moves that clear a zone's
+   buildings together.
    (4) **Exits: the region model** (owner: "we'd still only leak at the
    outer boundary, so all current must exit ... some of the outer boundary might not leak at all
    and might have 0 conductance (like a railroad)"; "we can adjust boundary leakage, uniform
