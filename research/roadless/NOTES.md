@@ -4374,3 +4374,343 @@ Compute here, single-threaded, at most 8 processes: about 7.5 CPU-h, nothing on 
 passable width stays open (the owner is weighing it): closing gaps under a width needs only the
 sub-samples it folds into the footprints beside them (Grid.bsub and label_sub, all the operator
 reads of the footprints), not the operator.
+
+### The gap complex: passability, enclosure and flow without the raster (owner 2026-10-13: "sweep it, as a persistence filtration")
+
+BACKLOG 4, decision (3)'s "Next", the passable width. The owner's proposal: rather than pick a
+width, sweep it as a persistence filtration of the gaps between buildings, and if the structure
+holds up use it as the runtime representation (footprints read once, to measure the gaps, and never
+again). The brief (2026-10-13) and its addendum (the turning cost may go; three forms of the
+width): stage 1 the complex, its filtration and free first, gated on agreeing with the raster under
+Fws as w -> 0; stage 2 the uniform law on the complex, the forms, and the heading lift's weight.
+Code (all new, research/roadless): gap_complex.py (the complex, the filtration, free first),
+gap_study.py (agreement, apertures, the sweep), gap_check.py (stage 1's guards), gap_flow.py (the
+mesh, the two-point scheme, the demand, the width forms), gap_clear.py (fractional clearing),
+gap_compare.py (the complex against the raster's isotropic model and the lifted rows; lanes,
+interiors, the region), gap_simp.py (SIMP on the complex), gap_flow_check.py (stage 2's guards),
+gap_report.py (gap_rows/summary_*.csv, committed; the rows are not). No new dependency: shapely
+2.1.2's constrained Delaunay, scipy's SuperLU, pyamg (already in the research group) for the
+raster's isotropic solves.
+
+**The complex** (gap_complex.build). The open ground beyond the street band less the footprints,
+every outline densified to s and triangulated by GEOS's constrained Delaunay, then finished by
+Lawson's flips (GEOS stops after a fixed number of scans: 74 non-Delaunay passages left on 19263),
+flipping by the circumcentres' order along the passage's normal, (cot a + cot b) / 2 >= -1e-9 (an
+angle-sum tolerance let a sliver's centre run far back). Every vertex lies on an outline, so a
+passage two triangles share spans open ground from one outline to another and its length is the
+gap's width there, its aperture; a phantom passage cannot occur. The geometry forced some
+housekeeping: local coordinates (segmentize's vertices sat up to 9e-6 m off their outline in UTM),
+vertices snapped to 1e-9 m and merged within 1e-7 m (GEOS repeats a vertex where outlines meet;
+grown outlines cross a hair apart), the overlay's dust under 1e-6 m^2 dropped (slivers where GEOS's
+triangles fell inside footprints), and three fallbacks for GEOS's ear clipping. The street: the
+raster's ground is every cell centre within 1 m of the block's streets (lifted.Grid.of), so the
+complex's open ground stops at that line, a passage with an end on it has aperture inf (beyond it
+is street) and a triangle with an edge on it is an exit. Sampling or a constrained triangulation:
+both, the constrained triangulation of outlines densified to s 0.125 m. On 20 blocks (the 13
+tuning, the drift and four guard blocks; summary_apertures.csv), for every pair of footprints
+closer than 2 m whose closest approach crosses open ground, the shortest passage joining them
+measures the true gap from above, never below (a passage's ends lie on the outlines): gaps under
+12.5 cm a median 6.6 mm over (90th percentile 2.9 cm), 0.125 -- 0.5 m 1.5 mm (5.9 mm), 0.5 -- 1 m
+0.6 mm (2.2 mm); s 0.25 and 0.5 roughly 3x and 10x that. 97 -- 100% of the pairs have a passage
+joining them; the rest, and a 1% tail of the gaps over 0.5 m (0.15 -- 0.42 m over), are pairs whose
+closest approach the triangulation spans in two steps. Under closing a gap just under w can
+therefore stay open by its error; the shy distance grows the outlines themselves and has none.
+
+**The filtration.** A pocket's exit width is the widest path's bottleneck to the street (one
+maximum spanning forest); a pocket walled in below it is a bar from its exit width to its fill (its
+largest clearance, the Delaunay radius function as a width). A home is walled in at w when no open
+ground within RING_M of its outline (Placement's ring: any triangle within 1 m, or the open band)
+reaches the street at w. **Free first** on the complex: clear.free_first's objective on a region
+graph (the components at w and the standing buildings, a building joined to a component through a
+vertex on its own outline alone, since where two footprints meet the gap stays shut while either
+stands), Dijkstra from the street at each building's population share, the cheapest D per person
+first; each pass rebuilds the complex without the held buildings and re-runs the test, a home freed
+wrongly going to the next pass.
+
+**The agreement (the gate): passed.** All 302 blocks, s 0.125, against the raster under Fws
+(summary_agree*.csv, summary_crossings.csv). At w 0 the raster encloses 185 homes on 60 blocks and
+the complex walls in 73 on 30. Of the 122 only the raster encloses, 109 sit behind cracks under
+12.5 cm (a sub-sample; the complex keeps them open), 8 behind gaps of 12.5 -- 17.7 cm that the
+raster's 4-connected sub-samples cannot cross on a diagonal, and 5 reach a wide exit (0.35 -- 1.15
+m) only through a triangle 0.95 -- 0.99 m from their outline, where the raster's ring, sampled at
+cell centres, stops short. The 10 only the complex walls in (5 blocks) are sub-sample leaks: the
+raster's 4-adjacency passes between footprints touching at a corner or across a wall thinner than a
+sub-sample. Closing the complex at the raster's resolution (w 0.125) leaves 13 raster-only (the 8
+diagonal, the 5 ring edges) and 17 complex-only (the 10 leaks, 7 behind gaps of 0.0001 -- 0.122 m
+the raster samples open), on 18 of 302 blocks; at s 0.25 14 and 14, at s 0.5 39 and 14 (coarser
+outlines cut corners). The sentinel and drift blocks agree exactly at w 0.125, the walled-in homes
+and free first's crossings and D alike (17608 604:1003 D 0.00045; 20543 1194:812 D 0.00041; 30848
+4217:3453 and 5041:575 D 0.00026; 22422, 5810, 9712 and 38366 none); at w 0 they differ by cracks
+only (17608's three homes behind 5.5 -- 14.7 mm, 20543's 1194 behind 3.5 mm, 30848's 4217 behind
+5.2 cm). Free first's crossings at 0.125: 47 of the raster's 61 free their home in the complex too;
+of the other 14, 6 are crossings both models chose alike that free their home only with the pass's
+earlier picks, 3 are the leaks, and 5 free it in the raster only through a mixed cell: lifted
+spreads a cell's cleared share over all its footprint sub-samples, so clearing one building opens
+part of a standing neighbour's share of a cell they share, and with each building's own sub-samples
+cleared the raster does not free the home either. Of the complex's 70, 48 free their home in the
+raster; the other 22 are 13 homes the raster does not enclose (the leaks and sub-resolution gaps)
+and 9 conditional crossings as above. Every disagreement is the raster's resolution, so stage 2
+ran. The mixed-cell spread is a small leak in today's metric, visible only through free first.
+
+**The sweep** (302 blocks; s 0.125, 0.25 and 0.5; summary_sweep.csv, summary_exits.csv,
+summary_bars.csv). Pooled over the 183,140 homes (area population, mean 1 a home), s 0.125:
+
+    w (m)                 0       0.125   0.25    0.375   0.5     0.625   0.75    1.0     2.0
+    homes walled in       73      189     279     399     581     848     1254    2710    18091
+    their people (%)      0.025   0.068   0.10    0.15    0.22    0.32    0.46    1.02    7.5
+    freed first: bldgs    54      -       204     277     382     536     726     1314    -
+    small: blocks         19      -       45      57      76      89      101     137     -
+      D median            0.0038  -       0.0048  0.0036  0.0034  0.0036  0.0045  0.0070  -
+      D max               0.016   -       0.026   0.034   0.043   0.054   0.063   0.096   -
+    large: blocks         11      -       29      35      40      45      46      53      -
+      D median            0.0002  -       0.0009  0.0008  0.0008  0.0011  0.0014  0.0022  -
+      D max               0.003   -       0.009   0.009   0.009   0.009   0.010   0.014   -
+
+(blocks: those with a home walled in; D, free first's, over them; large: the 82 large and
+oversized.)
+
+The population behind each exit width (people per metre of width): a spike under 1 cm (2,056 /m:
+walls traced a hair apart), a low floor of 300 -- 760 /m from 1 cm to 35 cm, then a steady rise
+(1,060 -- 1,330 /m at 0.35 -- 0.6 m, 2,100 -- 2,500 at 0.6 -- 0.8, 4,300 -- 4,500 at 0.8 -- 1,
+7,000 at 1 -- 1.25 and 15,200 at 1.5 -- 2). **No scale gap:** the walled-in count grows at every
+step (x1.4 -- 2.2 a step from 0.25 m), free first's cost with it, and the trough between traced
+walls and lanes (1 -- 35 cm) is shallow, not empty. The bars: the homes behind exits under 1 m sit
+in real yards, not slivers (fill a median 2.4 -- 4.5 m wide; bar length, fill less exit, median 2.3
+-- 3.7 m, 90th percentile 6 -- 7.5 m). Spacing: s 0.25 and 0.5 wall in 1% and 4 -- 14% fewer at w
+0.25 -- 1 m, alike at 0. Free first frees every walled-in home at every width (no home left: the
+homes the region graph freed wrongly, 3 -- 122 a width over the 302 blocks, every one taken by a
+later pass, at most 3 passes); D over 0.05 on 1 -- 2 small blocks from 0.625 m. Cost: the complex
+takes a median 4.1 s to build on a small block and 38 s on a large (at most 219 s, 1.6M triangles),
+free first 0.3 -- 1.7 s and 4.5 -- 26 s a width; the s 0.125 sweep 7.4 CPU-h for all 302 blocks.
+
+**The uniform law on the complex** (gap_flow). The complex refined by Steiner points on a
+triangular lattice of spacing R (the largest pocket), graded by clearance (4 levels, 2x a level),
+inserted one at a time with Lawson's flips, the outlines never flipped; under closing a Steiner
+point keeps 0.75 w from every outline, so no narrow gap gains a point. Each triangle a pocket at
+its circumcentre, a passage conducting sigma |e| / d, d the distance between the centres along its
+normal: on a Delaunay mesh both lie on its perpendicular bisector, so the scheme is consistent for
+isotropic diffusion. Pockets sharing a circumcircle (a rectangle split by its diagonal, common
+along densified parallel walls) are one cell. An obtuse triangle's centre lies outside it: across a
+passage harmless (consistency needs the centres' order, which Delaunay keeps), across a wall only
+the potential's location moves, and at an exit whose centre lies beyond the street line the pocket
+is ground. A passage beside a flat triangle (under 1e-4 |e|^2: a hairline crack's, which no flip
+mends) or with a weight under 1e-6 is dropped. SuperLU (COLAMD) with iterative refinement. Demand
+is Placement's: each pocket's 4 sub-points within 1 m of a home's outline whose nearest building it
+is, the home's population spread over them by area, those cut off at w moving to its other ring
+points, shadowed homes as in the raster. sigma pi / 2, the raster's isotropic limit. R converges at
+first order (P0 at R 1, 0.5, 0.25, 0.125: 33717 under closing at 0.125 16,212, 16,128, 16,091,
+16,075; 22422 under shy 0.5 86,427, 85,627, 85,347, 85,254; 20269 65,951, 64,722, 64,236 to R
+0.25), the lenses faster (SIMP's default on 33717: L_P 0.1946, 0.1931, 0.1925, 0.1924). R 0.5 runs
+everything below: P0 within 0.4 -- 1.5% of the limit, the lenses within 0.001 -- 0.004.
+
+**The passable width's three forms** (gap_flow.Width, a Strategy named in every row: close<w>,
+shy<w>, ramp<w>s<s>): closing (passages narrower than w closed; a filled part opens with min(1, the
+sum of its flanking clearings)), the shy distance (every footprint grown by w / 2, the complex
+rebuilt on the grown outlines: a lane of width W conducts W - w exactly) and the ramp (phi(d) =
+clip((d - w / 2) / s, 0, 1), s 0.5 m, phi sampled by 16-point Gauss-Legendre on each passage).
+Stage 1's topology is theirs alike.
+
+**Fractional clearing** (gap_clear.Model, for SIMP). The arrangement of every outline and every w /
+2 offset meshed as one, interiors included, each face carrying the buildings covering it and those
+whose zone holds it; a triangle's factor is the minimum over them of phi(d_b) + x_b (1 - phi(d_b))
+(the addendum's composition), a passage's the harmonic mean of its two triangles' (concave and
+non-decreasing in each, so the mean stays concave), so P is convex in the clearing and its adjoint
+gradient exact. Meshed interiors against one node per building (`lumped`), both at 0/1 clearings
+against the complex rebuilt (gap_compare interiors, closing at 0.125, 15 clearings on 38136, 19263,
+19570 and 20269): meshed within 0.0001 -- 0.007 of the rebuild on L_P (median 0.0005), one node per
+building 0.013 -- 0.091 above it (SIMP's default on 20269 0.385 against 0.294, random clearings 30
+-- 110% high); under the shy distance at 0.5 (9 random clearings on the first three) meshed within
+0.0004, one node per building 0.006 -- 0.051 above: not materially as good, so meshed. Two defects
+found on the way: polygonizing the noded outlines after clipping them to the region lost most open
+faces (19570's model saw no clearing at all: faces 9,544 of the region's 16,038 m^2), fixed by
+noding the region's boundary whole; grown outlines crossing a hair apart made needles no flip
+orders, fixed by the 1e-7 m merge.
+
+**The guards**, each run from the repo root and failing under its fault (exit 0 both ways; the
+blocks 38136, 19263, 19570 and 19537). Stage 1 (gap_check.py): `conform` (every densified ring
+segment an edge of exactly one triangle, none in three, the area to 3e-12, no centroid in a
+footprint; fault `unconstrained`, scipy's Delaunay of the same vertices: edges cross footprints);
+`delaunay` (no flippable passage with its centres out of order beyond 1e-9 of its length; fault
+`geos`, GEOS's triangulation as it comes: 24 on 38136 at s 0.125; fault `flip`, every few flippable
+passages of GEOS's flipped the wrong way and not mended); `apertures` (two footprints facing across
+a gap g at 0, 17 and 45 deg, shifted so no corners face: the shortest passage within [g, sqrt(g^2 +
+s^2)], 0.0502 for 0.05; fault `corners`, outlines not densified: the corner-to-corner 1.37 m);
+`filtration` (a courtyard with two exits reads the wider, 0.8; a crack alone its 0.2; a sealed
+courtyard -inf; the band inf; fault `narrowest`, the minimum spanning forest: 2.19 and 2.18);
+`free` (a home whose cheapest crossing in the region graph is a shed leaving its two neighbours too
+close: the rebuild catches it and the next pass frees the home; fault `no-rebuild`, the graph's
+claim taken: the home left walled in). Stage 2 (gap_flow_check.py): `angle` (P's max / min over the
+13 angles 1.0003 at W 1 -- 4 m, P / exact 0.9999 -- 1.0003; fault `centroids`, centroids for
+circumcentres: 1.006 -- 1.036 and 1 -- 8% off); `shift` (8 lattice offsets: 1.0005; fault 1.05 --
+1.13); `channel` (an open channel's P / exact 0.9999 -- 1.0003 at W 0.05 -- 4 m, 0 and 30 deg;
+fault 0.76 -- 1.20); `field` (an open disk's P within 0.07 -- 1.4% of its closed form; fault 1.3 --
+5% low); `law` (each form's width law on the channel, closing W, shy W - w and the ramp's G(W),
+within 0.3%; fault `no-grow`, shy and the ramp without the growth: 0.33 -- 0.83 of it); `closed` (a
+0.6 m lane conducts under closing at 0.5 and is closed at 0.7; fault `no-clearance`, Steiner points
+let into the gap: it conducts at 0.7); `convex` (fractional clearing along random lines: the
+factors' second differences at most 8.9e-16, P's at least 4.3e-3 of P, every form; fault
+`multiply`, transmittances multiplied: the factors' second differences +0.03 -- 0.07); `gradient`
+(q 1 and 3, J_1 and J_2, every form, within 4e-7 -- 1.5e-5 of the largest against the closer of the
+central differences at 1e-5 and 1e-6; fault `min-grad`, a passage's gradient through the smaller of
+its triangles': 6e-3 -- 0.35).
+
+**The comparison** (gap_compare complex and iso, aperture_rows' lifted rows;
+summary_compare_*.csv). The 13 tuning blocks; the stored clearings (SIMP's default, the cheap
+preset; freed first where a model leaves a home walled in) and item 4's six road prefixes at D
+0.05, in B's order on P, P_{1/2} and J_2:
+- The discretization (the complex under closing at 0.125 against the raster's isotropic model: the
+  same open geometry and placement, no heading): order tau median 1.00 on every lens (q25 0.93 --
+  1.00, min 0.43 -- 0.50 on 1558); levels a median 0.010 lower (10th -- 90th percentile -0.036 --
+  +0.005); the homes' escape times Spearman 0.998 (min 0.987). Where they part the raster is off:
+  on the walled corridor (gap_compare lanes, 10 widths, 3 angles, 4 offsets) its isotropic model
+  conducts a lane like an exact one narrower by 0.14 -- 0.29 m at each wall (a lane of 1, 2, 4, 16
+  m like 0.60 -- 0.69, 0.79 -- 0.86, 0.89 -- 0.91, 0.96 -- 0.97 of its width; one of 0.25 -- 0.5 m
+  like 0.28 -- 0.55 of it): beside a wall the lattice's oblique steps do not fit. The complex is
+  exact within 3e-4 at every width. On 22422 the three homes holding 63% of the raster's P (692,
+  1640 and 685, behind the gate the stored clearings open) leave through a 14 m lane 0.25 -- 0.4 m
+  wide, which the raster resists about 4x as much as the complex (their demand's dissipation there
+  73k against 19k, of 118k and 46k in all): their escape times read 2.2 -- 2.5x the complex's and
+  SIMP's default 0.605 against 0.376 on L_P, the order still alike. On 1558 the clearance roads,
+  which free homes whose way out is such a lane (1558's crack homes, the grid fix), score 0.11 --
+  0.14 on the raster and 0.055 -- 0.084 on the complex, falling from above cycle_native and
+  euclidean_grid to below them.
+- The lift (the lifted metric against the raster's isotropic model, one raster): order tau median
+  1.00 on P and J_2, 0.93 on P_{1/2} (q25 0.86 -- 0.93, min 0.79 -- 0.86: at most 3 of the 28 pairs
+  swapped); levels a median 0.043 higher on L_P and 0.056 on L_J2 for the stored clearings (0.015
+  and 0.009 for the roads); escape times Spearman 0.997 (min 0.992), the isotropic 0.86x the
+  lifted. The lift's width law, on the corridor: a boundary layer at each wall that grows with the
+  lane, 0.3 m in a 1 m lane, 0.5 in 2 m, 0.7 in 4 m, 0.8 -- 1.1 m in 8 -- 16 m (lanes of 1, 2, 4,
+  8, 16 m conduct 0.33 -- 0.37, 0.48 -- 0.51, 0.66 -- 0.67, 0.79 -- 0.81, 0.86 -- 0.89 of their
+  width's share; 0.25 -- 0.5 m lanes 0.09 -- 0.30): the runtime metric's superlinear width law is
+  the lift's. The FFT homogenization study's finding (old step rule: the fast-turning scalar model
+  0.04 -- 0.08 lower on 5810's clearings, 0.16 on 22422's gate, J_2) re-checked under Fws: the
+  isotropic model reads 5810's SIMP and cheap clearings 0.036 and 0.022 below the lifted (L_J2
+  0.230 against 0.266, 0.209 against 0.231), and the greedy's steps 1, 2 and 5 on the gated blocks
+  (clear_rows_S0.01cat, J_2; gap_compare gates, summary_gates.csv) read: 22422's gate (step 1, one
+  building, D 0.01) 0.575 isotropic against 0.556 lifted (the old rule's 0.534), steps 2 and 5
+  within 0.005, so the 0.16 was the old step rule; on 30848 the isotropic reads steps 1 and 2 0.11
+  and 0.17 higher and step 5 0.13 lower (0.280, 0.389, 0.575 against 0.168, 0.223, 0.705). On the
+  complex 22422's gate scores 0.386 under closing at 0.125 and 0.004 under the shy distance at 0.5:
+  its three homes' way out through the gate is the 0.25 -- 0.4 m lane, which the shy distance
+  closes, their demand moving to their open sides, so 22422's gate is no gate at a passable width
+  of 0.5 m.
+- So the heading lift changes few decisions, fewer than the passable width does (below); a lifted
+  complex was not built (the brief's step 3).
+- The forms at w 0.5 (closing, shy, the ramp on 12 blocks) against closing at 0.125: order tau
+  median 0.86, 0.79 -- 0.86 and 0.71 -- 0.86 (min 0.29, 0.21, 0.21); closing and shy at 0.5 order
+  alike (median 1.00, min 0.81 -- 0.91), the ramp nearly (against the shy distance 0.93 -- 1.00).
+  Levels, the stored clearings' L_P median: closing at 0.125 0.240 (SIMP's default) and 0.224
+  (cheap), closing at 0.5 0.243 and 0.223, shy 0.277 and 0.251, the ramp 0.357 and 0.295; the
+  raster's isotropic 0.276 and 0.257, the lifted 0.347 and 0.333. Against the lifted metric the shy
+  distance at 0.5 comes closest on levels (a median -0.003 on L_P and L_J2, 10th -- 90th -0.045 --
+  +0.036; closing at 0.125 -0.033, at 0.5 -0.017, the ramp +0.023). The share of J_2 its top three
+  homes hold at baseline (the dynamic range the cracks caused): the lifted median 0.19 (22422 0.96,
+  17608 0.60, 1558 0.51, 38616 0.38, 30848 0.36), the raster's isotropic 0.08, the complex 0.04
+  under closing at 0.125 (22422 0.82), 0.04 -- 0.05 under closing and shy at 0.5 (22422 0.15), the
+  ramp 0.12.
+- Cost, one CPU core: the complex scores a block's 9 -- 10 fields in 340 -- 2,500 s at 1.2 -- 5.9
+  GB (a field 30 -- 240 s, nearly all of it the mesh rebuilt in Python and GEOS; the baseline 52 --
+  330 s), the raster's isotropic model (AMG-CG) in 130 -- 3,700 s at 1.3 -- 26 GB, the lifted
+  metric 20 -- 330 s on a GPU at 2 -- 25 GB of host memory (on a core about 200 s a field on a
+  large block, the grid fix). The complex has 0.47 -- 2.8M cells where the raster has 0.41 -- 5.5M
+  (3 -- 42M lifted unknowns). The shy distance costs 1.0 -- 1.5x closing.
+- The region 5810@major (12,663 buildings, 6.74 km^2) on one core: the complex's baseline under
+  closing at 0.125 in 545 s and 11.8 GB (6.26M triangles), under shy 0.5 648 s and 12.8 GB, against
+  the lifted metric's 34.8 GiB score on an H100 and the fine scalar raster's 252 s and 14.4 GB (FFT
+  homogenization on 5810@major). Its two stored clearings (optimized on the lifted metric under the
+  old step rule at a5x8, D 0.05) on the complex, a clearing 380 -- 470 s: L_J2 under closing at
+  0.125 0.237 (SIMP's default) and 0.218 (the cheap preset), under shy 0.5 0.297 and 0.270, against
+  the lifted metric's 0.301 and 0.271 and the fine scalar's 0.018 apart (NOTES, the deciding test).
+  The order holds under both; the shy distance reproduces the lifted levels and gap (0.027 against
+  0.030), closing at 0.125 the fine scalar's (0.018). Both clearings leave 0.06 -- 0.16% of the
+  people walled in at the form's width (not freed first here).
+
+**SIMP under the forms** (gap_simp; SIMP base fw0.q3.i10.t0.001.e0.0001.k1s1e-06, P, D 0.05, free
+first, the winner rescored on the complex rebuilt; the 3 drift blocks and 10 small ones;
+summary_simp*.csv). Each form's clearing scored under the others too:
+- Under the shy distance its own clearing beats closing's on 9 of 11 blocks where they differ, by a
+  median 0.004 on L_P (-0.022 -- +0.079; L_J2 0.006); under closing, closing's own beats the shy
+  distance's on 8 of 11 by a median 0.001 (-0.075 -- +0.061): on 18918 and 40973 the shy distance's
+  clearing scores 0.043 and 0.075 higher under closing than closing's own, so closing's step leaves
+  SIMP a poorer landscape. Jaccard closing / shy a median 0.60 (0.29 -- 1; identical on 2 blocks),
+  closing / ramp 0.41.
+- Fewer, wider corridors? Under one flow (gap_simp cross: every clearing measured under both
+  forms), the shy distance's clearing carries a little more of the flow in wide lanes than
+  closing's: its share in lanes of 2 m or more +0.007 (median; up to +0.036), higher on 10 of the
+  11 blocks where the clearings differ, the flow-weighted median lane +0.05 m (up to +0.18); the
+  ramp +0.012 -- 0.016. But it clears as many buildings or more (median +1, up to +10) in as many
+  clusters or more (median +0, up to +7): wider by a little, not fewer.
+- Levels (each under its own form) L_P median 0.299 (closing), 0.342 (shy), 0.507 (ramp). Run time
+  a median 150, 199 and 250 s a block (at most 2,100 -- 3,700 s on the drift blocks, 7.5 GB). On
+  20543, the one block in both sets, the complex's SIMP base comes within 0.003 (closing) and 0.008
+  (shy) of the stored SIMP default (polished on the raster) scored on the complex.
+
+**The sweep's flow part** (gap_compare flowsweep; every block under closing at 0 -- 1 m and the shy
+distance at 0.25 -- 1 m (the oversized at 0.5 only), free first at budget 1, then P, P_{1/2} and
+J_2, each block's relative to its closing at 0.125, medians over blocks; summary_flowsweep.csv).
+The 220 small blocks: closing moves P by -1% at w 0 (the cracks conduct), +8% at 0.5 and +21% at 1
+m, P_{1/2} +13% and +42%, J_2 +22% and +65%; the shy distance moves P +17%, +40% and +92% at 0.25,
+0.5 and 1 m, P_{1/2} +23%, +58% and +169%, J_2 +41%, +114% and +381%. The share of J_2 its top
+three homes hold stays 0.15 -- 0.18 under closing (90th percentile 0.26 -- 0.29) and 0.17 -- 0.20
+(0.29 -- 0.37) under the shy distance; on the 104 small blocks with the lifted metric's per-home
+rows (aperture_rows) the lifted metric's is 0.17 (0.40) and closing at 0.125's 0.145 (0.26). The 60
+large blocks: closing +4% on P at 0.5 and +14% at 1 m (P_{1/2} +8%, +26%; J_2 +12%, +42%), the shy
+distance +11%, +22% and +57% at 0.25, 0.5 and 1 m (J_2 +27%, +60%, +210%); the 22 oversized barely
+move (closing +0.6% and +1.7% on P at 0.5 and 1 m, the shy distance at 0.5 +5%, J_2 +11%). The top
+three homes' share of J_2: on the large blocks a median 0.04 at every width and form, its 90th
+percentile 0.47 at w 0, 0.19 at 0.125, 0.14 at 0.5 and 0.13 at 1 m under closing, 0.15 -- 0.20
+under the shy distance; on the 35 large blocks with the lifted metric's rows the lifted's 90th
+percentile is 0.46, the complex's 0.44 at w 0 and 0.16 at 0.125. So the dynamic range the cracks
+caused is the cracks': the complex reproduces it with every crack open (w 0) and loses it once gaps
+under the raster's own sub-sample close, the passable width beyond that moving the levels, not the
+tail. Free first at every width costs a median D of at most 0.003 (the walled-in population at most
+0.5% on the median block).
+
+**Pedestrian buffers** (the shy distance's w / 2 a wall). The HCM's effective walkway width deducts
+a shy distance of 1.5 ft (0.46 m) from a curb or a fence or low wall, 2 ft (0.61 m) from a building
+face and 3 ft (0.91 m) from window displays; Habicht and Braaksma (J. Transp. Eng. 1984) measured
+14 -- 22 cm in a tunnel against the 46 cm then usual in design, and Bosina, Weidmann and colleagues
+(ETH 2016) a density-dependent distance kept from walls; single-file passage takes about 0.55 m a
+person (Seyfried et al., bottleneck experiments). Shy at 0.5 (0.25 m a wall) sits between the
+measured tunnel figure and the HCM's deductions; the raster's lattice loses 0.14 -- 0.29 m a wall
+by itself, the lifted metric 0.3 -- 1.1 m.
+
+**Decision support** (the owner decides).
+- A natural width: none. Enclosure, free first's cost, the levels and the method order all move
+  across every step of the sweep; the exit widths' only feature is a shallow trough from 1 to 35 cm
+  between traced walls and lanes. A width has to be chosen on other grounds: the trough's edge
+  (0.35 m) clears the traced walls and little else; a body's width (0.45 -- 0.55 m) and practice's
+  buffers argue for about 0.5 m.
+- The complex reproduces the raster where it should: the same enclosure and free first up to the
+  raster's resolution on all 302 blocks, the same method order (tau median 1.00) and escape-time
+  ranks (0.998), exact channels where the raster loses 0.14 -- 0.29 m at each wall; the levels part
+  where narrow lanes carry a home's way out (22422, 1558), and there the complex is the one that
+  measures the geometry. Cost: one core, 3 -- 6x less memory than the raster, about the raster's
+  CPU time per block, 30 -- 240 s per clearing (the rebuild); slower than the lifted metric on a
+  GPU.
+- The heading lift: few decisions (order tau median 1.00 / 1.00 / 0.93, min 0.79), the levels
+  (+0.04 -- 0.06) and the dynamic range (the top three homes' share of J_2 0.19 against 0.08)
+  through its wall boundary layer; the shy distance at 0.5 reproduces its levels on the 13 (median
+  -0.003).
+- Recommendation: the complex for passability and enclosure now, with the shy distance at 0.5 m as
+  the passable width (Placement's walled-in test and free first's graph read the gaps exactly where
+  the raster's resolution decides the enclosure of 0.07% of the people, for 4 -- 38 s a block);
+  then the runtime on the complex, isotropic, the raster and the lift retired. On the 13 it keeps
+  the raster's method order (tau median 1.00) and, with the shy distance, the lifted metric's
+  levels, measures lanes exactly where the raster loses 0.14 -- 1.1 m at each wall (the decisions
+  that move, 22422's gate and 1558's clearance roads, move toward the geometry), is convex with an
+  exact gradient (SIMP runs on it), needs 3 -- 6x less memory and runs a region on one core
+  (5810@major's baseline in 9 minutes, 12 GB). What the runtime needs first: a clearing re-meshed
+  locally (today the whole complex is rebuilt, 30 -- 240 s a field, which the greedy, the polish
+  and the swings cannot afford), and those optimizers moved (SIMP is). Keeping the raster keeps its
+  lattice's width law (0.14 -- 0.29 m a wall), its angle error (1.21 at 1 m) and the mixed-cell
+  leak, and a passable width would have to be folded into its sub-samples, a sub-sample coarse.
+
+Compute: no GPU. The CPU nodes (orion, quadro2; single-threaded tasks): the sweep 13.2 CPU-h (906
+tasks), the comparison on the 13 25.2, SIMP under the forms 8.6, the flow sweep 157 (4,122
+block-forms; an oversized block's 40 min and up to 64 GB), and about 15 more lost to duplicated and
+cancelled tasks (a resubmission at a fix, the large blocks' sweep split across the two nodes):
+about 220 CPU-h. Here (single-threaded, at most 8 processes): the agreement 6 CPU-h, the raster's
+isotropic model on the 13 4.2, the gate re-check 1.9, R's convergence 1.9, the region 1.1, the
+guards about 4, the rest (interiors, lanes, apertures, the corridors, the diagnoses) about 3, and
+the development before them about 10 [inferred]: about 30 CPU-h.

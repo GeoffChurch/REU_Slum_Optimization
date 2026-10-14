@@ -194,15 +194,32 @@ items up front"), in the order proposed:
    (lifted.step_widths), the rule before it (SmallestCell) and A, Aw and Aws deleted, and every
    conductance's name ends in `+apwfs` (uni+apwfs), so no row of the old rule is read as the new
    one's; the stored clearings stand, their scores are the old rule's until the consolidated pass
-   re-scores them. **Still open: the passable width** (the owner is weighing it; not started),
-   before any re-scoring, which now looks needed: Fws conducts a real crack of 1 -- 2 sub-samples
-   (12.5 -- 25 cm) at its sampled width, and a home with most of its demand in one gets up to 54x
-   the old rule's escape time, which the equity lenses follow (J_2's baseline up to 11.8x on 44274,
-   17x on 28051; on 1558 the clearance roads pass resistance_lp on P_{1/2} and J_2 by opening three
-   such homes). A gap nobody walks through is a wall, not a slow exit; closing gaps under about
-   0.5 m would enclose such homes (free first) or move their demand to their open side, a modelling
-   and a convexity question (a hard opening moves with every clearing; a B_r-like soft one keeps P
-   convex).
+   re-scores them. **The passable width: studied** (owner 2026-10-13, "sweep it, as a persistence
+   filtration"; NOTES, "The gap complex: passability, enclosure and flow without the raster"). Fws
+   conducts a real crack of 1 -- 2 sub-samples at its sampled width and the equity lenses follow
+   it; a gap nobody walks through is a wall. The gap complex (the open ground's constrained
+   Delaunay triangulation, each passage's aperture the gap's width there, read once from the
+   outlines) reproduces the raster's enclosure and free first on all 302 blocks up to the raster's
+   resolution (every difference a crack under 12.5 cm, a sub-sample leak, the ring's cell-centre
+   edge or the mixed cell's cleared share), and swept over w it finds no natural width: enclosure
+   grows at every step (0.07% of the people at 0.125 m, 0.22% at 0.5, 1.0% at 1 m, every one freed
+   first, D over 0.05 on 2 blocks at most) and the exit widths show only a shallow trough from 1 to
+   35 cm between traced walls and lanes. Of three forms (closing, the shy distance: every footprint
+   grown by w / 2, a ramp), closing and the shy distance at 0.5 m order the methods alike (tau
+   median 1.00), and the width moves the order more than the heading lift does (tau median 0.79 --
+   0.86 against 0.125 m, where the lift's is 1.00). The raster's lattice loses 0.14 -- 0.29 m of a
+   lane at each wall and the lift 0.3 -- 1.1 m, the turning length's boundary layer: today's
+   superlinear width law is theirs; the shy distance at 0.5 m reproduces the lifted metric's levels
+   on the complex without a lift (median -0.003 on the 13, 0.297 and 0.270 against 0.301 and 0.271
+   on 5810@major), gives SIMP a better landscape than closing's step, and makes its clearings carry
+   a little more of the flow in wide lanes (+0.007 of it in lanes of 2 m or more), not fewer
+   corridors. **Next** (the owner decides): the width's value (none is natural; 0.5 m is a body's
+   width and practice's buffers) and form (the shy distance recommended); the complex as the
+   metric's passability and enclosure (Placement's ring and free first's graph: recommended now)
+   and then as its runtime (exact, isotropic, convex with its gradient, 3 -- 6x less memory than
+   the raster, but 30 -- 240 s a clearing on a core until a clearing's re-mesh is local, and no GPU
+   path), the raster and the lift retired with it; the consolidated pass then re-scores under the
+   choice.
    (4) **Exits: the region model** (owner: "we'd still only leak at the
    outer boundary, so all current must exit ... some of the outer boundary might not leak at all
    and might have 0 conductance (like a railroad)"; "we can adjust boundary leakage, uniform
