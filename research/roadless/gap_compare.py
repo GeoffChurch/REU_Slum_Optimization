@@ -20,6 +20,7 @@ baseline) and J_2:
     uv run python $S iso <ids,|@file> <procs> [mesh]         # rows gap_rows/compare/iso_<mesh>/
     uv run python $S converge <id> <R,R,...> <levels> <form>  # P against R on one block
     uv run python $S flowsweep <ids,|@file> <procs> <forms,>   # the sweep's flow part
+    uv run python $S interiors <ids,|@file> <form>        # one node per building against meshed
 
 Fields (as aperture.py's): the baseline; the stored clearings (width.STORED: SIMP's default and the
 cheap preset, clearings.Store), each with the homes the model leaves enclosed freed first where it
@@ -446,6 +447,68 @@ def flowsweep_one(job: tuple[str, str]) -> str | None:
         return f"{bid} {token}: {e!r}"
 
 
+INTERIOR_RANDOM = 3               # interiors: random clearings at BUDGET besides the stored ones
+INTERIOR_SEED = 20261013
+INTERIOR_EPS = 1e-9               # a standing footprint's conductance in the meshed models at 0/1
+
+
+def interiors(bids: list[str], token: str) -> None:
+    """Whether one node per building is materially as good as meshing its interior: per block,
+    the stored clearings (where the block has them) and INTERIOR_RANDOM random clearings at
+    BUDGET, scored (P's lens, J_2's) by the complex rebuilt, by the clearing model with interiors
+    meshed and by the same with every building's interior one node (gap_clear, k = 1 cleared,
+    INTERIOR_EPS standing). Rows gap_rows/compare/interiors/<form>.parquet."""
+    import gap_clear as gcl
+    form = form_of(token)
+    fs = flow_spec(0.5, 4)
+    rows = []
+    for bid in bids:
+        [b] = common.build_blocks([bid])
+        cm = ComplexModel(b, fs, form)
+        n = cm.n
+        picks: dict[str, np.ndarray] = {}
+        store = clearings.Store.committed()
+        for name, run in STORED.items():
+            try:
+                x = np.zeros(n, dtype=bool)
+                x[store.cleared(run, b, step=1)] = True
+                picks[name] = x
+            except (KeyError, clearings.StaleClearing):
+                pass
+        rng = np.random.default_rng(INTERIOR_SEED)
+        for k in range(INTERIOR_RANDOM):
+            order = rng.permutation(n)
+            x = np.zeros(n, dtype=bool)
+            x[order[np.cumsum(cm.cost[order]) <= BUDGET]] = True
+            picks[f"random{k}"] = x
+        models = {}
+        for lumped in (False, True):
+            t0 = time.time()
+            m = gcl.Model(cm.geo, cm.spec, fs, form, lumped=lumped, pop=cm.pop)
+            k0 = np.full(n, INTERIOR_EPS)
+            J0 = m.J(k0, cm.pop, 1.0)[0]
+            J20 = m.J(k0, cm.pop, 2.0)[0]
+            models["lumped" if lumped else "meshed"] = (m, J0, J20, time.time() - t0)
+        for name, x in picks.items():
+            r, _u = cm.score(~x, None)
+            row = dict(block=bid, form=form.name, clearing=name, D=float(cm.cost[x].sum()),
+                       L_P_rebuild=r["L_P"], L_J2_rebuild=r["L_J2"])
+            for key, (m, J0, J20, tm) in models.items():
+                k = np.where(x, 1.0, INTERIOR_EPS)
+                J = m.J(k, cm.pop, 1.0)[0]
+                J2 = m.J(k, cm.pop, 2.0)[0]
+                row[f"L_P_{key}"] = 1.0 - J / J0
+                row[f"L_J2_{key}"] = 1.0 - (J2 / J20) ** 0.5
+                row[f"t_{key}"] = tm
+                row[f"cells_{key}"] = m.fc.n
+            rows.append(row)
+            print(f"{bid} {name}: L_P rebuild {row['L_P_rebuild']:.4f} meshed "
+                  f"{row['L_P_meshed']:.4f} lumped {row['L_P_lumped']:.4f}", flush=True)
+    out = ROWS / "interiors" / f"{form.name}.parquet"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_parquet(out)
+
+
 CONVERGE_FIELDS = ("baseline", "simp_default", "resistance_lp")
 
 
@@ -491,6 +554,9 @@ def main(argv: list[str]) -> None:
         R, levels, tokens = float(argv[3]), int(argv[4]), argv[5].split(",")
         failed = _pool(complex_one, [(i, R, levels, t) for t in tokens
                                      for i in gap_study.ids_of(argv[1])], int(argv[2]))
+    elif cmd == "interiors":
+        interiors(gap_study.ids_of(argv[1]), argv[2])
+        failed = []
     elif cmd == "flowsweep":
         failed = _pool(flowsweep_one, [(i, t) for t in argv[3].split(",")
                                        for i in gap_study.ids_of(argv[1])], int(argv[2]))

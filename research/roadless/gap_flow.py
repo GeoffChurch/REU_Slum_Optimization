@@ -65,8 +65,9 @@ T_MIN = 1e-6          # a passage whose weight kappa |e| / d_e is below this (a 
                       # an aperture 1e-7 m across cells s apart; a ramp's edge) is dropped: the
                       # cells it alone joins left the system near-singular (SuperLU's residuals
                       # 0.5%)
-FLAT_REL = 1e-6       # a triangle of area under this x L^2 (L a passage's length) is flat: a
-                      # hairline crack's (a 5 cm crack's triangles are ~0.2)
+FLAT_REL = 1e-4       # a triangle of area under this x L^2 (L a passage's length) is flat: a
+                      # hairline crack's, 25 um high on a 12.5 cm base (a 5 cm crack's triangles
+                      # are ~0.2; 19570's full mesh held one at 6.6e-6, its centre 3e8 L away)
 STEINER_W = 0.75      # Closing's Steiner clearance, x w (> 1 / sqrt(2))
 INSERT_PASSES = 8     # mesh: passes locating the Steiner points left by blocked walks
 OFFSET = (0.3141592653, 0.2718281828)   # the Steiner lattice's offset, x R (irrational: no row
@@ -125,11 +126,12 @@ def _locate(xy, tri, nbr, t, p, maxsteps):
 
 
 @njit(cache=True)
-def _insert(xy, tri, nbr, con, nt, nv, pts, start, tol):
+def _insert(xy, tri, nbr, con, face, nt, nv, pts, start, tol):
     """Each of pts into the triangulation (xy, tri, nbr, con, in place, with room for them):
-    located by a walk from start[k] (across any edge), split in three, legalized by
-    gap_complex.legalize (never across an edge flagged in con). Returns (nt, nv, skipped, done:
-    per point, inserted or dropped (on an edge), not left for another pass)."""
+    located by a walk from start[k] (across any edge), split in three (the children keep the
+    triangle's `face`), legalized by gap_complex.legalize (never across an edge flagged in con,
+    so a flip stays within a face). Returns (nt, nv, skipped, done: per point, inserted or dropped
+    (on an edge), not left for another pass)."""
     skipped = 0
     done = np.zeros(pts.shape[0], dtype=np.bool_)
     for k in range(pts.shape[0]):
@@ -164,6 +166,8 @@ def _insert(xy, tri, nbr, con, nt, nv, pts, start, tol):
         tri[t2, 0], tri[t2, 1], tri[t2, 2] = c, a, v
         nbr[t2, 0], nbr[t2, 1], nbr[t2, 2] = t, t1, nb
         con[t2, 0], con[t2, 1], con[t2, 2] = False, False, cb
+        face[t1] = face[t]
+        face[t2] = face[t]
         if na >= 0:
             for q in range(3):
                 if nbr[na, q] == t:
@@ -374,7 +378,7 @@ def _cross(p0, p1, p2):
         p2[:, 0] - p0[:, 0])
 
 
-def insert_points(xy, tri, nbr, con, nt: int, nv: int, pts) -> tuple[int, int, int]:
+def insert_points(xy, tri, nbr, con, face, nt: int, nv: int, pts) -> tuple[int, int, int]:
     """`pts` into the triangulation (arrays with room for them, in place, _insert): each
     located on the current mesh (STRtree), then walked to from there as earlier insertions change
     it; a walk a wall blocks (a concave pocket) is retried in the next pass. Returns (nt, nv, the
@@ -391,7 +395,7 @@ def insert_points(xy, tri, nbr, con, nt: int, nv: int, pts) -> tuple[int, int, i
         order = np.argsort(start, kind="stable")
         pts, start = pts[order], start[order]
         before = nv
-        nt, nv, _skipped, done = _insert(xy, tri, nbr, con, nt, nv, pts, start,
+        nt, nv, _skipped, done = _insert(xy, tri, nbr, con, face, nt, nv, pts, start,
                                          gc.DELAUNAY_TOL)
         pts = pts[~done]
         if nv == before:
@@ -416,7 +420,8 @@ def mesh(geo: gc.Geometry, spec: gc.Spec, fs: FlowSpec, width: Width,
     nbr = -np.ones_like(tri)
     nbr[:nt] = gc._neighbours(cx.tri, nv)
     con = nbr < 0
-    nt, nv, skipped = insert_points(xy, tri, nbr, con, nt, nv, pts)
+    nt, nv, skipped = insert_points(xy, tri, nbr, con, np.zeros(len(tri), dtype=np.int64), nt,
+                                    nv, pts)
     xy, tri = xy[:nv], tri[:nt]
     # passages and street faces of the refined mesh
     e = np.stack([tri[:, [1, 2]], tri[:, [2, 0]], tri[:, [0, 1]]], axis=1).reshape(-1, 2)
@@ -456,8 +461,9 @@ def circumcentres(xy: NDArray[np.float64], tri: NDArray[np.int64]) -> NDArray[np
     cx_, cy = c[:, 0] - a[:, 0], c[:, 1] - a[:, 1]
     d = 2.0 * (bx * cy - by * cx_)
     b2, c2 = bx * bx + by * by, cx_ * cx_ + cy * cy
-    ux = (cy * b2 - by * c2) / d
-    uy = (bx * c2 - cx_ * b2) / d
+    with np.errstate(divide="ignore", invalid="ignore"):   # a flat triangle: inf / nan, and its
+        ux = (cy * b2 - by * c2) / d                       # passages are dropped (no weight)
+        uy = (bx * c2 - cx_ * b2) / d
     return np.column_stack([a[:, 0] + ux, a[:, 1] + uy])
 
 

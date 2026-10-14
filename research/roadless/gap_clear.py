@@ -61,10 +61,14 @@ def _faces(geo: gc.Geometry, spec: gc.Spec, grow: float
     a face lies wholly inside or outside each footprint's zero zone)."""
     band = geo.streets.buffer(spec.band_m)
     region = geo.boundary.difference(band)
-    lines = [shapely.boundary(geo.polys), [shapely.boundary(region)]]
+    # the outlines clipped to the region, then noded with the region's own boundary whole (a
+    # noded set clipped afterwards lost pieces of that boundary on 19570, and with them the open
+    # faces it closes)
+    inside = [shapely.boundary(geo.polys)]
     if grow > 0:
-        lines.append(shapely.boundary(shapely.buffer(geo.polys, grow)))
-    noded = shapely.union_all(np.concatenate(lines)).intersection(region)
+        inside.append(shapely.boundary(shapely.buffer(geo.polys, grow)))
+    clipped = shapely.intersection(np.concatenate(inside), region)
+    noded = shapely.union_all(np.concatenate([clipped, [shapely.boundary(region)]]))
     noded = shapely.segmentize(noded, spec.s)
     faces = shapely.get_parts(shapely.polygonize(shapely.get_parts(noded)))
     faces = faces[shapely.area(faces) >= gc.DUST_M2]
@@ -163,17 +167,9 @@ def full_mesh(geo: gc.Geometry, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width) 
     CON[:nt] = con
     FACE = np.zeros(len(TRI), dtype=np.int64)
     FACE[:nt] = face
-    # a split triangle's children keep its face: insert, then read each new triangle's face from
-    # the face of the original triangle holding its centroid
-    nt2, nv2, skipped = gf.insert_points(XY, TRI, NBR, CON, nt, nv0, pts)
-    xy, tri = XY[:nv2], TRI[:nt2]
-    cen = xy[tri].mean(axis=1)
-    fi, ff = shapely.STRtree(faces).query(shapely.points(cen[:, 0], cen[:, 1]),
-                                          predicate="intersects")
-    face = np.full(nt2, -1, dtype=np.int64)
-    face[fi[::-1]] = ff[::-1]
-    if (face < 0).any():
-        raise ValueError(f"{int((face < 0).sum())} triangles in no face")
+    # a split triangle's children keep its face (gap_flow._insert), and flips stay within faces
+    nt2, nv2, skipped = gf.insert_points(XY, TRI, NBR, CON, FACE, nt, nv0, pts)
+    xy, tri, face = XY[:nv2], TRI[:nt2], FACE[:nt2]
     nbr = NBR[:nt2]
     # covering footprints per triangle
     rows = np.repeat(np.arange(nt2), [len(cover[f]) for f in face])
@@ -211,8 +207,13 @@ def full_mesh(geo: gc.Geometry, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width) 
     cross_f = face[pa] != face[pb]
     bad = cross_f & (d < gf.MERGE_REL * L)
     d = np.where(bad, np.maximum(da, CROSS_MIN * L) + np.maximum(db, CROSS_MIN * L), d)
-    if ((d < -gf.MERGE_REL * L) & ~flat).any():
-        raise ValueError("passages within a face with their centres in the wrong order")
+    wrong = (d < -gf.MERGE_REL * L) & ~flat
+    if wrong.any():
+        e = np.flatnonzero(wrong)
+        raise ValueError(f"{len(e)} passages within a face with their centres in the wrong order "
+                         f"(d / L {np.round(d[e] / L[e], 6)[:5].tolist()}, at "
+                         f"{np.round(xy[pu[e[:3]]], 3).tolist()}, areas "
+                         f"{np.round(np.minimum(area[pa[e]], area[pb[e]]) / L[e] ** 2, 8)[:5].tolist()})")
     with np.errstate(divide="ignore"):
         T = np.where(flat & (d < gf.MERGE_REL * L), 0.0,
                      np.where(d <= gf.MERGE_REL * L, np.inf,     # inf: merged (one circumcentre)

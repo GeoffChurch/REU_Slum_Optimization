@@ -300,7 +300,9 @@ CONVEX_POINTS = 7
 CONVEX_TOL = 1e-9
 GRAD_BUILDINGS = 6
 GRAD_Q = (1.0, 3.0)
-GRAD_STEP = 1e-6
+GRAD_STEPS = (1e-5, 1e-6)        # per building the closer central difference (as width_check's B_r
+                                 # guard: the factors are piecewise linear, a min per point, and one
+                                 # step straddled a kink, 19570's ramp, 1.2e-4 at 1e-6 alone)
 GRAD_TOL = 1e-4
 SEED = 20261013
 
@@ -348,8 +350,8 @@ def convex(ids: list[str]) -> list[str]:
 
 def gradient(ids: list[str]) -> list[str]:
     """The clearing model's gradient (q 1 and 3, J_1 and J_2, eps CLEAR_EPS, a random x in [0.1,
-    0.4]) against central differences (GRAD_STEP) on GRAD_BUILDINGS buildings, within GRAD_TOL of
-    the largest, under each of CLEAR_FORMS."""
+    0.4]) against the closer of the central differences at GRAD_STEPS on GRAD_BUILDINGS buildings,
+    within GRAD_TOL of the largest, under each of CLEAR_FORMS."""
     bad = []
     for bid in ids:
         for token in CLEAR_FORMS:
@@ -362,12 +364,16 @@ def gradient(ids: list[str]) -> list[str]:
                     rel = gcl.Relaxation(m, power, eps=CLEAR_EPS, inj=pop, cost=pop / pop.sum())
                     rel.q = q
                     _J, g = rel.value_grad(x0)
-                    fd = []
+                    err_j = []
                     for j in pick:
-                        e = np.zeros(m.n)
-                        e[j] = GRAD_STEP
-                        fd.append((rel.value(x0 + e) - rel.value(x0 - e)) / (2 * GRAD_STEP))
-                    err = float(np.abs(np.array(fd) - g[pick]).max() / np.abs(g[pick]).max())
+                        best = np.inf
+                        for h in GRAD_STEPS:
+                            e = np.zeros(m.n)
+                            e[j] = h
+                            fd = (rel.value(x0 + e) - rel.value(x0 - e)) / (2 * h)
+                            best = min(best, abs(fd - g[j]))
+                        err_j.append(best)
+                    err = float(np.max(err_j) / np.abs(g[pick]).max())
                     ok = err <= GRAD_TOL
                     print(f"{bid} {token} J_{power:g} q {q:g}: gradient against central "
                           f"differences {err:.1e} of the largest -> {'ok' if ok else 'FAILS'}",
