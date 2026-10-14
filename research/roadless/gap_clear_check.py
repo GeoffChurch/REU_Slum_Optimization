@@ -211,13 +211,6 @@ def _no_conform(a):
 
 # ------------------------------------------------------------------ reach
 
-def _complex_live(m: gcl.Model, removed: np.ndarray) -> np.ndarray:
-    """The homes the complex grown by w / 2 reaches at width 0 with `removed` cleared."""
-    cx = gc.build(m.geo, m.spec, ~removed, carve=None, grow=m.form.grow)
-    return ~gc.walled(gc.home_exits(gc.homes_of(m.geo, cx), gc.exit_widths(cx)),
-                      m.form.filtration_w)
-
-
 def reach(ids: list[str]) -> list[str]:
     bad = []
     for bid in ids:
@@ -242,7 +235,7 @@ def reach(ids: list[str]) -> list[str]:
         parts = []
         for name, x in states.items():
             flow = m.live_homes_of(m.factors(m.k_of(x)))
-            cxl = _complex_live(m, x)
+            cxl = m.complex_live(x)
             d = np.flatnonzero(flow ^ cxl)
             parts.append(f"{name}: {int((~flow).sum())} walled in, {len(d)} apart")
             if len(d):

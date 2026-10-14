@@ -57,7 +57,6 @@ import clear  # noqa: E402
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
 import gap_compare as gcmp  # noqa: E402
-import gap_complex as gc  # noqa: E402
 import gap_flow as gf  # noqa: E402
 import gap_study  # noqa: E402
 import lifted  # noqa: E402
@@ -132,10 +131,6 @@ def preset(bid: str, which: str) -> None:
 
 # ------------------------------------------------------------------ baseline
 
-def _rebuild_ref(b, cm: gcmp.ComplexModel | None) -> gcmp.ComplexModel:
-    return cm if cm is not None else gcmp.ComplexModel(b, METRIC.fs, METRIC.form)
-
-
 def baseline_one(bid: str) -> str | None:
     out = ROWS / "baseline" / f"{bid}.parquet"
     if out.exists():
@@ -153,7 +148,7 @@ def baseline_one(bid: str) -> str | None:
                       pop=common.POPULATIONS["area"].weights(np.asarray(b.buildings.outlines)),
                       demand=POP)
         t_model = time.time() - t0
-        cm = _rebuild_ref(b, None)
+        cm = gcmp.ComplexModel(b, METRIC.fs, METRIC.form)
         live = ~m.nodem & ~cm.walled
         ratio = m.u_pop0[live] / cm.u0[live]
         fm = m.fm
@@ -186,12 +181,6 @@ def baseline_one(bid: str) -> str | None:
 
 # ------------------------------------------------------------------ clearings
 
-def _complex_live(m: gcl.Model, removed: np.ndarray) -> np.ndarray:
-    cx = gc.build(m.geo, m.spec, ~removed, carve=None, grow=m.form.grow)
-    return ~gc.walled(gc.home_exits(gc.homes_of(m.geo, cx), gc.exit_widths(cx)),
-                      m.form.filtration_w)
-
-
 def clearings_one(bid: str) -> str | None:
     out = ROWS / "clearings" / f"{bid}.parquet"
     try:
@@ -212,7 +201,7 @@ def clearings_one(bid: str) -> str | None:
             L = m.lenses(x)
             t_fixed = time.time() - t0
             r, u = cm.score(~x, None)
-            live_cx = _complex_live(m, x)
+            live_cx = m.complex_live(x)
             Pq_r = r["Pq"]
             J2_r = float(np.nansum(cm.pop * u ** 2))
             rows.append(dict(

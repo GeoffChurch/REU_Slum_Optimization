@@ -976,6 +976,14 @@ class Model:
         (or the open band does): the flow model's own reach."""
         return np.asarray(self.fx.ring.live(st.reach.live[self.c.cell]))
 
+    def complex_live(self, removed: NDArray[np.bool_]) -> NDArray[np.bool_]:
+        """Per home: it reaches the street on the complex rebuilt without `removed`, grown as the
+        form grows its footprints, read at the form's filtration width (gap_complex's test, free
+        first's): the reference the flow model's reach is checked against, home for home."""
+        cx = gc.build(self.geo, self.spec, ~removed, carve=None, grow=self.form.grow)
+        return np.asarray(~gc.walled(gc.home_exits(gc.homes_of(self.geo, cx), gc.exit_widths(cx)),
+                                     self.form.filtration_w))
+
     def grad(self, st: State, u: NDArray[np.float64],
              lam: NDArray[np.float64]) -> NDArray[np.float64]:
         """dJ / dk per building by the adjoint (lam: J's adjoint; u for P): dJ / dw = -du dlam
