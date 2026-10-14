@@ -62,15 +62,12 @@ class Refined:
 
     def __init__(self, A: sp.csr_matrix, once: Callable[[NDArray[np.float64]], NDArray[np.float64]]):
         self.A = A
-        self.absA = sp.csr_matrix((np.abs(A.data), A.indices, A.indptr), shape=A.shape)
         self.once = once
 
     def _berr(self, b: NDArray[np.float64], x: NDArray[np.float64]
               ) -> tuple[float, NDArray[np.float64]]:
-        r = b - self.A @ x
-        den = self.absA @ np.abs(x) + np.abs(b)
-        return float(np.max(np.where(den > 0, np.abs(r) / np.where(den > 0, den, 1.0), 0.0),
-                            initial=0.0)), r
+        berr, r = _residual(self.A.indptr, self.A.indices, self.A.data, b, x)
+        return float(berr), r
 
     def solve(self, b: NDArray[np.float64]) -> NDArray[np.float64]:
         x = self.once(b)
@@ -88,6 +85,28 @@ class Refined:
         if berr > REFINE_ACCEPT:
             raise RuntimeError(f"refinement stalled at a backward error of {berr:.1e}")
         return x
+
+
+@njit(cache=True)
+def _residual(indptr, indices, data, b, x):  # type: ignore[no-untyped-def]
+    """(the componentwise backward error max_i |r_i| / (|A| |x| + |b|)_i, 0 where that is 0; the
+    residual r = b - A x), one pass over A (CSR)."""
+    n = len(b)
+    r = np.empty(n)
+    berr = 0.0
+    for i in range(n):
+        s = b[i]
+        d = abs(b[i])
+        for p in range(indptr[i], indptr[i + 1]):
+            v = data[p] * x[indices[p]]
+            s -= v
+            d += abs(v)
+        r[i] = s
+        if d > 0.0:
+            e = abs(s) / d
+            if e > berr:
+                berr = e
+    return berr, r
 
 
 class Pattern(NamedTuple):

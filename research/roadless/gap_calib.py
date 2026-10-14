@@ -7,6 +7,7 @@ carrying every constant that can change a score, the code's digest among them). 
 uni+apwfs at h 0.5 (RASTER).
 
     S=research/roadless/gap_calib.py     # from the repo root, PYTHONPATH=., single-threaded
+    uv run python $S warm <id>                      # the block's fixed mesh into gap_clear.CACHE
     uv run python $S preset <id> <simp|cheap>[E][L] <cpu|gpu>  # a preset on the complex
     uv run python $S baseline <ids,|@file> <procs>  # the fixed mesh's baseline against the rebuild
     uv run python $S clearings <ids,|@file> <procs> # every clearing on the fixed mesh and rebuilt
@@ -131,6 +132,16 @@ def _gpu_gb() -> float:
     import cupy
     free, total = cupy.cuda.runtime.memGetInfo()
     return (total - free) / 2 ** 30
+
+
+def warm(bid: str) -> None:
+    """The block's fixed mesh built into the cache (gap_clear.CACHE: a node's own disk), before a
+    run's tasks for the block load it at once."""
+    [b] = common.build_blocks([bid])
+    t0 = time.time()
+    fx = METRIC.fixed(b, cache=gcl.CACHE)
+    print(f"{bid}: the fixed mesh, {fx.fm.nt} triangles, {time.time() - t0:.0f}s (built in "
+          f"{fx.t_build:.0f}s); peak {_peak_gb():.1f} GB", flush=True)
 
 
 def preset(bid: str, item: str, device: str) -> None:
@@ -550,7 +561,9 @@ def main(argv: list[str]) -> None:
             raise SystemExit(f"{v}=1 is required (single-threaded workers)")
     cmd = argv[0]
     failed: list[str] = []
-    if cmd == "preset":
+    if cmd == "warm":
+        warm(argv[1])
+    elif cmd == "preset":
         preset(argv[1], argv[2], argv[3])
     elif cmd == "rasterscore":
         rasterscore(argv[1], argv[2])

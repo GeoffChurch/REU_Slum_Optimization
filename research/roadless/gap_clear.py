@@ -801,6 +801,19 @@ class Reach(NamedTuple):
 
 
 @njit(cache=True)
+def _conduct(pe, pair, T, kp, npair):
+    """(per static passage its conductance T kp, per pair the sum of its passages')."""
+    Tp = np.empty(len(pe))
+    W = np.zeros(npair)
+    for q in range(len(pe)):
+        p = pe[q]
+        t = T[p] * kp[p]
+        Tp[q] = t
+        W[pair[q]] += t
+    return Tp, W
+
+
+@njit(cache=True)
 def _bfs(indptr, indices, epair, W, seed):
     """The rows reached from `seed` through the pattern's entries whose pair conducts (W > 0)."""
     n = len(seed)
@@ -877,11 +890,19 @@ class Graph:
                               np.bincount(c.cell, weights=cen[:, 1], minlength=n) / cnt])
         self.pattern = gap_factor.Pattern(indptr=indptr, indices=cols[o].astype(np.int32),
                                           xy=xy)
-        self.epair = tag[o]
+        self.epair = tag[o].astype(np.int32)
+        # the cells the street reaches when every pair conducts and every street face does (the
+        # eps world's every state: its reach without the search)
+        street = np.zeros(n, dtype=bool)
+        street[c.fc] = True
+        street[c.gcell] = True
+        self.street_all = street
+        self.live_all = _bfs(indptr, self.pattern.indices, self.epair, np.ones(self.npair),
+                             street)
 
     def reach(self, fm: FullMesh, kt: NDArray[np.float64], kp: NDArray[np.float64]) -> Reach:
         c = self.c
-        Tp = fm.T[c.pe] * kp[c.pe]
+        Tp, W = _conduct(c.pe, self.pair, fm.T, kp, self.npair)
         kf = kt[fm.fa]
         Gf = fm.Tf[c.pf] * kf[c.pf]
         if (Tp < 0).any() or (Gf < 0).any():
@@ -889,9 +910,12 @@ class Graph:
         ground = np.zeros(c.n, dtype=bool)
         ground[c.gcell[kf[c.pg] > 0]] = True
         G = np.bincount(c.fc, weights=Gf, minlength=c.n)
-        W = np.bincount(self.pair, weights=Tp, minlength=self.npair)
         p = self.pattern
-        live = _bfs(p.indptr, p.indices, self.epair, W, ground | (G > 0))
+        seed = ground | (G > 0)
+        if (self.npair == 0 or W.min() > 0) and np.array_equal(seed, self.street_all):
+            live = self.live_all            # every pair and street face conducts
+        else:
+            live = _bfs(p.indptr, p.indices, self.epair, W, seed)
         return Reach(live=live, ground=ground, unknown=live & ~ground, Tp=Tp, Gf=Gf, G=G, W=W)
 
     def values(self, r: Reach) -> NDArray[np.float64]:
