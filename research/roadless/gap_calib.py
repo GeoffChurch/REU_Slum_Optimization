@@ -9,6 +9,7 @@ uni+apwfs at h 0.5 (RASTER).
     S=research/roadless/gap_calib.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S warm <id>                      # the block's fixed mesh into gap_clear.CACHE
     uv run python $S preset <id> <simp|cheap>[E][L] <cpu|gpu>  # a preset on the complex
+    uv run python $S presets <id> <items,> <cpu|gpu>   # several, one after another (one GPU run)
     uv run python $S baseline <ids,|@file> <procs>  # the fixed mesh's baseline against the rebuild
     uv run python $S clearings <ids,|@file> <procs> # every clearing on the fixed mesh and rebuilt
     uv run python $S rasterscore <id> <cpu|gpu>     # every clearing on the raster (cluster GPU)
@@ -565,6 +566,9 @@ def main(argv: list[str]) -> None:
         warm(argv[1])
     elif cmd == "preset":
         preset(argv[1], argv[2], argv[3])
+    elif cmd == "presets":
+        for item in argv[2].split(","):
+            preset(argv[1], item, argv[3])
     elif cmd == "rasterscore":
         rasterscore(argv[1], argv[2])
     elif cmd == "speed":
