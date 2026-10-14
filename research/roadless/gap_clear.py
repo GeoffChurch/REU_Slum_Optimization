@@ -86,7 +86,7 @@ HERE = Path(__file__).resolve().parent
 CACHE = HERE / "gap_cache"              # the fixed meshes, by identity (`Fixed.of`; git-ignored)
 CONFORM_ROUNDS = 64     # conformity: rounds at most (each splits every bad edge it finds; a mesh
                         # still holding one after them raises)
-MESH_REV = 2            # the fixed mesh's construction, in its cache key with every meshing
+MESH_REV = 3            # the fixed mesh's construction, in its cache key with every meshing
                         # constant: raised by any change to the code that moves a mesh
 LINE_SNAP_M = 1e-4      # the linework's precision (m): a crack narrower than this conducts
                         # nothing under any passable width while either footprint stands (it is
@@ -124,6 +124,12 @@ def _faces(geo: gc.Geometry, spec: gc.Spec, grow: float
     faces = shapely.get_parts(shapely.polygonize(shapely.get_parts(noded)))
     faces = faces[shapely.area(faces) >= gc.DUST_M2]
     rep = shapely.point_on_surface(faces)
+    # the rings of the region's holes polygonize too: a street inside the block (its band an
+    # island of the region) came back as a face, meshed over the band, its line no exit (23597:
+    # 8,685 m^2 of band meshed, 470 m of exits lost)
+    shapely.prepare(region)
+    inside_region = shapely.contains(region, rep)
+    faces, rep = faces[inside_region], rep[inside_region]
     tree = shapely.STRtree(geo.polys)
     qi, qb = tree.query(rep, predicate="intersects")
     cover = [tuple(sorted(qb[qi == k].tolist())) for k in range(len(faces))]
