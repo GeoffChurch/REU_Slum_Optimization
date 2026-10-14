@@ -19,6 +19,7 @@ baseline) and J_2:
     uv run python $S complex <ids,|@file> <procs> <R> <levels> <forms,>  # gap_rows/compare/complex_*
     uv run python $S iso <ids,|@file> <procs> [mesh]         # rows gap_rows/compare/iso_<mesh>/
     uv run python $S converge <id> <R,R,...> <levels> <form>  # P against R on one block
+    uv run python $S flowsweep <ids,|@file> <procs> <forms,>   # the sweep's flow part
 
 Fields (as aperture.py's): the baseline; the stored clearings (width.STORED: SIMP's default and the
 cheap preset, clearings.Store), each with the homes the model leaves enclosed freed first where it
@@ -385,6 +386,66 @@ def iso_one(job: tuple[str, str | None]) -> str | None:
         return f"{bid}: {e!r}"
 
 
+SWEEP_R = 0.5                     # flowsweep: the mesh (graded, SWEEP_LEVELS)
+SWEEP_LEVELS = 4
+SWEEP_BUDGET = 1.0                # free first frees every walled-in home
+TOP = 3                           # the share of a lens its top homes hold
+
+
+def _top_share(terms: np.ndarray) -> float:
+    t = np.sort(np.nan_to_num(terms))[::-1]
+    return float(t[:TOP].sum() / t.sum()) if t.sum() > 0 else np.nan
+
+
+def flowsweep_one(job: tuple[str, str]) -> str | None:
+    """One block under one width form (`form_of`): its homes walled in at baseline, free first
+    (gap_complex.free_first at the form's w, budget SWEEP_BUDGET), and at baseline and after free
+    first P, P_{1/2} and J_2 (B's: over the homes live at baseline) with the share of each its top
+    TOP homes hold. Rows gap_rows/compare/flowsweep_<flow>/<form>/<id>.parquet."""
+    bid, token = job
+    form = form_of(token)
+    fs = flow_spec(SWEEP_R, SWEEP_LEVELS)
+    out = ROWS / f"flowsweep_{fs.name}" / form.name / f"{bid}.parquet"
+    if out.exists():
+        return None
+    try:
+        t0 = time.time()
+        [b] = common.build_blocks([bid])
+        cm = ComplexModel(b, fs, form)
+        fr = gc.free_first(cm.geo, cm.spec, w=form.w, budget=SWEEP_BUDGET, cost=cm.cost,
+                           pop=cm.pop, held0=np.zeros(cm.n, dtype=bool), cx0=None)
+        r_free, u_free = cm.score(~fr.held, None)
+        live = ~cm.walled
+        rows = []
+        for state, u, P, Pq in (("baseline", cm.u0, cm.P0, cm.Pq0),
+                                ("free", u_free, r_free["P"], r_free["Pq"])):
+            uq = cm.u_q0 if state == "baseline" else None
+            rows.append(dict(
+                state=state, P=P, Pq=Pq, J2=float(np.nansum(cm.pop * u ** 2)),
+                top_P=_top_share(np.where(live, cm.pop * u, 0.0)),
+                top_J2=_top_share(np.where(live, cm.pop * u ** 2, 0.0)),
+                top_Pq=_top_share(np.where(live, cm.inj_q * u, 0.0)) if uq is None
+                else _top_share(np.where(live, cm.inj_q * uq, 0.0)),
+                u_med=float(np.nanmedian(u)), u_max=float(np.nanmax(u))))
+        df = pd.DataFrame(rows).assign(
+            block=bid, form=form.name, w=form.w, flow=fs.name,
+            walled=int(cm.walled.sum()), walled_pop=float(cm.cost[cm.walled].sum()),
+            free_n=int(fr.held.sum()), free_D=float(cm.cost[fr.held].sum()),
+            left_pop=float(cm.cost[fr.left].sum()), enclosed_after=r_free["enclosed"],
+            shadowed=int(cm.dem.shadowed.sum()), cells0=cm.cells0, t_block=time.time() - t0,
+            host=socket.gethostname(), peak_rss_gb=_peak_gb())
+        out.parent.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(out)
+        print(f"{bid} {form.name}: walled {int(cm.walled.sum())}, free D {df.free_D.iloc[0]:.4f}; "
+              f"P {cm.P0:.4g} -> {r_free['P']:.4g}; top{TOP} J2 {rows[0]['top_J2']:.3f} "
+              f"({time.time() - t0:.0f}s)", flush=True)
+        return None
+    except Exception as e:     # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        return f"{bid} {token}: {e!r}"
+
+
 CONVERGE_FIELDS = ("baseline", "simp_default", "resistance_lp")
 
 
@@ -430,6 +491,9 @@ def main(argv: list[str]) -> None:
         R, levels, tokens = float(argv[3]), int(argv[4]), argv[5].split(",")
         failed = _pool(complex_one, [(i, R, levels, t) for t in tokens
                                      for i in gap_study.ids_of(argv[1])], int(argv[2]))
+    elif cmd == "flowsweep":
+        failed = _pool(flowsweep_one, [(i, t) for t in argv[3].split(",")
+                                       for i in gap_study.ids_of(argv[1])], int(argv[2]))
     elif cmd == "converge":
         converge(argv[1], [float(x) for x in argv[2].split(",")], int(argv[3]), argv[4])
         failed = []

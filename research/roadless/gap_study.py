@@ -425,9 +425,11 @@ def main(argv: list[str]) -> None:
         failed = _pool(apertures_one, ids_of(argv[1]), int(argv[2]))
     elif cmd == "sweep":
         ids = ids_of(argv[1])
-        # the largest first, so the pool's tail is short
-        sizes = _large_sizes()
-        ids = sorted(ids, key=lambda i: -sizes.get(i, 0.0))
+        if len(ids) > 1:
+            # the largest first, so the pool's tail is short (order only: a cluster task, one
+            # block, has no large82_area.parquet)
+            sizes = _large_sizes()
+            ids = sorted(ids, key=lambda i: -sizes.get(i, 0.0))
         failed = _pool(sweep_one, [(i, float(argv[3])) for i in ids], int(argv[2]))
     else:
         raise SystemExit(__doc__)
