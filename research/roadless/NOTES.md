@@ -4826,8 +4826,9 @@ summary_runtime_clearings.csv).
   48.4), the fixed mesh's 8,458.2 and 8,456.9 at s 0.125 and 0.0625 (44.4, 43.9), so of the two the
   fixed mesh is the nearer its limit there. On 30848 (P0 -1.1e-3) the difference is spread over
   many homes (the top five hold 18% of it): necks of the same kind (3585 and 1010, 0.5035 m apart,
-  escape times 4% low) and, the other way, a few homes on the band line up to 19% high (2137)
-  [inferred: the demand's sub-points near the band line fall differently; not traced].
+  escape times 4% low) and, the other way, a few homes up to 19% high (2137, whose ring reaches the
+  band; not traced: its demand points lie off the band in both models, so it is not the demand's
+  placement); its clearings' lenses are within 2.3e-4 all the same.
 - Clearings: every stored clearing of both presets under both metrics on the 13 (52, with the 13
   baselines) on the fixed mesh against the rebuild: L_P within 2.3e-4 (median 7e-5), L_{P_1/2}
   within 3.3e-4 and L_J2 within 2.5e-4 on 12 of the 13; 46841's neck carries its baseline
@@ -4913,23 +4914,31 @@ scored in both metrics:
 
 **Search or model.** In B's order the complex's optimizers end behind the raster's clearing on the
 complex's own metric five times: SIMP on 18895, 33717, 9712 and 9717 (L_P 0.003, 0.0003, 0.0006 and
-0.0012 behind) and the cheap preset on 33717 (0.006). It is the search. The model scores those
-clearings as the rebuild does (within 2.3e-4), and its gradient is the adjoint's (the guard).
-Started from the raster's clearing (free first's building added and held where the complex has
-one), the complex's own polish holds it or climbs from it, every time above the complex's own
-result: SIMP's polish (P256w8x2, every building movable) takes 18895's from 0.2997 (with free
-first's building; the raster's clearing alone 0.3007, the complex's own 0.2977) to 0.3026 and holds
-9717's at 0.1549 (own 0.1537); the cheap preset's polish (P64w8) takes 33717's cheap clearing from
-0.1990 to 0.2000 (own 0.1930). The complex's own clearings are local optima of the same polish
-(20269's cheap one does not move even under two-for-one exchanges with four times the tries), so
-which basin a run ends in is decided by the greedy's path or SIMP's continuation, both starting
-from first-order information. That information is a little less faithful on the complex than it was
-on the raster: the tension's ranking of single clearings at the greedy's start against their exact
-gains has Spearman +0.84 on 20269 (all 1,045 buildings; the exact best in its top ten, its own best
-worth 0.92 of the best per person), against the raster's +0.93 -- 0.95 (NOTES, "Tension ranks like
-exact LOO": 41132 and 18537, another metric and blocks). The raster's searches end below another
-clearing on their own metric too (its cheap preset behind the complex's clearing on 18895 and
-5810).
+0.0012 behind) and the cheap preset on 33717 (0.006). It is the search, not the model's accuracy.
+The model scores those clearings as the rebuild does (within 2.3e-4), and its gradient is the
+adjoint's (the guard). Started from the raster's clearing (free first's building added and held
+where the complex has one), the complex's own polish holds it or climbs from it, every time above
+the complex's own result: SIMP's polish (P256w8x2, every building movable) takes 18895's from
+0.2997 (with free first's building; the raster's clearing alone 0.3007, the complex's own 0.2977)
+to 0.3026, 33717's from 0.2224 to 0.2233 (own 0.2221), 9712's from 0.1232 to 0.1234 (own 0.1226)
+and holds 9717's at 0.1549 (own 0.1537); the cheap preset's polish (P64w8) takes 33717's cheap
+clearing from 0.1990 to 0.2000 (own 0.1930). The complex's own clearings are local optima of the
+same polish (20269's cheap one does not move even under two-for-one exchanges with four times the
+tries), so which basin a run ends in is decided by the greedy's path or SIMP's continuation, both
+starting from first-order information. That information is sound: the tension's ranking of single
+clearings at the greedy's start against their exact gains has Spearman +0.84 on 20269 (all 1,045
+buildings; +0.80 per person; the exact best in its top ten, its own best worth 0.92 of the best per
+person) and +0.98 on 33717 (its top 100 and 100 others, a sample that flatters it; +0.94 per
+person; the exact best in its top ten, its own best worth 0.75 of it), against the raster's
++0.93 -- 0.95 (NOTES, "Tension ranks like exact LOO": 41132 and 18537, another metric and other
+blocks); it reads a single clearing's gain a median 3.4 -- 3.7x high (the slope at eps against the
+whole step). Where it is least faithful is the shy distance's minimum: on 20269 the 821 buildings
+whose zone shares a triangle with another's (a gap both shut, opened only by clearing both, whose
+first-order gain the tie splits between them) rank at +0.83 and read 4.1x high, the 224 alone at
++0.97 and 2.5x, which makes the first-order searches' early choices noisier on the complex
+[inferred], a property of the metric rather than an error in the model. The raster's searches end
+below another clearing on their own metric too (its cheap preset behind the complex's clearing on
+18895 and 5810).
 
 **Timings** (gap_calib timing; summary_runtime_timing.csv; one core of ai01, each twice, the mean):
 a random clearing at D 0.05, its exact score (the scorer's: the lenses' two solves), a SIMP
