@@ -23,6 +23,7 @@ baseline) and J_2:
     uv run python $S interiors <ids,|@file> <form>        # one node per building against meshed
     uv run python $S region <id@major> <forms,>          # a region's stored clearings (REGION)
     uv run python $S lanes                     # the raster's width laws on the walled channel
+    uv run python $S gates <ids,>              # FFT homogenization's gate test, re-checked
 
 Fields (as aperture.py's): the baseline; the stored clearings (width.STORED: SIMP's default and the
 cheap preset, clearings.Store), each with the homes the model leaves enclosed freed first where it
@@ -601,6 +602,48 @@ def lanes() -> None:
     pd.DataFrame(rows).to_parquet(out)
 
 
+GATE_RUN = HERE / "clear_rows_S0.01cat_h0.5_area_p2"   # the greedy FFT homogenization re-scored
+GATE_STEPS = (1, 2, 5)
+GATE_FORMS = ("close0.125", "shy0.5")
+
+
+def gates(bids: list[str]) -> None:
+    """FFT homogenization's gate test re-checked (NOTES, "FFT homogenization": the fast-turning
+    scalar model 0.16 below the lifted on 22422's gate, old step rule): the greedy's clearings
+    through GATE_STEPS (fft_homog/extract_gated.py's), L_J2 under the lifted metric (uni+apwfs),
+    the raster's isotropic model and the complex under GATE_FORMS. Rows
+    gap_rows/compare/gates.parquet."""
+    out = []
+    for bid in bids:
+        [b] = common.build_blocks([bid])
+        rows = pd.read_parquet(GATE_RUN / f"{bid}.parquet")
+        n = len(b.buildings.outlines)
+        sc = common.Scorer(b, common.mesh_of("0.5"), gap_study._params(), population=AREA,
+                           demand=common.PopulationDemand())
+        c = clear.Clearing.on_scorer(sc, rtol=clear.RTOL_TENSION, search=None)
+        ri = RasterIso(b, "0.5")
+        cms = {t: ComplexModel(b, flow_spec(SWEEP_R, SWEEP_LEVELS), form_of(t))
+               for t in GATE_FORMS}
+        for step in GATE_STEPS:
+            upto = rows[(rows.step >= 1) & (rows.step <= step)]
+            ids = np.unique(np.concatenate([np.asarray(x, dtype=np.int64) for x in upto.cleared]))
+            x = np.zeros(n, dtype=bool)
+            x[ids] = True
+            o = c.open_(x)
+            r = dict(block=bid, step=step, n=int(x.sum()), D=float(c.cost[x].sum()),
+                     old_lifted=float(rows[rows.step == step].perm.iloc[0]),
+                     lifted=sc.perm_p(sc.home_u(o), 2.0), lifted_enc=sc.enclosed_left(o))
+            r["iso"] = ri.score(o)[0]["L_J2"]
+            for t, cm in cms.items():
+                cr, _u = cm.score(~x, None)
+                r[t], r[f"{t}_enc"] = cr["L_J2"], cr["enclosed"]
+            out.append(r)
+            print(r, flush=True)
+    path = ROWS / "gates.parquet"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(out).to_parquet(path)
+
+
 REGION = {   # NOTES, "A region whose only exit is its edge: 5810@major"
     "simp_default": "relax_rows/uni/fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2.a5x8/D0.05.p2",
     "cheap": "polish_rows/uni/S0.01cat.P64w8.a5x8/D0.05.p2"}
@@ -660,6 +703,9 @@ def main(argv: list[str]) -> None:
     elif cmd == "flowsweep":
         failed = _pool(flowsweep_one, [(i, t) for t in argv[3].split(",")
                                        for i in gap_study.ids_of(argv[1])], int(argv[2]))
+    elif cmd == "gates":
+        gates(gap_study.ids_of(argv[1]))
+        failed = []
     elif cmd == "lanes":
         lanes()
         failed = []

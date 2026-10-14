@@ -275,6 +275,16 @@ def compare() -> None:
     C = _read("compare/converge/*.parquet")
     if len(C):
         _summary("converge", C)
+    for name in ("lanes", "gates"):
+        f = ROWS / "compare" / f"{name}.parquet"
+        if f.exists():
+            _summary(name, pd.read_parquet(f))
+    R = _read("compare/region/*.parquet")
+    if len(R):
+        _summary("region", R)
+    Ir = _read("compare/interiors/*.parquet")
+    if len(Ir):
+        _summary("interiors", Ir)
 
 
 def _set(text: str) -> set[int]:
@@ -308,7 +318,6 @@ def flowsweep() -> None:
     if not len(F):
         return
     F["size"] = _size(F.block)
-    _summary("flowsweep_blocks", F)
     base = F[F.state == "free"].copy()
     # each block's levels relative to its closing at 0.125 (the raster's resolution)
     ref = base[base.form == "close0.125"].set_index("block")
