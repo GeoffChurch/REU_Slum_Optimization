@@ -22,8 +22,8 @@ J'(0) = -gap and J(1), checked, and shorter steps when neither it nor the full s
     CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/relax.py one|path <ids,|all> <p> <cpu|gpu> <plan> <metric> [workers] [budget]
 
 metric: a raster conductance (`along`: lifted.conductance_of, [@<search along>]) or the gap
-complex's name (gap_clear.ComplexMetric, cpu only), resolved here (metrics.metric_of) and handed
-down (seam.Metric). one: SIMP at one budget (default D_LENS, 0.05; plus the Frank-Wolfe relaxation
+complex's name (gap_clear.ComplexMetric; cpu or gpu, its factorization's), resolved here
+(metrics.metric_of) and handed down (seam.Metric). one: SIMP at one budget (default D_LENS, 0.05; plus the Frank-Wolfe relaxation
 and bound if fw > 0), rows in relax_rows/<metric>/<plan>/D<budget>/. path: nested budgets D 0.01 .. 0.15,
 rows in the greedy's format (clear.rows_dir, picker SIMP<plan>), so picker_compare reads them
 like any picker.

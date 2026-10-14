@@ -21,7 +21,8 @@ uni+apwfs at h 0.5 (RASTER).
 at area D BUDGET, power 1 (P), free first, on the complex, on the device's factorization; `E` the
 polish's candidates scored exactly (search.Exactly), `L` the metric's eps world with one cell per
 building's interior (+relaxlumped). Rows ROWS/preset/<device>/<item>/<id>.parquet (the run's row,
-its item, metric, host, peak memory and wall time; the device's memory in use at its end): the
+its item, metric, host, peak memory and wall time; on a GPU the device's memory in use, its most
+over the run, `gpu_gb`): the
 acceptance's own, so that a run on one device never overwrites another's or the stored rows
 (relax_rows/<METRIC>/, polish_rows/<METRIC>/, phase 1's, which `report` compares them with).
 
@@ -89,6 +90,7 @@ POWER = 1.0                             # P, the headline (owner 2026-10-12)
 POP = common.PopulationDemand()
 PQ = common.PriorityDemand(0.5)
 SPEED_REPS = 2
+GPU_SAMPLE_S = 0.5          # _GpuPeak's sampling (measurement only)
 ROWS = HERE / "gap_rows" / "runtime"
 ITEM = re.compile(r"(simp|cheap)(E?)(L?)")    # a preset item: the polish scoring, the eps world
 
@@ -132,7 +134,32 @@ def _gpu_gb() -> float:
     """The device's memory in use (one process a card: this run's), GB."""
     import cupy
     free, total = cupy.cuda.runtime.memGetInfo()
-    return (total - free) / 2 ** 30
+    return float(total - free) / 2 ** 30
+
+
+class _GpuPeak:
+    """The device's memory in use, its most over a run, sampled every GPU_SAMPLE_S seconds by a
+    thread (the factorizations' plans live and die with their models, inside the run)."""
+
+    def __init__(self) -> None:
+        import threading
+        self.peak = 0.0
+        self.done = threading.Event()
+        self.thread = threading.Thread(target=self._poll, daemon=True)
+
+    def _poll(self) -> None:
+        while not self.done.wait(GPU_SAMPLE_S):
+            self.peak = max(self.peak, _gpu_gb())
+
+    def __enter__(self) -> _GpuPeak:
+        self.peak = _gpu_gb()
+        self.thread.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.done.set()
+        self.thread.join()
+        self.peak = max(self.peak, _gpu_gb())
 
 
 def warm(bid: str) -> None:
@@ -155,15 +182,22 @@ def preset(bid: str, item: str, device: str) -> None:
     scoring = search.polish_scoring_of(exact)
     out = ROWS / "preset" / device / item / f"{bid}.parquet"
     t0 = time.time()
-    if which == "simp":
-        row = relax.one(bid, POWER, metric, PLAN._replace(polish_scoring=scoring), BUDGET,
-                        demand=POP)
-    else:
+
+    def run() -> dict[str, object]:
+        if which == "simp":
+            return relax.one(bid, POWER, metric, PLAN._replace(polish_scoring=scoring), BUDGET,
+                             demand=POP)
         picker, tries, width, pairs = CHEAP
-        row = polish_greedy.run(bid, POWER, metric, picker, tries, width, BUDGET, MESH, pairs,
-                                scoring=scoring)
+        return polish_greedy.run(bid, POWER, metric, picker, tries, width, BUDGET, MESH, pairs,
+                                 scoring=scoring)
+    if device == "gpu":
+        with _GpuPeak() as peak:
+            row = run()
+        gpu_gb = peak.peak
+    else:
+        row, gpu_gb = run(), np.nan
     row.update(item=item, metric=metric.name, host=socket.gethostname(), peak_rss_gb=_peak_gb(),
-               gpu_gb=_gpu_gb() if device == "gpu" else np.nan, wall=time.time() - t0)
+               gpu_gb=gpu_gb, wall=time.time() - t0)
     out.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame([row]).to_parquet(out)
     print(f"{bid} {item} on {device}: peak {_peak_gb():.1f} GB, {row['wall']:.0f}s", flush=True)

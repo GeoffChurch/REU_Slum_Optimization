@@ -34,7 +34,7 @@ and checked against SIMP's own score of it, so a swing from it finishes SIMP's a
         <cpu|gpu> <metric> <d_max>
 
 metric: a raster conductance (lifted.conductance_of) or the complex's name (gap_clear.ComplexMetric;
-cpu only): metrics.metric_of, resolved here and handed down (seam.Metric).
+cpu or gpu, its factorization's): metrics.metric_of, resolved here and handed down (seam.Metric).
 
 spec: GP<grow>x<greedy picker>r<restore share per round>[m<shortlist>], e.g.
 GP3xS0.01catr0.005m8; FL<same>c<cap on the conditional adds' scorings>, e.g.
