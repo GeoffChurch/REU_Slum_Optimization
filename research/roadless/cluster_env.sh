@@ -6,3 +6,6 @@ export PYTHONUNBUFFERED=1 PYTHONUTF8=1 PYTHONPATH=.
 # no bytecode written into the per-commit checkout the run's tasks share (road_rescore.py
 # requires it with the single-threaded settings)
 export PYTHONDONTWRITEBYTECODE=1
+# the complex's fixed meshes cached on the node's own disk (gap_clear.CACHE): a block's tasks
+# share it, and the shared home's quota does not hold them
+export GAP_CACHE="${TMPDIR:-/tmp}/gap_cache_$USER"

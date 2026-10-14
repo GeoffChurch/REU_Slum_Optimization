@@ -83,7 +83,9 @@ from gap_complex import legalize
 from seam import Flow
 
 HERE = Path(__file__).resolve().parent
-CACHE = HERE / "gap_cache"              # the fixed meshes, by identity (`Fixed.of`; git-ignored)
+# the fixed meshes, by identity (`Fixed.of`; git-ignored): $GAP_CACHE where a machine sets it
+# (cluster_env.sh: a node's own disk, not the shared home's quota), else beside this file
+CACHE = Path(os.environ["GAP_CACHE"]) if "GAP_CACHE" in os.environ else HERE / "gap_cache"
 CONFORM_ROUNDS = 64     # conformity: rounds at most (each splits every bad edge it finds; a mesh
                         # still holding one after them raises)
 MESH_REV = 3            # the fixed mesh's construction, in its cache key with every meshing
