@@ -157,7 +157,7 @@ def baseline_one(bid: str) -> str | None:
         live = ~m.nodem & ~cm.walled
         ratio = m.u_pop0[live] / cm.u0[live]
         fm = m.fm
-        row = dict(block=bid, size=gap_study.size_of(bid), n=m.n,
+        row = dict(block=bid, n=m.n,
                    P0=m.base.P, P0_rebuild=cm.P0, Pq0=m.base.Pq, Pq0_rebuild=cm.Pq0,
                    J2_0=m.base.J2, J2_0_rebuild=cm.J2_0,
                    walled=int(m.walled0.sum()), walled_rebuild=int(cm.walled.sum()),
@@ -411,6 +411,7 @@ def report() -> None:
     if len(base):
         b = base.assign(dP0=base.P0 / base.P0_rebuild - 1, dPq0=base.Pq0 / base.Pq0_rebuild - 1,
                         dJ2_0=base.J2_0 / base.J2_0_rebuild - 1)
+        b = b.assign(size=[gap_study.size_of(x) for x in b.block])
         b[["block", "size", "n", "dP0", "dPq0", "dJ2_0", "walled", "walled_rebuild",
            "walled_alike", "home_rel_max", "home_rel_med", "nt", "nt_rebuild", "cells",
            "unknowns0", "cells_rebuild", "unflat", "splits", "rounds", "flat", "t_build",
