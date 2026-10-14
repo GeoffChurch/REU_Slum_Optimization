@@ -29,7 +29,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROWS = HERE / "gap_rows" / "runtime" / "cudss"
 REPS = 3
-WITH = ("nvmath-python[cu12]==1.0.0", "nvidia-cudss-cu12", "cupy-cuda12x[ctk]", "scipy", "numpy",
+WITH = ("nvmath-python[cu12]==1.0.0", "nvidia-cudss-cu12", "cupy-cuda12x[ctk]==14.2.0",
+        "nvidia-nvjitlink-cu12", "scipy", "numpy",
         "pandas", "pyarrow")
 INNER = "GAP_CUDSS_INNER"
 
@@ -42,7 +43,20 @@ def outer(bid: str) -> None:
     raise SystemExit(subprocess.call(cmd, env=env))
 
 
+def _preload() -> None:
+    """The CUDA libraries the wheels bring, loaded globally before cupy looks for them (on a
+    node with no system copy, cuda.pathfinder missed the ephemeral environment's
+    libnvJitLink)."""
+    import ctypes
+    import glob
+    for name in ("nvjitlink", "cusparse", "cudss"):
+        for d in sys.path:
+            for lib in sorted(glob.glob(f"{d}/nvidia/{name}/lib/lib*.so*")):
+                ctypes.CDLL(lib, mode=ctypes.RTLD_GLOBAL)
+
+
 def inner(bid: str) -> None:
+    _preload()
     import cupy as cp
     import cupyx.scipy.sparse as csp
     import numpy as np

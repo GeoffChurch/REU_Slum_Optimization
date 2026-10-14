@@ -514,27 +514,7 @@ def full_mesh(geo: gc.Geometry, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width) 
     pa, pb = i0 // 3, i1 // 3
     pu, pv = es[i0, 0], es[i0, 1]
     cc = gf.circumcentres(xy, tri)
-    L = np.hypot(*(xy[pu] - xy[pv]).T)
-    tv = (xy[pv] - xy[pu]) / L[:, None]
-    nrm = np.column_stack([-tv[:, 1], tv[:, 0]])
-    p3 = gf._third(tri, pa, pu, pv)
-    flip = ((xy[p3] - xy[pu]) * nrm).sum(1) > 0
-    nrm[flip] *= -1.0
-    d = ((cc[pb] - cc[pa]) * nrm).sum(1)
-    area = 0.5 * np.abs(gf._cross(xy[tri[:, 0]], xy[tri[:, 1]], xy[tri[:, 2]]))
-    flat = np.minimum(area[pa], area[pb]) <= gf.FLAT_REL * L * L
-    cross_f = face[pa] != face[pb]
-    wrong = ((d < -gf.MERGE_REL * L) | (cross_f & (d <= gf.MERGE_REL * L))) & ~flat
-    if wrong.any():
-        w_ = np.flatnonzero(wrong)
-        raise ValueError(f"{len(w_)} passages ({int(cross_f[w_].sum())} across faces) with their "
-                         f"centres in the wrong order or one: the mesh is not Delaunay "
-                         f"(d / L {np.round(d[w_] / L[w_], 6)[:5].tolist()}, at "
-                         f"{np.round(xy[pu[w_[:3]]], 3).tolist()})")
-    drop = flat & (d <= gf.MERGE_REL * L)
-    with np.errstate(divide="ignore"):
-        T = np.where(drop, 0.0, np.where(d <= gf.MERGE_REL * L, np.inf,
-                                         fs.sigma * L / np.maximum(d, 1e-300)))
+    T, drop = _weights(xy, tri, face, cc, pa, pb, pu, pv, fs.sigma)
     # street faces: boundary edges on the band's line
     single = np.ones(len(key), dtype=bool)
     single[i0] = False
@@ -566,6 +546,35 @@ def full_mesh(geo: gc.Geometry, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width) 
                     fv=fv_, Tf=Tf, vb=vb, obstacle=obstacle, sigma=fs.sigma, unflat=conf.unflat,
                     splits=conf.splits, rounds=conf.rounds, flat=int(drop.sum()),
                     skipped=int(skipped))
+
+
+def _weights(xy, tri, face, cc, pa, pb, pu, pv, sigma: float
+             ) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
+    """(per passage sigma |e| / d_e, inf where its two triangles share a circumcentre within a
+    face, 0 beside a flat triangle; whether it is dropped so). Refuses a passage whose centres
+    are in the wrong order (or, across faces, one): the mesh not Delaunay."""
+    L = np.hypot(*(xy[pu] - xy[pv]).T)
+    tv = (xy[pv] - xy[pu]) / L[:, None]
+    nrm = np.column_stack([-tv[:, 1], tv[:, 0]])
+    p3 = gf._third(tri, pa, pu, pv)
+    flip = ((xy[p3] - xy[pu]) * nrm).sum(1) > 0
+    nrm[flip] *= -1.0
+    d = ((cc[pb] - cc[pa]) * nrm).sum(1)
+    area = 0.5 * np.abs(gf._cross(xy[tri[:, 0]], xy[tri[:, 1]], xy[tri[:, 2]]))
+    flat = np.minimum(area[pa], area[pb]) <= gf.FLAT_REL * L * L
+    cross_f = face[pa] != face[pb]
+    wrong = ((d < -gf.MERGE_REL * L) | (cross_f & (d <= gf.MERGE_REL * L))) & ~flat
+    if wrong.any():
+        w_ = np.flatnonzero(wrong)
+        raise ValueError(f"{len(w_)} passages ({int(cross_f[w_].sum())} across faces) with their "
+                         f"centres in the wrong order or one: the mesh is not Delaunay "
+                         f"(d / L {np.round(d[w_] / L[w_], 6)[:5].tolist()}, at "
+                         f"{np.round(xy[pu[w_[:3]]], 3).tolist()})")
+    drop = flat & (d <= gf.MERGE_REL * L)
+    with np.errstate(divide="ignore"):
+        T = np.where(drop, 0.0, np.where(d <= gf.MERGE_REL * L, np.inf,
+                                         sigma * L / np.maximum(d, 1e-300)))
+    return T, drop
 
 
 # ------------------------------------------------------------------ cells
