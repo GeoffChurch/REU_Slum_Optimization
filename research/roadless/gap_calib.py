@@ -388,6 +388,88 @@ def timing_one(bid: str) -> str | None:
         return f"{bid}: {e!r}"
 
 
+# ------------------------------------------------------------------ the summaries
+
+LENSES = ("L_P", "L_Pq", "L_J2")
+
+
+def _read(sub: str) -> pd.DataFrame:
+    fs = sorted((ROWS / sub).glob("*.parquet"))
+    return pd.concat([pd.read_parquet(f) for f in fs], ignore_index=True) if fs else pd.DataFrame()
+
+
+def _kendall(a: np.ndarray, b: np.ndarray) -> float:
+    from scipy.stats import kendalltau
+    return float(kendalltau(a, b).statistic)
+
+
+def report() -> None:
+    """ROWS' summaries, gap_rows/summary_runtime_<name>.csv (committed; the rows are not)."""
+    out = HERE / "gap_rows"
+    base = _read("baseline")
+    if len(base):
+        b = base.assign(dP0=base.P0 / base.P0_rebuild - 1, dPq0=base.Pq0 / base.Pq0_rebuild - 1,
+                        dJ2_0=base.J2_0 / base.J2_0_rebuild - 1)
+        b[["block", "size", "n", "dP0", "dPq0", "dJ2_0", "walled", "walled_rebuild",
+           "walled_alike", "home_rel_max", "home_rel_med", "nt", "nt_rebuild", "cells",
+           "unknowns0", "cells_rebuild", "unflat", "splits", "rounds", "flat", "t_build",
+           "t_model", "t_rebuild", "peak_build_gb", "peak_gb"]].round(6).to_csv(
+            out / "summary_runtime_baseline.csv", index=False)
+    cl = _read("clearings")
+    if len(cl):
+        c = cl.assign(**{f"d{k}": cl[k] - cl[f"{k}_rebuild"] for k in LENSES},
+                      d_enclosed=cl.enclosed - cl.enclosed_rebuild,
+                      d_n_enclosed=cl.n_enclosed - cl.n_enclosed_rebuild)
+        c[["block", "clearing", "n_cleared", "D", *LENSES, *(f"{k}_rebuild" for k in LENSES),
+           *(f"d{k}" for k in LENSES), "enclosed", "enclosed_rebuild", "n_enclosed",
+           "n_enclosed_rebuild", "d_n_enclosed", "reach_apart", "unknowns", "t_fixed",
+           "t_rebuild"]].round(6).to_csv(out / "summary_runtime_clearings.csv", index=False)
+    ras = _read("raster")
+    if len(cl) and len(ras):
+        rows = []
+        for bid, g in cl[cl.clearing != "baseline"].groupby("block"):
+            r = ras[ras.block == bid].set_index("clearing")
+            g = g.set_index("clearing")
+            keys = [k for k in g.index if k in r.index]
+            row = dict(block=bid, clearings=len(keys))
+            for lens in LENSES:
+                for k in keys:
+                    row[f"{k}_{lens}_cx"] = g.loc[k, lens]
+                    row[f"{k}_{lens}_raster"] = r.loc[k, lens]
+                if len(keys) >= 2:
+                    row[f"tau_{lens}"] = _kendall(g.loc[keys, lens].to_numpy(),
+                                                  r.loc[keys, lens].to_numpy())
+            for k in keys:
+                row[f"{k}_enclosed_cx"] = g.loc[k, "enclosed"]
+                row[f"{k}_enclosed_raster"] = r.loc[k, "enclosed"]
+                row[f"{k}_D"] = g.loc[k, "D"]
+            for preset in ("simp", "cheap"):
+                a, z = f"raster_{preset}", f"cx_{preset}"
+                if a in g.index and z in g.index:
+                    xa = set(map(int, str(g.loc[a, "cleared"]).split()))
+                    xz = set(map(int, str(g.loc[z, "cleared"]).split()))
+                    row[f"jaccard_{preset}"] = len(xa & xz) / max(len(xa | xz), 1)
+            rows.append(row)
+        pd.DataFrame(rows).round(6).to_csv(out / "summary_runtime_acceptance.csv", index=False)
+    tim = _read("timing")
+    if len(tim):
+        tim.round(4).to_csv(out / "summary_runtime_timing.csv", index=False)
+    cud = _read("cudss")
+    if len(cud):
+        cud.round(6).to_csv(out / "summary_runtime_cudss.csv", index=False)
+    runs = []
+    for key, (name, preset) in SOURCES.items():
+        for f in sorted(sources(name)[preset].glob(f"*_p{POWER:g}.parquet")):
+            r = pd.read_parquet(f).iloc[0]
+            runs.append(dict(block=r.block, clearing=key,
+                             perm=float(r.simp_perm if preset == "simp" else r.perm),
+                             D=float(r.simp_D if preset == "simp" else r.D),
+                             enclosed=float(r.enclosed), free_D=float(r.free_D),
+                             t=float(r.t)))
+    if runs:
+        pd.DataFrame(runs).round(6).to_csv(out / "summary_runtime_runs.csv", index=False)
+
+
 # ------------------------------------------------------------------ the run
 
 def _pool(fn, jobs: list, procs: int) -> list[str]:
