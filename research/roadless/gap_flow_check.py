@@ -8,8 +8,6 @@ file edited): a guard passes on the code as it is and must fail under its fault.
     uv run python $S channel - [fault]
     uv run python $S field - [fault]
     uv run python $S closed - [fault]
-    uv run python $S convex <ids,> [fault]
-    uv run python $S gradient <ids,> [fault]
 
 The corridor is width.walled_channel's (W x L_C, walls footprints WALL_M thick, a dead end behind
 the demand, the street the far edge): its demand the open ground within 1 m of the dead end,
@@ -35,14 +33,7 @@ clip((y - w/2) / s, 0, 1) dy (W - w - s from W = w + 2 s), within LAW_TOL at LAW
 30 deg. Fault `no-grow`: the shy distance and the ramp without their zero zone (footprints not
 grown, the ramp from the wall).
 
-`convex`, `gradient`: the clearing model (gap_clear: building interiors meshed, each footprint's
-w / 2 offset an outline, a triangle's factor the min over the footprints whose zone holds it of
-phi + k_b (1 - phi), a passage's the harmonic mean of its two triangles'), under each of
-CLEAR_FORMS on blocks: along random lines the passages' factors concave and P convex (q 1, eps
-CLEAR_EPS); the gradient (q 1 and 3, J_1 and J_2) against central differences. Faults:
-`multiply` (a point's terms multiplied, transmittances in series: equal at 0/1, not concave) and
-`min-grad` (the passage's gradient the smaller triangle's alone, the min's, under the harmonic
-mean's value).
+`convex` and `gradient` (the clearing model's) moved with it to gap_clear_check.py.
 
 `closed`: a lane CLOSED_W wide conducts at a passable width below CLOSED_W and is walled in
 above it (its demand reaches no street-connected cell), at R_CHECK. Fault `no-clearance`: the
@@ -65,7 +56,6 @@ from shapely.geometry import LineString, Point, Polygon
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
-import gap_clear as gcl  # noqa: E402
 import gap_compare as gcmp  # noqa: E402
 import gap_complex as gc  # noqa: E402
 import gap_flow as gf  # noqa: E402
@@ -292,97 +282,6 @@ def closed(_ids: list[str]) -> list[str]:
 
 # ------------------------------------------------------------------ the clearing model
 
-CLEAR_FORMS = ("close0.125", "shy0.5", "ramp0.5")
-CLEAR_R = 0.5
-CLEAR_EPS = 1e-4                 # SIMP base's eps world
-CONVEX_LINES = 4
-CONVEX_POINTS = 7
-CONVEX_TOL = 1e-9
-GRAD_BUILDINGS = 6
-GRAD_Q = (1.0, 3.0)
-GRAD_STEPS = (1e-5, 1e-6)        # per building the closer central difference (as width_check's B_r
-                                 # guard: the factors are piecewise linear, a min per point, and one
-                                 # step straddled a kink, 19570's ramp, 1.2e-4 at 1e-6 alone)
-GRAD_TOL = 1e-4
-SEED = 20261013
-
-
-def _clear_model(bid: str, token: str):
-    [b] = common.build_blocks([bid])
-    geo = gc.geometry(b)
-    pop = common.POPULATIONS["area"].weights(geo.polys)
-    m = gcl.Model(geo, gc.Spec(s=S_M, ring_m=1.0, band_m=1.0), gcmp.flow_spec(CLEAR_R, 4),
-                  gcmp.form_of(token), lumped=False, pop=pop)
-    return m, pop
-
-
-def convex(ids: list[str]) -> list[str]:
-    """The clearing model (gap_clear): along CONVEX_LINES random segments of the clearing box,
-    every passage's factor concave (second differences at most CONVEX_TOL) and P (q 1, eps
-    CLEAR_EPS) convex (at least -CONVEX_TOL of P), under each of CLEAR_FORMS."""
-    bad = []
-    for bid in ids:
-        for token in CLEAR_FORMS:
-            m, pop = _clear_model(bid, token)
-            rel = gcl.Relaxation(m, 1.0, eps=CLEAR_EPS, inj=pop, cost=pop / pop.sum())
-            rng = np.random.default_rng(SEED + 2)
-            worst_k, worst_P = -np.inf, np.inf
-            for _ in range(CONVEX_LINES):
-                a, z = rng.uniform(0.0, 1.0, m.n), rng.uniform(0.0, 1.0, m.n)
-                ks, Ps = [], []
-                for t in np.linspace(0.0, 1.0, CONVEX_POINTS):
-                    x = a + t * (z - a)
-                    kp, _Dp, _kf, _Df = m.fac.values(rel.k_of(x))
-                    ks.append(kp)
-                    Ps.append(rel.value(x))
-                K2 = np.diff(np.array(ks), 2, axis=0)
-                P2 = np.diff(np.array(Ps), 2)
-                worst_k = max(worst_k, float(K2.max()))
-                worst_P = min(worst_P, float((P2 / np.max(Ps)).min()))
-            ok = worst_k <= CONVEX_TOL and worst_P >= -CONVEX_TOL
-            print(f"{bid} {token}: on {CONVEX_LINES} lines the factors' largest second difference "
-                  f"{worst_k:.1e}, P's smallest {worst_P:.1e} of P -> {'ok' if ok else 'FAILS'}",
-                  flush=True)
-            if not ok:
-                bad.append(f"{bid} {token}")
-    return bad
-
-
-def gradient(ids: list[str]) -> list[str]:
-    """The clearing model's gradient (q 1 and 3, J_1 and J_2, eps CLEAR_EPS, a random x in [0.1,
-    0.4]) against the closer of the central differences at GRAD_STEPS on GRAD_BUILDINGS buildings,
-    within GRAD_TOL of the largest, under each of CLEAR_FORMS."""
-    bad = []
-    for bid in ids:
-        for token in CLEAR_FORMS:
-            m, pop = _clear_model(bid, token)
-            rng = np.random.default_rng(SEED)
-            x0 = rng.uniform(0.1, 0.4, m.n)
-            pick = rng.choice(m.n, GRAD_BUILDINGS, replace=False)
-            for power in (1.0, 2.0):
-                for q in GRAD_Q:
-                    rel = gcl.Relaxation(m, power, eps=CLEAR_EPS, inj=pop, cost=pop / pop.sum())
-                    rel.q = q
-                    _J, g = rel.value_grad(x0)
-                    err_j = []
-                    for j in pick:
-                        best = np.inf
-                        for h in GRAD_STEPS:
-                            e = np.zeros(m.n)
-                            e[j] = h
-                            fd = (rel.value(x0 + e) - rel.value(x0 - e)) / (2 * h)
-                            best = min(best, abs(fd - g[j]))
-                        err_j.append(best)
-                    err = float(np.max(err_j) / np.abs(g[pick]).max())
-                    ok = err <= GRAD_TOL
-                    print(f"{bid} {token} J_{power:g} q {q:g}: gradient against central "
-                          f"differences {err:.1e} of the largest -> {'ok' if ok else 'FAILS'}",
-                          flush=True)
-                    if not ok:
-                        bad.append(f"{bid} {token} p{power:g} q{q:g}")
-    return bad
-
-
 # ------------------------------------------------------------------ the faults
 
 _CELLS = gf.cells
@@ -402,12 +301,11 @@ def _fault_centroids() -> Iterator[None]:
 _STEINER = gf.steiner_points
 
 
-def _no_clearance(inner, fs, clear):
-    return _STEINER(inner, fs, 0.0)
+def _no_clearance(inner, fs, clear, *, box, lines):
+    return _STEINER(inner, fs, 0.0, box=box, lines=lines)
 
 
 _RAMP_KAPPA = gf.Ramp.kappa
-_HARM = gcl._harmonic_of
 
 
 def _ramp_from_zero(self, *a):
@@ -425,32 +323,9 @@ def _fault_no_grow() -> Iterator[None]:
         yield
 
 
-def _multiply(self, k):
-    """Terms.value_grad with a point's terms multiplied (transmittances in series), not their
-    minimum: equal at every 0/1 state, not concave."""
-    n, G = self.n, self.G
-    v = self.phi + k[self.b] * (1.0 - self.phi)
-    prod = np.ones(n * G)
-    if len(self.row):
-        np.multiply.at(prod, self.row, v)
-    return prod.reshape(n, G).mean(axis=1), sp.csr_matrix((n, len(k)))
-
-
-def _min_grad(kt, Dt, a, b):
-    """The harmonic mean's value with the min's gradient (the smaller triangle's alone)."""
-    fac, _D = _HARM(kt, Dt, a, b)
-    wa = (kt[a] <= kt[b]).astype(float)
-    return fac, (sp.diags(wa) @ Dt[a] + sp.diags(1.0 - wa) @ Dt[b]).tocsr()
-
-
-def _fault_clear(name: str, value):
-    owner = gcl.Terms if name == "value_grad" else gcl
-    return _patched(owner, name, value)
-
-
 GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "angle": angle, "shift": shift, "channel": channel, "field": field, "law": law,
-    "closed": closed, "convex": convex, "gradient": gradient}
+    "closed": closed}
 FAULTS: dict[str, dict[str, Callable]] = {
     "angle": {"centroids": _fault_centroids},
     "shift": {"centroids": _fault_centroids},
@@ -458,8 +333,6 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "field": {"centroids": _fault_centroids},
     "law": {"no-grow": lambda: _fault_no_grow()},
     "closed": {"no-clearance": lambda: _patched(gf, "steiner_points", _no_clearance)},
-    "convex": {"multiply": lambda: _fault_clear("value_grad", _multiply)},
-    "gradient": {"min-grad": lambda: _fault_clear("_harmonic_of", _min_grad)},
 }
 
 

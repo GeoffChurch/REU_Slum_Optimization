@@ -11,11 +11,13 @@ and the polish never moves them. Where no home is enclosed nothing is held and t
 before.
 
     PYTHONPATH=. uv run python research/roadless/polish_greedy.py <id> <p> <cpu|gpu> <picker> \\
-        <tries> <width> <along> <budget> <mesh> [x2]
+        <tries> <width> <metric> <budget> <mesh> [x2]
 
-mesh: a common.mesh_of token, the grid of every solve and score. `x2`:
+metric: a raster conductance or the gap complex's name (metrics.metric_of; the complex: cpu, mesh
+0.5, which names no grid of its). mesh: a common.mesh_of token, the raster's grid of every solve
+and score. `x2`:
 two-for-one moves too (search.Swaps' pairs). Rows in
-polish_rows/<along>/<picker>.P<tries>w<width>[x2]<the mesh's suffix>/D<budget>/<id>_p<p>.parquet
+polish_rows/<metric>/<picker>.P<tries>w<width>[x2]<the mesh's suffix>/D<budget>/<id>_p<p>.parquet
 (h 0.5 unnamed, as in a SIMP plan): `perm` the polished clearing's Lens A, `greedy_perm` the
 greedy's own clearing within the budget (a real clearing, not picker_compare's interpolation
 between steps), `t` the free stage, the greedy and the polish, `t_greedy` the free stage and the
@@ -39,6 +41,7 @@ import common  # noqa: E402
 import lifted  # noqa: E402
 import search  # noqa: E402
 import relax  # noqa: E402
+import seam  # noqa: E402
 
 RTOL = 1e-3          # the solves while polishing, as SIMP's base plan's (t0.001)
 SCORE_EPS = 1e-6     # candidates' eps world, as SIMP's incumbent (k1s1e-06)
@@ -50,19 +53,21 @@ def rows_of(picker: str, tries: int, width: int, pairs: bool, mesh: lifted.MeshS
             / f"{picker}.P{tries}w{width}{'x2' if pairs else ''}{mesh.suffix}" / f"D{budget:g}")
 
 
-def main(bid: str, power: float, device: str, picker_spec: str, tries: int, width: int,
-         along: str, budget: float, mesh: lifted.MeshSpec, pairs: bool) -> None:
-    out = (rows_of(picker_spec, tries, width, pairs, mesh, along, budget)
+def main(bid: str, power: float, metric: seam.Metric, picker_spec: str, tries: int, width: int,
+         budget: float, mesh: lifted.MeshSpec, pairs: bool) -> None:
+    """`metric` the run's (metrics.metric_of: the raster's on `mesh`, or the complex's)."""
+    out = (rows_of(picker_spec, tries, width, pairs, mesh, metric.name, budget)
            / f"{bid}_p{power:g}.parquet")
-    c = relax._clearing(bid, device, along, mesh, demand=common.PopulationDemand())
-    rnd = search.greedy_round(picker_spec, clear.sweep_of(device))
+    [b] = common.build_blocks([bid])
+    c = metric.clearing(b, demand=common.PopulationDemand())
+    rnd = search.greedy_round(picker_spec, metric.sweep)
     t0 = time.time()
     # B's first stage: the crossings that free the enclosed homes, the greedy's start (its D
     # counts them) and not movable in the polish; none enclosed, none held
-    held = clear.free_first(c, budget=budget, held=np.zeros(c.n, dtype=bool))
+    held = c.free_first(budget=budget, held=np.zeros(c.n, dtype=bool))
     c.removed[:] = held
-    start = (search.Score(*clear.exact(c, held, power)) if held.any()
-             else search.Score(c.sc.J(c.sc.u0, power), c.sc.P0))      # the baseline's, no solve
+    start = (search.Score(*c.exact(held, power)) if held.any()
+             else search.Score(*c.baseline(power)))      # the baseline's, no solve
     s = search.SearchState.start(c, power=power, score=start, world=search.EXACT)
     search.greedy(rnd, budget)(s, search.Silent())
     t_greedy = time.time() - t0
@@ -70,8 +75,8 @@ def main(bid: str, power: float, device: str, picker_spec: str, tries: int, widt
     r = ((relax.cut_to_budget(s.order, c.cost, budget - float(c.cost[held].sum())) > 0)
          | held).astype(float)
     c.removed[:] = r > 0
-    rel = relax.Relaxation(c, power, rtol=RTOL)
-    scorer = relax.Relaxation(c, power, q=1.0, rtol=RTOL, eps=SCORE_EPS, params=c.p)
+    rel = c.relaxation(power, q=1.0, rtol=RTOL, eps=clear.EPS)
+    scorer = rel.metric_world(SCORE_EPS)
     greedy_perm = rel.perm(rel.exact(r))
     # the polish's own count: the greedy's scorings are not its tries
     s = search.SearchState.start(c, power=power, score=search.UNSCORED, world=None)
@@ -82,7 +87,7 @@ def main(bid: str, power: float, device: str, picker_spec: str, tries: int, widt
     perm = rel.perm(rel.exact(rp))
     t = time.time() - t0
     out.parent.mkdir(parents=True, exist_ok=True)
-    enclosed = c.sc.enclosed_left(c.open_(rp > 0))
+    enclosed = c.enclosed_left(rp > 0)
     pd.DataFrame([dict(block=bid, n=c.n, picker=picker_spec, mesh=mesh.name, perm=perm,
                        greedy_perm=greedy_perm,
                        D=float(c.cost @ rp), greedy_D=float(c.cost @ r), moves=moves,
@@ -96,9 +101,11 @@ def main(bid: str, power: float, device: str, picker_spec: str, tries: int, widt
 
 
 if __name__ == "__main__":
+    import metrics
     a = sys.argv[1:]
     if len(a) not in (9, 10) or (len(a) == 10 and a[9] != "x2"):
-        raise SystemExit("usage: <id> <p> <cpu|gpu> <picker> <tries> <width> <along> <budget> "
+        raise SystemExit("usage: <id> <p> <cpu|gpu> <picker> <tries> <width> <metric> <budget> "
                          "<mesh> [x2]")
-    main(a[0], float(a[1]), a[2], a[3], int(a[4]), int(a[5]), a[6], float(a[7]),
-         common.mesh_of(a[8]), len(a) == 10)
+    mesh = common.mesh_of(a[8])
+    main(a[0], float(a[1]), metrics.metric_of(a[6], device=a[2], mesh=mesh), a[3], int(a[4]),
+         int(a[5]), float(a[7]), mesh, len(a) == 10)

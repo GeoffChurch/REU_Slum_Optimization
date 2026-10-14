@@ -34,11 +34,12 @@ import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, NamedTuple, Protocol
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple, Protocol
 
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+import shapely
 from numba import njit
 from scipy.sparse.csgraph import dijkstra
 
@@ -46,9 +47,13 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import lifted  # noqa: E402
+from seam import Flow  # noqa: E402
 
 if TYPE_CHECKING:
+    import relax  # relax imports clear at run time
     import search as engine  # search imports clear at run time
+    from seam import ClearingModel
+    from seam import Tension as TensionLike
 
 EPS = 0.01
 RTOL_TENSION = 1e-3     # a ranking: checked unchanged against 1e-9 (NOTES, "Speed")
@@ -73,13 +78,50 @@ class Tension:
     the cleared cells)."""
 
     def __init__(self, system: lifted.System, u, lam, fam, bfree, scale, K: int, home_u,
-                 removed, nonlocal_gain, solver: lifted.Solver):
+                 removed, nonlocal_gain, solver: lifted.Solver, S: sp.csr_matrix,
+                 inj: np.ndarray):
         self.system, self.u, self.lam, self.fam, self.K = system, u, lam, fam, K
         self.bfree, self.scale, self.solver = bfree, scale, solver
         self.home_u = home_u                  # per building (host), from the eps solve
+        self.S, self.inj = S, inj             # the placement's (cells x homes), the injection
         self.g_local = self._gain()
         self.g = self.g_local + nonlocal_gain
         self.g[removed] = -np.inf
+
+    def weight(self, power: float) -> Any:
+        """Per home (on the device) inj_h u_h^power: its weight in J_power (Catchment's c_h)."""
+        return self.system.xp.asarray(self.inj * np.nan_to_num(self.home_u) ** power)
+
+    def flow(self, cand: list[int]) -> Flow:
+        """Catchment's view (seam.Flow) of this eps solve: the kept unknowns its nodes, each
+        home's injection on them by the axes' angular shares (the placement's S_cj inj_j, so a cell
+        several homes inject into splits its load among them), a candidate's members the kept
+        positions of its cells' unknowns."""
+        sy, K, xp = self.system, self.K, self.system.xp
+        spm = self.solver.sparse
+        A = sy.A
+        keep = xp.flatnonzero(sy.keep)
+        n = self.bfree.shape[0]
+        assert len(sy.unk_cell) == self.bfree.shape[1]  # eps world: free cell = inside
+        pos = -xp.ones(sy.n, dtype=xp.int64)
+        pos[keep] = xp.arange(len(keep))
+        Sc = self.S.tocoo()
+        unk = sy.unk_cell[sy.cell.ravel()[xp.asarray(Sc.row)]]         # -1 on ground
+        on = unk >= 0
+        at = pos[(unk[on][:, None] * K + xp.arange(K)[None, :]).ravel()]
+        home = xp.repeat(xp.asarray(Sc.col)[on], K)
+        load = (xp.asarray(Sc.data * self.inj[Sc.col])[on][:, None]
+                * xp.asarray(lifted.axes(K)[2] / np.pi)[None, :]).ravel()
+        kept = at >= 0
+        Hown = spm.coo_matrix((load[kept], (home[kept], at[kept])),
+                              shape=(n, len(keep))).tocsr()
+        sub = self.bfree[xp.asarray(cand)].tocoo()
+        un = sy.unk_cell[sub.col]
+        ok = un >= 0
+        idx = pos[(un[ok][:, None] * K + xp.arange(K)[None, :]).ravel()]
+        col = xp.repeat(sub.row[ok], K)
+        return Flow(xp=xp, A=A, u=self.u[keep], rowsum=A @ xp.ones(A.shape[0]), load=Hown,
+                    rows=idx[idx >= 0], cols=col[idx >= 0], to_host=self.solver.to_host)
 
     def _gain(self) -> np.ndarray:
         xp = self.system.xp
@@ -146,7 +188,42 @@ class Clearing:
     def P(self, removed: np.ndarray) -> float:
         return self.sc.P_free(self.open_(removed))
 
-    def tension(self, power: float = 1.0, restore: bool = False) -> Tension:
+    # -- seam.ClearingModel (the raster's)
+
+    @property
+    def polys(self) -> np.ndarray:
+        return self.sc.polys
+
+    @property
+    def tree(self) -> shapely.STRtree:
+        return self.sc.tree
+
+    @property
+    def cells(self) -> int:
+        return int(self.sc.grid.inside.sum())
+
+    def release(self) -> None:
+        self.p.solver.release()
+
+    def baseline(self, power: float) -> tuple[float, float]:
+        return self.sc.J(self.sc.u0, power), self.sc.P0
+
+    def exact(self, removed: np.ndarray, power: float) -> tuple[float, float]:
+        """`exact` (the module's, looked up at call time: memprobe_greedy instruments it)."""
+        return exact(self, removed, power)
+
+    def enclosed_left(self, removed: np.ndarray) -> float:
+        return self.sc.enclosed_left(self.open_(removed))
+
+    def free_first(self, *, budget: float, held: np.ndarray) -> np.ndarray:
+        return free_first(self, budget=budget, held=held)
+
+    def relaxation(self, power: float, *, q: float, rtol: float, eps: float) -> relax.Relaxation:
+        """relax.Relaxation under the search's conductance (relax imports this module)."""
+        import relax
+        return relax.Relaxation(self, power, q=q, rtol=rtol, eps=eps)
+
+    def tension(self, power: float, *, restore: bool) -> Tension:
         """First-order gain in J_power of clearing each (remaining) building, from one
         eps-material solve (power 1: the potential is its own adjoint) or two (power != 1: the
         adjoint L lam = dJ/du = power u_i^(power-1) x injection). dJ/dw_e = -(du_e)(dlam_e).
@@ -217,7 +294,8 @@ class Clearing:
             scale = 1.0 / xp.maximum(1.0 - xp.asarray(op).ravel()[ff], 1e-9)
         return Tension(system=sy, u=sol.u, lam=lam, fam=fam, bfree=self.bfree, scale=scale,
                        K=K, home_u=home_u, removed=~self.removed if restore else self.removed,
-                       nonlocal_gain=nonlocal_gain, solver=self.p.solver)
+                       nonlocal_gain=nonlocal_gain, solver=self.p.solver, S=self.sc.pl.S,
+                       inj=self.sc.inj)
 
 def loo(i: int, h: float, pop: str = "count", power: float = 1.0) -> None:
     from scipy.stats import spearmanr
@@ -229,7 +307,7 @@ def loo(i: int, h: float, pop: str = "count", power: float = 1.0) -> None:
     sc = c.sc
     P0 = sc.J(sc.u0, power)
     t = time.time()
-    T = c.tension(power).g
+    T = c.tension(power, restore=False).g
     tt = time.time() - t
     t = time.time()
     exact = np.zeros(c.n)
@@ -261,7 +339,7 @@ def exact(c: Clearing, removed: np.ndarray, power: float) -> tuple[float, float]
     return c.sc.J(c.sc.home_u_of(sol, op), power), sol.P
 
 
-def _next_target(c: Clearing, delta: float) -> tuple[float, float]:
+def _next_target(c: ClearingModel, delta: float) -> tuple[float, float]:
     """(D now, the next multiple of delta above it)."""
     D = float(c.cost[c.removed].sum())
     return D, (np.floor(D / delta + 1e-9) + 1) * delta
@@ -380,11 +458,12 @@ def free_first(c: Clearing, *, budget: float, held: np.ndarray) -> np.ndarray:
 
 class GramSource(Protocol):
     """How alike the candidates' effects are: a PSD matrix over `cand` whose normalised entries
-    are the correlations rho_ij that `search.Diverse` builds its batch from."""
+    are the correlations rho_ij that `search.Diverse` builds its batch from (a seam.Tension's:
+    the raster's or the complex's)."""
     @property
     def name(self) -> str: ...
 
-    def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray: ...
+    def gram(self, t: TensionLike, cand: list[int], power: float) -> np.ndarray: ...
 
 
 class Sweep(Protocol):
@@ -566,51 +645,26 @@ class Catchment:
     def name(self) -> str:
         return "cat"
 
-    def gram(self, c: Clearing, t: Tension, cand: list[int], power: float) -> np.ndarray:
-        V = self.shares(c, t, cand)
-        wt = t.system.xp.asarray(c.sc.inj * np.nan_to_num(t.home_u) ** power)
-        return t.solver.to_host((V * wt[:, None]).T @ V)
+    def gram(self, t: TensionLike, cand: list[int], power: float) -> np.ndarray:
+        f = t.flow(cand)
+        V = self.shares(f, len(cand))
+        wt = t.weight(power)
+        return f.to_host((V * wt[:, None]).T @ V)
 
-    def shares(self, c: Clearing, t: Tension, cand: list[int]):
+    def shares(self, f: Flow, ncand: int) -> Any:
         """v_j(h) on the device, (homes x candidates): the share of home h's injected flow in
-        the tension's state that passes through candidate j's cells on its way to ground (0 for
-        a home none of whose injection is on a kept unknown)."""
-        sy, K, xp = t.system, t.K, t.system.xp
-        spm = t.solver.sparse
-        A = sy.A
-        keep = xp.flatnonzero(sy.keep)
-        u = t.u[keep]
-        rowsum = A @ xp.ones(A.shape[0])
-        assert len(sy.unk_cell) == c.bfree.shape[1]     # eps world: free cell = inside
-        pos = -xp.ones(sy.n, dtype=xp.int64)
-        pos[keep] = xp.arange(len(keep))
-        # per home, its injection on each kept unknown (sy.load's: S_cj inj_j by the axis's
-        # angular share), so a cell several homes inject into splits its load among them
-        Sc = c.sc.pl.S.tocoo()
-        unk = sy.unk_cell[sy.cell.ravel()[xp.asarray(Sc.row)]]         # -1 on ground
-        on = unk >= 0
-        at = pos[(unk[on][:, None] * K + xp.arange(K)[None, :]).ravel()]
-        home = xp.repeat(xp.asarray(Sc.col)[on], K)
-        load = (xp.asarray(Sc.data * c.sc.inj[Sc.col])[on][:, None]
-                * xp.asarray(lifted.axes(K)[2] / np.pi)[None, :]).ravel()
-        kept = at >= 0
-        inj = xp.bincount(home[kept], load[kept], minlength=c.n)
-        Hown = spm.coo_matrix((load[kept], (home[kept], at[kept])),
-                              shape=(c.n, len(keep))).tocsr()
-        # members: kept positions of each candidate's unknowns
-        sub = c.bfree[xp.asarray(cand)].tocoo()
-        un = sy.unk_cell[sub.col]
-        ok = un >= 0
-        idx = pos[(un[ok][:, None] * K + xp.arange(K)[None, :]).ravel()]
-        col = xp.repeat(sub.row[ok], K)
-        rows, cols = idx[idx >= 0], col[idx >= 0]
-        run = self.sweep.prepare(A, u, rowsum)
-        V = xp.zeros((c.n, len(cand)))
-        step = self.sweep.columns(len(keep))
-        for s0 in range(0, len(cand), step):
-            C = min(step, len(cand) - s0)
-            sel = (cols >= s0) & (cols < s0 + C)
-            V[:, s0:s0 + C] = Hown @ run(rows[sel], cols[sel] - s0, C)
+        the tension's state (`f`, its Flow with the candidates' members) that passes through
+        candidate j's nodes on its way to ground (0 for a home none of whose injection is on a
+        node)."""
+        xp = f.xp
+        inj = f.load @ xp.ones(f.load.shape[1])
+        run = self.sweep.prepare(f.A, f.u, f.rowsum)
+        V = xp.zeros((f.load.shape[0], ncand))
+        step = self.sweep.columns(len(f.u))
+        for s0 in range(0, ncand, step):
+            C = min(step, ncand - s0)
+            sel = (f.cols >= s0) & (f.cols < s0 + C)
+            V[:, s0:s0 + C] = f.load @ run(f.rows[sel], f.cols[sel] - s0, C)
         return xp.where(inj[:, None] > 0, V / xp.where(inj > 0, inj, 1.0)[:, None], 0.0)
 
 

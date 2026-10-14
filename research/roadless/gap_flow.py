@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 import scipy.sparse as sp
@@ -57,6 +57,9 @@ from numpy.typing import NDArray
 from scipy.sparse.csgraph import connected_components
 
 import gap_complex as gc
+
+if TYPE_CHECKING:
+    import gap_clear
 
 MERGE_REL = 1e-4      # pockets whose centres lie within this share of their passage's length along
                       # its normal are merged (d_e 0: a shared circumcircle; below 1e-4 the weight
@@ -184,12 +187,13 @@ def _insert(xy, tri, nbr, con, face, nt, nv, pts, start, tol):
     return nt, nv, skipped, done
 
 
-def _lattice(inner, h: float, offset: tuple[float, float]) -> NDArray[np.float64]:
-    """The triangular lattice of spacing h over `inner`'s box, inside it (its offset irrational, so
+def _lattice(inner, h: float, offset: tuple[float, float],
+             box: tuple[float, float, float, float]) -> NDArray[np.float64]:
+    """The triangular lattice of spacing h over `box`, inside `inner` (its offset irrational, so
     no point falls on an outline's vertex row; perturbed by 1e-6 h, seeded: a lattice's rows are
     exactly collinear, and a point would fall on the edge between two of its row inserted before
     it)."""
-    x0, y0, x1, y1 = inner.bounds
+    x0, y0, x1, y1 = box
     dy = h * math.sqrt(3.0) / 2.0
     ys = np.arange(y0 + offset[1] * dy, y1, dy)
     pts = []
@@ -202,19 +206,22 @@ def _lattice(inner, h: float, offset: tuple[float, float]) -> NDArray[np.float64
     return P[shapely.contains_xy(inner, P[:, 0], P[:, 1])]
 
 
-def steiner_points(inner, fs: FlowSpec, clear: float) -> NDArray[np.float64]:
-    """The Steiner points: on lattice level l (spacing R 2^l, l = 0 .. fs.levels) the points whose
-    clearance d from `inner`'s boundary is at least max(clear, R 2^l / 2), and for l > 0 at least
-    fs.grade R 2^l, and below fs.grade R 2^(l+1) unless l is the last: R near the outlines,
-    doubling with the clearance (levels 0: R everywhere)."""
+def steiner_points(inner, fs: FlowSpec, clear: float, *, box: tuple[float, float, float, float],
+                   lines) -> NDArray[np.float64]:
+    """The Steiner points inside `inner`: on lattice level l (spacing R 2^l, l = 0 .. fs.levels,
+    laid over `box`) the points whose clearance d from `lines` (the outlines they keep clear of:
+    `inner`'s boundary for the rebuild, every outline and offset of the fixed mesh) is at least
+    max(clear, R 2^l / 2), and for l > 0 at least fs.grade R 2^l, and below fs.grade R 2^(l+1)
+    unless l is the last: R near the outlines, doubling with the clearance (levels 0: R
+    everywhere)."""
     if inner.is_empty:
         return np.zeros((0, 2))
-    bnd = shapely.boundary(inner)
+    bnd = lines
     shapely.prepare(bnd)
     out = []
     for lv in range(fs.levels + 1):
         h = fs.R * 2 ** lv
-        P = _lattice(inner, h, fs.offset)
+        P = _lattice(inner, h, fs.offset, box)
         pts = shapely.points(P[:, 0], P[:, 1])
         lo = max(clear, h / 2.0, fs.grade * h if lv > 0 else 0.0)
         keep = ~shapely.dwithin(bnd, pts, lo)
@@ -226,12 +233,63 @@ def steiner_points(inner, fs: FlowSpec, clear: float) -> NDArray[np.float64]:
 
 # ------------------------------------------------------------------ the passable width's forms
 
+TIE_TOL = 1e-15       # Terms: terms within this of a point's minimum share its gradient
+
+
+@dataclass(frozen=True, eq=False)
+class Terms:
+    """A width form's fractional factors on a fixed mesh (gap_clear), one per triangle: each the
+    mean over its G points of the minimum over the point's terms (building b, phi) of phi + k_b (1
+    - phi), 1 with no term (k_b: building b's clearing, 0 standing, 1 cleared). `row` per term
+    its (triangle, point) row (rows triangle * G + g), sorted; `b`, `phi`. Concave and
+    non-decreasing in k (a minimum of affine functions)."""
+    n: int
+    G: int
+    row: NDArray[np.int64]
+    b: NDArray[np.int64]
+    phi: NDArray[np.float64]
+
+    def _mins(self, k: NDArray[np.float64]) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        v = self.phi + k[self.b] * (1.0 - self.phi)
+        mins = np.ones(self.n * self.G)
+        if len(self.row):
+            np.minimum.at(mins, self.row, v)
+        return v, mins
+
+    def value(self, k: NDArray[np.float64]) -> NDArray[np.float64]:
+        """Per triangle its factor."""
+        return self._mins(k)[1].reshape(self.n, self.G).mean(axis=1)
+
+    def vjp(self, k: NDArray[np.float64], g: NDArray[np.float64]) -> NDArray[np.float64]:
+        """g^T d(factor) / dk: per building, the sum over the terms at their point's minimum of g
+        at the term's triangle times (1 - phi) / G, a tie's share split equally among the terms
+        tied (a supergradient of the minimum: SIMP's and the tension's)."""
+        v, mins = self._mins(k)
+        at = v <= mins[self.row] + TIE_TOL
+        cnt = np.bincount(self.row[at], minlength=self.n * self.G)
+        wt = (1.0 - self.phi[at]) / cnt[self.row[at]] / self.G
+        return np.bincount(self.b[at], weights=g[self.row[at] // self.G] * wt, minlength=len(k))
+
+
+def _pairs(M: sp.csr_matrix) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
+    co = M.tocoo()
+    o = np.lexsort((co.col, co.row))
+    return co.row[o].astype(np.int64), co.col[o].astype(np.int64)
+
+
+NO_FILL = (np.zeros(0, dtype=np.int64), np.zeros(0, dtype=np.int64))
+
+
 class Width(Protocol):
     """The passable width's form (the brief's addendum): resolved once where a run is configured,
     part of its name. `grow` the footprints' growth before meshing, `steiner_clear` the Steiner
     points' clearance from every outline, `kappa` the factor in [0, 1] of each passage and street
     face at a 0/1 state (the standing footprints less `carve`), from which the form's width law
-    follows: a lane of width W conducts G(W) = 2 int_0^{W/2} phi."""
+    follows: a lane of width W conducts G(W) = 2 int_0^{W/2} phi. On the fixed mesh (gap_clear)
+    the same factors at any clearing, fractional too: `terms` per triangle, `fill_pairs` the
+    passages a filled gap holds shut (each with a building whose clearing opens it). Its
+    passability's topology: the complex grown by `grow` read at the filtration width
+    `filtration_w` (free first's; gap_complex)."""
 
     @property
     def name(self) -> str: ...
@@ -242,8 +300,16 @@ class Width(Protocol):
     @property
     def steiner_clear(self) -> float: ...
 
+    @property
+    def filtration_w(self) -> float: ...
+
     def kappa(self, geo: gc.Geometry, standing: NDArray[np.bool_], carve, xy: NDArray[np.float64],
               passages: tuple, faces: tuple) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+        ...
+
+    def terms(self, geo: gc.Geometry, fm: gap_clear.FullMesh, quad: int) -> Terms: ...
+
+    def fill_pairs(self, fm: gap_clear.FullMesh) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
         ...
 
 
@@ -266,9 +332,36 @@ class Closing:
     def steiner_clear(self) -> float:
         return STEINER_W * self.w
 
+    @property
+    def filtration_w(self) -> float:
+        return self.w
+
     def kappa(self, geo, standing, carve, xy, passages, faces):
         _pu, _pv, ap = passages
         return (ap >= self.w).astype(float), np.ones(len(faces[0]))
+
+    def terms(self, geo, fm, quad):
+        """A triangle conducts by the least k_b of the footprints covering it."""
+        r, b = _pairs(fm.tcov)
+        return Terms(n=fm.nt, G=1, row=r, b=b, phi=np.zeros(len(b)))
+
+    def fill_pairs(self, fm):
+        """The open passages between open triangles, both ends on outlines and shorter than w (a
+        filled gap), each with the buildings at its ends: it opens with min(1, the sum of their
+        k_b)."""
+        if self.w <= 0:
+            return NO_FILL
+        op = fm.open_tri
+        L = np.hypot(*(fm.xy[fm.pu] - fm.xy[fm.pv]).T)
+        narrow = op[fm.pa] & op[fm.pb] & fm.obstacle[fm.pu] & fm.obstacle[fm.pv] & (L < self.w)
+        e = np.flatnonzero(narrow)
+        vb = fm.vb.tocsr()
+        ends = [np.zeros((0, 2), dtype=np.int64)]
+        for x in (fm.pu[e], fm.pv[e]):
+            sub = vb[x].tocoo()
+            ends.append(np.stack([e[sub.row], sub.col], axis=1))
+        pr = np.unique(np.concatenate(ends), axis=0)
+        return pr[:, 0], pr[:, 1]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -290,8 +383,21 @@ class Shy:
     def steiner_clear(self) -> float:
         return 0.0
 
+    @property
+    def filtration_w(self) -> float:
+        return 0.0
+
     def kappa(self, geo, standing, carve, xy, passages, faces):
         return np.ones(len(passages[0])), np.ones(len(faces[0]))
+
+    def terms(self, geo, fm, quad):
+        """A triangle conducts by the least k_b of the footprints whose zero zone (within w / 2)
+        holds it: exact, the offset curves being outlines of the mesh."""
+        r, b = _pairs(fm.tzone)
+        return Terms(n=fm.nt, G=1, row=r, b=b, phi=np.zeros(len(b)))
+
+    def fill_pairs(self, fm):
+        return NO_FILL
 
 
 GAUSS_N = 16          # Ramp: Gauss-Legendre points along a passage (phi has kinks where the
@@ -319,6 +425,26 @@ class Ramp:
     @property
     def steiner_clear(self) -> float:
         return 0.0
+
+    @property
+    def filtration_w(self) -> float:
+        return 0.0
+
+    def terms(self, geo, fm, quad):
+        """At each of a triangle's `quad` sub-points, the footprints within w / 2 + s, phi(d)."""
+        P, _wt, _t = _points_of(fm.xy, fm.tri, quad)     # triangle-major, quad points each
+        pts = shapely.points(P[:, 0], P[:, 1])
+        qi, qb = shapely.STRtree(geo.polys).query(pts, predicate="dwithin",
+                                                  distance=self.w / 2.0 + self.s)
+        d = shapely.distance(pts[qi], geo.polys[qb])
+        phi = np.clip((d - self.w / 2.0) / self.s, 0.0, 1.0)
+        keep = phi < 1.0
+        o = np.argsort(qi[keep], kind="stable")
+        return Terms(n=fm.nt, G=quad, row=qi[keep][o].astype(np.int64),
+                     b=qb[keep][o].astype(np.int64), phi=phi[keep][o])
+
+    def fill_pairs(self, fm):
+        return NO_FILL
 
     def kappa(self, geo, standing, carve, xy, passages, faces):
         _idx, polys = gc.obstacles(geo, standing, carve=carve, grow=0.0)
@@ -413,7 +539,8 @@ def mesh(geo: gc.Geometry, spec: gc.Spec, fs: FlowSpec, width: Width,
     factors."""
     cx = gc.build(geo, spec, standing, carve=carve, grow=width.grow)
     inner, _band = gc._open_ground(geo, standing, spec.band_m, carve=carve, grow=width.grow)
-    pts = steiner_points(inner, fs, width.steiner_clear)
+    pts = steiner_points(inner, fs, width.steiner_clear, box=inner.bounds,
+                         lines=shapely.boundary(inner))
     nt, nv = cx.nt, len(cx.xy)
     nv0 = nv
     xy = np.zeros((nv + len(pts), 2))
@@ -581,36 +708,52 @@ def laplacian(c: Cells, kappa: NDArray[np.float64] | None = None) -> sp.csr_matr
     return sp.csr_matrix((vals, (rows, cols)), shape=(N, N))
 
 
-REFINE_RTOL = 1e-12   # factor's solves: iterative refinement to this residual (relative), and
-REFINE_ACCEPT = 1e-5  # ... at worst this after REFINE_STEPS (the weights span ten decades; P's
-                      # error is of this order, far below any lens's resolution)
+REFINE_BERR = 4 * np.finfo(np.float64).eps   # factor's solves: refined until the componentwise
+                                            # backward error max |r| / (|A| |x| + |b|) is this,
+REFINE_ACCEPT = 1e-8  # ... or stops falling by half (refinement can do no better), when it must
+                      # be at most this (a solve worse than that raises)
 REFINE_STEPS = 8
 
 
 class _Refined:
-    """A's SuperLU factorization with iterative refinement: a cell joined to the rest only through
-    a hairline passage has a diagonal 1e-9 of the others', and SuperLU's partial pivoting then
-    left residuals of 0.7% (relative) that the clearing model's finite differences saw; each
-    solve is refined until its residual is below REFINE_RTOL of the right-hand side."""
+    """A's LU factorization with iterative refinement (LAPACK's xGERFS stopping rule): a cell
+    joined to the rest only through a hairline passage has a diagonal 1e-9 of the others', and
+    SuperLU's partial pivoting then left residuals of 0.7% (relative) that the clearing model's
+    finite differences saw; each solve is refined while its backward error falls. `lu` factors
+    A with rows and columns permuted by p (A[p][:, p]; None: SuperLU's own ordering)."""
 
-    def __init__(self, A: sp.csr_matrix):
-        from scipy.sparse.linalg import splu
+    def __init__(self, A: sp.csr_matrix, lu, p: NDArray[np.int64] | None):
         self.A = A.tocsr()
-        self.lu = splu(A.tocsc(), permc_spec="COLAMD")
+        self.absA = abs(self.A)
+        self.lu, self.p = lu, p
+        self.inv = None if p is None else np.argsort(p)
+
+    def _once(self, r: NDArray[np.float64]) -> NDArray[np.float64]:
+        if self.p is None:
+            return np.asarray(self.lu.solve(r))
+        return np.asarray(self.lu.solve(r[self.p]))[self.inv]
+
+    def _berr(self, b: NDArray[np.float64], x: NDArray[np.float64]
+              ) -> tuple[float, NDArray[np.float64]]:
+        r = b - self.A @ x
+        den = self.absA @ np.abs(x) + np.abs(b)
+        return float(np.max(np.where(den > 0, np.abs(r) / np.where(den > 0, den, 1.0), 0.0))), r
 
     def solve(self, b: NDArray[np.float64]) -> NDArray[np.float64]:
-        x = self.lu.solve(b)
-        nb = float(np.abs(b).max())
-        if nb == 0.0:
-            return x
+        x = self._once(b)
+        berr, r = self._berr(b, x)
         for _ in range(REFINE_STEPS):
-            r = b - self.A @ x
-            if float(np.abs(r).max()) <= REFINE_RTOL * nb:
-                return x
-            x = x + self.lu.solve(r)
-        r = b - self.A @ x
-        if float(np.abs(r).max()) > REFINE_ACCEPT * nb:
-            raise RuntimeError(f"refinement stalled at {float(np.abs(r).max()) / nb:.1e}")
+            if berr <= REFINE_BERR:
+                break
+            x2 = x + self._once(r)
+            berr2, r2 = self._berr(b, x2)
+            if berr2 > 0.5 * berr:
+                if berr2 < berr:
+                    x, berr = x2, berr2
+                break
+            x, berr, r = x2, berr2, r2
+        if berr > REFINE_ACCEPT:
+            raise RuntimeError(f"refinement stalled at a backward error of {berr:.1e}")
         return x
 
 
@@ -618,7 +761,91 @@ def factor(A: sp.csr_matrix) -> _Refined:
     """A's LU factorization (SuperLU, COLAMD: on these planar meshes it fills little, 1.5 s for
     690k unknowns against pyamg's 16 -- 69 s per solve to 1e-8, the conductances spanning six
     decades), its `solve` refined (_Refined)."""
-    return _Refined(A)
+    from scipy.sparse.linalg import splu
+    return _Refined(A, splu(A.tocsc(), permc_spec="COLAMD"), None)
+
+
+def factor_ordered(A: sp.csr_matrix, p: NDArray[np.int64]) -> _Refined:
+    """A's factorization in the elimination order p (`dissection`'s, restricted to A's unknowns):
+    SuperLU on A[p][:, p] with no ordering of its own, pivoting on the diagonal (A is symmetric
+    positive definite, a weighted Laplacian with conductances to ground), its `solve` refined."""
+    from scipy.sparse.linalg import splu
+    return _Refined(A, splu(A[p][:, p].tocsc(), permc_spec="NATURAL", diag_pivot_thresh=0.0,
+                            options=dict(SymmetricMode=True)), p)
+
+
+ND_LEAF = 8           # dissection: subgraphs of at most this many nodes are not split (their own
+                      # order kept: larger leaves fill more, measured on 20269)
+
+
+@njit(cache=True)
+def dissection(indptr, indices, x, y, leaf):
+    """A geometric nested dissection of the graph (CSR, symmetric) whose node v lies at (x[v],
+    y[v]): an elimination order (perm[k] the node eliminated k-th). Each subgraph is split at the
+    median of its longer side, its separator the left nodes with a neighbour on the right,
+    ordered after both halves, recursively to `leaf` nodes. On a planar mesh the separators are
+    of the order of the square root of the subgraph's size: fill O(n log n)."""
+    n = len(x)
+    perm = np.arange(n)
+    stamp = -np.ones(n, dtype=np.int64)
+    side = np.zeros(n, dtype=np.int8)
+    stack_s = [0]
+    stack_e = [n]
+    seg = 0
+    buf = np.empty(n, dtype=np.int64)
+    while len(stack_s):
+        s = stack_s.pop()
+        e = stack_e.pop()
+        m = e - s
+        if m <= leaf:
+            continue
+        seg += 1
+        xmin, xmax, ymin, ymax = np.inf, -np.inf, np.inf, -np.inf
+        for k in range(s, e):
+            v = perm[k]
+            xmin, xmax = min(xmin, x[v]), max(xmax, x[v])
+            ymin, ymax = min(ymin, y[v]), max(ymax, y[v])
+        c = np.empty(m)
+        if xmax - xmin >= ymax - ymin:
+            for k in range(m):
+                c[k] = x[perm[s + k]]
+        else:
+            for k in range(m):
+                c[k] = y[perm[s + k]]
+        o = np.argsort(c)
+        for k in range(m):
+            buf[k] = perm[s + o[k]]
+        half = m // 2
+        for k in range(m):
+            v = buf[k]
+            stamp[v] = seg
+            side[v] = 0 if k < half else 1
+        nl = 0
+        ns = 0
+        sep = np.empty(half, dtype=np.int64)
+        for k in range(half):
+            v = buf[k]
+            cut = False
+            for q in range(indptr[v], indptr[v + 1]):
+                w = indices[q]
+                if w != v and stamp[w] == seg and side[w] == 1:
+                    cut = True
+                    break
+            if cut:
+                sep[ns] = v
+                ns += 1
+            else:
+                perm[s + nl] = v
+                nl += 1
+        for k in range(half, m):
+            perm[s + nl + (k - half)] = buf[k]
+        for k in range(ns):
+            perm[e - ns + k] = sep[k]
+        stack_s.append(s)
+        stack_e.append(s + nl)
+        stack_s.append(s + nl)
+        stack_e.append(s + nl + (m - half))
+    return perm
 
 
 # ------------------------------------------------------------------ demand
@@ -665,24 +892,29 @@ def _points_of(xy, tri, quad: int) -> tuple[NDArray[np.float64], NDArray[np.floa
 
 def point_demand(geo: gc.Geometry, m: Mesh, c: Cells) -> PointDemand:
     """The baseline's demand on mesh m (its cells at the run's width, c)."""
-    spec, fs = m.cx.spec, m.fs
-    P, wt, t = _points_of(m.xy, m.tri, fs.quad)
-    ok = c.cell[t] >= 0                                    # reaches the street at w
-    P, wt = P[ok], wt[ok]
+    return demand_on(geo, m.cx.spec, m.fs.quad, m.xy, m.tri[c.cell >= 0], m.cx.band_open)
+
+
+def demand_on(geo: gc.Geometry, spec: gc.Spec, quad: int, xy: NDArray[np.float64],
+              tri: NDArray[np.int64], band_open) -> PointDemand:
+    """The demand (module docstring) on the triangles `tri` (of vertices xy) that reach the street
+    at the run's width, in their order (the points of triangle k are rows k quad .. (k + 1) quad
+    - 1), then the open band's."""
+    P, wt, _t = _points_of(xy, tri, quad)
     # the open band's points (u = 0)
-    btris = gc._triangulate(m.cx.band_open, spec.s)
+    btris = gc._triangulate(band_open, spec.s)
     if len(btris):
         bc = shapely.get_coordinates(btris).reshape(-1, 4, 2)[:, :3]
         bxy, binv = np.unique(bc.reshape(-1, 2), axis=0, return_inverse=True)
-        BP, bwt, _bt = _points_of(bxy, binv.reshape(-1, 3), fs.quad)
+        BP, bwt, _bt = _points_of(bxy, binv.reshape(-1, 3), quad)
     else:
         BP, bwt = np.zeros((0, 2)), np.zeros(0)
-    xy = np.concatenate([P, BP])
+    pxy = np.concatenate([P, BP])
     w = np.concatenate([wt, bwt])
     band = np.concatenate([np.zeros(len(P), dtype=bool), np.ones(len(BP), dtype=bool)])
     polys = geo.polys
     n = len(polys)
-    pts = shapely.points(xy[:, 0], xy[:, 1])
+    pts = shapely.points(pxy[:, 0], pxy[:, 1])
     tree = shapely.STRtree(polys)
     (pi, hi), dist = tree.query_nearest(pts, return_distance=True, all_matches=False)
     ring = dist <= spec.ring_m
@@ -700,9 +932,9 @@ def point_demand(geo: gc.Geometry, m: Mesh, c: Cells) -> PointDemand:
         cols.append(lack[qi])
     r, cl = np.concatenate(rows), np.concatenate(cols)
     tot = np.bincount(cl, weights=w[r], minlength=n)
-    S = sp.csr_matrix((w[r] / tot[cl], (r, cl)), shape=(len(xy), n))
+    S = sp.csr_matrix((w[r] / tot[cl], (r, cl)), shape=(len(pxy), n))
     walled = tot == 0
-    return PointDemand(xy=xy, band=band, S=S, walled=walled, shadowed=shadowed)
+    return PointDemand(xy=pxy, band=band, S=S, walled=walled, shadowed=shadowed)
 
 
 def locate(m: Mesh, xy: NDArray[np.float64]) -> NDArray[np.int64]:
@@ -756,14 +988,39 @@ def live_homes(geo: gc.Geometry, m: Mesh, c: Cells) -> NDArray[np.bool_]:
     """Per home: some open ground within ring_m of its outline reaches the street on the mesh's
     cells (a triangle with a cell, or the open band): Placement's test under the width form (its
     complement the homes walled in)."""
-    ring = m.cx.spec.ring_m
-    geom = shapely.polygons(m.xy[m.tri])
-    qh, qt = shapely.STRtree(geom).query(geo.polys, predicate="dwithin", distance=ring)
-    out = np.zeros(len(geo.polys), dtype=bool)
-    out[qh[c.cell[qt] >= 0]] = True
-    parts = shapely.get_parts(m.cx.band_open)
+    return ring_of(geo, m.cx.spec.ring_m, m.xy, m.tri, m.cx.band_open).live(c.cell >= 0)
+
+
+RING_CHUNK = 1_000_000    # ring_of: triangles made shapely polygons at a time (memory only)
+
+
+@dataclass(frozen=True, eq=False)
+class Ring:
+    """Each home's open ground within ring_m of its outline: `tri` (homes x triangles) 0/1, `band`
+    the homes with the open street band within ring_m."""
+    tri: sp.csr_matrix
+    band: NDArray[np.bool_]
+
+    def live(self, live_tri: NDArray[np.bool_]) -> NDArray[np.bool_]:
+        """Per home: a triangle of its ring reaching the street (`live_tri`), or the band."""
+        return (self.tri @ live_tri.astype(np.float64) > 0) | self.band
+
+
+def ring_of(geo: gc.Geometry, ring_m: float, xy: NDArray[np.float64], tri: NDArray[np.int64],
+            band_open) -> Ring:
+    polys = geo.polys
+    hs, ts = [], []
+    for k0 in range(0, len(tri), RING_CHUNK):
+        geom = shapely.polygons(xy[tri[k0:k0 + RING_CHUNK]])
+        qh, qt = shapely.STRtree(geom).query(polys, predicate="dwithin", distance=ring_m)
+        hs.append(qh)
+        ts.append(qt + k0)
+    h_, t_ = np.concatenate(hs), np.concatenate(ts)
+    R = sp.csr_matrix((np.ones(len(h_)), (h_, t_)), shape=(len(polys), len(tri)))
+    band = np.zeros(len(polys), dtype=bool)
+    parts = shapely.get_parts(band_open)
     parts = parts[shapely.area(parts) > 0]
     if len(parts):
-        bh, _ = shapely.STRtree(parts).query(geo.polys, predicate="dwithin", distance=ring)
-        out[bh] = True
-    return out
+        bh, _ = shapely.STRtree(parts).query(polys, predicate="dwithin", distance=ring_m)
+        band[bh] = True
+    return Ring(tri=R, band=band)

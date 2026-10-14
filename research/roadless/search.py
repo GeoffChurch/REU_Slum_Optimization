@@ -31,7 +31,10 @@ relax.py's rows of that plan, power and conductance): the seed is the first move
 and checked against SIMP's own score of it, so a swing from it finishes SIMP's answer.
 
     CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/search.py <ids,> <spec> <p> \
-        <cpu|gpu> <conductance> <d_max>
+        <cpu|gpu> <metric> <d_max>
+
+metric: a raster conductance (lifted.conductance_of) or the complex's name (gap_clear.ComplexMetric;
+cpu only): metrics.metric_of, resolved here and handed down (seam.Metric).
 
 spec: GP<grow>x<greedy picker>r<restore share per round>[m<shortlist>], e.g.
 GP3xS0.01catr0.005m8; FL<same>c<cap on the conditional adds' scorings>, e.g.
@@ -65,9 +68,10 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
-import lifted  # noqa: E402
 import clear  # noqa: E402
-from clear import RTOL_SCORE, Clearing, rows_dir, sweep_of  # noqa: E402
+import seam  # noqa: E402
+from clear import RTOL_SCORE, rows_dir, sweep_of  # noqa: E402
+from seam import ClearingModel  # noqa: E402
 
 R = TypeVar("R")
 R_co = TypeVar("R_co", covariant=True)             # a Ranker only returns it
@@ -89,11 +93,11 @@ class World(Protocol):
 
 
 class _Exact:
-    """The exact world: real geometry, the metric conductance, RTOL_SCORE (clear.exact, looked
-    up at call time so memprobe_greedy's instrumentation applies)."""
+    """The exact world: real geometry, the metric itself (seam.ClearingModel.exact: the raster's
+    clear.exact, looked up at call time so memprobe_greedy's instrumentation applies)."""
 
     def score(self, s: SearchState, removed: np.ndarray) -> Score:
-        return Score(*clear.exact(s.c, removed, s.power))
+        return Score(*s.c.exact(removed, s.power))
 
 
 EXACT = _Exact()
@@ -159,7 +163,7 @@ class SearchState:
     current state's in `world` (UNSCORED, None: not scored); `order` every building cleared, in
     pick order (relax.cut_to_budget's); `scorings` the candidate scorings spent (the caps);
     `movable` the buildings a move may touch."""
-    c: Clearing
+    c: ClearingModel
     power: float
     score: Score
     world: World | None
@@ -168,7 +172,7 @@ class SearchState:
     movable: np.ndarray
 
     @classmethod
-    def start(cls, c: Clearing, *, power: float, score: Score, world: World | None
+    def start(cls, c: ClearingModel, *, power: float, score: Score, world: World | None
               ) -> SearchState:
         """From c's current clearing, nothing spent, every building movable."""
         return cls(c, power, score, world, [], 0, np.ones(c.n, dtype=bool))
@@ -524,14 +528,14 @@ class IfBetter:
 
 
 class Gains(NamedTuple):
-    t: clear.Tension            # the round's tension (Catchment sweeps its system)
+    t: seam.Tension             # the round's tension (Catchment sweeps its flow)
     T: np.ndarray               # t.g / cost: gain per unit of population (removed: -inf)
 
 
 @dataclass(frozen=True)
 class AddTension:
     def rank(self, s: SearchState) -> Gains:
-        t = s.c.tension(s.power)
+        t = s.c.tension(s.power, restore=False)
         return Gains(t, t.g / s.c.cost)
 
 
@@ -576,8 +580,8 @@ class Spaced:
                 continue
             taken.append(j)
             D += float(c.cost[j])
-            near.update(int(k) for k in c.sc.tree.query(c.sc.polys[j], predicate="dwithin",
-                                                         distance=self.gap))
+            near.update(int(k) for k in c.tree.query(c.polys[j], predicate="dwithin",
+                                                      distance=self.gap))
         return taken
 
     def tiers(self, s: SearchState, r: Gains) -> list[Callable[[], Tier]]:
@@ -605,7 +609,7 @@ class Diverse:
         order = [int(j) for j in np.argsort(-r.T) if _addable(s, j)]
         cum = np.cumsum(c.cost[order])
         cand = order[:int(np.searchsorted(cum, self.reach * (target - D))) + 1]
-        H = self.source.gram(c, r.t, cand, s.power)
+        H = self.source.gram(r.t, cand, s.power)
         gain, cost = r.t.g[cand], c.cost[cand]
         firsts = [None] + [int(i) for i in np.argsort(-gain / cost)[1:self.width]]
         batches: dict[frozenset[int], list[int]] = {}   # distinct batches, each in pick order
@@ -656,7 +660,7 @@ class GreedyRows:
     """The greedy's rows (clear.greedy_block's format): every state scored exactly; per step D,
     perm (J_power), perm1 (P) and the step's buildings in pick order, after a step-0 row."""
 
-    def __init__(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+    def __init__(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
                  t0: float):
         self.block_id, self.n, self.power, self.J0, self.P0, self.t0 = (
             block_id, c.n, power, J0, P0, t0)
@@ -871,7 +875,7 @@ class PruneRows:
     exactly; written in increasing D in the greedy's format, `cleared` in index order (the
     states are nested), `t` the time when written."""
 
-    def __init__(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+    def __init__(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
                  d_max: float, t0: float):
         self.block_id, self.n, self.power, self.J0, self.P0, self.d_max, self.t0 = (
             block_id, c.n, power, J0, P0, d_max, t0)
@@ -932,7 +936,7 @@ class GrowPrune:
         return Seq((With(Silent(), greedy(self.add, self.grow * d_max)),
                     Grown(block_id=block_id, t0=t0)))
 
-    def build(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+    def build(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
               d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built:
         rec = PruneRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max, t0=t0)
         restore = restore_round(step=self.restore, shortlist=self.shortlist, screen=screen)
@@ -1014,7 +1018,7 @@ class FloatRows:
     `cleared` deltas and cleared_through does not read them), after a D 0 row, `t` the time when
     written. Every exact state at or below d_max is offered to the archive."""
 
-    def __init__(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+    def __init__(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
                  d_max: float, archive: Archive, t0: float):
         self.block_id, self.n, self.power, self.J0, self.P0, self.d_max, self.t0 = (
             block_id, c.n, power, J0, P0, d_max, t0)
@@ -1056,7 +1060,7 @@ class FloatPrune:
     def screen_eps(self) -> float:
         return self.base.screen_eps
 
-    def build(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+    def build(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
               d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built:
         g = self.base
         archive = Archive(step=g.restore)
@@ -1123,7 +1127,7 @@ class Swings:
                 + (f"m{self.shortlist}" if self.shortlist else "")
                 + f".P{self.tries}w{self.width}" + ("x2" if self.pairs else ""))
 
-    def build(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+    def build(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
               d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built:
         archive = Archive(step=self.restore)
         rec = FloatRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max,
@@ -1214,7 +1218,7 @@ class Seeded:
     def screen_eps(self) -> float:
         return self.plan.screen_eps
 
-    def build(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+    def build(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
               d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built:
         inner = self.plan.build(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max,
                                 t0=t0, screen=screen, polish_world=polish_world)
@@ -1235,7 +1239,7 @@ class SearchPlan(Protocol):
     @property
     def screen_eps(self) -> float: ...
 
-    def build(self, *, block_id: str, c: Clearing, power: float, J0: float, P0: float,
+    def build(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
               d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built: ...
 
 
@@ -1269,16 +1273,12 @@ def _unseeded(spec: str, *, sweep: clear.Sweep, pool: int) -> SearchPlan:
     raise ValueError(f"unknown search {spec!r}")
 
 
-def prune_block(b: Any, plan: SearchPlan, *,
-                screen_of: Callable[[Clearing, float], Valuer],
-                polish_of: Callable[[Clearing, float], Graded], power: float,
-                along: str, device: str, d_max: float) -> pd.DataFrame:
-    cond = lifted.conductance_of(along, lifted.scans_of(device))
-    p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells, solver=lifted.solver_of(device))
-    mesh = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
-    c = Clearing(b, mesh, p, population=common.POPULATIONS["area"],
-                 demand=common.PopulationDemand())
-    J0, P0 = c.sc.J(c.sc.u0, power), c.sc.P0
+def prune_block(b: Any, plan: SearchPlan, *, metric: seam.Metric,
+                screen_of: Callable[[ClearingModel, float], Valuer],
+                polish_of: Callable[[ClearingModel, float], Graded], power: float,
+                d_max: float) -> pd.DataFrame:
+    c = metric.clearing(b, demand=common.PopulationDemand())
+    J0, P0 = c.baseline(power)
     t0 = time.time()
     built = plan.build(block_id=b.block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max,
                        t0=t0, screen=screen_of(c, power), polish_world=polish_of(c, power))
@@ -1290,20 +1290,19 @@ def prune_block(b: Any, plan: SearchPlan, *,
     return rows
 
 
-def main(ids: list[str], plan: SearchPlan, power: float, device: str, along: str,
+def main(ids: list[str], plan: SearchPlan, power: float, metric: seam.Metric,
          d_max: float) -> None:
     import polish_greedy  # the cheap preset's polish world
-    import relax  # the edge binds the eps world; search.py's library code does not import relax
 
-    def screen_of(c: Clearing, pw: float) -> Valuer:
-        return relax.Relaxation(c, pw, q=1.0, rtol=RTOL_SCORE, eps=plan.screen_eps)
+    def screen_of(c: ClearingModel, pw: float) -> Valuer:
+        return c.relaxation(pw, q=1.0, rtol=RTOL_SCORE, eps=plan.screen_eps)
 
-    def polish_of(c: Clearing, pw: float) -> Graded:
-        """The cheap preset's polish world (the swings' last stage)."""
-        return relax.Relaxation(c, pw, q=1.0, rtol=polish_greedy.RTOL,
-                                eps=polish_greedy.SCORE_EPS, params=c.p)
+    def polish_of(c: ClearingModel, pw: float) -> Graded:
+        """The cheap preset's polish world (the swings' last stage), under the metric itself."""
+        return c.relaxation(pw, q=1.0, rtol=polish_greedy.RTOL,
+                            eps=polish_greedy.SCORE_EPS).metric_world(polish_greedy.SCORE_EPS)
 
-    out = rows_dir(f"{plan.name}D{d_max:g}", 0.5, "area", power, along)
+    out = rows_dir(f"{plan.name}D{d_max:g}", 0.5, "area", power, metric.name)
     out.mkdir(parents=True, exist_ok=True)
     failed = []
     for b in common.build_blocks(ids):
@@ -1311,8 +1310,8 @@ def main(ids: list[str], plan: SearchPlan, power: float, device: str, along: str
         if f.exists():
             continue
         try:
-            rows = prune_block(b, plan, screen_of=screen_of, polish_of=polish_of, power=power,
-                               along=along, device=device, d_max=d_max)
+            rows = prune_block(b, plan, metric=metric, screen_of=screen_of, polish_of=polish_of,
+                               power=power, d_max=d_max)
         except Exception as e:
             print(f"{b.block_id} FAILED {type(e).__name__}: {str(e)[:200]}", flush=True)
             failed.append(b.block_id)
@@ -1325,18 +1324,22 @@ def main(ids: list[str], plan: SearchPlan, power: float, device: str, along: str
 
 
 if __name__ == "__main__":
+    import lifted
+    import metrics
     import relax
     import search       # run as a script this file would be `__main__`, and relax's `search`
                         # a second copy of the engine (its own EXACT and classes)
     power, device, along, d_max = (float(sys.argv[3]), sys.argv[4], sys.argv[5],
                                    float(sys.argv[6]))
+    metric = metrics.metric_of(along, device=device,
+                               mesh=lifted.UniformMesh(0.5, offset=lifted.OFFSET))
 
     def simp_seeds(name: str) -> dict[str, search.Seed]:
         """SIMP plan `name`'s clearings at this run's budget, power and conductance."""
         plan = relax.plan_of(name)
         if plan.name != name:
             raise ValueError(f"SIMP plan {name!r} is spelled {plan.name!r}")
-        files = sorted(relax.rows_of(plan, along, d_max).glob(f"*_p{power:g}.parquet"))
+        files = sorted(relax.rows_of(plan, metric.name, d_max).glob(f"*_p{power:g}.parquet"))
         if not files:
             raise ValueError(f"no rows of SIMP {name} ({along}, D {d_max:g}, p {power:g})")
         rows = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
@@ -1346,4 +1349,4 @@ if __name__ == "__main__":
     search.main(sys.argv[1].split(","),
                 search.plan_of(sys.argv[2], sweep=sweep_of(device), pool=relax.PAIR_POOL,
                                simp_seeds=simp_seeds),
-                power, device, along, d_max)
+                power, metric, d_max)

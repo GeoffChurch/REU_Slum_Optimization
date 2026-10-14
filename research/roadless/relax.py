@@ -19,10 +19,12 @@ pickers' rule, best gain per unit population up to D). Step size: a parabola thr
 J'(0) = -gap and J(1), checked, and shorter steps when neither it nor the full step descends
 (FW_BACKOFF). Rounding: clear buildings by decreasing x while they fit, then score exactly.
 
-    CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/relax.py one|path <ids,|all> <p> <cpu|gpu> <plan> <along> [workers] [budget]
+    CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/relax.py one|path <ids,|all> <p> <cpu|gpu> <plan> <metric> [workers] [budget]
 
-one: SIMP at one budget (default D_LENS, 0.05; plus the Frank-Wolfe relaxation and bound if
-fw > 0), rows in relax_rows/<along>/<plan>/D<budget>/. path: nested budgets D 0.01 .. 0.15,
+metric: a raster conductance (`along`: lifted.conductance_of, [@<search along>]) or the gap
+complex's name (gap_clear.ComplexMetric, cpu only), resolved here (metrics.metric_of) and handed
+down (seam.Metric). one: SIMP at one budget (default D_LENS, 0.05; plus the Frank-Wolfe relaxation
+and bound if fw > 0), rows in relax_rows/<metric>/<plan>/D<budget>/. path: nested budgets D 0.01 .. 0.15,
 rows in the greedy's format (clear.rows_dir, picker SIMP<plan>), so picker_compare reads them
 like any picker.
 
@@ -40,6 +42,7 @@ the optional suffixes are Plan's (.e .b .k[s] .r[l] .p .w .c .u).
 """
 from __future__ import annotations
 
+import dataclasses
 import re
 import sys
 import time
@@ -57,6 +60,7 @@ import common  # noqa: E402
 import lifted  # noqa: E402
 import clear  # noqa: E402
 import search  # noqa: E402
+import seam  # noqa: E402
 from clear import EPS, RTOL_SCORE, Clearing, _cells_axes, rows_dir  # noqa: E402
 
 D_LENS = 0.05          # Lens A's budget (owner, 2026-10-03: 0.10 saturates under sightline)
@@ -87,21 +91,10 @@ class Relaxation:
         self._share = xp.asarray(lifted.axes(c.p.K)[2] / np.pi)
 
     def proj(self, x: np.ndarray) -> np.ndarray:
-        """The clearing a design x stands for: x itself, or with beta > 0 a smooth step at
-        ETA, H(x) = (tanh(beta ETA) + tanh(beta (x - ETA))) / (tanh(beta ETA) + tanh(beta
-        (1 - ETA))), so a mostly-closed building conducts ~nothing (no grey leaks) and 0, 1
-        stay 0, 1. Conductance share H(x)^q, cost c . H(x)."""
-        if self.beta == 0.0:
-            return x
-        b = self.beta
-        return ((np.tanh(b * ETA) + np.tanh(b * (x - ETA)))
-                / (np.tanh(b * ETA) + np.tanh(b * (1 - ETA))))
+        return project(x, self.beta)
 
     def dproj(self, x: np.ndarray) -> np.ndarray:
-        if self.beta == 0.0:
-            return np.ones_like(x)
-        b = self.beta
-        return b * (1 - np.tanh(b * (x - ETA)) ** 2) / (np.tanh(b * ETA) + np.tanh(b * (1 - ETA)))
+        return dproject(x, self.beta)
 
     def open_of(self, x: np.ndarray) -> np.ndarray:
         o = self.ff0.copy()
@@ -212,6 +205,29 @@ class Relaxation:
     def perm(self, J: float) -> float:
         return 1.0 - (J / self.J0) ** (1.0 / self.power)
 
+    def metric_world(self, eps: float) -> Relaxation:
+        """The eps world at `eps` under the metric's own conductance (c.p, not the search's), q 1,
+        no projection: the incumbent's and the polish's scorer."""
+        return Relaxation(self.c, self.power, q=1.0, rtol=self.rtol, eps=eps, params=self.c.p)
+
+
+def project(x: np.ndarray, beta: float) -> np.ndarray:
+    """The clearing a design x stands for: x itself, or with beta > 0 a smooth step at ETA, H(x)
+    = (tanh(beta ETA) + tanh(beta (x - ETA))) / (tanh(beta ETA) + tanh(beta (1 - ETA))), so a
+    mostly-closed building conducts ~nothing (no grey leaks) and 0, 1 stay 0, 1. Conductance
+    share H(x)^q, cost c . H(x). Every relaxation's (seam.Relaxed.proj)."""
+    if beta == 0.0:
+        return x
+    return ((np.tanh(beta * ETA) + np.tanh(beta * (x - ETA)))
+            / (np.tanh(beta * ETA) + np.tanh(beta * (1 - ETA))))
+
+
+def dproject(x: np.ndarray, beta: float) -> np.ndarray:
+    if beta == 0.0:
+        return np.ones_like(x)
+    return (beta * (1 - np.tanh(beta * (x - ETA)) ** 2)
+            / (np.tanh(beta * ETA) + np.tanh(beta * (1 - ETA))))
+
 
 def knapsack(grad: np.ndarray, cost: np.ndarray, budget: float) -> np.ndarray:
     """argmin <grad, s> s.t. cost . s <= budget, 0 <= s <= 1: the most negative gradient per
@@ -304,7 +320,7 @@ FW_BACKOFF = 4.0
 FW_STEP_FLOOR = 1e-3
 
 
-def frank_wolfe(rel: Relaxation, budget: float, iters: int, log=print) -> dict:
+def frank_wolfe(rel: seam.Relaxed, budget: float, iters: int, log=print) -> dict:
     cost = rel.c.cost
     x = np.zeros(len(cost))
     J, grad = rel.value_grad(x)
@@ -577,7 +593,7 @@ class Incumbent:
     the rounding of update 3 scores 0.810 and the last 0.012, the gate and its neighbours, being
     substitutes, flipping between x 0.3 and 0.5 until the continuation drops them (NOTES)."""
 
-    def __init__(self, rel: Relaxation, budget: float, every: int, *, samples: int,
+    def __init__(self, rel: seam.Relaxed, budget: float, every: int, *, samples: int,
                  sample_in: tuple[tuple[float, float], ...],
                  first: np.ndarray | None = None, score_eps: float = 0.0):
         self.rel, self.budget, self.every, self.first = rel, budget, every, first
@@ -587,8 +603,7 @@ class Incumbent:
         self.rng = np.random.default_rng(SAMPLE_SEED)
         # score_eps > 0: candidates scored in the eps world at score_eps under the METRIC
         # conductance (rel may optimize under a search one), q 1, no projection
-        self.scorer = (Relaxation(rel.c, rel.power, q=1.0, rtol=rel.rtol, eps=score_eps,
-                                  params=rel.c.p) if score_eps > 0 else None)
+        self.scorer = rel.metric_world(score_eps) if score_eps > 0 else None
         self.n = 0
         self.J, self.r = np.inf, np.zeros(rel.c.n)
         self._seen: set[bytes] = set()
@@ -663,7 +678,7 @@ class Incumbent:
             f"{moves} moves kept, {used} scorings, J {J0:.6g} -> {self.J:.6g}")
 
 
-def simp(rel: Relaxation, x0: np.ndarray, budget: float,
+def simp(rel: seam.Relaxed, x0: np.ndarray, budget: float,
          stages: tuple[tuple[float, float], ...], iters: int, update: Update, log=print,
          xlo: np.ndarray | None = None, watch=None) -> np.ndarray:
     """SIMP continuation from x0: for (q, beta) in stages, up to `iters` updates by `update`
@@ -709,40 +724,69 @@ def simp(rel: Relaxation, x0: np.ndarray, budget: float,
     return x
 
 
+@dataclass(frozen=True, kw_only=True)
+class RasterMetric:
+    """The raster's metric (seam.Metric): `along` the conductance (lifted.conductance_of:
+    `<along>[+<cells>]+apwfs`), or <metric>@<search>: SIMP's gradient and the greedy's tension
+    under the search one's along-conductance (as the greedy's translucent search), every score
+    under the metric; `device` the solves', the sightline scans' and the catchment sweep's (cpu |
+    gpu); `mesh` the grid (a plan's suffix names it). Its name is `along` (the rows' directories
+    as before the seam)."""
+    along: str
+    device: str
+    mesh: lifted.MeshSpec
+
+    @property
+    def name(self) -> str:
+        return self.along
+
+    @property
+    def sweep(self) -> clear.Sweep:
+        return clear.sweep_of(self.device)
+
+    def clearing(self, block, *, demand: common.Demand) -> Clearing:
+        """`demand`: what each home injects (common.Demand); the area population sets the cost
+        whatever it is."""
+        scans = lifted.scans_of(self.device)
+        specs = self.along.split("@")
+        cond = lifted.conductance_of(specs[0], scans)
+        p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells,
+                          solver=lifted.solver_of(self.device))
+        return Clearing(block, self.mesh, p, population=common.POPULATIONS["area"],
+                        search=lifted.along_of(specs[1], scans) if len(specs) == 2 else None,
+                        demand=demand)
+
+    def coarse(self, h: float) -> RasterMetric:
+        return dataclasses.replace(self, mesh=lifted.UniformMesh(h, offset=lifted.OFFSET))
+
+
 def _clearing(bid: str, device: str, along: str, mesh: lifted.MeshSpec, *,
               demand: common.Demand) -> Clearing:
-    """`along`: the metric's conductance (lifted.conductance_of: `<along>[+<cells>]+apwfs`), or
-    <metric>@<search>: SIMP's gradient under the search one's along-conductance (as the greedy's
-    translucent search), every score under the metric. `demand`: what each home injects
-    (common.Demand); the area population sets the cost whatever it is."""
+    """The raster's clearing of block `bid` (RasterMetric's)."""
     [b] = common.build_blocks([bid])
-    scans = lifted.scans_of(device)
-    specs = along.split("@")
-    cond = lifted.conductance_of(specs[0], scans)
-    p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells, solver=lifted.solver_of(device))
-    return Clearing(b, mesh, p, population=common.POPULATIONS["area"],
-                    search=lifted.along_of(specs[1], scans) if len(specs) == 2 else None,
-                    demand=demand)
+    return RasterMetric(along=along, device=device, mesh=mesh).clearing(b, demand=demand)
 
 
-def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: float, *,
+def one(bid: str, power: float, metric: seam.Metric, plan: Plan, budget: float, *,
         demand: common.Demand) -> dict:
-    """SIMP at one budget on `bid`, J_power under `demand` (common.Demand: J_1 is P_q under a
-    common.PriorityDemand), the cost the area population's."""
-    c = _clearing(bid, device, along, plan.mesh, demand=demand)
-    rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
+    """SIMP at one budget on `bid` under `metric`, J_power under `demand` (common.Demand: J_1 is
+    P_q under a common.PriorityDemand), the cost the area population's."""
+    [b] = common.build_blocks([bid])
+    c = metric.clearing(b, demand=demand)
+    rel = c.relaxation(power, q=1.0, rtol=plan.rtol, eps=plan.eps)
     log = lambda s: print(f"{bid} {s}", flush=True)  # noqa: E731
     t0 = time.time()
     # B's first stage: the crossings that free the enclosed homes, held at 1 through SIMP (xlo),
     # the incumbent's roundings (first) and its polish (not movable); none enclosed, none held
-    held = clear.free_first(c, budget=budget, held=np.zeros(c.n, dtype=bool))
+    held = c.free_first(budget=budget, held=np.zeros(c.n, dtype=bool))
     if held.any() and (plan.fw > 0 or plan.coarse > 0 or plan.coarse_all > 0 or plan.starts > 1
                        or plan.seed or plan.track):
         raise NotImplementedError(f"{bid}: the free stage holds {int(held.sum())} buildings, and "
                                   f"fw, .c, .C, .m, .g and .G are not built for held buildings: "
                                   f"{plan.name}")
     xlo = np.where(held, 1.0, XMIN)
-    out = dict(block=bid, n=c.n, power=power, demand=demand.name, plan=plan.name, along=along)
+    out = dict(block=bid, n=c.n, power=power, demand=demand.name, plan=plan.name,
+               along=metric.name)
     if plan.fw > 0:
         fw = frank_wolfe(rel, budget, plan.fw, log=log)
         x = fw["x"]
@@ -774,8 +818,8 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
     r_greedy = None
     if plan.seed or plan.track:
         spec = plan.seed or plan.track
-        rnd = search.greedy_round(spec, clear.sweep_of(device))
-        s = search.SearchState.start(c, power=power, score=search.Score(rel.J0, c.sc.P0),
+        rnd = search.greedy_round(spec, metric.sweep)
+        s = search.SearchState.start(c, power=power, score=search.Score(*c.baseline(power)),
                                      world=search.EXACT)
         search.greedy(rnd, budget)(s, search.Silent())
         c.removed[:] = False
@@ -785,11 +829,10 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
         log(f"  the greedy {spec}: {time.time() - t0:.0f}s")
     xs = x
     if plan.coarse_all > 0:
-        coarse = lifted.UniformMesh(plan.coarse_all, offset=lifted.OFFSET)
-        rel_c = Relaxation(_clearing(bid, device, along, coarse, demand=demand), power,
-                           rtol=plan.rtol, eps=plan.eps)
-        log(f"  all stages at h {plan.coarse_all:g}: {rel_c.c.sc.grid.inside.sum()} cells, "
-            f"fine {c.sc.grid.inside.sum()}; {starts} start(s)")
+        rel_c = metric.coarse(plan.coarse_all).clearing(b, demand=demand).relaxation(
+            power, q=1.0, rtol=plan.rtol, eps=plan.eps)
+        log(f"  all stages at h {plan.coarse_all:g}: {rel_c.c.cells} cells, "
+            f"fine {c.cells}; {starts} start(s)")
         for k in range(starts):
             inc_c = Incumbent(rel_c, budget, max(plan.keep, 1), samples=plan.samples,
                               sample_in=sample_in, score_eps=plan.kscore)
@@ -802,18 +845,16 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
                 xs = xk                                   # the polish's undecided set from it
             del inc_c
         del rel_c
-        c.p.solver.release()     # the coarse systems' cached blocks: 1558 ran out of 32 GB without
+        c.release()     # the coarse systems' cached blocks: 1558 ran out of 32 GB without
 
     else:
         for k in range(starts):
             xk = x if k == 0 else start_x(k, c.cost, budget)
             stages = plan.stages
             if plan.coarse > 0:
-                coarse = lifted.UniformMesh(plan.coarse, offset=lifted.OFFSET)
-                rel_c = Relaxation(_clearing(bid, device, along, coarse, demand=demand), power,
-                                   rtol=plan.rtol, eps=plan.eps)
-                log(f"  coarse h {plan.coarse:g}: {rel_c.c.sc.grid.inside.sum()} cells, fine "
-                    f"{c.sc.grid.inside.sum()}")
+                rel_c = metric.coarse(plan.coarse).clearing(b, demand=demand).relaxation(
+                    power, q=1.0, rtol=plan.rtol, eps=plan.eps)
+                log(f"  coarse h {plan.coarse:g}: {rel_c.c.cells} cells, fine {c.cells}")
                 xk = simp(rel_c, xk, budget, stages[:-1], plan.iters, plan.update, log=log,
                           xlo=xlo, watch=watch)
                 del rel_c
@@ -843,8 +884,8 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
                simp_grey=float(np.mean((xs > 0.05) & (xs < 0.95))),
                simp_cleared=np.flatnonzero(rs).tolist(), simp_x=xs.tolist(),
                free_D=float(c.cost[held].sum()), free_cleared=np.flatnonzero(held).tolist(),
-               enclosed=c.sc.enclosed_left(c.open_(rs > 0)), t=time.time() - t0)
-    print(f"{bid} n={c.n} p={power:g} {along} {plan.name}: "
+               enclosed=c.enclosed_left(rs > 0), t=time.time() - t0)
+    print(f"{bid} n={c.n} p={power:g} {metric.name} {plan.name}: "
           + (f"relaxed {out['relaxed_perm']:.4f} bound {out['bound_perm']:.4f} rounded "
              f"{out['rounded_perm']:.4f}; " if plan.fw > 0 else "")
           + f"SIMP rounded {out['simp_perm']:.4f} (D {out['simp_D']:.4f}, grey "
@@ -856,7 +897,7 @@ def one(bid: str, power: float, device: str, plan: Plan, along: str, budget: flo
 PATH_DS = tuple(round(0.01 * k, 2) for k in range(1, 16))
 
 
-def path(bid: str, power: float, device: str, plan: Plan, along: str, *,
+def path(bid: str, power: float, metric: seam.Metric, plan: Plan, *,
          demand: common.Demand) -> pd.DataFrame:
     """Nested SIMP: for D in PATH_DS, everything cleared so far held at 1, the rest reset to an
     even share of the remaining budget and the full q continuation rerun (warm-starting the
@@ -871,9 +912,10 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str, *,
             or plan.seed or plan.track):
         raise ValueError(f"coarse grids, polish and multi-start are not built for path: "
                          f"{plan.name}")
-    c = _clearing(bid, device, along, plan.mesh, demand=demand)
-    rel = Relaxation(c, power, rtol=plan.rtol, eps=plan.eps)
-    J0, P0 = rel.J0, c.sc.P0
+    [b] = common.build_blocks([bid])
+    c = metric.clearing(b, demand=demand)
+    rel = c.relaxation(power, q=1.0, rtol=plan.rtol, eps=plan.eps)
+    J0, P0 = rel.J0, c.baseline(power)[1]
     rows = [dict(block=bid, n=c.n, step=0, D=0.0, perm=0.0, perm1=0.0, cleared=[], P0=P0,
                  t=0.0)]
     fixed = np.zeros(c.n, dtype=bool)
@@ -881,7 +923,7 @@ def path(bid: str, power: float, device: str, plan: Plan, along: str, *,
     t0 = time.time()
     for i, D in enumerate(PATH_DS):
         last = fixed
-        fixed = clear.free_first(c, budget=D, held=last)
+        fixed = c.free_first(budget=D, held=last)
         rest = max(D - float(c.cost[fixed].sum()), 0.0)
         even = rest / max(float(c.cost[~fixed].sum()), 1e-12)
         warm = plan.warm > 0 and i > 0
@@ -916,16 +958,16 @@ _CFG: dict = {}
 def _run(bid: str) -> str | None:
     """`bid` if it failed (reported, and main exits non-zero at the end). The rows (named by
     the power alone) are the population's own demand's; pweight.py runs priority-weighted P."""
-    mode, power, device, plan, along, budget = (_CFG[k] for k in (
-        "mode", "power", "device", "plan", "along", "budget"))
+    mode, power, metric, plan, budget = (_CFG[k] for k in (
+        "mode", "power", "metric", "plan", "budget"))
     demand = common.PopulationDemand()
     try:
         if mode == "one":
-            pd.DataFrame([one(bid, power, device, plan, along, budget, demand=demand)]).to_parquet(
-                rows_of(plan, along, budget) / f"{bid}_p{power:g}.parquet")
+            pd.DataFrame([one(bid, power, metric, plan, budget, demand=demand)]).to_parquet(
+                rows_of(plan, metric.name, budget) / f"{bid}_p{power:g}.parquet")
         else:
-            out = rows_dir(f"SIMP{plan.name}", 0.5, "area", power, along) / f"{bid}.parquet"
-            path(bid, power, device, plan, along, demand=demand).to_parquet(out)
+            out = rows_dir(f"SIMP{plan.name}", 0.5, "area", power, metric.name) / f"{bid}.parquet"
+            path(bid, power, metric, plan, demand=demand).to_parquet(out)
             print(f"{time.strftime('%H:%M:%S')} {bid} path done", flush=True)
     except Exception as e:
         print(f"{bid} FAILED {type(e).__name__}: {e}"[:300], flush=True)
@@ -939,13 +981,14 @@ def _target(mode: str, bid: str, power: float, plan: Plan, along: str, budget: f
     return rows_dir(f"SIMP{plan.name}", 0.5, "area", power, along) / f"{bid}.parquet"
 
 
-def main(mode: str, ids: list[str], power: float, device: str, plan: Plan, along: str,
+def main(mode: str, ids: list[str], power: float, metric: seam.Metric, plan: Plan,
          workers: int, budget: float) -> None:
     if mode not in ("one", "path"):
         raise ValueError(f"unknown mode {mode!r}")
-    _target(mode, ids[0], power, plan, along, budget).parent.mkdir(parents=True, exist_ok=True)
-    _CFG.update(mode=mode, power=power, device=device, plan=plan, along=along, budget=budget)
-    todo = [i for i in ids if not _target(mode, i, power, plan, along, budget).exists()]
+    _target(mode, ids[0], power, plan, metric.name, budget).parent.mkdir(parents=True,
+                                                                         exist_ok=True)
+    _CFG.update(mode=mode, power=power, metric=metric, plan=plan, budget=budget)
+    todo = [i for i in ids if not _target(mode, i, power, plan, metric.name, budget).exists()]
     if workers == 1:
         failed = [f for f in map(_run, todo) if f]
     else:
@@ -957,7 +1000,10 @@ def main(mode: str, ids: list[str], power: float, device: str, plan: Plan, along
 
 
 if __name__ == "__main__":
+    import metrics
     ids = common.recipients() if sys.argv[2] == "all" else sys.argv[2].split(",")
-    main(sys.argv[1], ids, float(sys.argv[3]), sys.argv[4], plan_of(sys.argv[5]), sys.argv[6],
+    plan = plan_of(sys.argv[5])
+    main(sys.argv[1], ids, float(sys.argv[3]),
+         metrics.metric_of(sys.argv[6], device=sys.argv[4], mesh=plan.mesh), plan,
          int(sys.argv[7]) if len(sys.argv) > 7 else 1,
          float(sys.argv[8]) if len(sys.argv) > 8 else D_LENS)

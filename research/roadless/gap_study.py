@@ -209,8 +209,8 @@ def agree_one(bid: str) -> str | None:
             t_b = time.time() - t1
             for w in (0.0, RESOLUTION):
                 t2 = time.time()
-                fr = gc.free_first(geo, spec, w=w, budget=BUDGET, cost=c.cost, pop=c.sc.w,
-                                   held0=np.zeros(n, dtype=bool), cx0=cx)
+                fr = gc.free_first(geo, spec, w=w, grow=0.0, budget=BUDGET, cost=c.cost,
+                                   pop=c.sc.w, held0=np.zeros(n, dtype=bool), cx0=cx)
                 rows.append(dict(block=bid, mesh=mt, spec=spec.name, s=s, w=w,
                                  walled=int(gc.walled(he, w).sum()),
                                  held=" ".join(map(str, np.flatnonzero(fr.held))),
@@ -379,8 +379,8 @@ def sweep_one(job: tuple[str, float]) -> str | None:
         for w in WIDTHS:
             t1 = time.time()
             wall = gc.walled(he, w)
-            fr = gc.free_first(geo, spec, w=w, budget=SWEEP_BUDGET, cost=cost, pop=wpop,
-                               held0=np.zeros(n, dtype=bool), cx0=cx)
+            fr = gc.free_first(geo, spec, w=w, grow=0.0, budget=SWEEP_BUDGET, cost=cost,
+                               pop=wpop, held0=np.zeros(n, dtype=bool), cx0=cx)
             rows.append(dict(block=bid, spec=spec.name, s=s, w=w, walled=int(wall.sum()),
                              walled_pop=float(cost[wall].sum()), free_n=int(fr.held.sum()),
                              free_D=float(cost[fr.held].sum()),

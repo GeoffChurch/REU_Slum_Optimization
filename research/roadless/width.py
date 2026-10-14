@@ -431,7 +431,9 @@ def simp(bid: str, variant: str) -> None:
     """SIMP base, objective P, area D BUDGET, free first, under the variant (relax.one)."""
     rr._check_single_threaded()
     t0 = time.time()
-    row = relax.one(bid, 1.0, SIMP_DEVICE, SIMP_PLAN, VARIANTS[variant], BUDGET, demand=POP)
+    row = relax.one(bid, 1.0, relax.RasterMetric(along=VARIANTS[variant], device=SIMP_DEVICE,
+                                                 mesh=SIMP_PLAN.mesh), SIMP_PLAN, BUDGET,
+                    demand=POP)
     row.update(variant=variant, spec=VARIANTS[variant], budget=BUDGET, host=socket.gethostname(),
                peak_rss_gb=rr._status_gb("VmHWM"), wall=time.time() - t0)
     simp_path(variant, bid).parent.mkdir(parents=True, exist_ok=True)

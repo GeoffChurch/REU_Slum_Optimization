@@ -131,7 +131,9 @@ def task(bid: str, item: str) -> None:
     out = row_path(stage, obj, bid)
     t0 = time.time()
     if stage == "simp":
-        row = relax.one(bid, obj.power, DEVICE, PLAN, ALONG, BUDGET, demand=obj.demand)
+        row = relax.one(bid, obj.power,
+                        relax.RasterMetric(along=ALONG, device=DEVICE, mesh=PLAN.mesh), PLAN,
+                        BUDGET, demand=obj.demand)
     elif stage == "fw":
         row = bound(bid, obj)
     else:
@@ -198,7 +200,7 @@ def score_block(bid: str) -> None:
         cand = np.flatnonzero(x)
         own = cand[live[cand]]
         c.removed[:] = x
-        V = catch.shares(c, c.tension(1.0), cand.tolist())
+        V = catch.shares(c.tension(1.0, restore=False).flow(cand.tolist()), len(cand))
         c.removed[:] = False
         flow = sc.w[:, None] * V * live[:, None]
         out.append(dict(

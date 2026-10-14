@@ -56,9 +56,9 @@ def main(bid: str, along: str, d_max: float) -> None:
     gram = rnd.build.source.gram
     step = [0]
 
-    def gram_(c_, t, cand, power):
+    def gram_(t, cand, power):
         step[0] += 1
-        H, dt = _synced(lambda: gram(c_, t, cand, power))
+        H, dt = _synced(lambda: gram(t, cand, power))
         runs = STATS["runs"]
         print(f"step {step[0]}: gram {dt:.2f}s, {len(cand)} cand | sweep prepare "
               f"{STATS['prepare']:.2f}s, {STATS['waves']} waves over {STATS['n']} unknowns | "

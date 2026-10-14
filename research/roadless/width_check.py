@@ -153,7 +153,7 @@ def numbers(bid: str) -> dict[str, str]:
             J, grad = rel.value_sgrad(x0)
             out[f"relax_p{power:g}_q{q:g}"] = repr(J) + " " + _sha(grad)
         c.removed[:] = x
-        out["tension"] = _sha(c.tension(2.0).g)
+        out["tension"] = _sha(c.tension(2.0, restore=False).g)
         c.removed[:] = False
         f = current_map.flow(sc, sc.free0, p)
         out["flow"] = repr(f.P) + " " + _sha(f.phi, f.power, f.u)

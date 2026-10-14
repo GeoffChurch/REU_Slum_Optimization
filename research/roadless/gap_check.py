@@ -391,8 +391,8 @@ def free(_ids: list[str]) -> list[str]:
     wpop = np.array([1.0, 0.05, 1.0, 1.2, 3.0, 3.0, 3.0])
     cost = wpop / wpop.sum()
     spec = spec_of(0.125)
-    fr = gc.free_first(geo, spec, w=FREE_W, budget=1.0, cost=cost, pop=wpop,
-                       held0=np.zeros(n, dtype=bool))
+    fr = gc.free_first(geo, spec, w=FREE_W, grow=0.0, budget=1.0, cost=cost, pop=wpop,
+                       held0=np.zeros(n, dtype=bool), cx0=None)
     cx = gc.build(geo, spec, ~fr.held, carve=None, grow=0.0)
     he = gc.home_exits(gc.homes_of(geo, cx), gc.exit_widths(cx))
     ok = he[0] >= FREE_W and not fr.left[0]
@@ -402,7 +402,7 @@ def free(_ids: list[str]) -> list[str]:
     return [] if ok else ["shed"]
 
 
-def _no_rebuild(geo, spec, *, w, budget, cost, pop, held0, cx0=None):
+def _no_rebuild(geo, spec, *, w, grow, budget, cost, pop, held0, cx0):
     """free_first stopping after its first pass: the graph's claim is the answer."""
     real = gc.build
 
@@ -414,10 +414,10 @@ def _no_rebuild(geo, spec, *, w, budget, cost, pop, held0, cx0=None):
             return real(a[0], a[1], np.ones_like(a[2]), **k)     # the rebuild: nothing changes
         return real(*a, **k)
     with _patched(gc, "build", build_once):
-        fr = _FREE_FIRST(geo, spec, w=w, budget=budget, cost=cost, pop=pop, held0=held0,
-                         cx0=cx0)
-    return gc.Freed(held=fr.held, left=np.zeros_like(fr.left), crossings=fr.crossings,
-                    passes=1, misses=0)
+        fr = _FREE_FIRST(geo, spec, w=w, grow=grow, budget=budget, cost=cost, pop=pop,
+                         held0=held0, cx0=cx0)
+    return gc.Freed(target=fr.target, held=fr.held, left=np.zeros_like(fr.left),
+                    crossings=fr.crossings, passes=1, misses=0)
 
 
 _FREE_FIRST = gc.free_first

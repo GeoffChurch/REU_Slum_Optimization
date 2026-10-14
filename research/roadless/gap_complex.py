@@ -32,21 +32,24 @@ is at least w, or the open street band within ring_m of it (the raster's ground 
 ground there, are its street). Distances are the polygons' own (shapely), so as in the raster a
 ring reaches through a thin wall.
 
-FREE FIRST (`free_first`, clear.free_first on the complex). At width w: the region graph's nodes
+FREE FIRST (`free_first`, clear.free_first on the complex). At width w on the complex built on
+the footprints grown by `grow` (the study's: 0, the filtration read at w; the shy distance's
+runtime: w / 2 and the filtration at 0, its own geometry, gap_clear): the region graph's nodes
 the components of the triangles joined by open passages (the street's the one holding the exits)
 and the standing buildings; a building is adjacent to every component with a triangle touching its
-outline at a vertex on no other footprint's (clearing it opens its interior and frees the passages
-that end on it; a vertex where two footprints meet stays an obstacle while either stands), to the
-buildings it intersects, and to the street where it reaches into the band. Each round one
-Dijkstra from the street, entering a building costing its population share, picks the crossing
-with the least D per unit of the home's population, as clear.free_first does. A pass ends when the
-graph frees every walled-in home or none it can afford; the complex is then rebuilt without the
-held buildings and the metric's own test (`walled`) re-run, another pass taking any home the graph
-freed wrongly. Clearing a building can open a passage no triangle of the old complex shows (two
-buildings close across its former footprint), so the graph is generous and the rebuild decides.
+(grown) outline at a vertex on no other footprint's (clearing it opens its interior and frees the
+passages that end on it; a vertex where two footprints meet stays an obstacle while either
+stands), to the buildings whose grown footprints meet its own (within 2 grow), and to the street
+where its grown footprint reaches into the band. Each round one Dijkstra from the street, entering
+a building costing its population share, picks the crossing with the least D per unit of the
+home's population, as clear.free_first does. A pass ends when the graph frees every walled-in home
+or none it can afford; the complex is then rebuilt without the held buildings and the metric's own
+test (`walled`) re-run, another pass taking any home the graph freed wrongly. Clearing a building
+can open a passage no triangle of the old complex shows (two buildings close across its former
+footprint), so the graph is generous and the rebuild decides.
 
 The run's identity is `Spec` (s, ring_m, band_m: required, keyword-only, its name in every row);
-the width w and the budget are each call's, required.
+the width w, the growth and the budget are each call's, required.
 """
 from __future__ import annotations
 
@@ -140,6 +143,7 @@ class Complex:
     vb: sp.csr_matrix                # (nv, n buildings) 0/1: the vertex on building j's outline
     standing: NDArray[np.bool_]      # (n buildings,)
     band_open: object                # the open street band (shapely), the raster's ground
+    grow: float                      # the footprints' growth it was built on (0: as they are)
 
     @property
     def nt(self) -> int:
@@ -449,7 +453,8 @@ def build(geo: Geometry, spec: Spec, standing: NDArray[np.bool_], *, carve,
     return Complex(spec=spec, xy=xy, tri=tri, tri_geom=tris, area=np.abs(cross) / 2,
                    fill=_fill_of(p0, p1, p2), pa=pa, pb=pb, pu=pu, pv=pv, ap=ap, exit=exit_,
                    street_faces=es[bi[~on_fp]],
-                   street_v=street_v, vb=vb, standing=standing.copy(), band_open=band_open)
+                   street_v=street_v, vb=vb, standing=standing.copy(), band_open=band_open,
+                   grow=grow)
 
 
 # ------------------------------------------------------------------ the filtration
@@ -610,17 +615,17 @@ def region_graph(geo: Geometry, cx: Complex, w: float) -> Graph:
     tb = (tv @ alone).tocoo()
     a = [comp[tb.row]]
     b = [ncomp + tb.col]
-    # buildings that intersect (overlap or touch), both standing
+    # buildings whose (grown) footprints meet, both standing (dwithin 0: they intersect)
     idx = np.flatnonzero(cx.standing)
     tree = shapely.STRtree(polys[idx])
-    i, j = tree.query(polys[idx], predicate="intersects")
+    i, j = tree.query(polys[idx], predicate="dwithin", distance=2.0 * cx.grow)
     keep = i < j
     a.append(ncomp + idx[i[keep]])
     b.append(ncomp + idx[j[keep]])
-    # a building reaching into the band: its interior, cleared, is street
+    # a building whose (grown) footprint reaches into the band: its interior, cleared, is street
     band = geo.streets.buffer(cx.spec.band_m)
     shapely.prepare(band)
-    touch = idx[shapely.intersects(band, polys[idx])]
+    touch = idx[shapely.dwithin(band, polys[idx], cx.grow)]
     a.append(np.full(len(touch), street))
     b.append(ncomp + touch)
     a_, b_ = np.concatenate(a), np.concatenate(b)
@@ -649,9 +654,11 @@ def _sources(geo: Geometry, cx: Complex, hm: Homes, g: Graph, homes: NDArray[np.
 
 
 class Freed(NamedTuple):
-    """free_first's answer at one width: `held` the buildings cleared; `left` the homes still
-    walled in (by the complex rebuilt without `held`); `crossings` in order (home, buildings);
-    `passes` the rebuilds; `misses` the homes a pass's graph freed that its rebuild did not."""
+    """free_first's answer at one width: `target` the homes walled in at baseline; `held` the
+    buildings cleared; `left` the homes still walled in (by the complex rebuilt without `held`);
+    `crossings` in order (home, buildings); `passes` the rebuilds; `misses` the homes a pass's
+    graph freed that its rebuild did not."""
+    target: NDArray[np.bool_]
     held: NDArray[np.bool_]
     left: NDArray[np.bool_]
     crossings: list
@@ -659,18 +666,21 @@ class Freed(NamedTuple):
     misses: int
 
 
-def free_first(geo: Geometry, spec: Spec, *, w: float, budget: float, cost: NDArray[np.float64],
-               pop: NDArray[np.float64], held0: NDArray[np.bool_],
-               cx0: Complex | None = None) -> Freed:
-    """clear.free_first on the complex at width w: `held0` (a clearing, held) plus crossings
-    freeing the homes walled in at baseline at w that it leaves walled in, the least D (`cost`,
-    each building's population share) per unit of the home's population (`pop`) first, while the
-    held set's D stays within `budget` (module docstring). `cx0` the baseline complex if built."""
+def free_first(geo: Geometry, spec: Spec, *, w: float, grow: float, budget: float,
+               cost: NDArray[np.float64], pop: NDArray[np.float64], held0: NDArray[np.bool_],
+               cx0: Complex | None) -> Freed:
+    """clear.free_first on the complex grown by `grow` at width w: `held0` (a clearing, held)
+    plus crossings freeing the homes walled in at baseline at w that it leaves walled in, the
+    least D (`cost`, each building's population share) per unit of the home's population (`pop`)
+    first, while the held set's D stays within `budget` (module docstring). `cx0` the baseline
+    complex (grown by `grow`) if built, else None."""
     held = held0.copy()
-    base = (build(geo, spec, np.ones(len(cost), dtype=bool), carve=None, grow=0.0)
+    base = (build(geo, spec, np.ones(len(cost), dtype=bool), carve=None, grow=grow)
             if cx0 is None else cx0)
+    if base.grow != grow:
+        raise ValueError(f"the baseline complex is grown by {base.grow:g}, free first by {grow:g}")
     target = walled(home_exits(homes_of(geo, base), exit_widths(base)), w)
-    cx = base if not held.any() else build(geo, spec, ~held, carve=None, grow=0.0)
+    cx = base if not held.any() else build(geo, spec, ~held, carve=None, grow=grow)
     hm = homes_of(geo, cx)
     left = target & walled(home_exits(hm, exit_widths(cx)), w)
     n = len(cost)
@@ -719,12 +729,13 @@ def free_first(geo: Geometry, spec: Spec, *, w: float, budget: float, cost: NDAr
         if not progress or not (hold & ~held).any():
             break
         held |= hold
-        cx = build(geo, spec, ~held, carve=None, grow=0.0)
+        cx = build(geo, spec, ~held, carve=None, grow=grow)
         hm = homes_of(geo, cx)
         now = walled(home_exits(hm, exit_widths(cx)), w)
         misses += int((claimed & left & now).sum())
         left = target & now
-    return Freed(held=held, left=left, crossings=crossings, passes=passes, misses=misses)
+    return Freed(target=target, held=held, left=left, crossings=crossings, passes=passes,
+                 misses=misses)
 
 
 def _zero_reach(g: Graph, hold: NDArray[np.bool_]) -> NDArray[np.bool_]:

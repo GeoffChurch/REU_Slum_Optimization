@@ -140,14 +140,15 @@ def run_one(job: tuple[str, str]) -> str | None:
         cost = pop / pop.sum()
         fs = gcmp.flow_spec(R, LEVELS)
         spec = gap_study.spec_of(gcmp.S_M)
-        m = gcl.Model(geo, spec, fs, form, lumped=False, pop=pop)
+        m = gcl.ComplexMetric(spec=spec, fs=fs, form=form, lumped=False).clearing(
+            b, demand=common.PopulationDemand())
         t_model = time.time() - t0
-        fr = gc.free_first(geo, spec, w=form.w, budget=BUDGET, cost=cost, pop=pop,
+        fr = gc.free_first(geo, spec, w=form.w, grow=0.0, budget=BUDGET, cost=cost, pop=pop,
                            held0=np.zeros(len(pop), dtype=bool), cx0=None)
         held = fr.held
         xlo = np.where(held, 1.0, relax.XMIN)
-        rel = gcl.Relaxation(m, POWER, eps=PLAN.eps, inj=pop, cost=cost)
-        scorer = gcl.Relaxation(m, POWER, eps=SCORE_EPS, inj=pop, cost=cost)
+        rel = m.relaxation(POWER, q=1.0, rtol=PLAN.rtol, eps=PLAN.eps)
+        scorer = rel.metric_world(SCORE_EPS)
         best = {"J": np.inf, "r": None}
 
         def watch(x, stage):
@@ -181,7 +182,7 @@ def run_one(job: tuple[str, str]) -> str | None:
                    cleared=" ".join(map(str, np.flatnonzero(cleared))),
                    grey=float(np.mean((x > 0.05) & (x < 0.95))), J_eps=best["J"], **score,
                    **cor, **cross, t_model=t_model, t_simp=t_simp, t_block=time.time() - t0,
-                   nt_full=m.fm.nt, cells_full=m.fc.n, host=socket.gethostname(),
+                   nt_full=m.fm.nt, cells_full=m.c.n, host=socket.gethostname(),
                    peak_rss_gb=_peak_gb())
         out.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame([row]).to_parquet(out)

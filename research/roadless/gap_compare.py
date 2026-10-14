@@ -178,8 +178,8 @@ class ComplexModel:
     def free_first(self, held: np.ndarray) -> np.ndarray:
         """gap_complex.free_first at the form's w from `held` (no budget): the held set grown (the
         three forms share stage 1's topology)."""
-        fr = gc.free_first(self.geo, self.spec, w=self.form.w, budget=1.0, cost=self.cost,
-                           pop=self.pop, held0=held, cx0=None)
+        fr = gc.free_first(self.geo, self.spec, w=self.form.w, grow=0.0, budget=1.0,
+                           cost=self.cost, pop=self.pop, held0=held, cx0=None)
         return fr.held
 
 
@@ -444,8 +444,8 @@ def flowsweep_one(job: tuple[str, str]) -> str | None:
         t0 = time.time()
         [b] = common.build_blocks([bid])
         cm = ComplexModel(b, fs, form)
-        fr = gc.free_first(cm.geo, cm.spec, w=form.w, budget=SWEEP_BUDGET, cost=cm.cost,
-                           pop=cm.pop, held0=np.zeros(cm.n, dtype=bool), cx0=None)
+        fr = gc.free_first(cm.geo, cm.spec, w=form.w, grow=0.0, budget=SWEEP_BUDGET,
+                           cost=cm.cost, pop=cm.pop, held0=np.zeros(cm.n, dtype=bool), cx0=None)
         r_free, u_free = cm.score(~fr.held, None)
         live = ~cm.walled
         rows = []
@@ -480,15 +480,15 @@ def flowsweep_one(job: tuple[str, str]) -> str | None:
 
 INTERIOR_RANDOM = 3               # interiors: random clearings at BUDGET besides the stored ones
 INTERIOR_SEED = 20261013
-INTERIOR_EPS = 1e-9               # a standing footprint's conductance in the meshed models at 0/1
 
 
 def interiors(bids: list[str], token: str) -> None:
     """Whether one node per building is materially as good as meshing its interior: per block,
     the stored clearings (where the block has them) and INTERIOR_RANDOM random clearings at
     BUDGET, scored (P's lens, J_2's) by the complex rebuilt, by the clearing model with interiors
-    meshed and by the same with every building's interior one node (gap_clear, k = 1 cleared,
-    INTERIOR_EPS standing). Rows gap_rows/compare/interiors/<form>.parquet."""
+    meshed and by the same with every building's interior one node (gap_clear's fixed mesh, the
+    0/1 clearing; the study's first run scored it in the eps world at 1e-9). Rows
+    gap_rows/compare/interiors/<form>.parquet."""
     import gap_clear as gcl
     form = form_of(token)
     fs = flow_spec(0.5, 4)
@@ -515,23 +515,19 @@ def interiors(bids: list[str], token: str) -> None:
         models = {}
         for lumped in (False, True):
             t0 = time.time()
-            m = gcl.Model(cm.geo, cm.spec, fs, form, lumped=lumped, pop=cm.pop)
-            k0 = np.full(n, INTERIOR_EPS)
-            J0 = m.J(k0, cm.pop, 1.0)[0]
-            J20 = m.J(k0, cm.pop, 2.0)[0]
-            models["lumped" if lumped else "meshed"] = (m, J0, J20, time.time() - t0)
+            m = gcl.ComplexMetric(spec=cm.spec, fs=fs, form=form, lumped=lumped).clearing(
+                b, demand=POP)
+            models["lumped" if lumped else "meshed"] = (m, time.time() - t0)
         for name, x in picks.items():
             r, _u = cm.score(~x, None)
             row = dict(block=bid, form=form.name, clearing=name, D=float(cm.cost[x].sum()),
                        L_P_rebuild=r["L_P"], L_J2_rebuild=r["L_J2"])
-            for key, (m, J0, J20, tm) in models.items():
-                k = np.where(x, 1.0, INTERIOR_EPS)
-                J = m.J(k, cm.pop, 1.0)[0]
-                J2 = m.J(k, cm.pop, 2.0)[0]
-                row[f"L_P_{key}"] = 1.0 - J / J0
-                row[f"L_J2_{key}"] = 1.0 - (J2 / J20) ** 0.5
+            for key, (m, tm) in models.items():
+                L = m.lenses(x)
+                row[f"L_P_{key}"] = 1.0 - L.P / m.base.P
+                row[f"L_J2_{key}"] = 1.0 - (L.J2 / m.base.J2) ** 0.5
                 row[f"t_{key}"] = tm
-                row[f"cells_{key}"] = m.fc.n
+                row[f"cells_{key}"] = m.c.n
             rows.append(row)
             print(f"{bid} {name}: L_P rebuild {row['L_P_rebuild']:.4f} meshed "
                   f"{row['L_P_meshed']:.4f} lumped {row['L_P_lumped']:.4f}", flush=True)

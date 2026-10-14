@@ -99,7 +99,7 @@ def main(bid: str, spec: str, d_max: float, allocator: str) -> None:
     tension, gram, exact = c.tension, rnd.build.source.gram, clear.exact
     step = [0]
 
-    def tension_(power, restore=False):
+    def tension_(power, *, restore):
         step[0] += 1
         report(f"step {step[0]} before tension", c)
         if release:
@@ -108,12 +108,12 @@ def main(bid: str, spec: str, d_max: float, allocator: str) -> None:
         if collect:
             print(f"    gc.collect: {gc.collect()} objects", flush=True)
             report(f"step {step[0]} collected", c)
-        t = tension(power, restore)
+        t = tension(power, restore=restore)
         report(f"step {step[0]} after tension", c)
         return t
 
-    def gram_(c_, t, cand, power):
-        H = gram(c_, t, cand, power)
+    def gram_(t, cand, power):
+        H = gram(t, cand, power)
         report(f"step {step[0]} after gram ({len(cand)} candidates)", c)
         return H
 
