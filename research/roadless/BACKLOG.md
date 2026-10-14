@@ -226,10 +226,31 @@ items up front"), in the order proposed:
    vulnerability"). A GPU path is added only where measured faster: the complex's systems are
    planar and factor directly on a core (SuperLU 1.5 s at 690k unknowns, against pyamg's 16 -- 69 s
    a solve), and today's cost is the mesh rebuilt for every clearing, which a GPU cannot help.
-   **Next**, the runtime's first phase: a clearing as a conductance change on one fixed mesh, the
-   scorer, free first and the optimizers' seam on it, calibrated against the rebuild and timed;
-   then the remaining ports and the retirement (each retired variant to the wiki's dead-end record
-   with its numbers), the region test on the complex, and the consolidated pass.
+   **The runtime's first phase: done** (NOTES, "The complex as the runtime: one fixed mesh"): one
+   fixed mesh a block (every outline and its w / 2 offset noded at 0.1 mm, the footprints'
+   interiors and the shy distance's zone strips meshed with the open ground, every face boundary
+   split until the mesh is Delaunay, so no weight is clipped; cached by identity), a clearing a
+   re-weighting of its passages with no GEOS call; the scorer, free first on the complex grown by
+   w / 2, and the optimizers' seam (seam.py's Protocols, the metric resolved where a run is
+   configured: metrics.metric_of), the raster and the complex both behind it, the raster's numbers
+   bit for bit as before; the metric `cx+shy0.5+s0.125r1b1+R0.5g4x2q4`, its rows under that name.
+   Against the rebuild: the baselines within 2.3e-4 on 16 of 18 blocks and every clearing's lenses
+   within 3.3e-4 on 12 of 13, reach equal home for home; the outliers are necks a few millimetres
+   wide (46841's 2.1 mm), where the rebuild converges toward the fixed mesh as s refines. An exact
+   score takes 1 -- 11 s, 16x faster than the rebuild. The presets run on it on one core: each
+   metric's optimizers lead on their own metric in B's order (the complex's SIMP on 9 of 13 against
+   the raster's clearing, its cheap preset on 12), the losses the search's (the complex's own
+   polish holds the raster's clearing or climbs from it), at 4 -- 73x the raster's GPU time (median
+   11 -- 13x) and 2 -- 13 GB. The factorization is 57 -- 81% of the time; cuDSS on one H100
+   refactors the same systems 240 -- 290x faster than SuperLU once a pattern's plan (16 -- 40 s) is
+   made, about 3x on an exact score and 5x on a SIMP iteration as the host's work stands: a GPU
+   path, and with it a new dependency (nvmath-python, cuDSS), is the owner's decision. **Next**,
+   the second phase: the remaining ports (road re-scoring, pweight, the atlas and corridor
+   pictures, clearings_check, the exports, the translucent search), the speed (the GPU decision;
+   the polish's moves scored exactly rather than in the eps world, over half of SIMP's time on
+   5810; the eps world's interiors; the host's assembly, reach and gradient), the dominance
+   measurement and the retirement (each retired variant to the wiki's dead-end record with its
+   numbers), the region test on the complex, and the consolidated pass.
    (4) **Exits: the region model** (owner: "we'd still only leak at the
    outer boundary, so all current must exit ... some of the outer boundary might not leak at all
    and might have 0 conductance (like a railroad)"; "we can adjust boundary leakage, uniform

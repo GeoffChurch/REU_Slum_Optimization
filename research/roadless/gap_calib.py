@@ -457,7 +457,8 @@ def report() -> None:
         tim.round(4).to_csv(out / "summary_runtime_timing.csv", index=False)
     cud = _read("cudss")
     if len(cud):
-        cud.round(6).to_csv(out / "summary_runtime_cudss.csv", index=False)
+        # six significant digits: the residuals are 1e-9
+        cud.to_csv(out / "summary_runtime_cudss.csv", index=False, float_format="%.6g")
     runs = []
     for key, (name, preset) in SOURCES.items():
         for f in sorted(sources(name)[preset].glob(f"*_p{POWER:g}.parquet")):

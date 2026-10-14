@@ -4727,3 +4727,279 @@ path: only where measured faster. The complex's systems are planar and factor di
 six decades), so the iterative solve a GPU speeds up already loses on a core; a field's 30 -- 240 s
 is the mesh rebuilt in Python and GEOS, which the fixed mesh removes; and a GPU direct solver
 (cuDSS) is a new dependency, piloted only if the factorization dominates once the mesh is fixed.
+
+### The complex as the runtime: one fixed mesh (owner 2026-10-14: "that SGTM")
+
+BACKLOG 4, decision (3): the runtime's first phase, the gap complex made the model the optimizers
+run on, calibrated by equality against the rebuild and timed (the brief:
+.superpowers/sdd/2026-10-14-complex-runtime). The metric is `cx+shy0.5+s0.125r1b1+R0.5g4x2q4`: the
+shy distance at w 0.5 m, the complex's Spec (s 0.125, ring and band 1 m) and the FlowSpec (R 0.5, 4
+levels graded 2x, 4 demand sub-points a triangle): every configurable constant that can move a
+score is in the name, which names the rows' directories (relax_rows/<metric>/...,
+polish_rows/<metric>/...); the code's own constants (the 0.1 mm snap, the merge and flatness
+tolerances, MESH_REV) are in the mesh's cache key with them, so a change to one of those needs a
+new name by hand. Code: gap_clear.py (the fixed mesh, the model, its eps world, the metric),
+seam.py (the optimizers' seam), metrics.py (the metric resolved at the edge), gap_clear_check.py
+(the guards), gap_calib.py (calibration, acceptance, timing; gap_rows/summary_runtime_*.csv,
+committed; the rows are not), gap_cudss.py (the GPU pilot). No new dependency.
+
+**The seam** (seam.py). What search.py, relax.py, polish_greedy.py and free first read from a
+clearing model, written down as Protocols: `ClearingModel` (the clearing `removed`, `n`, `cost`,
+the footprints and their tree for the spaced picker, `baseline`, `exact`, `enclosed_left`,
+`tension(power, restore=)`, `free_first`, `relaxation`, `release`), `Tension` (`g`, and the
+catchment's view of its state: `weight` and `flow`, the operator, the potential, the row sums, each
+home's load and the candidates' member nodes), `Relaxed` (the eps world of relax.simp, the
+incumbent and the polish: proj, value, value_sgrad, exact, perm, `metric_world`) and `Metric` (the
+name, the catchment sweep's device, a block's model, the coarse grid a plan's .c / .C asks for,
+which the complex refuses). The raster's clear.Clearing and relax.Relaxation and the complex's
+gap_clear.Model and Relaxation both satisfy it; clear.Catchment sweeps a `Flow`, so the cheap
+preset's picker runs on either. The metric is resolved once where a run's configuration is read
+(metrics.metric_of: a name beginning `cx+` the complex's, on the host; anything else a raster
+conductance on its device and grid) and handed down; below that edge no code asks which it has. The
+raster stays a live alternative until phase 2 measures dominance, and its numbers did not move:
+width_check.py's identity (the raster scorer's baseline, a clearing's operator, P, J_2 and P_{1/2},
+the relaxation's value and gradient, the tension, current_map's flow, the sightline metric's)
+passes bit for bit on its three blocks, and the catchment's gram on 19570 (40 candidates) is bit
+for bit the code's before the seam. gap_clear.check_disjoint refuses a complex metric whose name
+reads as a raster conductance (with or without a search's @<along>), so no row the raster wrote can
+be read as the complex's; stored clearings are sets of buildings and stay valid across metrics.
+
+**The mesh** (gap_clear.full_mesh; Fixed.of caches it). Every outline, its w / 2 offset (the shy
+distance's zero zone) and the band's line noded together by snap-rounding at 0.1 mm (OverlayNG on a
+grid: snapping the noded set afterwards left dangles where offset arcs nearly coincide, and a crack
+between two footprints joined the open ground, 38136's homes 3% low), densified to s and
+polygonized, the faces outside the region dropped (a street inside the block, its band a hole of
+the region, came back as a face: 23597's 8,685 m^2 of band meshed and 470 m of exits lost); each
+face triangulated by GEOS's constrained Delaunay and finished by Lawson's flips within it, Steiner
+points on the rebuild's own lattice (laid over the baseline open ground's box, kept R / 2 clear of
+every line of the noding), flat triangles dissolved into their neighbours. A clearing then only
+re-weights passages: a triangle conducts by the least k_b of the footprints whose zone holds it, a
+passage by the harmonic mean of its two triangles', so after the baseline a state's score is
+assembly, factorization and solves, with no GEOS call and no meshing (0/1 for the greedy,
+fractional for SIMP, one code path). The factorization uses one geometric nested-dissection order
+of the whole cell graph, computed once and restricted to each state's unknowns; every solve is
+refined to the backward-error floor. The cache key is the block's footprints
+(clearings.fingerprint), streets and boundary, every meshing constant and MESH_REV. On the 18
+calibration blocks a mesh builds in 34 -- 323 s at 2 -- 10 GB, 1.3x the rebuild's baseline, and
+loads in 0.1 -- 4.4 s (the timing blocks); it holds 1.9 -- 3.0x the rebuild's triangles (the
+interiors and strips) and 0.95 -- 0.98x its unknowns at baseline.
+
+**Conformity: no clip.** A passage across a face boundary whose circumcentres lie in the wrong
+order (the study's CROSS_MIN clipped the 0.3% that were) lies in open ground once a clearing opens
+both faces, where a clipped weight makes the two-point scheme inconsistent. So every face-boundary
+edge two triangles share whose centres are out of order, or within MERGE_REL of its length of each
+other, is split at its midpoint and the faces re-flipped, round after round until none is
+(`_conform`: 355 -- 6,694 splits in 4 -- 14 rounds on the 18 blocks). The mesh is then Delaunay
+outright and every passage's weight sigma |e| / d_e is non-negative by construction; a passage
+still out of order is refused when the weights are made (`_weights`), and a negative conductance in
+any state assembled raises (`_reach`), so every state scored is checked. Its cost allows it:
+against the same mesh without the splits and with the study's clip (the out-of-order passages'
+centre distances clipped at 0.05 |e|: 70 -- 841 passages of 0.12 -- 2.2M on 19263, 38136, 19570 and
+20269), conformity's splits cost nothing measurable (builds of 1.8 -- 47 s, at most 3 s apart
+either way over two runs), and the clip itself, measured anyway on four random clearings a block,
+moves L_P and L_J2 by at most 2.8e-5 where both sit within 1.3 -- 1.7e-4 of the rebuild: harmless
+at these blocks, but a weight no longer consistent wherever a clearing opens it. The `weights`
+guard: no negative weight and no passage across faces sharing a centre on 19570 (508k passages,
+1,737 splits) and 20269 (2.2M, 1,693), every conductance non-negative at six states (the baseline,
+the eps world, a fractional state, three random clearings) and u0 > 0 for every home with demand
+(P_{1/2} needs it); with the splits skipped the mesh is refused (841 and 728 passages across faces
+out of order).
+
+**Calibration** (gap_calib baseline and clearings; summary_runtime_baseline.csv,
+summary_runtime_clearings.csv).
+- The baseline on 18 blocks (the 13, the large 17608, 30796 and 38366, the oversized 32841 and
+  7851) against the rebuild (gap_compare.ComplexModel: gap_flow's mesh under the shy distance at
+  0.5): P0 a median 1.1e-4 low and within 2.3e-4 on 16 (P_{1/2},0 within 4.0e-4, J_2,0 5.8e-4); the
+  homes with no demand alike on all 18; each block's median home escape time within 2.4e-4. They
+  cannot be equal: the fixed mesh triangulates the same open ground differently (its faces share
+  their boundaries with the interiors and strips, conformity splits those boundaries, the outlines
+  are snap-rounded at 0.1 mm), and 1e-4 is far below the scheme's own error (P0 within 0.4 -- 1.5%
+  of its limit at R 0.5: the study).
+- The outliers are necks. On 46841 (P0 -2.7e-3, P_{1/2},0 -1.0e-2, J_2,0 -1.2e-2) four homes (6,
+  51, 222, 1026; 97% of P0's difference) leave through a neck 2.1 mm wide between footprints 222
+  and 1026, which stand 0.50097 m apart and are each grown by 0.25 m; both meshes have it, equally
+  wide. Flow through such a gap is set within a few centimetres of the neck (between two arcs of
+  radius 0.25 m its width doubles 2.3 cm either side), which s 0.125 does not resolve; conformity's
+  splits refine those arcs on the fixed mesh [inferred]. The four escape times read 18 -- 23% below
+  the rebuild's at s 0.125, and refining the outlines moves the rebuild toward the fixed mesh: P0
+  8,480.7, 8,469.9 and 8,465.3 at s 0.125, 0.0625 and 0.03125 (home 222's escape time 57.4, 51.3,
+  48.4), the fixed mesh's 8,458.2 and 8,456.9 at s 0.125 and 0.0625 (44.4, 43.9), so of the two the
+  fixed mesh is the nearer its limit there. On 30848 (P0 -1.1e-3) the difference is spread over
+  many homes (the top five hold 18% of it): necks of the same kind (3585 and 1010, 0.5035 m apart,
+  escape times 4% low) and, the other way, a few homes on the band line up to 19% high (2137)
+  [inferred: the demand's sub-points near the band line fall differently; not traced].
+- Clearings: every stored clearing of both presets under both metrics on the 13 (52, with the 13
+  baselines) on the fixed mesh against the rebuild: L_P within 2.3e-4 (median 7e-5), L_{P_1/2}
+  within 3.3e-4 and L_J2 within 2.5e-4 on 12 of the 13; 46841's neck carries its baseline
+  difference into every lens (1.5 -- 1.7e-3 on L_P, 5.1 -- 5.4e-3 on L_{P_1/2}, 3.2 -- 3.4e-3 on
+  L_J2). The enclosed population and count are equal at every state. The study's 0.0004 (meshed
+  interiors against the rebuild, shy 0.5) holds everywhere but the neck. An exact score takes
+  1.2 -- 10.6 s on the fixed mesh against the rebuild's 18 -- 164 s (16x, 10 -- 23x).
+- Reach: the homes the flow model reaches equal those the complex grown by w / 2 reaches at width
+  0, home for home, at all 65 states scored (and at the `reach` guard's seven states a block).
+- Each optimizer's stored score is its scorer's: the complex's rows and the fixed mesh's L_P of the
+  same clearing agree to 1e-15, the raster's rows and gap_calib's re-scoring of them on the raster
+  (rasterscore, on a core) to 3e-8.
+
+**The guards** (gap_clear_check.py; each passes on the code as it is and fails under its fault,
+both ways on the final code; 19570 and 20269 unless named):
+- `baseline`: P0, P_{1/2},0, J_2,0 within 2e-3 of the rebuild, the no-demand homes alike, every
+  escape time within 5%, the three most populous buildings' single clearings' L_P within 2e-3
+  (19570 -5.4e-5, +1.3e-5, -7.4e-5, homes within 1.8e-2, singles at most 9.1e-5; 20269 -1.6e-4,
+  -2.1e-4, -3.5e-4, 2.8e-2, 3.9e-6). Fault `interior` (the most populous building's interior faces
+  dropped): its single clearing's L_P 3.4e-2 and 4.0e-3 off. Fault `exits` (the band's faces read
+  at the unsnapped tolerance): P0 11x and +68%.
+- `weights`: above.
+- `reach`: no home apart at the baseline, three single clearings, two random clearings and free
+  first's state. Fault `threshold` (a ring with no triangle reaching the street read as reaching
+  it): every walled-in home apart (7 on 19570, 1 on 20269). The brief's fault, the width threshold
+  off by one comparison (gap_complex.walled read `<=`), goes unseen under the shy distance: its
+  filtration is read at 0 on the grown complex, where a home's exit width is -inf or positive and
+  never 0; the ring's test is the comparison that decides reach there.
+- `gradient` (q 1 and 3, J_1 and J_2, every form, at a random x and at SIMP's start, against the
+  closer of the central differences): within 3.9e-5 of the largest on 19570 and 38136. Fault `tie`
+  (a tie's gradient given to one building): 6e-3 -- 0.10 at the start.
+- `free`: free first frees every walled-in home and the flow model agrees (20269 one home, 23597
+  six). Fault `drop-crossing`: the flow model leaves a home walled in (198, 45) and
+  Model.free_first raises.
+- `identity`: the names spell back; the 7 raster names (every directory under relax_rows/ and
+  polish_rows/, and the conductances) are refused as a complex metric's. Fault `collide`
+  (check_disjoint off): all 7 accepted.
+- `convex` (the study's, moved here): the factors' second differences at most 7.8e-16 along random
+  lines, P's at least 2.7e-3 of P (19570, 38136). Fault `multiply`: 0.023 -- 0.058.
+- The study's guards (gap_check.py: conform, delaunay, apertures, filtration, free;
+  gap_flow_check.py: angle, shift, channel, field, law, closed), whose modules this phase touched,
+  pass and fail under their faults as before.
+
+**The acceptance run** (gap_calib preset on orion and quadro2, one core a task;
+summary_runtime_acceptance.csv, summary_runtime_runs.csv). The cheap preset (S0.01cat.P64w8) and
+SIMP's default (fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2) at D 0.05, free first, optimizing P,
+area population, on the 13, on the complex; against the raster's clearings of the same presets
+under uni+apwfs (the Store holds no P runs of them, so they were run on the GPU), every clearing
+scored in both metrics:
+- Each metric prefers its own optimizer's clearings, in B's order (the population left walled in
+  first, then the lens). On the complex its SIMP is ahead of the raster's SIMP clearing on 9 of the
+  13 and its cheap preset on 12: on 5 blocks the raster's clearings leave 0.0001 -- 0.0012 of the
+  people walled in on the complex (its free first frees the raster's walled-in homes, not the
+  complex's), and where enclosure ties L_P is a median +0.0004 (-0.003 -- +0.028) for SIMP and
+  +0.006 (-0.006 -- +0.058) for the cheap preset. On the raster the raster's SIMP is ahead on all
+  13 (L_P a median +0.010, up to +0.53) and its cheap preset on 11 (+0.010, -0.004 -- +0.42). The
+  other lenses alike (on the complex SIMP ahead on 8 and 9 of 13 on P_{1/2} and J_2, the cheap
+  preset on 12 and 12).
+- Levels, median over the 13, on the complex (its own clearing / the raster's): SIMP 0.287 / 0.275
+  on L_P, 0.333 / 0.334 on L_{P_1/2}, 0.310 / 0.312 on L_J2; the cheap preset 0.266 / 0.256,
+  0.324 / 0.314, 0.301 / 0.290. On the raster the complex's clearings read 0.280 (SIMP) and 0.313
+  (cheap) on L_P against the raster's own 0.378 and 0.364. They part most on 22422 and 23597, where
+  the raster's clearings open the 0.25 -- 0.4 m lanes the shy distance closes (the study's gate):
+  0.61 and 0.43 on the raster against 0.16 and 0.24 on the complex.
+- The method order: in B's order SIMP leads the cheap preset on the complex on 12 of 13 with the
+  complex's clearings (L_P median +0.015) and on 11 of 13 with the raster's, as the raster's SIMP
+  leads its cheap preset on the raster on 13 of 13 (the complex's clearings there on 9). The four
+  clearings' order in B's order, metric against metric (Kendall tau per block), is a median 0.00 on
+  every lens (-1.00 -- +1.00): each metric ranks its own optimizer's clearings first, while the
+  presets keep their order.
+- Jaccard, the complex's clearing against the raster's of the same preset: SIMP a median 0.63
+  (0.37 -- 0.79), the cheap preset 0.48 (0.10 -- 0.64).
+- No run leaves a home walled in on its own metric, and the complex's clearings leave none on the
+  raster.
+- Time and memory, one core a block: SIMP 820 -- 11,543 s (median 1,841), the cheap preset
+  175 -- 1,858 s (median 699), at 2.2 -- 12.5 GB (SIMP's rows; the cheap preset's task logs within
+  0.6 GB of them); the raster's on a GPU (H100 or the tesla node) 26 -- 337 s and 8 -- 166 s. The
+  complex is 3.7 -- 73x slower for SIMP (median 11x) and 4.7 -- 40x for the cheap preset (median
+  13x), at about half the raster's host memory (2 -- 25 GB: the study). The 26 runs took 12.7
+  CPU-h. Of SIMP's 3.2 h on 5810 the continuation (four stages of at most ten iterations, each with
+  its incumbent's roundings scored) took about 5,000 s and the polish's 88 scorings the other 6,500
+  [inferred from the log's times], every one an eps-world factorization of all 6.8M cells.
+
+**Search or model.** In B's order the complex's optimizers end behind the raster's clearing on the
+complex's own metric five times: SIMP on 18895, 33717, 9712 and 9717 (L_P 0.003, 0.0003, 0.0006 and
+0.0012 behind) and the cheap preset on 33717 (0.006). It is the search. The model scores those
+clearings as the rebuild does (within 2.3e-4), and its gradient is the adjoint's (the guard).
+Started from the raster's clearing (free first's building added and held where the complex has
+one), the complex's own polish holds it or climbs from it, every time above the complex's own
+result: SIMP's polish (P256w8x2, every building movable) takes 18895's from 0.2997 (with free
+first's building; the raster's clearing alone 0.3007, the complex's own 0.2977) to 0.3026 and holds
+9717's at 0.1549 (own 0.1537); the cheap preset's polish (P64w8) takes 33717's cheap clearing from
+0.1990 to 0.2000 (own 0.1930). The complex's own clearings are local optima of the same polish
+(20269's cheap one does not move even under two-for-one exchanges with four times the tries), so
+which basin a run ends in is decided by the greedy's path or SIMP's continuation, both starting
+from first-order information. That information is a little less faithful on the complex than it was
+on the raster: the tension's ranking of single clearings at the greedy's start against their exact
+gains has Spearman +0.84 on 20269 (all 1,045 buildings; the exact best in its top ten, its own best
+worth 0.92 of the best per person), against the raster's +0.93 -- 0.95 (NOTES, "Tension ranks like
+exact LOO": 41132 and 18537, another metric and blocks). The raster's searches end below another
+clearing on their own metric too (its cheap preset behind the complex's clearing on 18895 and
+5810).
+
+**Timings** (gap_calib timing; summary_runtime_timing.csv; one core of ai01, each twice, the mean):
+a random clearing at D 0.05, its exact score (the scorer's: the lenses' two solves), a SIMP
+iteration (value_sgrad in the eps world at 1e-4, q 3) and a tension, on a small block (19570), a
+large one (5810), the two oversized (32841, 7851), and 5810@major's baseline. AFTER is the runtime;
+BEFORE the mesh as first run (SuperLU's COLAMD at every factorization, each solve refined toward a
+residual of 1e-12, eight steps where the floor lies above it).
+
+    block       unknowns: open / all    exact score  factor  solves  assembly  reach  terms
+    19570       75k / 0.33M                    0.27    0.16    0.03      0.03   0.02   0.01
+    5810        2.85M / 6.77M                  21.7    13.8     4.0       1.5    1.0    0.5
+    32841       2.02M / 4.28M                  13.1     7.7     2.7       1.0    0.7    0.3
+    7851        1.39M / 2.60M                   9.1     5.6     1.8       0.6    0.4    0.2
+    5810@major  6.06M / 15.4M                  32.9    19.9     6.2       2.5    1.7    1.1
+
+    block         SIMP iteration  factor  solves  gradient  assembly  reach
+    19570                   1.52    1.22    0.07      0.07      0.08   0.05
+    5810                    68.0    55.4     4.8       2.2       2.6    1.7
+    32841                   31.2    23.3     3.0       1.4       1.5    1.0
+    7851                    19.4    15.2     1.6       0.7       0.9    0.6
+
+(seconds; 5810@major's is its baseline's score; a tension costs what a SIMP iteration does). The
+factorization is 57 -- 63% of an exact score and 75 -- 81% of a SIMP iteration. BEFORE took
+1.6 -- 1.8x as long for an exact score and 1.4 -- 1.7x for a SIMP iteration (5810: 35.0 and 105 s),
+most of it the refinement (5810's solves 13.0 s against 4.0) and the rest the order (SuperLU's
+COLAMD 18.2 s against the dissection's 13.8). A mesh builds in 18 s (19570), 236 -- 344 s (the
+oversized), 496 s (5810) and 1,133 s at 22 GB (5810@major), loads in 0.1 -- 4.4 s; the model's
+baseline (the order and four solves) 3 -- 78 s. A SIMP iteration factors every cell, the interiors'
+and strips' too (they conduct eps): 1.9 -- 4.4x the open ground's unknowns.
+
+**CPU first, and the GPU (the owner's question).** On the host the order is computed once and every
+factorization reuses it; SuperLU in scipy keeps no symbolic factorization to reuse, and CHOLMOD
+(scikit-sparse, symbolic reuse and rank updates) needs the system's cholmod.h, so its pilot was
+skipped. Since the factorization dominates, the GPU pilot ran (gap_cudss.py: nvmath-python 1.0 and
+cuDSS from their wheels, in an ephemeral environment, `uv run --with`, nothing added to the
+project; one H100 PCIe, 0.21 GPU-h in all) on 5810's systems as the runtime builds them, a random
+clearing's (x: 3.03M unknowns, 11.2M non-zeros) and the eps world's (e: 6.77M, 27.4M), each three
+times, against SuperLU in the runtime's order on that node's host:
+
+    system   cuDSS: plan  factorize  solve  refactorize  solve  SuperLU: factorize  solve
+    x               15.7      0.026  0.011        0.025  0.011                6.05   0.30
+    e               39.5       0.08   0.03         0.08  0.025                23.6   0.77
+
+(seconds; residuals alike, 3 -- 9e-9 of the right-hand side before refinement). The plan
+(reordering and the symbolic factorization, on the host, single-threaded without a threading
+library) is paid once per sparsity pattern; a refactorization with new values on the same pattern
+then takes 0.025 -- 0.08 s, 240 -- 290x SuperLU's. In the eps world every cell is an unknown at
+every state, so one plan serves a whole SIMP run or every tension; an exact score's unknowns change
+with the clearing, and keeping one pattern there means assembling every cell, the walled-in ones as
+decoupled identity rows and a closed passage as an explicit zero, which changes no score [inferred:
+not built]. With the factorization at 0.1 s a clearing's time is the host's: on 5810 everything but
+the factorization is 7.9 of an exact score's 21.7 s and 12.6 of a SIMP iteration's 68 s, so about
+3x and 5x as the host work stands [inferred], more once that work is cut too (on a fixed pattern
+assembly is one product with a fixed incidence). So yes: a GPU direct solver could speed the method
+greatly, SIMP and the tension most, at the price of a new dependency (nvmath-python, cuDSS's
+wheels) and a GPU; the CPU path stays as it is, one core and scipy. Offering both (the
+factorization as a Strategy chosen where the run is configured) is the owner's decision.
+
+**Phase 2 needs**: the remaining ports (road re-scoring, which needs roads carved into the fixed
+mesh; pweight; the atlas and corridor pictures; clearings_check; the exports; the translucent
+search, which is the raster's alone: the complex has no search conductance), the dominance
+measurement against the raster and the lifted metric and the retirement (each retired variant to
+the wiki's dead-end record with its numbers), the region test on the complex (5810@major: a
+19-minute build, 33 s a score, 22 GB), the consolidated pass, and the speed before them: the
+owner's decision on a GPU path; the polish's moves scored exactly rather than in the eps world
+(more than half of SIMP's time on 5810; an exact score factors 2.3x fewer unknowns there [inferred:
+not built]); the eps world's interiors and strips (58% of a SIMP iteration's unknowns on 5810,
+conducting eps: a coarser lattice inside the footprints would cut them [inferred]); the host's
+assembly, reach and gradient on a fixed pattern. Compute: on the CPU nodes the acceptance 14.7
+CPU-h (the 26 runs' own time 12.7, the rest a pilot and failed starts), the timings 1.7 and the
+raster's clearings re-scored on a core 16.4; on the GPUs the raster's presets 1.4 GPU-h and the
+pilot 0.21; here (single-threaded, at most 8 processes) the baseline and clearings' calibration 2.6
+CPU-h and the guards and diagnoses about 4 [inferred], besides the development.
