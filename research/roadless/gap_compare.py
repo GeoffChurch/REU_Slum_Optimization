@@ -16,11 +16,12 @@ baseline) and J_2:
   (aperture_rows/score/o0/Fws/, the 13 tuning blocks; not recomputed).
 
     S=research/roadless/gap_compare.py     # from the repo root, PYTHONPATH=., single-threaded
-    uv run python $S complex <ids,|@file> <procs> <R> <levels> <forms,>  # gap_rows/compare/complex_*
+    uv run python $S complex <ids,|@file> <procs> <R> <levels> <forms,>  # compare/complex_*
     uv run python $S iso <ids,|@file> <procs> [mesh]         # rows gap_rows/compare/iso_<mesh>/
     uv run python $S converge <id> <R,R,...> <levels> <form>  # P against R on one block
     uv run python $S flowsweep <ids,|@file> <procs> <forms,>   # the sweep's flow part
     uv run python $S interiors <ids,|@file> <form>        # one node per building against meshed
+    uv run python $S region <id@major> <forms,>          # a region's stored clearings (REGION)
 
 Fields (as aperture.py's): the baseline; the stored clearings (width.STORED: SIMP's default and the
 cheap preset, clearings.Store), each with the homes the model leaves enclosed freed first where it
@@ -97,8 +98,9 @@ def _peak_gb() -> float:
 
 def fields_of(b, n: int) -> dict[str, tuple[str, np.ndarray, object]]:
     """Per field: (kind, the buildings cleared (bool), a road's corridor in UTM or None)."""
-    from reblock.budget import road_corridor
     import geopandas as gpd
+
+    from reblock.budget import road_corridor
     store = clearings.Store.committed()
     out: dict[str, tuple[str, np.ndarray, object]] = {
         "baseline": ("baseline", np.zeros(n, dtype=bool), None)}
@@ -536,6 +538,41 @@ def converge(bid: str, Rs: list[float], levels: int, token: str) -> None:
     pd.DataFrame(rows).to_parquet(out)
 
 
+REGION = {   # NOTES, "A region whose only exit is its edge: 5810@major"
+    "simp_default": "relax_rows/uni/fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2.a5x8/D0.05.p2",
+    "cheap": "polish_rows/uni/S0.01cat.P64w8.a5x8/D0.05.p2"}
+
+
+def region(bid: str, tokens: list[str]) -> None:
+    """A region's baseline and its stored clearings (REGION, optimized under the old step rule on
+    the lifted metric's a5x8 mesh) on the complex under each form, with time and peak memory; rows
+    gap_rows/compare/region/<id>_<form>.parquet."""
+    [b] = common.build_blocks([bid])
+    store = clearings.Store.committed()
+    fs = flow_spec(SWEEP_R, SWEEP_LEVELS)
+    for token in tokens:
+        t0 = time.time()
+        cm = ComplexModel(b, fs, form_of(token))
+        rows = [dict(field="baseline", D=0.0, P=cm.P0, Pq=cm.Pq0, L_P=0.0, L_J2=0.0,
+                     **{"L_Pq0.5": 0.0}, enclosed=0.0, t=cm.t_base, peak_rss_gb=_peak_gb())]
+        print(f"{bid} {cm.form.name}: baseline P0 {cm.P0:.6g} walled {int(cm.walled.sum())} "
+              f"cells {cm.cells0} ({cm.t_base:.0f}s, {_peak_gb():.1f} GB)", flush=True)
+        for name, run in REGION.items():
+            x = np.zeros(cm.n, dtype=bool)
+            x[store.cleared(run, b, step=1)] = True
+            r, _u = cm.score(~x, None)
+            rows.append(dict(field=name, D=float(cm.cost[x].sum()), **{k: r[k] for k in (
+                "P", "Pq", "L_P", "L_J2", "L_Pq0.5", "enclosed", "t")}, peak_rss_gb=_peak_gb()))
+            print(f"{bid} {cm.form.name} {name}: L_P {r['L_P']:.4f} L_J2 {r['L_J2']:.4f} L_Pq "
+                  f"{r['L_Pq0.5']:.4f} enclosed {r['enclosed']:.4f} ({r['t']:.0f}s)", flush=True)
+        out = ROWS / "region" / f"{bid}_{cm.form.name}.parquet"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).assign(block=bid, form=cm.form.name, flow=fs.name, nt0=cm.nt0,
+                                  cells0=cm.cells0, n_walled0=int(cm.walled.sum()),
+                                  t_mesh=cm.t_mesh, t_block=time.time() - t0,
+                                  host=socket.gethostname()).to_parquet(out)
+
+
 def _pool(fn, jobs: list, procs: int) -> list[str]:
     if procs == 1:
         return [f for f in map(fn, jobs) if f]
@@ -560,6 +597,9 @@ def main(argv: list[str]) -> None:
     elif cmd == "flowsweep":
         failed = _pool(flowsweep_one, [(i, t) for t in argv[3].split(",")
                                        for i in gap_study.ids_of(argv[1])], int(argv[2]))
+    elif cmd == "region":
+        region(argv[1], argv[2].split(","))
+        failed = []
     elif cmd == "converge":
         converge(argv[1], [float(x) for x in argv[2].split(",")], int(argv[3]), argv[4])
         failed = []

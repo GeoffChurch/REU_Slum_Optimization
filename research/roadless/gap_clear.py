@@ -35,7 +35,6 @@ q, beta, proj, dproj, value_sgrad, value_grad).
 """
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -48,7 +47,6 @@ import gap_complex as gc
 import gap_flow as gf
 import relax
 
-SLIVER_M2 = 1e-8       # a triangle of the full mesh under this area (m^2) is dropped
 CROSS_MIN = 0.05       # a passage across a face boundary whose circumcentres are in the wrong
                        # order: each centre's distance to the edge clipped at this x |e|
 
@@ -141,16 +139,11 @@ def full_mesh(geo: gc.Geometry, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width) 
     tris_ = np.concatenate(tris)
     face = np.concatenate(tface)
     c = shapely.get_coordinates(tris_).reshape(-1, 4, 2)[:, :3]
-    xy, inv = np.unique(np.round(c.reshape(-1, 2) / gc.SNAP_M) * gc.SNAP_M, axis=0,
-                        return_inverse=True)
+    xy, inv = gc.vertices(c.reshape(-1, 2))
     tri = inv.reshape(-1, 3).astype(np.int64)
     good = (tri[:, 0] != tri[:, 1]) & (tri[:, 1] != tri[:, 2]) & (tri[:, 2] != tri[:, 0])
     tri, face = tri[good], face[good]
     cr = gf._cross(xy[tri[:, 0]], xy[tri[:, 1]], xy[tri[:, 2]])
-    # micro-slivers where two offset arcs nearly meet (areas 1e-19 -- 1e-10 m^2, two vertices
-    # 1e-5 m apart: on 43347 an edge then lay in four triangles): dropped
-    keep = np.abs(cr) > 2.0 * SLIVER_M2
-    tri, face, cr = tri[keep], face[keep], cr[keep]
     tri[cr < 0] = tri[cr < 0][:, [0, 2, 1]]
     nv0, nt = len(xy), len(tri)
     nbr = gc._neighbours(tri, nv0)
@@ -215,10 +208,11 @@ def full_mesh(geo: gc.Geometry, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width) 
     wrong = (d < -gf.MERGE_REL * L) & ~flat
     if wrong.any():
         e = np.flatnonzero(wrong)
+        rel = np.minimum(area[pa[e]], area[pb[e]]) / L[e] ** 2
         raise ValueError(f"{len(e)} passages within a face with their centres in the wrong order "
                          f"(d / L {np.round(d[e] / L[e], 6)[:5].tolist()}, at "
-                         f"{np.round(xy[pu[e[:3]]], 3).tolist()}, areas "
-                         f"{np.round(np.minimum(area[pa[e]], area[pb[e]]) / L[e] ** 2, 8)[:5].tolist()})")
+                         f"{np.round(xy[pu[e[:3]]], 3).tolist()}, areas / L^2 "
+                         f"{np.round(rel, 8)[:5].tolist()})")
     with np.errstate(divide="ignore"):
         T = np.where(flat & (d < gf.MERGE_REL * L), 0.0,
                      np.where(d <= gf.MERGE_REL * L, np.inf,     # inf: merged (one circumcentre)

@@ -2,12 +2,13 @@
 the raster"): gap_rows/summary_<name>.csv, committed; the rows they read are not.
 
     S=research/roadless/gap_report.py     # from the repo root, PYTHONPATH=.
-    uv run python $S agree|sweep|compare|simp|flowsweep|all
+    uv run python $S agree|apertures|sweep|compare|simp|flowsweep|all
 
 agree      the agreement with the raster (gap_study agree, crossings): agree_blocks (per block and
            spacing: the raster's enclosed homes, the complex's walled in at 0, RESOLUTION and the
            diagonal resolution, the differences), agree (pooled by spacing), agree_homes (every
            home on which the two disagree at 0 or RESOLUTION, with its exit width), crossings.
+apertures  the measured apertures against the true gaps (gap_study apertures), per spacing.
 sweep      the passability sweep (gap_study sweep): sweep (per width, spacing and size: the
            walled-in population, free first's D and buildings), exits (the population-weighted
            distribution of the homes' exit widths), bars.
@@ -100,6 +101,31 @@ def agree() -> None:
     X = _read("crossings/*.parquet")
     if len(X):
         _summary("crossings", X)
+
+
+APERTURE_BINS = (0.0, 0.125, 0.5, 1.0, 2.0)
+
+
+def apertures() -> None:
+    """The measured apertures against the true gaps (gap_study apertures): per spacing and true
+    gap, over the direct pairs, how many a passage joins and the error (measured less true)."""
+    A = _read("apertures/*.parquet")
+    if not len(A):
+        return
+    A = A[A.direct]
+    rows = []
+    for s in gap_study.S_SENS:
+        m = A[f"meas_s{s:g}"].to_numpy()
+        for lo, hi in zip(APERTURE_BINS[:-1], APERTURE_BINS[1:], strict=True):
+            sel = (A.true >= lo).to_numpy() & (A.true < hi).to_numpy()
+            e = m[sel] - A.true.to_numpy()[sel]
+            ok = np.isfinite(e)
+            q = np.quantile(e[ok], (0.5, 0.9, 0.99)) if ok.any() else (np.nan,) * 3
+            rows.append(dict(s=s, true_lo=lo, true_hi=hi, pairs=int(sel.sum()),
+                             joined=int(ok.sum()), err_min=float(e[ok].min()) if ok.any()
+                             else np.nan, err_median=q[0], err_p90=q[1], err_p99=q[2],
+                             err_max=float(e[ok].max()) if ok.any() else np.nan))
+    _summary("apertures", pd.DataFrame(rows))
 
 
 def sweep() -> None:
@@ -237,10 +263,30 @@ def compare() -> None:
         _summary("converge", C)
 
 
+def _set(text: str) -> set[int]:
+    return {int(i) for i in text.split()}
+
+
 def simp() -> None:
+    """SIMP under the forms (gap_simp run): the rows less the cleared lists, each pair of forms'
+    clearings' Jaccard per block, and every clearing's corridors under one flow (gap_simp cross)."""
     D = _read("simp/*/*/*.parquet")
-    if len(D):
-        _summary("simp", D.drop(columns=[c for c in ("cleared", "free_cleared") if c in D]))
+    if not len(D):
+        return
+    _summary("simp", D.drop(columns=[c for c in ("cleared", "free_cleared") if c in D]))
+    jac = []
+    for bid, g in D.groupby("block"):
+        cl = dict(zip(g.form, g.cleared.map(_set), strict=True))
+        forms = sorted(cl)
+        for i, a in enumerate(forms):
+            for b2 in forms[i + 1:]:
+                u = cl[a] | cl[b2]
+                jac.append(dict(block=bid, a=a, b=b2, n_a=len(cl[a]), n_b=len(cl[b2]),
+                                jaccard=len(cl[a] & cl[b2]) / len(u) if u else 1.0))
+    _summary("simp_jaccard", pd.DataFrame(jac))
+    X = _read("simp_cross/*/*.parquet")
+    if len(X):
+        _summary("simp_cross", X)
 
 
 def flowsweep() -> None:
@@ -264,8 +310,8 @@ def flowsweep() -> None:
 
 
 def main(argv: list[str]) -> None:
-    jobs = {"agree": agree, "sweep": sweep, "compare": compare, "simp": simp,
-            "flowsweep": flowsweep}
+    jobs = {"agree": agree, "apertures": apertures, "sweep": sweep, "compare": compare,
+            "simp": simp, "flowsweep": flowsweep}
     which = list(jobs) if argv[0] == "all" else argv
     for j in which:
         jobs[j]()

@@ -11,12 +11,14 @@ winner scored exactly on the complex rebuilt (gap_compare.ComplexModel, the form
 
 The corridors (`corridors`), on the winner's rebuilt complex under its form: the flow-weighted
 clear width (per triangle the flux magnitude times its area, the clear width 2 d at its centroid, d
-to the nearest standing footprint), and the cleared ground's (per sub-point of the cleared
-footprints, area-weighted, the clear width there after clearing), and how many clusters the cleared
-buildings form (touching or within CLUSTER_M).
+to the nearest standing footprint) and the flow's share in lanes at least LANES wide, the cleared
+ground's clear width (per sub-point of the cleared footprints, area-weighted, after clearing), and
+how many clusters the cleared buildings form (touching or within CLUSTER_M). `cross` measures every
+form's clearing of a block under each of CROSS, so two clearings compare under one flow.
 
     S=research/roadless/gap_simp.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S run <ids,|@file> <procs> <forms,>
+    uv run python $S cross <ids,|@file> <procs>       # every form's clearing under each of CROSS
 """
 from __future__ import annotations
 
@@ -53,6 +55,7 @@ LEVELS = 4
 SCORE_EPS = 1e-6
 CLUSTER_M = 0.5                 # cleared buildings closer than this are one cluster
 QUANTILES = (0.1, 0.25, 0.5, 0.75, 0.9)
+LANES = (1.0, 2.0, 4.0)          # the flow's share in lanes at least this wide (m)
 CROSS = ("close0.5", "shy0.5")   # each clearing scored under these forms too
 ROWS = HERE / "gap_rows" / "simp"
 
@@ -100,6 +103,8 @@ def corridors(geo: gc.Geometry, cm: gcmp.ComplexModel, cleared: np.ndarray) -> d
     out = {f"flow_width_q{q:g}": float(v) for q, v in zip(QUANTILES, _wq(2 * d, wt, QUANTILES),
                                                           strict=True)}
     out["flow_width_mean"] = float((2 * d * wt).sum() / wt.sum())
+    for lane in LANES:
+        out[f"flow_share_ge{lane:g}"] = float(wt[2 * d >= lane].sum() / wt.sum())
     # the cleared ground's clear width
     if cleared.any():
         ff = np.flatnonzero(cleared)
@@ -191,20 +196,60 @@ def run_one(job: tuple[str, str]) -> str | None:
         return f"{bid} {token}: {e!r}"
 
 
+def cross_one(bid: str) -> str | None:
+    """Every form's clearing of a block (run_one's rows) measured by `corridors` under each of
+    CROSS, so two clearings' corridors compare under one flow; rows gap_rows/simp_cross/."""
+    fs = gcmp.flow_spec(R, LEVELS)
+    base = ROWS / f"{PLAN.name}_p{POWER:g}_{fs.name}"
+    out = HERE / "gap_rows" / "simp_cross" / base.name / f"{bid}.parquet"
+    if out.exists():
+        return None
+    try:
+        t0 = time.time()
+        [b] = common.build_blocks([bid])
+        geo = gc.geometry(b)
+        clearings = {}
+        for d in sorted(base.iterdir()):
+            f = d / f"{bid}.parquet"
+            if f.exists():
+                [c] = pd.read_parquet(f).cleared
+                x = np.zeros(len(geo.polys), dtype=bool)
+                x[[int(i) for i in c.split()]] = True
+                clearings[d.name] = x
+        rows = []
+        for token in CROSS:
+            cm = gcmp.ComplexModel(b, fs, gcmp.form_of(token))
+            for name, x in clearings.items():
+                rows.append(dict(block=bid, clearing=name, scored=cm.form.name,
+                                 **corridors(geo, cm, x)))
+        out.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_parquet(out)
+        print(f"{bid}: {len(clearings)} clearings under {len(CROSS)} forms "
+              f"({time.time() - t0:.0f}s)", flush=True)
+        return None
+    except Exception as e:     # noqa: BLE001 -- a pool's task reports its block and goes on
+        import traceback
+        traceback.print_exc()
+        return f"{bid}: {e!r}"
+
+
 def main(argv: list[str]) -> None:
     for v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
               "NUMBA_NUM_THREADS"):
         if os.environ.get(v) != "1":
             raise SystemExit(f"{v}=1 is required (single-threaded workers)")
-    if argv[0] != "run":
+    if argv[0] == "run":
+        fn, jobs = run_one, [(i, t) for i in gap_study.ids_of(argv[1]) for t in argv[3].split(",")]
+    elif argv[0] == "cross":
+        fn, jobs = cross_one, gap_study.ids_of(argv[1])
+    else:
         raise SystemExit(__doc__)
-    jobs = [(i, t) for i in gap_study.ids_of(argv[1]) for t in argv[3].split(",")]
     procs = int(argv[2])
     if procs == 1:
-        failed = [f for f in map(run_one, jobs) if f]
+        failed = [f for f in map(fn, jobs) if f]
     else:
         with multiprocessing.get_context("fork").Pool(procs, maxtasksperchild=1) as pool:
-            failed = [f for f in pool.imap_unordered(run_one, jobs) if f]
+            failed = [f for f in pool.imap_unordered(fn, jobs) if f]
     if failed:
         print("FAILED:\n" + "\n".join(failed), flush=True)
         raise SystemExit(1)

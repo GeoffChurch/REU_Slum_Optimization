@@ -60,6 +60,7 @@ import shapely
 from numba import njit
 from numpy.typing import NDArray
 from scipy.sparse.csgraph import breadth_first_order, connected_components, dijkstra
+from scipy.spatial import cKDTree
 
 TOL = 1e-6           # metres: a vertex on an outline (in the block's local coordinates the
                      # overlay's and segmentize's vertices sit within 1e-14 of it; in UTM
@@ -79,6 +80,10 @@ GROW_TOL_REL = 0.02  # a grown outline lies within this share of the growth of i
 SNAP_M = 1e-9        # vertices snapped to this grid (m): GEOS repeats a vertex where two
                      # outlines meet with the last bits apart, which made zero-area triangles;
                      # a triangle left with a repeated vertex is dropped
+MERGE_M = 1e-7       # vertices closer than this (m) are one (`vertices`): where two grown
+                     # outlines nearly touch their offset arcs cross twice a hair apart (1.4e-9
+                     # m on 18912's shy 0.5), a passage that short has needles either side whose
+                     # centres no flip can order, and the snap grid splits a pair across a line
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -276,9 +281,9 @@ def flips_all(xy, tri, nbr, con, tol):
 @njit(cache=True)
 def _flips(xy, tri, nbr, tol):
     """Lawson's flips, in place, until no passage's circumcentres lie in the wrong order by more
-    than tol of its length (DELAUNAY_TOL) where its quadrilateral is strictly convex (counter-clockwise triangles; nbr[t, i] the triangle across
-    the edge opposite tri[t, i], -1 on the outline: the constraints, never flipped). Returns the
-    number of flips."""
+    than tol of its length (DELAUNAY_TOL) where its quadrilateral is strictly convex
+    (counter-clockwise triangles; nbr[t, i] the triangle across the edge opposite tri[t, i], -1
+    on the outline: the constraints, never flipped). Returns the number of flips."""
     nt = tri.shape[0]
     stack = [(0, 0)]
     stack.pop()
@@ -359,6 +364,22 @@ def delaunay_flips(xy: NDArray[np.float64], tri: NDArray[np.int64]) -> NDArray[n
     return tri
 
 
+def vertices(c: NDArray[np.float64]) -> tuple[NDArray[np.float64], NDArray[np.int64]]:
+    """(the distinct vertices, each input point's) of points `c` (k x 2): snapped to SNAP_M, then
+    every cluster closer than MERGE_M (single linkage) one vertex, its lowest's coordinates."""
+    xy, inv = np.unique(np.round(c / SNAP_M) * SNAP_M, axis=0, return_inverse=True)
+    pairs = cKDTree(xy).query_pairs(MERGE_M, output_type="ndarray")
+    if len(pairs) == 0:
+        return xy, inv.ravel()
+    nv = len(xy)
+    _n, lab = connected_components(sp.csr_matrix(
+        (np.ones(len(pairs)), (pairs[:, 0], pairs[:, 1])), shape=(nv, nv)), directed=False)
+    first = np.full(lab.max() + 1, nv)
+    np.minimum.at(first, lab, np.arange(nv))
+    keep, new = np.unique(first, return_inverse=True)
+    return xy[keep], new[lab][inv.ravel()]
+
+
 def build(geo: Geometry, spec: Spec, standing: NDArray[np.bool_], *, carve,
           grow: float) -> Complex:
     """The gap complex of a block (`geometry`) with the buildings `standing` (a cleared
@@ -369,8 +390,7 @@ def build(geo: Geometry, spec: Spec, standing: NDArray[np.bool_], *, carve,
     inner, band_open = _open_ground(geo, standing, spec.band_m, carve=carve, grow=grow)
     tris = _triangulate(inner, spec.s)
     c = shapely.get_coordinates(tris).reshape(-1, 4, 2)[:, :3]
-    xy, inv = np.unique(np.round(c.reshape(-1, 2) / SNAP_M) * SNAP_M, axis=0,
-                        return_inverse=True)
+    xy, inv = vertices(c.reshape(-1, 2))
     tri = inv.reshape(-1, 3).astype(np.int64)
     tri = tri[(tri[:, 0] != tri[:, 1]) & (tri[:, 1] != tri[:, 2]) & (tri[:, 2] != tri[:, 0])]
     # counter-clockwise
