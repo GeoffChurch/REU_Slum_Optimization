@@ -37,8 +37,10 @@ INNER = "GAP_CUDSS_INNER"
 
 def outer(bid: str) -> None:
     uv = Path.home() / ".local" / "bin" / "uv"
+    # not `python -I`: uv lays the --with packages over its base environment through the
+    # interpreter's path, which isolated mode drops (the pilot's cupy then found no CUDA wheels)
     cmd = [str(uv), "run", "--no-project", *(a for w in WITH for a in ("--with", w)),
-           "python", "-I", str(Path(__file__).resolve()), bid]
+           "python", str(Path(__file__).resolve()), bid]
     env = dict(os.environ, **{INNER: "1"})
     raise SystemExit(subprocess.call(cmd, env=env))
 
