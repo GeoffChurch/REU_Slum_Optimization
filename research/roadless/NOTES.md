@@ -4713,3 +4713,17 @@ about 220 CPU-h. Here (single-threaded, at most 8 processes): the agreement 6 CP
 isotropic model on the 13 4.2, the gate re-check 1.9, R's convergence 1.9, the region 1.1, the
 guards about 4, the rest (interiors, lanes, apertures, the corridors, the diagnoses) about 3, and
 the development before them about 10 [inferred]: about 30 CPU-h.
+
+**Decided** (owner 2026-10-14, "that SGTM"): the shy distance at 0.5 m on the complex, as the
+metric and its runtime, the raster and the lift retired once the complex is measured to dominate
+them. Two questions the owner asked with it. A vehicle's width as the shy distance: no, for the
+walking metric; at 3 m the lanes narrower wall in 27% of the small blocks' people, 16% of the large
+blocks' and 2% of the oversized blocks' (summary_exits.csv, s 0.125), so enclosure, ranked first,
+would become vehicle access and P its tie-break, and free first would have to build vehicle roads;
+vehicle access is the same filtration read another way (a home's exit width is its widest path's
+bottleneck, the widest vehicle that reaches it, turning ignored), to be reported over W. A GPU
+path: only where measured faster. The complex's systems are planar and factor directly on one core
+(SuperLU 1.5 s at 690k unknowns, where pyamg takes 16 -- 69 s a solve, the conductances spanning
+six decades), so the iterative solve a GPU speeds up already loses on a core; a field's 30 -- 240 s
+is the mesh rebuilt in Python and GEOS, which the fixed mesh removes; and a GPU direct solver
+(cuDSS) is a new dependency, piloted only if the factorization dominates once the mesh is fixed.

@@ -213,13 +213,23 @@ items up front"), in the order proposed:
    on the complex without a lift (median -0.003 on the 13, 0.297 and 0.270 against 0.301 and 0.271
    on 5810@major), gives SIMP a better landscape than closing's step, and makes its clearings carry
    a little more of the flow in wide lanes (+0.007 of it in lanes of 2 m or more), not fewer
-   corridors. **Next** (the owner decides): the width's value (none is natural; 0.5 m is a body's
-   width and practice's buffers) and form (the shy distance recommended); the complex as the
-   metric's passability and enclosure (Placement's ring and free first's graph: recommended now)
-   and then as its runtime (exact, isotropic, convex with its gradient, 3 -- 6x less memory than
-   the raster, but 30 -- 240 s a clearing on a core until a clearing's re-mesh is local, and no GPU
-   path), the raster and the lift retired with it; the consolidated pass then re-scores under the
-   choice.
+   corridors. **Decided (owner 2026-10-14, "that SGTM"): the shy distance at w 0.5 m on the gap
+   complex, as the metric and as its runtime**, isotropic, with the raster, its lift and the
+   turning cost retired once the complex is measured to dominate them. A vehicle's width is not the
+   walking metric's shy distance (the owner asked, 2026-10-14): at 3 m, a lane narrower walls in
+   27% of the small blocks' people, 16% of the large blocks' and 2% of the oversized blocks'
+   (summary_exits.csv), so enclosure, which comes first, would read vehicle access and P would only
+   break its ties. Vehicle access is its own reading of the same filtration (a home's exit width is
+   its widest path's bottleneck to the street; turning is not modelled), reported over W, since the
+   widest-path study found reblocking pays for vehicles only above about 4.5 m with the ranking
+   rotating with W; when to add it is the owner's (with the switch or with the vulnerability
+   score). A GPU path is added only where measured faster: the complex's systems are planar and
+   factor directly on a core (SuperLU 1.5 s at 690k unknowns, against pyamg's 16 -- 69 s a solve),
+   and today's cost is the mesh rebuilt for every clearing, which a GPU cannot help. **Next**, the
+   runtime's first phase: a clearing as a conductance change on one fixed mesh, the scorer, free
+   first and the optimizers' seam on it, calibrated against the rebuild and timed; then the
+   remaining ports and the retirement (each retired variant to the wiki's dead-end record with its
+   numbers), the region test on the complex, and the consolidated pass.
    (4) **Exits: the region model** (owner: "we'd still only leak at the
    outer boundary, so all current must exit ... some of the outer boundary might not leak at all
    and might have 0 conductance (like a railroad)"; "we can adjust boundary leakage, uniform
