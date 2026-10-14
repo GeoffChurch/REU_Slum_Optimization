@@ -15,7 +15,7 @@ elimination order): `x` a random 0/1 clearing at area D 0.05 (an exact score's),
 world at 1e-4 (a SIMP iteration's). Per system: cuDSS's plan (reordering and symbolic
 factorization), factorization, solve, and a refactorization and solve with the values changed
 (the plan reused, as every state of one pattern would), each REPS times, the operands on the
-device; SuperLU's factorization and solve on the host; the residuals. Rows
+host (nvmath moves them); SuperLU's factorization and solve on the host; the residuals. Rows
 ROWS/<id>.parquet.
 """
 from __future__ import annotations
@@ -29,9 +29,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROWS = HERE / "gap_rows" / "runtime" / "cudss"
 REPS = 3
-WITH = ("nvmath-python[cu12]==1.0.0", "nvidia-cudss-cu12", "cupy-cuda12x[ctk]==14.2.0",
-        "nvidia-nvjitlink-cu12", "scipy", "numpy",
-        "pandas", "pyarrow")
+WITH = ("nvmath-python[cu12]==1.0.0", "nvidia-cudss-cu12", "nvidia-nvjitlink-cu12", "scipy",
+        "numpy", "pandas", "pyarrow")
 INNER = "GAP_CUDSS_INNER"
 
 
@@ -68,8 +67,6 @@ def _preload() -> None:
 
 def inner(bid: str) -> None:
     _preload()
-    import cupy as cp
-    import cupyx.scipy.sparse as csp
     import numpy as np
     import pandas as pd
     import scipy.sparse as sp
@@ -97,49 +94,43 @@ def inner(bid: str) -> None:
         r_slu = float(np.abs(b - A @ x).max() / np.abs(b).max())
         nnz_slu = int(lu.L.nnz + lu.U.nnz)
         del lu
-        # cuDSS on the device
-        Ad = csp.csr_matrix(A)
-        bd = cp.asarray(b)
-        opts = DirectSolverOptions(sparse_system_type=DirectSolverMatrixType.SPD)
+        # cuDSS on the device (host operands: nvmath moves them; blocking, so each call's time
+        # is its own)
+        w = 1.0 + 1e-3 * np.cos(np.arange(A.nnz))
+        A2 = sp.csr_matrix((A.data * w, A.indices, A.indptr), shape=A.shape)
+        A2 = ((A2 + A2.T) * 0.5).tocsr()
+        opts = DirectSolverOptions(sparse_system_type=DirectSolverMatrixType.SPD, blocking=True)
         for rep in range(REPS):
-            cp.cuda.Device().synchronize()
-            with DirectSolver(Ad, bd, options=opts) as s:
+            t0 = time.time()
+            with DirectSolver(A, b, options=opts, execution="cuda") as s:
+                t_setup = time.time() - t0
                 t0 = time.time()
                 s.plan()
-                cp.cuda.Device().synchronize()
                 t_plan = time.time() - t0
                 t0 = time.time()
                 s.factorize()
-                cp.cuda.Device().synchronize()
                 t_fact = time.time() - t0
                 t0 = time.time()
-                xd = s.solve()
-                cp.cuda.Device().synchronize()
+                xs = np.asarray(s.solve())
                 t_solve = time.time() - t0
-                r_gpu = float(cp.abs(bd - Ad @ xd).max() / cp.abs(bd).max())
-                A2 = csp.csr_matrix((Ad.data * (1.0 + 1e-3 * cp.cos(cp.arange(Ad.nnz))),
-                                     Ad.indices, Ad.indptr), shape=Ad.shape)
-                A2 = (A2 + A2.T) * 0.5
-                s.reset_operands(a=A2, b=bd)
+                r_gpu = float(np.abs(b - A @ xs).max() / np.abs(b).max())
+                t0 = time.time()
+                s.reset_operands(a=A2, b=b)
+                t_reset = time.time() - t0
                 t0 = time.time()
                 s.factorize()
-                cp.cuda.Device().synchronize()
                 t_refact = time.time() - t0
                 t0 = time.time()
-                xd2 = s.solve()
-                cp.cuda.Device().synchronize()
+                xs2 = np.asarray(s.solve())
                 t_resolve = time.time() - t0
-                r_gpu2 = float(cp.abs(bd - A2 @ xd2).max() / cp.abs(bd).max())
+                r_gpu2 = float(np.abs(b - A2 @ xs2).max() / np.abs(b).max())
             rows.append(dict(block=bid, system=name, n=n, nnz=int(A.nnz), rep=rep,
-                             t_plan=t_plan, t_factorize=t_fact, t_solve=t_solve,
-                             t_refactorize=t_refact, t_resolve=t_resolve, resid=r_gpu,
-                             resid_refactorized=r_gpu2, superlu_factorize=t_slu_f,
-                             superlu_solve=t_slu_s, superlu_resid=r_slu, superlu_nnz=nnz_slu,
-                             gpu=cp.cuda.runtime.getDeviceProperties(0)["name"].decode(),
-                             gpu_mem_gb=cp.get_default_memory_pool().total_bytes() / 2 ** 30))
+                             t_setup=t_setup, t_plan=t_plan, t_factorize=t_fact,
+                             t_solve=t_solve, t_reset=t_reset, t_refactorize=t_refact,
+                             t_resolve=t_resolve, resid=r_gpu, resid_refactorized=r_gpu2,
+                             superlu_factorize=t_slu_f, superlu_solve=t_slu_s,
+                             superlu_resid=r_slu, superlu_nnz=nnz_slu))
             print(rows[-1], flush=True)
-        del Ad, bd
-        cp.get_default_memory_pool().free_all_blocks()
     ROWS.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_parquet(ROWS / f"{bid}.parquet")
 
