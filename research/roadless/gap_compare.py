@@ -60,7 +60,7 @@ import width  # noqa: E402
 
 # ------------------------------------------------------------------ the run's configuration
 S_M = 0.125                       # the complex's outline spacing (stage 1's choice)
-SIGMA = np.pi / 2                 # gap_flow.FlowSpec.sigma: lifted's isotropic limit
+SIGMA = gf.SIGMA_ISO              # gap_flow.FlowSpec.sigma: lifted's isotropic limit
 QUAD = 4                          # demand sub-points per triangle
 BUDGET = width.BUDGET             # area D 0.05
 STORED = width.STORED

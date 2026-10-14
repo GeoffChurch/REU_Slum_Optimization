@@ -70,6 +70,8 @@ FLAT_REL = 1e-4       # a triangle of area under this x L^2 (L a passage's lengt
                       # are ~0.2; 19570's full mesh held one at 6.6e-6, its centre 3e8 L away)
 STEINER_W = 0.75      # Closing's Steiner clearance, x w (> 1 / sqrt(2))
 INSERT_PASSES = 8     # mesh: passes locating the Steiner points left by blocked walks
+SIGMA_ISO = math.pi / 2   # the raster's isotropic limit (lifted's sum_k m_k e_k e_k^T): a
+                          # FlowSpec's name omits sigma at this value (as the offset at OFFSET)
 OFFSET = (0.3141592653, 0.2718281828)   # the Steiner lattice's offset, x R (irrational: no row
                                         # on an outline's)
 
@@ -92,7 +94,8 @@ class FlowSpec:
     def name(self) -> str:
         o = "" if self.offset == OFFSET else f"o{self.offset[0]:g},{self.offset[1]:g}"
         g = f"g{self.levels}x{self.grade:g}" if self.levels > 0 else ""
-        return f"R{self.R:g}{g}q{self.quad}{o}"
+        k = "" if self.sigma == SIGMA_ISO else f"k{self.sigma:g}"
+        return f"R{self.R:g}{g}q{self.quad}{k}{o}"
 
 
 # ------------------------------------------------------------------ refinement
@@ -244,7 +247,7 @@ class Width(Protocol):
         ...
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Closing:
     """Gaps narrower than w filled into the footprints beside them: a passage conducts wholly or,
     with aperture < w, not at all (a lane at least w wide keeps its full width: G(W) = W for W >=
@@ -268,7 +271,7 @@ class Closing:
         return (ap >= self.w).astype(float), np.ones(len(faces[0]))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Shy:
     """The shy distance: every footprint grown by w / 2 (the step kernel phi = [d >= w / 2]), so
     the open ground itself shrinks and a lane of width W conducts W - w (0 below w): G(W) =
@@ -296,7 +299,7 @@ GAUSS_N = 16          # Ramp: Gauss-Legendre points along a passage (phi has kin
 GAUSS = np.polynomial.legendre.leggauss(GAUSS_N)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Ramp:
     """The shy distance's zero zone with a ramp: phi(d) = clip((d - w / 2) / s, 0, 1), d the
     distance to the nearest standing footprint; the footprints grown by w / 2 (phi's zero zone)
