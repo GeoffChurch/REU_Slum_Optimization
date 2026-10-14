@@ -4596,18 +4596,17 @@ preset; freed first where a model leaves a home walled in) and item 4's six road
   of 0.5 m.
 - So the heading lift changes few decisions, fewer than the passable width does (below); a lifted
   complex was not built (the brief's step 3).
-- The forms at w 0.5 (closing, shy, the ramp on 12 blocks) against closing at 0.125: order tau
-  median 0.86, 0.79 -- 0.86 and 0.71 -- 0.86 (min 0.29, 0.21, 0.21); closing and shy at 0.5 order
-  alike (median 1.00, min 0.81 -- 0.91), the ramp nearly (against the shy distance 0.93 -- 1.00).
-  Levels, the stored clearings' L_P median: closing at 0.125 0.240 (SIMP's default) and 0.224
-  (cheap), closing at 0.5 0.243 and 0.223, shy 0.277 and 0.251, the ramp 0.357 and 0.295; the
-  raster's isotropic 0.276 and 0.257, the lifted 0.347 and 0.333. Against the lifted metric the shy
-  distance at 0.5 comes closest on levels (a median -0.003 on L_P and L_J2, 10th -- 90th -0.045 --
-  +0.036; closing at 0.125 -0.033, at 0.5 -0.017, the ramp +0.023). The share of J_2 its top three
-  homes hold at baseline (the dynamic range the cracks caused): the lifted median 0.19 (22422 0.96,
-  17608 0.60, 1558 0.51, 38616 0.38, 30848 0.36), the raster's isotropic 0.08, the complex 0.04
-  under closing at 0.125 (22422 0.82), 0.04 -- 0.05 under closing and shy at 0.5 (22422 0.15), the
-  ramp 0.12.
+- The forms at w 0.5 (closing, shy, the ramp) against closing at 0.125: order tau median 0.86, 0.79
+  -- 0.86 and 0.64 -- 0.86 (min 0.29, 0.21, 0.21); closing and shy at 0.5 order alike (median 1.00,
+  min 0.81 -- 0.91), the ramp nearly (against the shy distance 0.93 -- 1.00). Levels, the stored
+  clearings' L_P median: closing at 0.125 0.240 (SIMP's default) and 0.224 (cheap), closing at 0.5
+  0.243 and 0.223, shy 0.277 and 0.251, the ramp 0.362 and 0.326; the raster's isotropic 0.276 and
+  0.257, the lifted 0.347 and 0.333. Against the lifted metric the shy distance at 0.5 comes
+  closest on levels (a median -0.003 on L_P and L_J2, 10th -- 90th -0.045 -- +0.036; closing at
+  0.125 -0.033, at 0.5 -0.017, the ramp +0.022). The share of J_2 its top three homes hold at
+  baseline (the dynamic range the cracks caused): the lifted median 0.19 (22422 0.96, 17608 0.60,
+  1558 0.51, 38616 0.38, 30848 0.36), the raster's isotropic 0.08, the complex 0.04 under closing
+  at 0.125 (22422 0.82), 0.04 -- 0.05 under closing and shy at 0.5 (22422 0.15), the ramp 0.15.
 - Cost, one CPU core: the complex scores a block's 9 -- 10 fields in 340 -- 2,500 s at 1.2 -- 5.9
   GB (a field 30 -- 240 s, nearly all of it the mesh rebuilt in Python and GEOS; the baseline 52 --
   330 s), the raster's isotropic model (AMG-CG) in 130 -- 3,700 s at 1.3 -- 26 GB, the lifted
