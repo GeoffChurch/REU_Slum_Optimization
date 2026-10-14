@@ -27,13 +27,14 @@ with face boundaries not Delaunay: refused).
 `reach`: at the baseline, the ONE_K single clearings, REACH_RANDOM random clearings at area D
 BUDGET and free first's state, the homes the flow model reaches (Model.live_homes_of) equal those
 the complex grown by w / 2 reaches at width 0 (gap_complex's test), home for home. Fault
-`threshold`: the flow model's conduction test off by one comparison (a passage or face of
-conductance 0 counted as conducting).
+`threshold`: the flow model's reach of a home off by one comparison (a ring with no triangle
+reaching the street counted as reaching it: gap_flow.Ring.live).
 `gradient`: the model's gradient (power 1 and 2, q 1 and 3, eps GRAD_EPS) at a random x in [0.1,
 0.4] and at SIMP's start (x = D everywhere: every triangle within w / 2 of two footprints a tie)
 against the closer of the central differences at GRAD_STEPS on GRAD_BUILDINGS buildings (at the
-start, those with the most tied terms), within GRAD_TOL of the largest, under each of
-GRAD_FORMS. Fault `tie`: a tie's gradient broken to one building (gap_flow.Terms.vjp).
+start, those in the most two-way ties and no wider one, `_paired`), within GRAD_TOL of the
+largest, under each of GRAD_FORMS. Fault `tie`: a tie's gradient broken to one building
+(gap_flow.Terms.vjp).
 `free`: free first on the complex (Model.free_first, budget 1) frees every walled-in home, and the
 flow model's own reach agrees home for home (Model.free_first raises where it does not). Fault
 `drop-crossing`: one crossing dropped from free first's answer (its claim kept).
@@ -221,7 +222,12 @@ def reach(ids: list[str]) -> list[str]:
     bad = []
     for bid in ids:
         [b] = common.build_blocks([bid])
-        m = _model(b)
+        try:
+            m = _model(b)
+        except Exception as e:      # noqa: BLE001 -- a fault may break the model: reported
+            print(f"{bid}: the model fails to build ({e!r}) -> FAILS", flush=True)
+            bad.append(bid)
+            continue
         rng = np.random.default_rng(SEED + 1)
         states = {"baseline": np.zeros(m.n, dtype=bool)}
         for j in _largest(m, ONE_K):
@@ -245,26 +251,10 @@ def reach(ids: list[str]) -> list[str]:
     return bad
 
 
-_REACH = gcl._reach
-
-
-def _reach_off_by_one(fm, c, kt, kp):
-    """gap_clear._reach with its conduction test `> 0` read `>= 0` (fault `threshold`)."""
-    r = _REACH(fm, c, kt, kp)
-    from scipy.sparse.csgraph import connected_components
-    import scipy.sparse as sp
-    on = r.Tp >= 0
-    street = c.n
-    touch = np.unique(np.concatenate([c.fc[r.Gf >= 0], np.flatnonzero(r.ground)]))
-    rr = np.concatenate([c.ea[on], touch])
-    cc_ = np.concatenate([c.eb[on], np.full(len(touch), street)])
-    _k, comp = connected_components(sp.csr_matrix((np.ones(len(rr)), (rr, cc_)),
-                                                  shape=(c.n + 1, c.n + 1)), directed=False)
-    live = comp[:c.n] == comp[street]
-    unk = -np.ones(c.n, dtype=np.int64)
-    free = live & ~r.ground
-    unk[free] = np.arange(int(free.sum()))
-    return r._replace(live=live, unk=unk)
+def _ring_off_by_one(self, live_tri):
+    """gap_flow.Ring.live with its test `> 0` read `>= 0` (fault `threshold`): every home's ring
+    reaches the street."""
+    return (self.tri @ live_tri.astype(np.float64) >= 0) | self.band
 
 
 # ------------------------------------------------------------------ gradient
@@ -277,13 +267,9 @@ def gradient(ids: list[str]) -> list[str]:
             metric = gcl.complex_of(f"cx+{gcmp.form_of(token).name}+s0.125r1b1+R0.5g4x2q4")
             m = _model(b, metric)
             rng = np.random.default_rng(SEED)
-            tied = (np.diff(m.terms.row) == 0)
-            nties = np.bincount(m.terms.b[1:][tied], minlength=m.n) + np.bincount(
-                m.terms.b[:-1][tied], minlength=m.n)
             starts = {"random": (rng.uniform(0.1, 0.4, m.n),
                                  rng.choice(m.n, GRAD_BUILDINGS, replace=False)),
-                      "start": (np.full(m.n, BUDGET),
-                                np.argsort(-nties, kind="stable")[:GRAD_BUILDINGS])}
+                      "start": (np.full(m.n, BUDGET), _paired(m.terms, m.n))}
             for where, (x0, pick) in starts.items():
                 for power in (1.0, 2.0):
                     for q in GRAD_Q:
@@ -306,6 +292,19 @@ def gradient(ids: list[str]) -> list[str]:
                         if not ok:
                             bad.append(f"{bid} {token} {where} p{power:g} q{q:g}")
     return bad
+
+
+def _paired(terms: gf.Terms, n: int) -> np.ndarray:
+    """At SIMP's start (every k alike) the GRAD_BUILDINGS buildings in the most two-way ties (a
+    point within w / 2 of it and one other footprint, phi 0) and in no wider one: there the
+    central difference of the minimum is the shared gradient's 1/2 (of three tied, the central
+    difference is still 1/2, the shared gradient 1/3: both supergradients)."""
+    zero = terms.phi == 0.0
+    row, b = terms.row[zero], terms.b[zero]
+    size = np.bincount(row, minlength=terms.n * terms.G)[row]
+    two = np.bincount(b[size == 2], minlength=n)
+    wider = np.bincount(b[size > 2], minlength=n) > 0
+    return np.argsort(-np.where(wider, -1, two), kind="stable")[:GRAD_BUILDINGS]
 
 
 def _vjp_first(self, k, g):
@@ -457,7 +456,7 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "baseline": {"interior": lambda: _patched(gcl, "_faces", _faces_less_interior),
                  "exits": _fault_exits},
     "weights": {"no-conform": lambda: _patched(gcl, "_conform", _no_conform)},
-    "reach": {"threshold": lambda: _patched(gcl, "_reach", _reach_off_by_one)},
+    "reach": {"threshold": lambda: _patched(gf.Ring, "live", _ring_off_by_one)},
     "gradient": {"tie": lambda: _patched(gf.Terms, "vjp", _vjp_first)},
     "free": {"drop-crossing": lambda: _patched(gc, "free_first", _drop_crossing)},
     "identity": {"collide": lambda: _patched(gcl, "check_disjoint", lambda name: None)},

@@ -1239,10 +1239,12 @@ class ComplexMetric:
 
 def check_disjoint(name: str) -> None:
     """Raises if `name` reads as a raster conductance (lifted.conductance_of, or an along-
-    conductance of the rows before the face aperture, lifted.along_of): a complex's rows would
-    sit in a raster run's directories."""
-    for parse in (lambda: lifted.conductance_of(name, lifted.CpuScans()),
-                  lambda: lifted.along_of(name)):
+    conductance of the rows before the face aperture, lifted.along_of; either with its search's
+    `@<along>`, as RasterMetric reads it): a complex's rows would sit in a raster run's
+    directories."""
+    head = name.split("@")[0]
+    for parse in (lambda: lifted.conductance_of(head, lifted.CpuScans()),
+                  lambda: lifted.along_of(head)):
         try:
             parse()
         except ValueError:

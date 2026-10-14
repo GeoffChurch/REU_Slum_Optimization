@@ -172,8 +172,9 @@ class ComplexModel:
         J2 = float(np.nansum(self.pop * u ** 2))
         return dict(P=P, Pq=Pq, L_P=1.0 - P / self.P0, L_J2=1.0 - (J2 / self.J2_0) ** 0.5,
                     **{"L_Pq0.5": 1.0 - Pq / self.Pq0},
-                    enclosed=float(self.cost[left].sum()), unknowns=int((~c.ground).sum()),
-                    nt=m.nt, dropped=sc.dropped, t=time.time() - t0), u
+                    enclosed=float(self.cost[left].sum()), n_enclosed=int(left.sum()),
+                    unknowns=int((~c.ground).sum()), nt=m.nt, dropped=sc.dropped,
+                    t=time.time() - t0), u
 
     def free_first(self, held: np.ndarray) -> np.ndarray:
         """gap_complex.free_first at the form's w from `held` (no budget): the held set grown (the
