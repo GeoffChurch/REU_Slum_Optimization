@@ -213,19 +213,18 @@ def compare() -> None:
         name = Path(d).name.replace("complex_", "complex:")
         models[name] = _read(f"compare/{Path(d).name}/*.parquet")
     models = {k: v for k, v in models.items() if len(v)}
-    blocks = sorted(set.intersection(*[set(v.block) for v in models.values()]))
+    blocks = sorted(set.union(*[set(v.block) for v in models.values()]))
     lev, taus = [], []
     for bid in blocks:
-        per = {k: _methods(v[v.block == bid]) for k, v in models.items()}
-        names = sorted(set.intersection(*[set(p.field) for p in per.values()]))
+        per = {k: _methods(v[v.block == bid]) for k, v in models.items() if bid in set(v.block)}
         for k, p in per.items():
-            p = p.set_index("field").loc[names]
-            for f in names:
-                lev.append(dict(block=bid, model=k, field=f, enclosed=p.loc[f, "enclosed"],
-                                **{L: p.loc[f, L] for L in LENSES}))
+            for _, r in p.iterrows():
+                lev.append(dict(block=bid, model=k, field=r.field, enclosed=r.enclosed,
+                                **{L: r[L] for L in LENSES}))
         keys = list(per)
         for i, a in enumerate(keys):
             for b2 in keys[i + 1:]:
+                names = sorted(set(per[a].field) & set(per[b2].field))
                 pa = per[a].set_index("field").loc[names].reset_index()
                 pb = per[b2].set_index("field").loc[names].reset_index()
                 for L in LENSES:
@@ -247,7 +246,8 @@ def compare() -> None:
             f"compare/{Path(d).name}/homes/*.parquet")
     sp = []
     for bid in blocks:
-        hh = {k: v[v.block == bid].set_index("home") for k, v in homes.items() if len(v)}
+        hh = {k: v[v.block == bid].set_index("home") for k, v in homes.items()
+              if bid in set(v.block)}
         keys = list(hh)
         for i, a in enumerate(keys):
             for b2 in keys[i + 1:]:
