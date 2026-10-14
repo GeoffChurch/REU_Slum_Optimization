@@ -86,12 +86,14 @@ HERE = Path(__file__).resolve().parent
 CACHE = HERE / "gap_cache"              # the fixed meshes, by identity (`Fixed.of`; git-ignored)
 CONFORM_ROUNDS = 64     # conformity: rounds at most (each splits every bad edge it finds; a mesh
                         # still holding one after them raises)
-MESH_REV = 1            # the fixed mesh's construction, in its cache key with every meshing
+MESH_REV = 2            # the fixed mesh's construction, in its cache key with every meshing
                         # constant: raised by any change to the code that moves a mesh
 LINE_SNAP_M = 1e-4      # the linework's precision (m): a crack narrower than this conducts
                         # nothing under any passable width while either footprint stands (it is
                         # in their zero zone, or flat: gap_flow.FLAT_REL s is 1.25e-5 m), and with
                         # both cleared it is nothing; the vertices move by at most half of it
+BAND_TOL_M = LINE_SNAP_M    # a boundary edge whose midpoint lies this near the band's line is a
+                            # street face (its vertices snapped: gap_complex.TOL lost the exits)
 
 
 # ------------------------------------------------------------------ the mesh
@@ -110,11 +112,15 @@ def _faces(geo: gc.Geometry, spec: gc.Spec, grow: float
     if grow > 0:
         inside.append(shapely.boundary(shapely.buffer(geo.polys, grow)))
     clipped = shapely.intersection(np.concatenate(inside), region)
-    noded = shapely.union_all(np.concatenate([clipped, [shapely.boundary(region)]]))
-    # snap-rounded (GEOS's fixed-precision noding): lines closer than LINE_SNAP_M are one, so a
-    # hairline crack between two footprints is a shared boundary, not a sliver face of flat
-    # triangles (a wall between the two interiors once both are cleared)
-    noded = shapely.segmentize(shapely.set_precision(noded, LINE_SNAP_M), spec.s)
+    # noded by snap-rounding (OverlayNG at a grid of LINE_SNAP_M): lines closer than that are
+    # one, so a hairline crack between two footprints is a shared boundary, not a sliver face of
+    # flat triangles (a wall between the two interiors once both are cleared). Snapping the noded
+    # set afterwards (set_precision) left dangles where offset arcs nearly coincide, and
+    # polygonize lost the faces they bound (38136: a crack between two footprints joined to the
+    # open ground, its homes' escape times 3% low)
+    noded = shapely.union_all(np.concatenate([clipped, [shapely.boundary(region)]]),
+                              grid_size=LINE_SNAP_M)
+    noded = shapely.segmentize(noded, spec.s)
     faces = shapely.get_parts(shapely.polygonize(shapely.get_parts(noded)))
     faces = faces[shapely.area(faces) >= gc.DUST_M2]
     rep = shapely.point_on_surface(faces)
@@ -528,7 +534,7 @@ def full_mesh(geo: gc.Geometry, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width) 
     bi = np.flatnonzero(single)
     mid = 0.5 * (xy[es[bi, 0]] + xy[es[bi, 1]])
     shapely.prepare(band_line := shapely.boundary(geo.streets.buffer(spec.band_m)))
-    on_band = shapely.dwithin(band_line, shapely.points(mid[:, 0], mid[:, 1]), LINE_SNAP_M)
+    on_band = shapely.dwithin(band_line, shapely.points(mid[:, 0], mid[:, 1]), BAND_TOL_M)
     fb = bi[on_band]
     fa_, fu_, fv_ = fb // 3, es[fb, 0], es[fb, 1]
     fl = np.hypot(*(xy[fv_] - xy[fu_]).T)
@@ -631,7 +637,7 @@ class Fixed(NamedTuple):
             streets=hashlib.sha256(shapely.to_wkb(geo.streets)).hexdigest(),
             boundary=hashlib.sha256(shapely.to_wkb(geo.boundary)).hexdigest(),
             spec=spec.name, flow=fs.name, sigma=fs.sigma, offset=fs.offset, form=form.name,
-            rev=MESH_REV, conform=CONFORM_ROUNDS, snap=LINE_SNAP_M,
+            rev=MESH_REV, conform=CONFORM_ROUNDS, snap=LINE_SNAP_M, band=BAND_TOL_M,
             consts=[gc.TOL, gc.DUST_M2, gc.DELAUNAY_TOL, gc.GROW_TOL_REL, gc.SNAP_M, gc.MERGE_M,
                     gf.MERGE_REL, gf.T_MIN, gf.FLAT_REL, gf.STEINER_W, gf.INSERT_PASSES])
         return hashlib.sha256(json.dumps(ident, sort_keys=True).encode()).hexdigest()[:24]
