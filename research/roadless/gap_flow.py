@@ -61,9 +61,10 @@ import gap_complex as gc
 MERGE_REL = 1e-4      # pockets whose centres lie within this share of their passage's length along
                       # its normal are merged (d_e 0: a shared circumcircle; below 1e-4 the weight
                       # |e| / d_e passes 1e4 and the system's conditioning suffers for nothing)
-T_MIN = 1e-6          # a passage whose weight |e| / d_e is below this (a hairline crack's: an
-                      # aperture 1e-7 m across cells s apart) is dropped: the cells it alone joins
-                      # left the system near-singular (SuperLU's residuals 0.5%)
+T_MIN = 1e-6          # a passage whose weight kappa |e| / d_e is below this (a hairline crack's:
+                      # an aperture 1e-7 m across cells s apart; a ramp's edge) is dropped: the
+                      # cells it alone joins left the system near-singular (SuperLU's residuals
+                      # 0.5%)
 FLAT_REL = 1e-6       # a triangle of area under this x L^2 (L a passage's length) is flat: a
                       # hairline crack's (a 5 cm crack's triangles are ~0.2)
 STEINER_W = 0.75      # Closing's Steiner clearance, x w (> 1 / sqrt(2))
@@ -527,7 +528,7 @@ def cells(m: Mesh) -> Cells:
     fn[inward] *= -1.0                                  # outward
     df = ((xy[m.fu] - cc[m.fa]) * fn).sum(1)
     # components: open passages and street faces
-    keep = ~merge & (L / np.maximum(d, 1e-300) >= T_MIN)
+    keep = ~merge & (kp * L / np.maximum(d, 1e-300) >= T_MIN)
     ea, eb, T = lab[pa[keep]], lab[pb[keep]], kp[keep] * L[keep] / d[keep]
     ncell = int(lab.max()) + 1
     fo = m.kf > 0
@@ -572,7 +573,8 @@ def laplacian(c: Cells, kappa: NDArray[np.float64] | None = None) -> sp.csr_matr
 
 
 REFINE_RTOL = 1e-12   # factor's solves: iterative refinement to this residual (relative), and
-REFINE_ACCEPT = 1e-7  # ... at worst this after REFINE_STEPS (the weights span ten decades)
+REFINE_ACCEPT = 1e-5  # ... at worst this after REFINE_STEPS (the weights span ten decades; P's
+                      # error is of this order, far below any lens's resolution)
 REFINE_STEPS = 8
 
 
