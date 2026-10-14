@@ -22,6 +22,7 @@ baseline) and J_2:
     uv run python $S flowsweep <ids,|@file> <procs> <forms,>   # the sweep's flow part
     uv run python $S interiors <ids,|@file> <form>        # one node per building against meshed
     uv run python $S region <id@major> <forms,>          # a region's stored clearings (REGION)
+    uv run python $S lanes                     # the raster's width laws on the walled channel
 
 Fields (as aperture.py's): the baseline; the stored clearings (width.STORED: SIMP's default and the
 cheap preset, clearings.Store), each with the homes the model leaves enclosed freed first where it
@@ -36,6 +37,7 @@ import resource
 import socket
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -246,26 +248,19 @@ def complex_one(job: tuple[str, float, int, str]) -> str | None:
 
 # ------------------------------------------------------------------ the raster, isotropic
 
-class RasterIso:
-    """The isotropic model on the raster (module docstring) on one block: the metric's grid and
-    placement (gap_study.raster_view, B's), each field solved on its free cells."""
+@dataclass(frozen=True)
+class IsoSystem:
+    """The raster's isotropic operator on the open field o (RasterIso's): one unknown per free
+    cell that reaches the street and is not ground, the steps of lifted's pattern at their face
+    apertures (lifted.along_edges)."""
+    A: sp.csr_matrix
+    free: np.ndarray            # (cells,) the free cells
+    on: np.ndarray              # per free cell: it reaches the street
+    unk: np.ndarray             # per free cell its unknown (-1 none)
+    live: np.ndarray            # per free cell: an unknown
 
-    def __init__(self, b, mesh_token: str):
-        self.c = gap_study.raster_view(b, mesh_token)
-        self.sc = self.c.sc
-        self.p = self.c.p
-        g = self.sc.grid
-        self.f = self.sc.pl.field(self.sc.w, g.inside.shape)
-        [(P0, u0)] = self.solve(self.sc.free0, [self.f])
-        self.P0, self.u0 = P0, u0
-        self.inj_q = PQ.injection(self.sc.w, u0, self.sc.enclosed)
-        self.f_q = self.sc.pl.field(self.inj_q, g.inside.shape)
-        [(self.Pq0, self.u_q0)] = self.solve(self.sc.free0, [self.f_q])
-        self.J2_0 = float(np.nansum(self.sc.w * u0 ** 2))
-
-    def solve(self, o: np.ndarray, fs: list[np.ndarray]) -> list[tuple[float, np.ndarray]]:
-        """Per injection field f of `fs`: (P, per home its escape time) in the open field o."""
-        g, p = self.sc.grid, self.p
+    @classmethod
+    def of(cls, g, o: np.ndarray, p) -> IsoSystem:
         free = o.ravel() > 0
         nf = int(free.sum())
         on = lifted.reach(g, o.ravel(), p).ravel()[free]           # per free cell
@@ -287,18 +282,51 @@ class RasterIso:
         A = sp.csr_matrix((np.concatenate(vals + [diag]),
                            (np.concatenate(rows + [np.arange(N)]),
                             np.concatenate(cols + [np.arange(N)]))), shape=(N, N))
-        lu = _amg(A)
-        idx = np.flatnonzero(free)
+        return cls(A=A, free=free, on=on, unk=unk, live=live)
+
+    def rhs(self, f: np.ndarray) -> np.ndarray:
+        """The right-hand side of an injection field f (the grid's shape)."""
+        fc = f.ravel()[self.free]
+        if (fc[~self.on] > 0).any():
+            raise ValueError("injection on a cell with no path to the street")
+        return np.bincount(self.unk[self.live], weights=fc[self.live],
+                           minlength=self.A.shape[0])
+
+    def cell_u(self, u: np.ndarray, size: int) -> np.ndarray:
+        """The potential per cell of the grid (0 off the system)."""
+        out = np.zeros(size)
+        idx = np.flatnonzero(self.free)
+        out[idx[self.live]] = u[self.unk[self.live]]
+        return out
+
+
+class RasterIso:
+    """The isotropic model on the raster (module docstring) on one block: the metric's grid and
+    placement (gap_study.raster_view, B's), each field solved on its free cells."""
+
+    def __init__(self, b, mesh_token: str):
+        self.c = gap_study.raster_view(b, mesh_token)
+        self.sc = self.c.sc
+        self.p = self.c.p
+        g = self.sc.grid
+        self.f = self.sc.pl.field(self.sc.w, g.inside.shape)
+        [(P0, u0)] = self.solve(self.sc.free0, [self.f])
+        self.P0, self.u0 = P0, u0
+        self.inj_q = PQ.injection(self.sc.w, u0, self.sc.enclosed)
+        self.f_q = self.sc.pl.field(self.inj_q, g.inside.shape)
+        [(self.Pq0, self.u_q0)] = self.solve(self.sc.free0, [self.f_q])
+        self.J2_0 = float(np.nansum(self.sc.w * u0 ** 2))
+
+    def solve(self, o: np.ndarray, fs: list[np.ndarray]) -> list[tuple[float, np.ndarray]]:
+        """Per injection field f of `fs`: (P, per home its escape time) in the open field o."""
+        g = self.sc.grid
+        sy = IsoSystem.of(g, o, self.p)
+        lu = _amg(sy.A)
         out = []
         for f in fs:
-            fc = f.ravel()[free]
-            if (fc[~on] > 0).any():
-                raise ValueError("injection on a cell with no path to the street")
-            b = np.bincount(unk[live], weights=fc[live], minlength=N)
+            b = sy.rhs(f)
             u = lu.solve(b)
-            u_cell = np.zeros(g.inside.size)
-            u_cell[idx[live]] = u[unk[live]]
-            uh = self.sc.pl.home_u(u_cell)
+            uh = self.sc.pl.home_u(sy.cell_u(u, g.inside.size))
             out.append((float(b @ u), np.where(self.sc.enclosed, np.nan, uh)))
         return out
 
@@ -538,6 +566,41 @@ def converge(bid: str, Rs: list[float], levels: int, token: str) -> None:
     pd.DataFrame(rows).to_parquet(out)
 
 
+LANE_WIDTHS = (0.25, 0.375, 0.5, 0.75, 1.0, 1.5, 2.0, 4.0, 8.0, 16.0)
+LANE_ANGLES = (0.0, 22.5, 45.0)
+LANE_OFFSETS = 4                  # lattice offsets per width and angle (seeded)
+LANE_SEED = 20261014
+LANE_H = 0.5                      # the metric's cell
+
+
+def lanes() -> None:
+    """The raster's width laws on width.walled_channel (W x L_C, walls footprints, demand within 1
+    m of the dead end): P of the isotropic model (IsoSystem) and of the lifted metric (uni+apwfs)
+    over the exact (L_C - 2 + 1/3) / (SIGMA W) of a channel conducting SIGMA (the complex's: its
+    angle and channel guards, within 3e-4). Rows gap_rows/compare/lanes.parquet."""
+    from scipy.sparse.linalg import splu
+    p = gap_study._params()
+    offs = np.random.default_rng(LANE_SEED).random((LANE_OFFSETS, 2))
+    rows = []
+    for W in LANE_WIDTHS:
+        exact = (width.L_C - 2.0 + 1.0 / 3.0) / (SIGMA * W)
+        for a in LANE_ANGLES:
+            for k, off in enumerate(offs):
+                g, f = width.walled_channel(a, W, LANE_H, (float(off[0]), float(off[1])))
+                sy = IsoSystem.of(g, g.ff0, p)
+                b = sy.rhs(f)
+                P_iso = float(b @ splu(sy.A.tocsc()).solve(b))
+                P_lift = lifted.solve(g, g.ff0, f, p).P
+                rows.append(dict(W=W, angle=a, offset=k, iso=P_iso / exact,
+                                 lifted=P_lift / exact))
+            r = pd.DataFrame(rows[-LANE_OFFSETS:])
+            print(f"W {W:g} angle {a:g}: P / exact iso {r.iso.median():.3f} lifted "
+                  f"{r.lifted.median():.3f}", flush=True)
+    out = ROWS / "lanes.parquet"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_parquet(out)
+
+
 REGION = {   # NOTES, "A region whose only exit is its edge: 5810@major"
     "simp_default": "relax_rows/uni/fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2.a5x8/D0.05.p2",
     "cheap": "polish_rows/uni/S0.01cat.P64w8.a5x8/D0.05.p2"}
@@ -597,6 +660,9 @@ def main(argv: list[str]) -> None:
     elif cmd == "flowsweep":
         failed = _pool(flowsweep_one, [(i, t) for t in argv[3].split(",")
                                        for i in gap_study.ids_of(argv[1])], int(argv[2]))
+    elif cmd == "lanes":
+        lanes()
+        failed = []
     elif cmd == "region":
         region(argv[1], argv[2].split(","))
         failed = []

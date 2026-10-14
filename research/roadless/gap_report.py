@@ -37,6 +37,7 @@ EXIT_BINS = (0.0, 0.05, 0.1, 0.125, 0.15, 0.2, 0.25, 0.3, 0.375, 0.5, 0.625, 0.7
              3.0, np.inf)
 LENSES = ("L_P", "L_Pq0.5", "L_J2")
 REACH_TOL = 1e-9
+TOP = 3                                # compare_top: the share of a lens its top TOP homes hold
 
 
 def _summary(name: str, df: pd.DataFrame) -> None:
@@ -258,6 +259,19 @@ def compare() -> None:
                                        spearman=float(spearmanr(x[ok], y[ok]).statistic),
                                        ratio_median=float(np.median(y[ok] / x[ok]))))
     _summary("compare_homes", pd.DataFrame(sp))
+    # the share of each lens its top TOP homes hold, at baseline and under SIMP's default
+    top = []
+    for k, v in homes.items():
+        for bid, h in v[v.block.isin(blocks)].groupby("block"):
+            for col in ("u0", "u_default"):
+                u = h[col].to_numpy()
+                ok = np.isfinite(u)
+                terms = {"P": h.w.to_numpy()[ok] * u[ok],
+                         "J2": h.w.to_numpy()[ok] * u[ok] ** 2}
+                top.append(dict(block=bid, model=k, u=col, **{
+                    f"top{TOP}_{L}": float(np.sort(t)[-TOP:].sum() / t.sum())
+                    for L, t in terms.items()}))
+    _summary("compare_top", pd.DataFrame(top))
     C = _read("compare/converge/*.parquet")
     if len(C):
         _summary("converge", C)
