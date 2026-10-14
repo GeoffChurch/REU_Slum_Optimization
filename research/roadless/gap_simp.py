@@ -53,6 +53,7 @@ LEVELS = 4
 SCORE_EPS = 1e-6
 CLUSTER_M = 0.5                 # cleared buildings closer than this are one cluster
 QUANTILES = (0.1, 0.25, 0.5, 0.75, 0.9)
+CROSS = ("close0.5", "shy0.5")   # each clearing scored under these forms too
 ROWS = HERE / "gap_rows" / "simp"
 
 
@@ -161,13 +162,22 @@ def run_one(job: tuple[str, str]) -> str | None:
         cm = gcmp.ComplexModel(b, fs, form)
         score, _u = cm.score(~cleared, None)
         cor = corridors(geo, cm, cleared)
+        # the clearing under the other forms too (each its own baseline and demand)
+        cross = {}
+        for other in CROSS:
+            if other == token:
+                continue
+            co = gcmp.ComplexModel(b, fs, gcmp.form_of(other))
+            r2, _u2 = co.score(~cleared, None)
+            cross.update({f"{k}@{other}": r2[k] for k in ("L_P", "L_Pq0.5", "L_J2", "enclosed")})
         row = dict(block=bid, form=form.name, plan=PLAN.name, power=POWER, flow=fs.name,
                    D=float(cost[cleared].sum()), free_D=float(cost[held].sum()),
                    free_cleared=" ".join(map(str, np.flatnonzero(held))),
                    cleared=" ".join(map(str, np.flatnonzero(cleared))),
                    grey=float(np.mean((x > 0.05) & (x < 0.95))), J_eps=best["J"], **score,
-                   **cor, t_model=t_model, t_simp=t_simp, t_block=time.time() - t0,
-                   nt=m.fm.nt, cells=m.fc.n, host=socket.gethostname(), peak_rss_gb=_peak_gb())
+                   **cor, **cross, t_model=t_model, t_simp=t_simp, t_block=time.time() - t0,
+                   nt_full=m.fm.nt, cells_full=m.fc.n, host=socket.gethostname(),
+                   peak_rss_gb=_peak_gb())
         out.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame([row]).to_parquet(out)
         print(f"{bid} {form.name}: SIMP L_P {score['L_P']:.4f} L_Pq {score['L_Pq0.5']:.4f} L_J2 "

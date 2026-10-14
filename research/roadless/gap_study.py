@@ -3,6 +3,7 @@ gap complex: passability, enclosure and flow without the raster"; BACKLOG 4, dec
 
     S=research/roadless/gap_study.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S agree <ids,|@file> <procs>       # the agreement check (the gate)
+    uv run python $S crossings <ids,|@file> <procs>   # where free first's crossings differ
     uv run python $S apertures <ids,|@file> <procs>   # measured apertures against true gaps
     uv run python $S sweep <ids,|@file> <procs> <s>   # the passability sweep at spacing s
     uv run python $S report                           # the summaries
@@ -239,6 +240,55 @@ def agree_one(bid: str) -> str | None:
         return f"{bid}: {e!r}"
 
 
+# ------------------------------------------------------------------ crossings
+
+def crossings_one(bid: str) -> str | None:
+    """Where free first's crossings differ (agree's rows at RESOLUTION, s 0.125): per crossing of
+    either model (home, buildings), whether it frees its home in the complex at RESOLUTION (its
+    exit width with the buildings cleared), in the raster (common.reached), and in the raster with
+    each footprint sub-sample opened only by its own building (no cleared share spread over a mixed
+    cell). Rows gap_rows/crossings/<id>.parquet."""
+    out = ROWS / "crossings" / f"{bid}.parquet"
+    if out.exists():
+        return None
+    try:
+        blk = pd.read_parquet(ROWS / "agree_blocks" / f"{bid}.parquet")
+        r = blk[(blk.s == 0.125) & (blk.w == RESOLUTION)].iloc[0]
+        [b] = common.build_blocks([bid])
+        geo = gc.geometry(b)
+        n = len(geo.polys)
+        c = raster_view(b, mesh_token_of(bid))
+        g = c.sc.grid
+        rows = []
+        for model, text in (("raster", r.raster_crossings), ("complex", r.crossings)):
+            for item in [x for x in text.split(";") if x]:
+                h, js = item.split(":")
+                h, js = int(h), [int(x) for x in js.split()]
+                st = np.ones(n, dtype=bool)
+                st[js] = False
+                cx = gc.build(geo, spec_of(0.125), st, carve=None, grow=0.0)
+                he = gc.home_exits(gc.homes_of(geo, cx), gc.exit_widths(cx))[h]
+                held = ~st
+                freed = bool(common.reached(c.sc.pl, g, c.open_(held), c.p)[h])
+                gone = (c.lab >= 0) & held[np.maximum(c.lab, 0)]
+                g2 = lifted.Grid(x0=g.x0, y0=g.y0, h=g.h, inside=g.inside, building=g.building,
+                                 ground=g.ground, dist_b=g.dist_b, xy=g.xy, isub=g.isub,
+                                 bsub=g.bsub & ~gone, S=g.S)
+                own = bool(common.reached(c.sc.pl, g2, g2.ff0, c.p)[h])
+                rows.append(dict(block=bid, model=model, home=h,
+                                 buildings=" ".join(map(str, js)),
+                                 D=float(c.cost[js].sum()), complex_exit=float(he),
+                                 raster_frees=freed, raster_frees_own=own,
+                                 raster_enclosed=bool(c.sc.enclosed[h])))
+        out.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_parquet(out)
+        return None
+    except Exception as e:     # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        return f"{bid}: {e!r}"
+
+
 # ------------------------------------------------------------------ apertures
 
 def apertures_one(bid: str) -> str | None:
@@ -369,6 +419,8 @@ def main(argv: list[str]) -> None:
     cmd = argv[0]
     if cmd == "agree":
         failed = _pool(agree_one, ids_of(argv[1]), int(argv[2]))
+    elif cmd == "crossings":
+        failed = _pool(crossings_one, ids_of(argv[1]), int(argv[2]))
     elif cmd == "apertures":
         failed = _pool(apertures_one, ids_of(argv[1]), int(argv[2]))
     elif cmd == "sweep":
