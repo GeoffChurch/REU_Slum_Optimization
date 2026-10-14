@@ -34,6 +34,25 @@ cells reached from the street through conducting passages are the state's (the r
 w), an obtuse exit triangle's cell is ground once it conducts. Scoring a state is assembly,
 factorization and solves: no GEOS call and no meshing after the baseline.
 
+THE SYSTEM (`System`, `Graph`; NOTES, "The complex as the runtime: its speed and a GPU path"). A
+cell structure's operator lives on one fixed pattern: every pair of cells a static passage joins
+and the diagonal, every cell in every state. A state's reach is a search from the street through
+the pairs that conduct; its values are one pass over the pattern: an unknown row its conductances,
+a closed passage an explicit zero, a cell off the unknowns (walled in, or ground) an identity row.
+The run's factorization (gap_factor, a Strategy resolved where the run is configured: SuperLU on
+a core, restricting the pattern to the state's unknowns in one nested-dissection order; cuDSS on
+a GPU, refactoring the whole pattern) makes one plan per pattern, so exact scores, tensions,
+SIMP's iterations and the polish share it. Potentials, right-hand sides and the adjoint are per
+cell (0 off the unknowns). The exact world's cells are `sys`; the eps world's (SIMP's, the
+tension's, the eps-world polish's) `relax_sys`, the same unless a metric lumps the interiors there
+(+relaxlumped).
+
+THE IDENTITY (`ComplexMetric.name`): every configurable constant, and the code's own: every
+public module-level constant of this module, gap_complex, gap_flow and gap_factor (and clear.EPS,
+the tension's) digested at import (CODE, `code_constants`), the few that cannot change a result
+exempt with their reasons (`_EXEMPT`). Editing a constant renames the metric, and the mesh cache's
+key carries the digest too.
+
 THE SCORER (`Model`). The demand is gap_flow's (lifted.Placement's rule on the complex), fixed at
 baseline on the triangles reaching the street then; each home's escape time the injection-weighted
 mean potential over its points. P (each home injecting its population), P_{1/2}
@@ -55,12 +74,14 @@ on.
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
 import re
 import time
 from dataclasses import dataclass
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -75,6 +96,7 @@ import clear
 import clearings
 import common
 import gap_complex as gc
+import gap_factor
 import gap_flow as gf
 import lifted
 import relax
@@ -628,55 +650,45 @@ def full_cells(fm: FullMesh, *, lumped: bool) -> FullCells:
 # ------------------------------------------------------------------ the fixed mesh, cached
 
 class Fixed(NamedTuple):
-    """A block's fixed mesh and what its baseline fixes (module docstring): the mesh, its cells,
-    the demand on the triangles reaching the street with every footprint standing
-    (gap_flow.demand_on; per point its triangle `ptri`, -1 in the band) and each home's ring
-    (gap_flow.ring_of)."""
+    """A block's fixed mesh and what its baseline fixes (module docstring): the mesh, the demand
+    on the triangles reaching the street with every footprint standing (gap_flow.demand_on; per
+    point its triangle `ptri`, -1 in the band) and each home's ring (gap_flow.ring_of)."""
     fm: FullMesh
-    cells: FullCells
     dem: gf.PointDemand
     ptri: NDArray[np.int64]
     ring: gf.Ring
     t_build: float
 
-    @property
-    def pcell(self) -> NDArray[np.int64]:
-        """Per demand point its cell (-1 in the band)."""
-        return np.where(self.ptri >= 0, self.cells.cell[np.maximum(self.ptri, 0)], -1)
-
     @staticmethod
     def key(block, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width) -> str:
         """The identity: the block's footprints (clearings.fingerprint), its streets and boundary,
-        and every constant that can move the mesh."""
+        the configurable constants and the code's (CODE: every constant that can move a mesh
+        among them)."""
         geo = gc.geometry(block)
         ident = dict(
             block=block.block_id, footprints=clearings.fingerprint(block.buildings.outlines),
             streets=hashlib.sha256(shapely.to_wkb(geo.streets)).hexdigest(),
             boundary=hashlib.sha256(shapely.to_wkb(geo.boundary)).hexdigest(),
             spec=spec.name, flow=fs.name, sigma=fs.sigma, offset=fs.offset, form=form.name,
-            rev=MESH_REV, conform=CONFORM_ROUNDS, snap=LINE_SNAP_M, band=BAND_TOL_M,
-            consts=[gc.TOL, gc.DUST_M2, gc.DELAUNAY_TOL, gc.GROW_TOL_REL, gc.SNAP_M, gc.MERGE_M,
-                    gf.MERGE_REL, gf.T_MIN, gf.FLAT_REL, gf.STEINER_W, gf.INSERT_PASSES])
+            code=CODE)
         return hashlib.sha256(json.dumps(ident, sort_keys=True).encode()).hexdigest()[:24]
 
     @classmethod
-    def of(cls, block, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width, *, lumped: bool,
-           cache: Path) -> Fixed:
-        """The block's fixed mesh: from `cache` if built before, else built and stored there
-        (the cells, cheap, are made at each load: `lumped` is not in the key)."""
+    def of(cls, block, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width, *, cache: Path) -> Fixed:
+        """The block's fixed mesh: from `cache` if built before, else built and stored there."""
         path = cache / f"{block.block_id}__{cls.key(block, spec, fs, form)}.npz"
         if path.exists():
-            return cls._load(path, lumped=lumped)
+            return cls._load(path)
         t0 = time.time()
         geo = gc.geometry(block)
         fm = full_mesh(geo, spec, fs, form)
-        cells = full_cells(fm, lumped=lumped)
+        cells = full_cells(fm, lumped=False)
         # the baseline's reach: every footprint standing
         k0 = np.zeros(len(geo.polys))
         kt = form.terms(geo, fm, fs.quad).value(k0)
         fe, fb = form.fill_pairs(fm)
         kp, _binds = _passage_factors(fm, kt, k0, Fill(e=fe, b=fb))
-        live0 = _reach(fm, cells, kt, kp).live[cells.cell]
+        live0 = Graph(fm, cells).reach(fm, kt, kp).live[cells.cell]
         _ib, band_open = gc._open_ground(geo, np.ones(len(geo.polys), dtype=bool), spec.band_m,
                                          carve=None, grow=0.0)
         ids = np.flatnonzero(live0)
@@ -685,7 +697,7 @@ class Fixed(NamedTuple):
         ptri = -np.ones(len(dem.xy), dtype=np.int64)
         ptri[:nin] = ids[np.arange(nin) // fs.quad]
         ring = gf.ring_of(geo, spec.ring_m, fm.xy, fm.tri, band_open)
-        fx = cls(fm=fm, cells=cells, dem=dem, ptri=ptri, ring=ring, t_build=time.time() - t0)
+        fx = cls(fm=fm, dem=dem, ptri=ptri, ring=ring, t_build=time.time() - t0)
         cls._store(fx, path)
         return fx
 
@@ -715,7 +727,7 @@ class Fixed(NamedTuple):
         os.replace(tmp, path)
 
     @classmethod
-    def _load(cls, path: Path, *, lumped: bool) -> Fixed:
+    def _load(cls, path: Path) -> Fixed:
         z = np.load(path)
 
         def csr(name: str) -> sp.csr_matrix:
@@ -729,7 +741,7 @@ class Fixed(NamedTuple):
                       rounds=int(rounds), flat=int(flat), skipped=int(skipped))
         dem = gf.PointDemand(xy=z["dem_xy"], band=z["dem_band"], S=csr("dem_S"),
                              walled=z["dem_walled"], shadowed=z["dem_shadowed"])
-        return cls(fm=fm, cells=full_cells(fm, lumped=lumped), dem=dem, ptri=z["ptri"],
+        return cls(fm=fm, dem=dem, ptri=z["ptri"],
                    ring=gf.Ring(tri=csr("ring_tri"), band=z["ring_band"]),
                    t_build=float(t_build))
 
@@ -747,9 +759,7 @@ def _passage_factors(fm: FullMesh, kt: NDArray[np.float64], k: NDArray[np.float6
     """(per passage the harmonic mean of its two triangles' factors (the half-cells in series;
     0 if either is), a filled one the sum of its buildings' k where that is less; per passage
     whether its fill binds)."""
-    va, vb_ = kt[fm.pa], kt[fm.pb]
-    s_ = va + vb_
-    kp = np.where(s_ > 0, 2.0 * va * vb_ / np.where(s_ > 0, s_, 1.0), 0.0)
+    kp = _harmonic(kt, fm.pa, fm.pb)
     binds = np.zeros(len(kp), dtype=bool)
     if len(fill.e):
         ssum = np.bincount(fill.e, weights=k[fill.b], minlength=len(kp))
@@ -760,88 +770,194 @@ def _passage_factors(fm: FullMesh, kt: NDArray[np.float64], k: NDArray[np.float6
     return kp, binds
 
 
+@njit(cache=True)
+def _harmonic(kt, pa, pb):
+    """Per passage 2 a b / (a + b) of its triangles' factors a, b (0 where a + b is)."""
+    out = np.empty(len(pa))
+    for p in range(len(pa)):
+        a, b = kt[pa[p]], kt[pb[p]]
+        s = a + b
+        out[p] = 2.0 * a * b / s if s > 0 else 0.0
+    return out
+
+
 class Reach(NamedTuple):
     """A state's cells: `live` (reached from the street through conducting passages), `ground`
-    (a conducting obtuse exit's), `unk` per cell its unknown (-1: not live, or ground); per
-    static passage (FullCells.pe) its conductance `Tp`, per finite street face its `Gf`."""
+    (a conducting obtuse exit's), `unknown` (live and not ground: the system's unknowns); per
+    static passage (FullCells.pe) its conductance `Tp`, per finite street face its `Gf`, per cell
+    its conductance to the street `G` (its faces'), per pair of cells their conductance `W` (the
+    sum of their passages')."""
     live: NDArray[np.bool_]
     ground: NDArray[np.bool_]
-    unk: NDArray[np.int64]
+    unknown: NDArray[np.bool_]
     Tp: NDArray[np.float64]
     Gf: NDArray[np.float64]
+    G: NDArray[np.float64]
+    W: NDArray[np.float64]
 
     @property
     def N(self) -> int:
-        return int((self.unk >= 0).sum())
+        return int(self.unknown.sum())
 
 
-def _reach(fm: FullMesh, c: FullCells, kt: NDArray[np.float64], kp: NDArray[np.float64]) -> Reach:
-    Tp = fm.T[c.pe] * kp[c.pe]
-    kf = kt[fm.fa]
-    Gf = fm.Tf[c.pf] * kf[c.pf]
-    if (Tp < 0).any() or (Gf < 0).any():
-        raise ValueError("a negative conductance")
-    ground = np.zeros(c.n, dtype=bool)
-    ground[c.gcell[kf[c.pg] > 0]] = True
-    on = Tp > 0
-    street = c.n
-    touch = np.unique(np.concatenate([c.fc[Gf > 0], np.flatnonzero(ground)]))
-    r = np.concatenate([c.ea[on], touch])
-    cc_ = np.concatenate([c.eb[on], np.full(len(touch), street)])
-    _k, comp = connected_components(sp.csr_matrix((np.ones(len(r)), (r, cc_)),
-                                                  shape=(c.n + 1, c.n + 1)), directed=False)
-    live = comp[:c.n] == comp[street]
-    unk = -np.ones(c.n, dtype=np.int64)
-    free = live & ~ground
-    unk[free] = np.arange(int(free.sum()))
-    return Reach(live=live, ground=ground, unk=unk, Tp=Tp, Gf=Gf)
+@njit(cache=True)
+def _bfs(indptr, indices, epair, W, seed):
+    """The rows reached from `seed` through the pattern's entries whose pair conducts (W > 0)."""
+    n = len(seed)
+    live = seed.copy()
+    stack = np.empty(n, dtype=np.int64)
+    top = 0
+    for i in range(n):
+        if seed[i]:
+            stack[top] = i
+            top += 1
+    while top > 0:
+        top -= 1
+        i = stack[top]
+        for p in range(indptr[i], indptr[i + 1]):
+            j = indices[p]
+            if not live[j] and W[epair[p]] > 0.0:
+                live[j] = True
+                stack[top] = j
+                top += 1
+    return live
 
 
-def _assemble(c: FullCells, r: Reach) -> sp.csr_matrix:
-    """The state's operator over its unknowns (a passage to a ground cell on the diagonal only)."""
-    N = r.N
-    ua, ub = r.unk[c.ea], r.unk[c.eb]
-    T = r.Tp
-    diag = (np.bincount(ua[ua >= 0], weights=T[ua >= 0], minlength=N)
-            + np.bincount(ub[ub >= 0], weights=T[ub >= 0], minlength=N))
-    uf = r.unk[c.fc]
-    diag += np.bincount(uf[uf >= 0], weights=r.Gf[uf >= 0], minlength=N)
-    both = (ua >= 0) & (ub >= 0) & (T > 0)
-    rows = np.concatenate([ua[both], ub[both], np.arange(N)])
-    cols = np.concatenate([ub[both], ua[both], np.arange(N)])
-    vals = np.concatenate([-T[both], -T[both], diag])
-    return sp.csr_matrix((vals, (rows, cols)), shape=(N, N))
+@njit(cache=True)
+def _values(indptr, indices, epair, W, G, unknown):
+    """The operator's values on the pattern: an unknown row conducts -W to each unknown
+    neighbour (an explicit zero to any other: a passage to a ground cell is on its diagonal
+    only) and its diagonal the sum of its pairs' W and its G; a row off the unknowns the
+    identity's."""
+    n = len(unknown)
+    data = np.empty(len(indices))
+    for i in range(n):
+        s = 0.0
+        dpos = -1
+        for p in range(indptr[i], indptr[i + 1]):
+            j = indices[p]
+            if j == i:
+                dpos = p
+                continue
+            w = W[epair[p]]
+            s += w
+            data[p] = -w if unknown[i] and unknown[j] else 0.0
+        data[dpos] = s + G[i] if unknown[i] else 1.0
+    return data
 
 
-def _rank(fm: FullMesh, c: FullCells) -> NDArray[np.int64]:
-    """Per cell its position in one elimination order of the whole cell graph (every static
-    passage; gap_flow.dissection at the cells' centroids), every state's unknowns factored in
-    the order it restricts to them: one ordering for all, its separators separating any
-    subgraph."""
-    cen = fm.xy[fm.tri].mean(axis=1)
-    cnt = np.bincount(c.cell, minlength=c.n)
-    x = np.bincount(c.cell, weights=cen[:, 0], minlength=c.n) / cnt
-    y = np.bincount(c.cell, weights=cen[:, 1], minlength=c.n) / cnt
-    G = sp.csr_matrix((np.ones(2 * len(c.ea)), (np.concatenate([c.ea, c.eb]),
-                                                 np.concatenate([c.eb, c.ea]))),
-                      shape=(c.n, c.n))
-    perm = gf.dissection(G.indptr, G.indices, x, y, gf.ND_LEAF)
-    rank = np.empty(c.n, dtype=np.int64)
-    rank[perm] = np.arange(c.n)
-    return rank
+class Graph:
+    """A cell structure's fixed pattern (gap_factor.Pattern: every pair of cells a static passage
+    joins, and the diagonal, at the cells' centroids), per off-diagonal entry its pair (`epair`;
+    the diagonal's -1), per static passage its pair (`pair`). A state's reach is a search through
+    the conducting pairs from the street, its operator's values one pass over the pattern
+    (`_values`): every state on the one pattern, a closed passage an explicit zero, a cell off
+    the unknowns an identity row."""
+
+    def __init__(self, fm: FullMesh, c: FullCells):
+        n = c.n
+        self.c = c
+        ea, eb = c.ea.astype(np.int64), c.eb.astype(np.int64)
+        lo, hi = np.minimum(ea, eb), np.maximum(ea, eb)
+        uniq, pair = np.unique(lo * n + hi, return_inverse=True)
+        self.pair = pair.astype(np.int64)
+        self.npair = len(uniq)
+        pi, pj = uniq // n, uniq % n
+        diag = np.arange(n)
+        rows = np.concatenate([pi, pj, diag])
+        cols = np.concatenate([pj, pi, diag])
+        tag = np.concatenate([np.arange(self.npair), np.arange(self.npair),
+                              -np.ones(n, dtype=np.int64)])
+        o = np.lexsort((cols, rows))
+        indptr = np.zeros(n + 1, dtype=np.int32)
+        np.cumsum(np.bincount(rows, minlength=n), out=indptr[1:])
+        cen = fm.xy[fm.tri].mean(axis=1)
+        cnt = np.bincount(c.cell, minlength=n)
+        xy = np.column_stack([np.bincount(c.cell, weights=cen[:, 0], minlength=n) / cnt,
+                              np.bincount(c.cell, weights=cen[:, 1], minlength=n) / cnt])
+        self.pattern = gap_factor.Pattern(indptr=indptr, indices=cols[o].astype(np.int32),
+                                          xy=xy)
+        self.epair = tag[o]
+
+    def reach(self, fm: FullMesh, kt: NDArray[np.float64], kp: NDArray[np.float64]) -> Reach:
+        c = self.c
+        Tp = fm.T[c.pe] * kp[c.pe]
+        kf = kt[fm.fa]
+        Gf = fm.Tf[c.pf] * kf[c.pf]
+        if (Tp < 0).any() or (Gf < 0).any():
+            raise ValueError("a negative conductance")
+        ground = np.zeros(c.n, dtype=bool)
+        ground[c.gcell[kf[c.pg] > 0]] = True
+        G = np.bincount(c.fc, weights=Gf, minlength=c.n)
+        W = np.bincount(self.pair, weights=Tp, minlength=self.npair)
+        p = self.pattern
+        live = _bfs(p.indptr, p.indices, self.epair, W, ground | (G > 0))
+        return Reach(live=live, ground=ground, unknown=live & ~ground, Tp=Tp, Gf=Gf, G=G, W=W)
+
+    def values(self, r: Reach) -> NDArray[np.float64]:
+        p = self.pattern
+        return np.asarray(_values(p.indptr, p.indices, self.epair, r.W, r.G, r.unknown))
+
+
+class System:
+    """A cell structure of the fixed mesh as each state's linear system: its cells (FullCells),
+    their Graph, the demand's points on them (`Pc`, cells x homes: per home its injection's
+    weight on each cell; transposed, `PcT`, a home's escape time from the potential per cell)
+    and the factorization's plan of the pattern (gap_factor)."""
+
+    def __init__(self, fm: FullMesh, cells: FullCells, *, dem: gf.PointDemand,
+                 ptri: NDArray[np.int64], factorization: gap_factor.Factorization):
+        self.cells = cells
+        self.graph = Graph(fm, cells)
+        pcell = np.where(ptri >= 0, cells.cell[np.maximum(ptri, 0)], -1)
+        on = np.flatnonzero(pcell >= 0)
+        M = sp.csr_matrix((np.ones(len(on)), (pcell[on], on)), shape=(cells.n, len(pcell)))
+        self.Pc = (M @ dem.S).tocsr()
+        self.PcT = self.Pc.T.tocsr()
+        self.planned = factorization.plan(self.graph.pattern)
+
+    @property
+    def n(self) -> int:
+        return self.cells.n
 
 
 class State(NamedTuple):
-    """A clearing's state on the fixed mesh: the factors (per building `k`, per triangle `kt`,
-    per passage `kp`, whether its fill binds), its reach and, once factored, its operator and
-    the operator's factorization."""
+    """A clearing's state on one System of the fixed mesh: the factors (per building `k`, per
+    triangle `kt`, per passage `kp`, whether its fill binds), its reach and, once factored, its
+    operator on the pattern (cells x cells) and the operator's factorization."""
+    sys: System
     k: NDArray[np.float64]
     kt: NDArray[np.float64]
     kp: NDArray[np.float64]
     binds: NDArray[np.bool_]
     reach: Reach
     A: sp.csr_matrix | None
-    lu: Any
+    factor: gap_factor.Factor | None
+
+
+@njit(cache=True)
+def _grad_tri(pe, ea, eb, pa, pb, T, kt, binds, pf, fc, fa, Tf, u, lam, nt):
+    """(per triangle dJ / d(its factor), per static passage dJ / d(its factor)) by the adjoint:
+    dJ / dw = -du dlam per conductance, through each passage's harmonic mean (a filled one's
+    binding fill takes it instead) and each street face's triangle."""
+    gt = np.zeros(nt)
+    gp = np.empty(len(pe))
+    for q in range(len(pe)):
+        p = pe[q]
+        g = -T[p] * (u[ea[q]] - u[eb[q]]) * (lam[ea[q]] - lam[eb[q]])
+        gp[q] = g
+        if binds[p]:
+            continue
+        va, vb = kt[pa[p]], kt[pb[p]]
+        s = va + vb
+        if s > 0:
+            s2 = s * s
+            gt[pa[p]] += g * 2.0 * vb * vb / s2
+            gt[pb[p]] += g * 2.0 * va * va / s2
+    for q in range(len(pf)):
+        f = pf[q]
+        gt[fa[f]] += -Tf[f] * u[fc[q]] * lam[fc[q]]
+    return gt, gp
 
 
 class Timing:
@@ -881,13 +997,16 @@ PQ = common.PriorityDemand(0.5)         # the equity view (owner 2026-10-13)
 class Model:
     """One block's clearing model on its fixed mesh (module docstring): the baseline, the scorer,
     free first and the seam's ClearingModel. `pop` each building's population (area: the
-    owner's), `demand` what each home injects in J_power (common.Demand)."""
+    owner's), `demand` what each home injects in J_power (common.Demand); `factorization` the
+    run's (gap_factor: its device); `lumped` every building's interior one cell in both worlds,
+    `relax_lumped` in the eps world (SIMP's, the tension's, the polish's scorer) at least."""
 
     def __init__(self, block, fx: Fixed, *, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width,
-                 pop: NDArray[np.float64], demand: common.Demand):
+                 pop: NDArray[np.float64], demand: common.Demand,
+                 factorization: gap_factor.Factorization, lumped: bool, relax_lumped: bool):
         self.block, self.fx, self.spec, self.fs, self.form = block, fx, spec, fs, form
         self.geo = gc.geometry(block)
-        self.fm, self.c = fx.fm, fx.cells
+        self.fm = fx.fm
         self.n_ = len(self.geo.polys)
         self.terms = form.terms(self.geo, self.fm, fs.quad)
         fe, fb = form.fill_pairs(self.fm)
@@ -898,8 +1017,12 @@ class Model:
         self.polys_ = np.asarray(block.buildings.outlines)
         self.tree_ = shapely.STRtree(self.polys_)
         self.timing = Timing()
-        self.rank = _rank(self.fm, self.c)
-        self.dem, self.pcell = fx.dem, fx.pcell
+        self.sys = System(self.fm, full_cells(self.fm, lumped=lumped), dem=fx.dem, ptri=fx.ptri,
+                          factorization=factorization)
+        self.relax_sys = (self.sys if relax_lumped == lumped else
+                          System(self.fm, full_cells(self.fm, lumped=relax_lumped), dem=fx.dem,
+                                 ptri=fx.ptri, factorization=factorization))
+        self.dem = fx.dem
         self.nodem = fx.dem.walled            # the homes with no demand point: out of every J
         # the baseline, every footprint standing: the walled-in homes, the escape times under the
         # population's demand (P_{1/2}'s weights) and under the run's (J_power's), the lenses'
@@ -916,55 +1039,64 @@ class Model:
         self.base = self.lenses_of(st0)
         self.cells0 = st0.reach.N
 
+    @property
+    def c(self) -> FullCells:
+        """The exact world's cells."""
+        return self.sys.cells
+
     # -- the state
 
-    def factors(self, k: NDArray[np.float64]) -> State:
-        """The state's factors and reach (no operator: the enclosed homes need no solve)."""
+    def _factors(self, sys: System, k: NDArray[np.float64]) -> State:
         t = time.time()
         kt = self.terms.value(k)
         kp, binds = _passage_factors(self.fm, kt, k, self.fill)
         self.timing.add("factors", time.time() - t)
         t = time.time()
-        r = _reach(self.fm, self.c, kt, kp)
+        r = sys.graph.reach(self.fm, kt, kp)
         self.timing.add("reach", time.time() - t)
-        return State(k=k, kt=kt, kp=kp, binds=binds, reach=r, A=None, lu=None)
+        return State(sys=sys, k=k, kt=kt, kp=kp, binds=binds, reach=r, A=None, factor=None)
 
-    def state(self, k: NDArray[np.float64]) -> State:
-        """The state of the clearing k, its operator assembled and factored."""
-        st = self.factors(k)
+    def _state(self, sys: System, k: NDArray[np.float64]) -> State:
+        st = self._factors(sys, k)
         t = time.time()
-        A = _assemble(self.c, st.reach)
+        data = sys.graph.values(st.reach)
+        p = sys.graph.pattern
+        A = sp.csr_matrix((data, p.indices, p.indptr), shape=(p.n, p.n))
         self.timing.add("assembly", time.time() - t)
         t = time.time()
-        on = st.reach.unk >= 0
-        lu = gf.factor_ordered(A, np.argsort(self.rank[np.flatnonzero(on)][
-            np.argsort(st.reach.unk[on])], kind="stable"))
+        f = sys.planned.factor(data, st.reach.unknown)
         self.timing.add("factorization", time.time() - t)
-        return st._replace(A=A, lu=lu)
+        return st._replace(A=A, factor=f)
 
-    def _unk_pt(self, st: State) -> NDArray[np.int64]:
-        return np.where(self.pcell >= 0, st.reach.unk[np.maximum(self.pcell, 0)], -1)
+    def factors(self, k: NDArray[np.float64]) -> State:
+        """The exact world's state of the clearing k: its factors and reach (no operator: the
+        enclosed homes need no solve)."""
+        return self._factors(self.sys, k)
+
+    def state(self, k: NDArray[np.float64]) -> State:
+        """The exact world's state of the clearing k, its operator assembled and factored."""
+        return self._state(self.sys, k)
+
+    def relaxed_state(self, k: NDArray[np.float64]) -> State:
+        """The eps world's state of k (its cells `relax_sys`'s), assembled and factored."""
+        return self._state(self.relax_sys, k)
 
     def _rhs(self, st: State, inj: NDArray[np.float64]) -> NDArray[np.float64]:
-        """The right-hand side of the injection `inj` per home (a point in a ground cell or the
-        band escapes at once)."""
-        f_pt = self.dem.S @ inj
-        uk = self._unk_pt(st)
-        on = uk >= 0
-        return np.bincount(uk[on], weights=f_pt[on], minlength=st.reach.N)
+        """The right-hand side per cell of the injection `inj` per home (a point in a ground cell
+        or the band escapes at once)."""
+        return np.asarray(st.sys.Pc @ inj) * st.reach.unknown
 
     def solve(self, st: State, inj: NDArray[np.float64]) -> NDArray[np.float64]:
-        """The potential per unknown under the injection `inj` per home."""
+        """The potential per cell (0 off the unknowns) under the injection `inj` per home."""
         t = time.time()
-        u = st.lu.solve(self._rhs(st, inj))
+        assert st.factor is not None
+        u = st.factor.solve(self._rhs(st, inj))
         self.timing.add("solves", time.time() - t)
-        return np.asarray(u)
+        return u
 
     def home_u(self, st: State, u: NDArray[np.float64]) -> NDArray[np.float64]:
-        """Per home its escape time (nan with no demand) from the potential per unknown."""
-        uk = self._unk_pt(st)
-        u_pt = np.where(uk >= 0, u[np.maximum(uk, 0)], 0.0)
-        uh = np.asarray(self.dem.S.T @ u_pt).ravel()
+        """Per home its escape time (nan with no demand) from the potential per cell."""
+        uh = np.asarray(st.sys.PcT @ u)
         return np.where(self.nodem, np.nan, uh)
 
     def J(self, u_home: NDArray[np.float64], inj: NDArray[np.float64], power: float) -> float:
@@ -974,7 +1106,7 @@ class Model:
     def live_homes_of(self, st: State) -> NDArray[np.bool_]:
         """Per home: some triangle within ring_m of its outline reaches the street in the state
         (or the open band does): the flow model's own reach."""
-        return np.asarray(self.fx.ring.live(st.reach.live[self.c.cell]))
+        return np.asarray(self.fx.ring.live(st.reach.live[st.sys.cells.cell]))
 
     def complex_live(self, removed: NDArray[np.bool_]) -> NDArray[np.bool_]:
         """Per home: it reaches the street on the complex rebuilt without `removed`, grown as the
@@ -986,32 +1118,20 @@ class Model:
 
     def grad(self, st: State, u: NDArray[np.float64],
              lam: NDArray[np.float64]) -> NDArray[np.float64]:
-        """dJ / dk per building by the adjoint (lam: J's adjoint; u for P): dJ / dw = -du dlam
-        per conductance, through each passage's harmonic mean and each triangle's terms
+        """dJ / dk per building by the adjoint (lam: J's adjoint, per cell; u for P): dJ / dw =
+        -du dlam per conductance, through each passage's harmonic mean and each triangle's terms
         (Width.terms.vjp: ties shared)."""
         t = time.time()
-        fm, c, r = self.fm, self.c, st.reach
-        uc = np.zeros(c.n)
-        lc = np.zeros(c.n)
-        on = r.unk >= 0
-        uc[on], lc[on] = u[r.unk[on]], lam[r.unk[on]]
-        gp = np.zeros(len(fm.pa))
-        gp[c.pe] = -fm.T[c.pe] * (uc[c.ea] - uc[c.eb]) * (lc[c.ea] - lc[c.eb])
-        gf_ = np.zeros(len(fm.fa))
-        gf_[c.pf] = -fm.Tf[c.pf] * uc[c.fc] * lc[c.fc]
-        va, vb_ = st.kt[fm.pa], st.kt[fm.pb]
-        s2 = (va + vb_) ** 2
-        free = ~st.binds
-        ga = np.where(s2 > 0, 2.0 * vb_ ** 2 / np.where(s2 > 0, s2, 1.0), 0.0) * free
-        gb = np.where(s2 > 0, 2.0 * va ** 2 / np.where(s2 > 0, s2, 1.0), 0.0) * free
-        nt = fm.nt
-        gt = (np.bincount(fm.pa, weights=gp * ga, minlength=nt)
-              + np.bincount(fm.pb, weights=gp * gb, minlength=nt)
-              + np.bincount(fm.fa, weights=gf_, minlength=nt))
+        fm, c = self.fm, st.sys.cells
+        gt, gp = _grad_tri(c.pe, c.ea, c.eb, fm.pa, fm.pb, fm.T, st.kt, st.binds, c.pf, c.fc,
+                           fm.fa, fm.Tf, u, lam, fm.nt)
         dk = self.terms.vjp(st.k, gt)
         if len(self.fill.e):
+            gp_all = np.zeros(len(fm.pa))
+            gp_all[c.pe] = gp
             sel = st.binds[self.fill.e]
-            dk += np.bincount(self.fill.b[sel], weights=gp[self.fill.e[sel]], minlength=self.n_)
+            dk += np.bincount(self.fill.b[sel], weights=gp_all[self.fill.e[sel]],
+                              minlength=self.n_)
         self.timing.add("gradient", time.time() - t)
         return np.asarray(dk)
 
@@ -1058,7 +1178,7 @@ class Model:
         return self.cells0
 
     def release(self) -> None:
-        """Nothing on a device."""
+        """Nothing: the plans live as long as the model (a cuDSS plan's device memory with it)."""
 
     def baseline(self, power: float) -> tuple[float, float]:
         return self.J(self.u0, self.inj, power), self.P0
@@ -1079,7 +1199,7 @@ class Model:
         eps). One solve, two for power != 1."""
         eps = clear.EPS
         k = np.where(self.removed, 1.0, eps)
-        st = self.state(k)
+        st = self.relaxed_state(k)
         u = self.solve(st, self.inj)
         uh = self.home_u(st, u)
         lam = u if power == 1.0 else self.solve(
@@ -1129,35 +1249,35 @@ class Tension:
         return np.asarray(self.m.inj * np.nan_to_num(self.home_u) ** power)
 
     def flow(self, cand: list[int]) -> Flow:
-        """The tension's system, its unknowns the nodes; a candidate's members the unknowns of
-        the triangles its clearing re-weights (its terms: its zone under the shy distance)."""
+        """The tension's system, its nodes the cells (a cell off the unknowns an identity row at
+        potential 0: no flow); a candidate's members the unknowns of the triangles its clearing
+        re-weights (its terms: its zone under the shy distance)."""
         m, st = self.m, self.st
         A = st.A
-        N = st.reach.N
-        uk = m._unk_pt(st)
-        S = m.dem.S.tocoo()
-        on = uk[S.row] >= 0
-        load = sp.csr_matrix((S.data[on] * m.inj[S.col[on]], (S.col[on], uk[S.row[on]])),
-                             shape=(m.n, N))
+        assert A is not None
+        unk = st.reach.unknown
+        load = (sp.diags(m.inj) @ st.sys.PcT @ sp.diags(unk.astype(np.float64))).tocsr()
+        load.eliminate_zeros()
         terms = m.terms
         tri_of = terms.row // terms.G
+        cell = st.sys.cells.cell
         rows, cols = [], []
         for col, j in enumerate(cand):
-            nodes = np.unique(st.reach.unk[m.c.cell[tri_of[terms.b == j]]])
-            nodes = nodes[nodes >= 0]
+            nodes = np.unique(cell[tri_of[terms.b == j]])
+            nodes = nodes[unk[nodes]]
             rows.append(nodes)
             cols.append(np.full(len(nodes), col, dtype=np.int64))
-        return Flow(xp=np, A=A, u=self.u, rowsum=np.asarray(A @ np.ones(N)), load=load,
+        return Flow(xp=np, A=A, u=self.u, rowsum=np.asarray(A @ np.ones(A.shape[0])), load=load,
                     rows=np.concatenate(rows) if rows else np.zeros(0, dtype=np.int64),
                     cols=np.concatenate(cols) if cols else np.zeros(0, dtype=np.int64),
                     to_host=np.asarray)
 
 
 class Relaxation:
-    """A seam.Relaxed of the fixed mesh: J_power in the eps world, k_b = eps + (1 - eps)
-    proj(x_b)^q (relax.project), its gradient in the projected clearing by the adjoint. `rtol`
-    is the raster's iterative tolerance, kept for the seam: every solve here is direct, refined
-    to the floating-point floor (gap_flow._Refined)."""
+    """A seam.Relaxed of the fixed mesh: J_power in the eps world (the model's relax_sys), k_b =
+    eps + (1 - eps) proj(x_b)^q (relax.project), its gradient in the projected clearing by the
+    adjoint. `rtol` is the raster's iterative tolerance, kept for the seam: every solve here is
+    direct, refined to the floating-point floor (gap_factor.Refined)."""
 
     def __init__(self, model: Model, power: float, *, q: float, rtol: float, eps: float):
         self.m, self.power_, self.q, self.rtol, self.eps = model, power, q, rtol, eps
@@ -1191,11 +1311,11 @@ class Relaxation:
         return self.m.J(uh, self.m.inj, self.power_), u, uh
 
     def value(self, x: NDArray[np.float64]) -> float:
-        return self._J(self.m.state(self.k_of(x)))[0]
+        return self._J(self.m.relaxed_state(self.k_of(x)))[0]
 
     def value_sgrad(self, x: NDArray[np.float64]) -> tuple[float, NDArray[np.float64]]:
         m = self.m
-        st = m.state(self.k_of(x))
+        st = m.relaxed_state(self.k_of(x))
         J, u, uh = self._J(st)
         p = self.power_
         lam = u if p == 1.0 else m.solve(
@@ -1232,31 +1352,52 @@ class Relaxation:
 class ComplexMetric:
     """The metric on the complex (seam.Metric): its identity the complex's Spec (s, ring, band),
     the FlowSpec (R, its grading, sigma, the demand's quadrature, the lattice offset), the width
-    form and `lumped` (one node per building: the study's alternative), every one in its name, which
-    no raster conductance's can be (`check_disjoint`): its rows never read as the raster's."""
+    form, `lumped` (one node per building in both worlds: the study's alternative),
+    `relax_lumped` (one node per building in the eps world only: SIMP's, the tension's and the
+    eps-world polish's; the exact scores the meshed interiors') and the code's constants (CODE),
+    every one in its name, which no raster conductance's can be (`check_disjoint`): its rows
+    never read as the raster's. `factorization` is the run's device (gap_factor): it moves
+    scores only at the floating-point level, so it is not in the name; the rows record it."""
     spec: gc.Spec
     fs: gf.FlowSpec
     form: gf.Width
     lumped: bool
+    relax_lumped: bool
+    factorization: gap_factor.Factorization
 
     def __post_init__(self) -> None:
+        if self.lumped and self.relax_lumped:
+            raise ValueError("+lumped lumps the eps world's interiors too: +relaxlumped is "
+                             "meshed interiors' alternative")
         check_disjoint(self.name)
 
     @property
     def name(self) -> str:
         return (f"cx+{self.form.name}+s{self.spec.s:g}r{self.spec.ring_m:g}b{self.spec.band_m:g}"
-                f"+{self.fs.name}" + ("+lumped" if self.lumped else ""))
+                f"+{self.fs.name}" + ("+lumped" if self.lumped else "")
+                + ("+relaxlumped" if self.relax_lumped else "") + f"+v{CODE}")
+
+    @property
+    def device(self) -> str:
+        return self.factorization.device
 
     @property
     def sweep(self) -> clear.Sweep:
-        """The catchment's sweep: on the host, as every solve here."""
+        """The catchment's sweep: on the host, as every solve's right-hand side and potential."""
         return clear.CpuSweep()
 
-    def clearing(self, block, *, demand: common.Demand) -> Model:
-        fx = Fixed.of(block, self.spec, self.fs, self.form, lumped=self.lumped, cache=CACHE)
+    def model(self, block, fx: Fixed, *, demand: common.Demand) -> Model:
+        """The block's model on its fixed mesh `fx` (`clearing`'s, or one meshed afresh)."""
         return Model(block, fx, spec=self.spec, fs=self.fs, form=self.form,
                      pop=common.POPULATIONS["area"].weights(np.asarray(block.buildings.outlines)),
-                     demand=demand)
+                     demand=demand, factorization=self.factorization, lumped=self.lumped,
+                     relax_lumped=self.lumped or self.relax_lumped)
+
+    def fixed(self, block, *, cache: Path) -> Fixed:
+        return Fixed.of(block, self.spec, self.fs, self.form, cache=cache)
+
+    def clearing(self, block, *, demand: common.Demand) -> Model:
+        return self.model(block, self.fixed(block, cache=CACHE), demand=demand)
 
     def coarse(self, h: float) -> ComplexMetric:
         raise ValueError(f"a coarse grid (h {h:g}) is the raster's: the complex has none")
@@ -1281,17 +1422,23 @@ def check_disjoint(name: str) -> None:
 _NUM = r"([0-9]+(?:\.[0-9]+)?(?:e-?[0-9]+)?)"
 _NAME = re.compile(rf"cx\+(close|shy|ramp){_NUM}(?:s{_NUM})?\+s{_NUM}r{_NUM}b{_NUM}"
                    rf"\+R{_NUM}(?:g([0-9]+)x{_NUM})?q([0-9]+)(?:k{_NUM})?"
-                   rf"(?:o(-?{_NUM[1:-1]}),(-?{_NUM[1:-1]}))?(\+lumped)?")
+                   rf"(?:o(-?{_NUM[1:-1]}),(-?{_NUM[1:-1]}))?(\+lumped)?(\+relaxlumped)?"
+                   r"\+v([0-9a-f]+)")
 
 
-def complex_of(name: str) -> ComplexMetric:
-    """The ComplexMetric `name` names (its name's inverse: refused unless it spells it back)."""
+def complex_of(name: str, *, factorization: gap_factor.Factorization) -> ComplexMetric:
+    """The ComplexMetric `name` names, on `factorization` (its name's inverse: refused unless it
+    spells it back, its code digest this code's)."""
     m = _NAME.fullmatch(name)
     if m is None:
         raise ValueError(f"unknown complex metric {name!r}: cx+<form><w>+s<s>r<ring>b<band>+"
-                         "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped]")
+                         "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped]"
+                         "[+relaxlumped]+v<code>")
     (kind, w, ramp_s, s_, ring, band, R, levels, grade, quad, sigma, ox, oy,
-     lumped) = m.groups()
+     lumped, relax_lumped, code) = m.groups()
+    if code != CODE:
+        raise ValueError(f"{name!r}: code {code}, but this code's constants digest to {CODE} "
+                         "(its rows are another code's)")
     form: gf.Width
     if kind == "close":
         form = gf.Closing(w=float(w))
@@ -1304,7 +1451,64 @@ def complex_of(name: str) -> ComplexMetric:
                      sigma=gf.SIGMA_ISO if sigma is None else float(sigma), quad=int(quad),
                      offset=gf.OFFSET if ox is None else (float(ox), float(oy)))
     metric = ComplexMetric(spec=gc.Spec(s=float(s_), ring_m=float(ring), band_m=float(band)),
-                           fs=fs, form=form, lumped=lumped is not None)
+                           fs=fs, form=form, lumped=lumped is not None,
+                           relax_lumped=relax_lumped is not None, factorization=factorization)
     if metric.name != name:
         raise ValueError(f"{name!r} spells the complex metric {metric.name!r}")
     return metric
+
+
+# ------------------------------------------------------------------ the code's identity
+
+# The modules whose module-level constants (public UPPER_CASE names) can change what the complex
+# scores, and the constants it reads from elsewhere. Every such constant is in the code's digest
+# (CODE), which every complex metric's name carries, so editing one renames the metric: no row of
+# the old constants reads as the new code's. Exempt, each because it cannot change a result:
+_EXEMPT = {
+    "gap_clear.HERE": "a path: where this file lies",
+    "gap_clear.CACHE": "a path: where the meshes are cached",
+    "gap_clear.CONFORM_ROUNDS": "a cap: a mesh still not conformed after it raises, so every "
+                                "mesh made is the same under any cap it fits in",
+    "gap_clear.CODE": "the digest itself",
+    "gap_flow.RING_CHUNK": "memory only: the same query in chunks",
+    "gap_flow.TYPE_CHECKING": "typing's flag, imported: False when run",
+    "gap_factor.CUDSS_LOG": "logging",
+}
+_EXTERNAL: dict[str, Callable[[], object]] = {
+    "clear.EPS": lambda: clear.EPS,     # the tension's eps world (Model.tension)
+}
+
+
+def _identity_modules() -> tuple[Any, ...]:
+    import sys
+    return (sys.modules[__name__], gc, gf, gap_factor)
+
+
+def code_constants() -> dict[str, str]:
+    """Every constant of the complex's code (module comment above) by `<module>.<NAME>`, as its
+    repr: a number, a string, a tuple, an array or a frozen dataclass; any other kind refused (a
+    new constant's kind decided here, not passed over)."""
+    out = {}
+    for mod in _identity_modules():
+        short = mod.__name__.rsplit(".", 1)[-1]
+        for name, value in vars(mod).items():
+            key = f"{short}.{name}"
+            if name.startswith("_") or not name.isupper() or key in _EXEMPT:
+                continue
+            if not (isinstance(value, (bool, int, float, str, tuple, np.ndarray))
+                    or (dataclasses.is_dataclass(value) and not isinstance(value, type))):
+                raise TypeError(f"{key}: a constant of kind {type(value).__name__}: in the "
+                                "code's digest or exempt (gap_clear._EXEMPT), decided there")
+            out[key] = repr(value)
+    for key, read in _EXTERNAL.items():
+        out[key] = repr(read())
+    return out
+
+
+def code_digest() -> str:
+    """The code's constants (code_constants) digested: 8 hex digits."""
+    blob = json.dumps(code_constants(), sort_keys=True).encode()
+    return hashlib.sha256(blob).hexdigest()[:8]
+
+
+CODE = code_digest()

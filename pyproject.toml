@@ -94,8 +94,13 @@ research = [
 ]
 # research/roadless's GPU stack, for its solvers here and on the cluster. cupy brings the CUDA 12
 # toolkit as wheels ([ctk]): the cluster's /usr/local/cuda is 11.8 and its nodes' drivers 12.8.
+# nvmath-python is the gap complex's direct solver on a GPU (cuDSS, gap_factor.CuDSS), its CUDA 12
+# libraries from the [cu12] wheels; nvidia-cudss-cu12 is pinned beside it, as the version its
+# timings were measured on.
 gpu = [
     "cupy-cuda12x[ctk]==14.2.0; sys_platform == 'linux'",
+    "nvmath-python[cu12]==1.0.0; sys_platform == 'linux'",
+    "nvidia-cudss-cu12==0.8.0.10; sys_platform == 'linux'",
     "pyamg==5.3.0",
 ]
 # research/roadless's cluster launcher, GeoffChurch/cluster_submit (private), pinned in
@@ -202,6 +207,12 @@ ignore_missing_imports = true
 # numba ships no py.typed marker and no stub package. Every kernel goes through the typed
 # `reblock._jit.njit` wrapper, so untyped numba never reaches a signature; same shim as joblib.
 module = ["numba", "numba.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# nvmath-python (the `gpu` group: research/roadless/gap_factor.py's cuDSS) ships no py.typed
+# marker and no stub package; same shim as joblib.
+module = ["nvmath", "nvmath.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

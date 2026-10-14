@@ -462,7 +462,9 @@ class Plan(NamedTuple):
     > 0: then exchange refinement on the undecided buildings (Incumbent.polish), `polish`
     scorings at most, the best `pwidth` ranked moves scored per round, over every building
     in each phase of `polish_sets` (True: every building, `P`; False: the undecided ones,
-    `p`; `pP` the undecided then every one), with two-for-one moves if `polish_pairs` (`x2`);
+    `p`; `pP` the undecided then every one), with two-for-one moves if `polish_pairs` (`x2`),
+    its candidates scored as `polish_scoring` says (search.PolishScoring: in the scorer's eps
+    world, unnamed, or exactly, `E`; ranked in that eps world either way);
     `seed` (one only): that greedy picker's clearing within the budget offered to the incumbent
     before SIMP runs (`.g<picker>`: the polish starts from the better of the two); `track`
     (one only): that greedy's clearing polished as a second track, the better of the two
@@ -510,6 +512,7 @@ class Plan(NamedTuple):
     track_gate: float = -1.0
     update: Update = DEFAULT_UPDATE
     mesh: lifted.MeshSpec = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
+    polish_scoring: search.PolishScoring = search.InEps()
 
     @property
     def name(self) -> str:
@@ -522,7 +525,7 @@ class Plan(NamedTuple):
                 + (f"l{self.late}" if self.late > 0 else "")
                 + (f".{''.join('P' if a else 'p' for a in self.polish_sets)}{self.polish}"
                    f"w{self.pwidth}" + ("x2" if self.polish_pairs else "")
-                   if self.polish > 0 else "")
+                   + self.polish_scoring.suffix if self.polish > 0 else "")
                 + (f".w{self.warm}" if self.warm > 0 else "")
                 + (f".c{self.coarse:g}" if self.coarse > 0 else "")
                 + (f".C{self.coarse_all:g}" if self.coarse_all > 0 else "")
@@ -553,7 +556,7 @@ def plan_of(spec: str) -> Plan:
     m = re.fullmatch(r"fw(?P<fw>\d+)\.q(?P<q>[0-9.]+)\.i(?P<i>\d+)\.t(?P<t>[0-9.e-]+?)"
                      r"(?:\.e(?P<e>[0-9.e-]+?))?(?:\.b(?P<b0>[0-9.]+)-(?P<bmax>[0-9.]+))?"
                      r"(?:\.k(?P<k>\d+)(?:s(?P<ks>[0-9.e-]+))?)?(?:\.r(?P<r>\d+)(?:l(?P<rl>\d+))?)?"
-                     r"(?:\.(?P<pset>p|P|pP)(?P<p>\d+)w(?P<pw>\d+)(?P<px>x2)?)?"
+                     r"(?:\.(?P<pset>p|P|pP)(?P<p>\d+)w(?P<pw>\d+)(?P<px>x2)?(?P<pe>E?))?"
                      r"(?:\.w(?P<w>\d+))?(?:\.c(?P<c>[0-9.]+))?(?:\.C(?P<C>[0-9.]+))?(?:\.m(?P<m>\d+))?"
                      r"(?:\.g(?P<g>S[0-9.]+cat(?:w\d+)?))?(?:\.G(?P<G>S[0-9.]+cat(?:w\d+)?)(?:e(?P<Ge>[0-9.]+))?)?"
                      r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?"
@@ -577,6 +580,7 @@ def plan_of(spec: str) -> Plan:
                 pwidth=0 if g["pw"] is None else int(g["pw"]),
                 polish_sets=() if g["pset"] is None else tuple(ch == "P" for ch in g["pset"]),
                 polish_pairs=g["px"] is not None,
+                polish_scoring=search.polish_scoring_of(g["pe"] or ""),
                 warm=0 if g["w"] is None else int(g["w"]),
                 coarse=0.0 if g["c"] is None else float(g["c"]),
                 coarse_all=0.0 if g["C"] is None else float(g["C"]),
@@ -649,13 +653,15 @@ class Incumbent:
         if self.n % self.every == 0:
             self.offer(x, stage)
 
-    def polish(self, x: np.ndarray, tries: int, width: int, everything: bool, pairs: bool,
-               log=print) -> None:
+    def polish(self, x: np.ndarray, tries: int, width: int, everything: bool, pairs: bool, *,
+               scoring: search.PolishScoring, log=print) -> None:
         """Exchange refinement of the incumbent (search.exchange_round) over every building if
         `everything`, else over the undecided ones: grey in the final iterate x, or where the
         incumbent and x's top-x rounding disagree (late samples flip them; NOTES "Where .r2's
         winners come from"). Ranked by the gradient at the 0/1 incumbent in the scorer's eps world
-        (the greedy's tension)."""
+        (the greedy's tension), its candidates scored as `scoring` says (the incumbent rescored
+        there first); its J then in that world (a second track's gate compares it with the
+        greedy's raw J in the scorer's: exact and eps 1e-6 differ by about 1e-6 of J)."""
         if self.scorer is None:
             raise ValueError("polish ranks with the eps-world scorer: give the plan .k<n>s<eps>")
         cost = self.rel.c.cost
@@ -667,11 +673,10 @@ class Incumbent:
         J0 = self.J
         c = self.rel.c
         c.removed[:] = self.r > 0
-        s = search.SearchState(c=c, power=self.rel.power, score=search.Score(self.J, np.nan),
-                               world=self.scorer, order=[], scorings=0,
-                               movable=np.isin(np.arange(c.n), movable))
-        moves = search.exchange(self.scorer, budget=self.budget, width=width, pairs=pairs,
-                                pool=PAIR_POOL, tries=tries)(s, search.Silent())
+        s = search.SearchState(c=c, power=self.rel.power, score=search.UNSCORED, world=None,
+                               order=[], scorings=0, movable=np.isin(np.arange(c.n), movable))
+        moves = search.polish(scoring.world(self.scorer), budget=self.budget, width=width,
+                              pairs=pairs, pool=PAIR_POOL, tries=tries)(s, search.Silent())
         self.J, self.r, used = s.score.J, c.removed.astype(float), s.scorings
         c.removed[:] = False                    # relax.one keeps its clearings in x, not here
         log(f"  polish: {len(movable)} {'buildings' if everything else 'undecided buildings'}, "
@@ -786,7 +791,7 @@ def one(bid: str, power: float, metric: seam.Metric, plan: Plan, budget: float, 
                                   f"{plan.name}")
     xlo = np.where(held, 1.0, XMIN)
     out = dict(block=bid, n=c.n, power=power, demand=demand.name, plan=plan.name,
-               along=metric.name)
+               along=metric.name, device=metric.device)
     if plan.fw > 0:
         fw = frank_wolfe(rel, budget, plan.fw, log=log)
         x = fw["x"]
@@ -867,7 +872,8 @@ def one(bid: str, power: float, metric: seam.Metric, plan: Plan, budget: float, 
                 xs = xk
     if plan.polish > 0:
         for everything in plan.polish_sets:
-            inc.polish(xs, plan.polish, plan.pwidth, everything, plan.polish_pairs, log=log)
+            inc.polish(xs, plan.polish, plan.pwidth, everything, plan.polish_pairs,
+                       scoring=plan.polish_scoring, log=log)
     if plan.track:
         inc_g = Incumbent(rel, budget, 1, samples=0, sample_in=(), score_eps=plan.kscore)
         inc_g.consider(r_greedy, f"the greedy {plan.track}, the second track")
@@ -875,7 +881,8 @@ def one(bid: str, power: float, metric: seam.Metric, plan: Plan, budget: float, 
         if gated:
             log(f"  the greedy's track not polished: {inc_g.J:.6g} raw, SIMP {inc.J:.6g} polished")
         for everything in plan.polish_sets if plan.polish > 0 and not gated else ():
-            inc_g.polish(xs, plan.polish, plan.pwidth, everything, plan.polish_pairs, log=log)
+            inc_g.polish(xs, plan.polish, plan.pwidth, everything, plan.polish_pairs,
+                         scoring=plan.polish_scoring, log=log)
         log(f"  tracks: SIMP {inc.J:.6g}, the greedy {inc_g.J:.6g}")
         if inc_g.J < inc.J:
             inc = inc_g
@@ -967,7 +974,8 @@ def _run(bid: str) -> str | None:
                 rows_of(plan, metric.name, budget) / f"{bid}_p{power:g}.parquet")
         else:
             out = rows_dir(f"SIMP{plan.name}", 0.5, "area", power, metric.name) / f"{bid}.parquet"
-            path(bid, power, metric, plan, demand=demand).to_parquet(out)
+            path(bid, power, metric, plan, demand=demand).assign(device=metric.device).to_parquet(
+                out)
             print(f"{time.strftime('%H:%M:%S')} {bid} path done", flush=True)
     except Exception as e:
         print(f"{bid} FAILED {type(e).__name__}: {e}"[:300], flush=True)

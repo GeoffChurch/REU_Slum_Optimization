@@ -57,6 +57,7 @@ from numpy.typing import NDArray
 from scipy.sparse.csgraph import connected_components
 
 import gap_complex as gc
+from gap_factor import Refined
 
 if TYPE_CHECKING:
     import gap_clear
@@ -708,144 +709,13 @@ def laplacian(c: Cells, kappa: NDArray[np.float64] | None = None) -> sp.csr_matr
     return sp.csr_matrix((vals, (rows, cols)), shape=(N, N))
 
 
-REFINE_BERR = 4 * np.finfo(np.float64).eps   # factor's solves: refined until the componentwise
-                                            # backward error max |r| / (|A| |x| + |b|) is this,
-REFINE_ACCEPT = 1e-8  # ... or stops falling by half (refinement can do no better), when it must
-                      # be at most this (a solve worse than that raises)
-REFINE_STEPS = 8
-
-
-class _Refined:
-    """A's LU factorization with iterative refinement (LAPACK's xGERFS stopping rule): a cell
-    joined to the rest only through a hairline passage has a diagonal 1e-9 of the others', and
-    SuperLU's partial pivoting then left residuals of 0.7% (relative) that the clearing model's
-    finite differences saw; each solve is refined while its backward error falls. `lu` factors
-    A with rows and columns permuted by p (A[p][:, p]; None: SuperLU's own ordering)."""
-
-    def __init__(self, A: sp.csr_matrix, lu, p: NDArray[np.int64] | None):
-        self.A = A.tocsr()
-        self.absA = abs(self.A)
-        self.lu, self.p = lu, p
-        self.inv = None if p is None else np.argsort(p)
-
-    def _once(self, r: NDArray[np.float64]) -> NDArray[np.float64]:
-        if self.p is None:
-            return np.asarray(self.lu.solve(r))
-        return np.asarray(self.lu.solve(r[self.p]))[self.inv]
-
-    def _berr(self, b: NDArray[np.float64], x: NDArray[np.float64]
-              ) -> tuple[float, NDArray[np.float64]]:
-        r = b - self.A @ x
-        den = self.absA @ np.abs(x) + np.abs(b)
-        return float(np.max(np.where(den > 0, np.abs(r) / np.where(den > 0, den, 1.0), 0.0))), r
-
-    def solve(self, b: NDArray[np.float64]) -> NDArray[np.float64]:
-        x = self._once(b)
-        berr, r = self._berr(b, x)
-        for _ in range(REFINE_STEPS):
-            if berr <= REFINE_BERR:
-                break
-            x2 = x + self._once(r)
-            berr2, r2 = self._berr(b, x2)
-            if berr2 > 0.5 * berr:
-                if berr2 < berr:
-                    x, berr = x2, berr2
-                break
-            x, berr, r = x2, berr2, r2
-        if berr > REFINE_ACCEPT:
-            raise RuntimeError(f"refinement stalled at a backward error of {berr:.1e}")
-        return x
-
-
-def factor(A: sp.csr_matrix) -> _Refined:
+def factor(A: sp.csr_matrix) -> Refined:
     """A's LU factorization (SuperLU, COLAMD: on these planar meshes it fills little, 1.5 s for
     690k unknowns against pyamg's 16 -- 69 s per solve to 1e-8, the conductances spanning six
-    decades), its `solve` refined (_Refined)."""
+    decades), its `solve` refined (gap_factor.Refined): the rebuild's (`Scores`)."""
     from scipy.sparse.linalg import splu
-    return _Refined(A, splu(A.tocsc(), permc_spec="COLAMD"), None)
-
-
-def factor_ordered(A: sp.csr_matrix, p: NDArray[np.int64]) -> _Refined:
-    """A's factorization in the elimination order p (`dissection`'s, restricted to A's unknowns):
-    SuperLU on A[p][:, p] with no ordering of its own, pivoting on the diagonal (A is symmetric
-    positive definite, a weighted Laplacian with conductances to ground), its `solve` refined."""
-    from scipy.sparse.linalg import splu
-    return _Refined(A, splu(A[p][:, p].tocsc(), permc_spec="NATURAL", diag_pivot_thresh=0.0,
-                            options=dict(SymmetricMode=True)), p)
-
-
-ND_LEAF = 8           # dissection: subgraphs of at most this many nodes are not split (their own
-                      # order kept: larger leaves fill more, measured on 20269)
-
-
-@njit(cache=True)
-def dissection(indptr, indices, x, y, leaf):
-    """A geometric nested dissection of the graph (CSR, symmetric) whose node v lies at (x[v],
-    y[v]): an elimination order (perm[k] the node eliminated k-th). Each subgraph is split at the
-    median of its longer side, its separator the left nodes with a neighbour on the right,
-    ordered after both halves, recursively to `leaf` nodes. On a planar mesh the separators are
-    of the order of the square root of the subgraph's size: fill O(n log n)."""
-    n = len(x)
-    perm = np.arange(n)
-    stamp = -np.ones(n, dtype=np.int64)
-    side = np.zeros(n, dtype=np.int8)
-    stack_s = [0]
-    stack_e = [n]
-    seg = 0
-    buf = np.empty(n, dtype=np.int64)
-    while len(stack_s):
-        s = stack_s.pop()
-        e = stack_e.pop()
-        m = e - s
-        if m <= leaf:
-            continue
-        seg += 1
-        xmin, xmax, ymin, ymax = np.inf, -np.inf, np.inf, -np.inf
-        for k in range(s, e):
-            v = perm[k]
-            xmin, xmax = min(xmin, x[v]), max(xmax, x[v])
-            ymin, ymax = min(ymin, y[v]), max(ymax, y[v])
-        c = np.empty(m)
-        if xmax - xmin >= ymax - ymin:
-            for k in range(m):
-                c[k] = x[perm[s + k]]
-        else:
-            for k in range(m):
-                c[k] = y[perm[s + k]]
-        o = np.argsort(c)
-        for k in range(m):
-            buf[k] = perm[s + o[k]]
-        half = m // 2
-        for k in range(m):
-            v = buf[k]
-            stamp[v] = seg
-            side[v] = 0 if k < half else 1
-        nl = 0
-        ns = 0
-        sep = np.empty(half, dtype=np.int64)
-        for k in range(half):
-            v = buf[k]
-            cut = False
-            for q in range(indptr[v], indptr[v + 1]):
-                w = indices[q]
-                if w != v and stamp[w] == seg and side[w] == 1:
-                    cut = True
-                    break
-            if cut:
-                sep[ns] = v
-                ns += 1
-            else:
-                perm[s + nl] = v
-                nl += 1
-        for k in range(half, m):
-            perm[s + nl + (k - half)] = buf[k]
-        for k in range(ns):
-            perm[e - ns + k] = sep[k]
-        stack_s.append(s)
-        stack_e.append(s + nl)
-        stack_s.append(s + nl)
-        stack_e.append(s + nl + (m - half))
-    return perm
+    lu = splu(A.tocsc(), permc_spec="COLAMD")
+    return Refined(A.tocsr(), lambda r: np.asarray(lu.solve(r)))
 
 
 # ------------------------------------------------------------------ demand

@@ -9,7 +9,9 @@ the grid the tasks use (common.mesh_of: <h>, <h>a<d0>x<smax> or
 time (a goal mesh's: its target); `--scans` says the tasks' conductance scans the fine lattice
 (a sightline metric or search: SoftSightline), whose rasters peak when the solves' own memory is
 down to what a run holds, so the estimate is the larger of the two; `--gb` sets a floor under
-the estimate, to send a block known to need a bigger card to one. `--unpack` ships a tar per
+the estimate, to send a block known to need a bigger card to one. `--complex`: the tasks run the
+gap complex (gap_clear: cuDSS on the card, gap_factor.CuDSS), which has no raster grid: no
+`--mesh`, the card sized by `--gb` alone. `--unpack` ships a tar per
 block of inputs git does not carry (parquet rows, at their repo paths) and unpacks it in the
 task's checkout before the command. Results (parquet rows) come back to the same paths here,
 never overwriting a local file.
@@ -28,7 +30,7 @@ a block's tasks unpack one tar at once into the checkout they share.
 
     uv run python research/roadless/cluster.py setup
     uv run python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] [--gpus N] \
-        [--mesh M] [--scans] [--with FILE ...] [--unpack TAR] <ids,|@file> \
+        [--mesh M | --complex] [--scans] [--with FILE ...] [--unpack TAR] <ids,|@file> \
         -- <script> <args with {id}>
     uv run python research/roadless/cluster.py submit cpu <run> --node orion|quadro2 --cpus C \
         --mem G --items <items,|@file> [--gpus N] [--time T] [--unpack TAR] <ids,|@file> \
@@ -140,6 +142,9 @@ class Blocks:
                             help="the grid the tasks use (<h> or <h>a<d0>x<smax>: relax.py's "
                                  ".h<h> / .a<d0>x<smax>, or one of resolution_check.py's); "
                                  "sets the memory estimate")
+        parser.add_argument("--complex", action="store_true",
+                            help="the tasks run the gap complex (no raster grid): the card "
+                                 "sized by --gb alone")
         parser.add_argument("--scans", action="store_true",
                             help="the tasks' conductance scans the fine lattice (ss/sl metric "
                                  "or search): size for its rasters too")
@@ -154,10 +159,14 @@ class Blocks:
         import common   # geopandas and the block sources: only a submit needs them
 
         line = _command(args, "{id}")
-        mesh = common.mesh_of(args.mesh)
-        if not _names(line, args.mesh, mesh):
-            raise SystemExit(f"--mesh {args.mesh} but the command does not use it")
         ids = _listed(args.ids)
+        if args.complex:
+            if args.scans or args.gb <= 0:
+                raise SystemExit("--complex: no --scans, and --gb sizes the card")
+        else:
+            mesh = common.mesh_of(args.mesh)
+            if not _names(line, args.mesh, mesh):
+                raise SystemExit(f"--mesh {args.mesh} but the command does not use it")
         unpack = _unpacks(args.unpack, ids)
 
         def task_line(b: str) -> str:
@@ -167,9 +176,12 @@ class Blocks:
             return f'tar -xf "$CLUSTER_SUBMIT_INPUTS/{unpack[b].name}" && {run}'
 
         bank = common.write_bank(ids, workdir / "bank.pkl")
-        with ProcessPoolExecutor(min(SIZING_WORKERS, len(ids))) as ex:
-            gb = list(ex.map(_gb, [mesh] * len(ids), [bank[b] for b in ids],
-                             [args.scans] * len(ids)))
+        if args.complex:
+            gb = [0.0] * len(ids)
+        else:
+            with ProcessPoolExecutor(min(SIZING_WORKERS, len(ids))) as ex:
+                gb = list(ex.map(_gb, [mesh] * len(ids), [bank[b] for b in ids],
+                                 [args.scans] * len(ids)))
         tasks = tuple(cs.Task(task_line(b), max(g, args.gb))
                       for b, g in zip(ids, gb, strict=True))
         return cs.RunPlan(

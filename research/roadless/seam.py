@@ -162,12 +162,16 @@ class ClearingModel(Protocol):
 
 class Metric(Protocol):
     """A run's metric: its name (the rows' directories: relax_rows/<name>/..., polish_rows/<name>/
-    ...), where the catchment's sweep runs (its tensions' device), a block's clearing model under
-    it, and the same metric on a coarser uniform grid (a SIMP plan's .c / .C: the raster's; the
-    complex has no grid and refuses)."""
+    ...), the device its solves run on (cpu | gpu: not in the name, as it moves scores only at the
+    floating-point level; each run's rows record it), where the catchment's sweep runs (its
+    tensions' device), a block's clearing model under it, and the same metric on a coarser
+    uniform grid (a SIMP plan's .c / .C: the raster's; the complex has no grid and refuses)."""
 
     @property
     def name(self) -> str: ...
+
+    @property
+    def device(self) -> str: ...
 
     @property
     def sweep(self) -> clear.Sweep: ...

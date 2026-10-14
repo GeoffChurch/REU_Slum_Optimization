@@ -11,6 +11,9 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S free <ids,> [fault]        # fault: drop-crossing
     uv run python $S identity - [fault]         # fault: collide
     uv run python $S convex <ids,> [fault]      # fault: multiply
+    uv run python $S pattern <ids,> [fault]     # fault: drop-identity
+    uv run python $S constants - [fault]        # fault: omit
+    uv run python $S device <ids,> [fault]      # fault: perturb (on a GPU: cluster.py --complex)
 
 `baseline`: the fixed mesh (the runtime's metric, METRIC) against the complex rebuilt
 (gap_compare.ComplexModel, gap_flow's mesh under the shy distance at 0.5): P0, P_{1/2},0 and
@@ -45,9 +48,31 @@ conductances' names) raises. Fault `collide`: gap_clear.check_disjoint disabled.
 clearing box, every passage's factor concave and P (q 1, eps GRAD_EPS) convex, under each of
 GRAD_FORMS. Fault `multiply`: a point's terms multiplied (transmittances in series: equal at every
 0/1 state, not concave).
+`pattern` (phase 2a: assembly on one fixed pattern): at the baseline, a random 0/1 clearing, a
+fractional state, the eps world and free first's state, the operator on the fixed pattern
+(gap_clear.Graph) against the operator assembled afresh over the state's unknowns from the
+passages (`_operator`, phase 1's assembly): on the unknowns equal to PATTERN_TOL, every row off
+them an identity row (diagonal 1, its off-diagonals explicit zeros), every value on the pattern's
+structure; and P from the model's solve against a direct solve of the other to PATTERN_P_TOL. The baseline holds
+walled-in cells (the footprints' interiors and the zone strips, and on 20269 and 23597 walled-in
+homes' ground). Fault `drop-identity`: one row off the unknowns left with a diagonal 0 (its
+identity dropped).
+`constants` (phase 2a: the run's identity): every constant of the complex's code
+(gap_clear.code_constants' modules: public UPPER_CASE names, the exempt ones apart) changed one at
+a time changes the code's digest and so the metric's name, and the name carries the digest. Fault
+`omit`: the digest computed without one constant (MESH_REV).
+`device` (phase 2a: the GPU path): cuDSS (gap_factor.CuDSS) against SuperLU on the same states
+of one fixed mesh: the baseline's lenses and escape times, a random clearing's lenses, its exact
+J_2, SIMP's value and gradient (q 3, eps GRAD_EPS, J_1 and J_2) at its start and at a random x,
+the tension (adding and putting back) at the random clearing and the polish's eps-world value,
+each within DEVICE_TOL of its largest magnitude. Run on a GPU node. Fault `perturb`: one
+refactorization (the random clearing's) handed its values with the diagonal raised by 1e-6
+(relative).
 """
 from __future__ import annotations
 
+import contextlib
+import dataclasses
 import sys
 import tempfile
 from collections.abc import Callable, Iterator
@@ -55,16 +80,19 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
+import scipy.sparse as sp
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
+import gap_factor  # noqa: E402
 import gap_compare as gcmp  # noqa: E402
 import gap_complex as gc  # noqa: E402
 import gap_flow as gf  # noqa: E402
 
-METRIC = gcl.complex_of("cx+shy0.5+s0.125r1b1+R0.5g4x2q4")    # the runtime's (owner 2026-10-14)
+NAME = f"cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v{gcl.CODE}"     # the runtime's (owner 2026-10-14)
+METRIC = gcl.complex_of(NAME, factorization=gap_factor.SuperLU())
 BUDGET = 0.05
 BASE_TOL = 2e-3          # the baseline against the rebuild: the rebuild's own lattice, moved,
                          # moves P0 by up to 1.9e-3 and J_2,0 by 4.6e-3 (19570)
@@ -85,6 +113,12 @@ CONVEX_POINTS = 7
 CONVEX_TOL = 1e-9
 SEED = 20261014
 POP = common.PopulationDemand()
+PATTERN_TOL = 1e-12      # the fixed pattern's operator against the one assembled afresh ...
+PATTERN_P_TOL = 1e-9     # ... and P from its refined solve against an unrefined direct solve of
+                         # the other (1e-12 -- 2e-11 apart on 19570 and 20269)
+DEVICE_TOL = 1e-8        # cuDSS against SuperLU, of the largest magnitude (both refined to the
+                         # floating-point floor: 1e-12 -- 1e-10 apart on 19570 and 20269)
+PERTURB = 1e-6           # fault `perturb`: the diagonal's relative rise
 
 
 @contextmanager
@@ -100,11 +134,8 @@ def _patched(owner: object, name: str, value: object) -> Iterator[None]:
 def _model(b, metric: gcl.ComplexMetric = METRIC) -> gcl.Model:
     """The block's model meshed afresh (a temporary cache: a fault in the meshing is seen)."""
     with tempfile.TemporaryDirectory() as tmp:
-        fx = gcl.Fixed.of(b, metric.spec, metric.fs, metric.form, lumped=metric.lumped,
-                          cache=Path(tmp))
-    return gcl.Model(b, fx, spec=metric.spec, fs=metric.fs, form=metric.form,
-                     pop=common.POPULATIONS["area"].weights(np.asarray(b.buildings.outlines)),
-                     demand=POP)
+        fx = metric.fixed(b, cache=Path(tmp))
+    return metric.model(b, fx, demand=POP)
 
 
 def _random(m: gcl.Model, rng: np.random.Generator) -> np.ndarray:
@@ -257,7 +288,7 @@ def gradient(ids: list[str]) -> list[str]:
     for bid in ids:
         [b] = common.build_blocks([bid])
         for token in GRAD_FORMS:
-            metric = gcl.complex_of(f"cx+{gcmp.form_of(token).name}+s0.125r1b1+R0.5g4x2q4")
+            metric = _form_metric(token)
             m = _model(b, metric)
             rng = np.random.default_rng(SEED)
             starts = {"random": (rng.uniform(0.1, 0.4, m.n),
@@ -365,10 +396,11 @@ def _raster_names() -> list[str]:
 
 def identity(_ids: list[str]) -> list[str]:
     bad = []
-    for name in ("cx+shy0.5+s0.125r1b1+R0.5g4x2q4", "cx+close0.125+s0.125r1b1+R0.5g4x2q4",
-                 "cx+ramp0.5s0.5+s0.125r1b1+R0.25q4+lumped"):
+    for name in (NAME, f"cx+close0.125+s0.125r1b1+R0.5g4x2q4+v{gcl.CODE}",
+                 f"cx+ramp0.5s0.5+s0.125r1b1+R0.25q4+lumped+v{gcl.CODE}",
+                 f"cx+shy0.5+s0.125r1b1+R0.5g4x2q4+relaxlumped+v{gcl.CODE}"):
         try:
-            back = gcl.complex_of(name).name
+            back = gcl.complex_of(name, factorization=gap_factor.SuperLU()).name
         except ValueError as e:
             back = repr(e)
         if back != name:
@@ -381,7 +413,8 @@ def identity(_ids: list[str]) -> list[str]:
             def name(self) -> str:
                 return raster
         try:
-            Colliding(spec=METRIC.spec, fs=METRIC.fs, form=METRIC.form, lumped=False)
+            Colliding(spec=METRIC.spec, fs=METRIC.fs, form=METRIC.form, lumped=False,
+                      relax_lumped=False, factorization=METRIC.factorization)
         except ValueError:
             refused += 1
             continue
@@ -399,7 +432,7 @@ def convex(ids: list[str]) -> list[str]:
     for bid in ids:
         [b] = common.build_blocks([bid])
         for token in GRAD_FORMS:
-            m = _model(b, gcl.complex_of(f"cx+{gcmp.form_of(token).name}+s0.125r1b1+R0.5g4x2q4"))
+            m = _model(b, _form_metric(token))
             rel = m.relaxation(1.0, q=1.0, rtol=0.0, eps=GRAD_EPS)
             rng = np.random.default_rng(SEED + 2)
             worst_k, worst_P = -np.inf, np.inf
@@ -433,11 +466,235 @@ def _multiply(self, k):
     return prod.reshape(self.n, self.G).mean(axis=1)
 
 
+def _form_metric(token: str) -> gcl.ComplexMetric:
+    """The runtime's metric under the width form `token` (gap_compare.form_of)."""
+    return gcl.complex_of(f"cx+{gcmp.form_of(token).name}+s0.125r1b1+R0.5g4x2q4+v{gcl.CODE}",
+                          factorization=gap_factor.SuperLU())
+
+
+# ------------------------------------------------------------------ the fixed pattern
+
+def _operator(st: gcl.State) -> tuple[sp.csr_matrix, np.ndarray]:
+    """(the state's operator over its unknowns, assembled afresh from the passages as phase 1
+    did: a passage between two unknowns off the diagonal, every conducting one on its unknowns'
+    diagonals, the street faces' too; the unknown cells, in order)."""
+    c, r = st.sys.cells, st.reach
+    cells = np.flatnonzero(r.unknown)
+    unk = -np.ones(c.n, dtype=np.int64)
+    unk[cells] = np.arange(len(cells))
+    N = len(cells)
+    ua, ub = unk[c.ea], unk[c.eb]
+    diag = (np.bincount(ua[ua >= 0], weights=r.Tp[ua >= 0], minlength=N)
+            + np.bincount(ub[ub >= 0], weights=r.Tp[ub >= 0], minlength=N))
+    uf = unk[c.fc]
+    diag += np.bincount(uf[uf >= 0], weights=r.Gf[uf >= 0], minlength=N)
+    both = (ua >= 0) & (ub >= 0) & (r.Tp > 0)
+    rows = np.concatenate([ua[both], ub[both], np.arange(N)])
+    cols = np.concatenate([ub[both], ua[both], np.arange(N)])
+    vals = np.concatenate([-r.Tp[both], -r.Tp[both], diag])
+    return sp.csr_matrix((vals, (rows, cols)), shape=(N, N)), cells
+
+
+def pattern(ids: list[str]) -> list[str]:
+    from scipy.sparse.linalg import spsolve
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        m = METRIC.clearing(b, demand=POP)
+        rng = np.random.default_rng(SEED + 3)
+        fr = m.free_first(budget=1.0, held=np.zeros(m.n, dtype=bool))
+        states = {"baseline": m.state(np.zeros(m.n)),
+                  "random": m.state(_random(m, rng).astype(float)),
+                  "fractional": m.state(rng.uniform(0.0, 1.0, m.n)),
+                  "eps": m.relaxed_state(np.full(m.n, GRAD_EPS)),
+                  "free first": m.state(fr.astype(float))}
+        parts = []
+        for name, st in states.items():
+            A = st.A
+            assert A is not None
+            p = st.sys.graph.pattern
+            same_structure = (np.array_equal(A.indptr, p.indptr)
+                              and np.array_equal(A.indices, p.indices))
+            ref, cells = _operator(st)
+            sub = A[cells][:, cells]
+            err = float(abs(sub - ref).max() / abs(ref).max()) if ref.nnz else 0.0
+            off = ~st.reach.unknown
+            rows = np.repeat(np.arange(A.shape[0]), np.diff(A.indptr))
+            on_off = off[rows]
+            diag = rows == A.indices
+            ident = bool(np.all(A.data[on_off & diag] == 1.0)
+                         and np.all(A.data[on_off & ~diag] == 0.0)
+                         and np.all(A.data[off[A.indices] & ~diag] == 0.0))
+            rhs = m._rhs(st, m.pop)
+            u = m.solve(st, m.pop)
+            P_fixed = float(rhs @ u)
+            P_ref = float(rhs[cells] @ spsolve(ref.tocsc(), rhs[cells]))
+            dP = abs(P_fixed / P_ref - 1.0)
+            ok = same_structure and err <= PATTERN_TOL and ident and dP <= PATTERN_P_TOL
+            parts.append(f"{name}: {int(off.sum())} of {len(off)} cells off the unknowns, "
+                         f"operator {err:.1e}, identity rows {ident}, P {dP:.1e}"
+                         + ("" if ok else " FAILS"))
+            if not ok:
+                bad.append(f"{bid} {name}")
+        print(f"{bid}: " + "; ".join(parts), flush=True)
+    return bad
+
+
+_VALUES = gcl.Graph.values
+
+
+def _drop_identity(self: gcl.Graph, r: gcl.Reach) -> np.ndarray:
+    """gap_clear.Graph.values with the first row off the unknowns given a diagonal 0 (fault
+    `drop-identity`)."""
+    data = _VALUES(self, r)
+    off = np.flatnonzero(~r.unknown)
+    if len(off):
+        i = off[0]
+        p = self.pattern
+        lo, hi = p.indptr[i], p.indptr[i + 1]
+        data[lo + int(np.flatnonzero(p.indices[lo:hi] == i)[0])] = 0.0
+    return data
+
+
+# ------------------------------------------------------------------ the code's identity
+
+_DIGESTED = gcl.code_constants
+
+
+def _perturbed(value: object) -> object:
+    if isinstance(value, bool):
+        return not value
+    if isinstance(value, (int, float)):
+        return value * 2 + 1
+    if isinstance(value, str):
+        return value + "x"
+    if isinstance(value, tuple):
+        return (*value, 0)
+    if isinstance(value, np.ndarray):
+        return value + 1
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        f = dataclasses.fields(value)[0]
+        return dataclasses.replace(value, **{f.name: _perturbed(getattr(value, f.name))})
+    raise TypeError(f"no perturbation for {type(value).__name__}")
+
+
+def constants(_ids: list[str]) -> list[str]:
+    bad = []
+    base = gcl.code_digest()
+    if not NAME.endswith(f"+v{base}") or gcl.CODE != base:
+        bad.append(f"the metric's name {NAME} does not carry the code's digest {base}")
+    mods = gcl._identity_modules()
+    seen = 0
+    for mod in mods:
+        short = mod.__name__.rsplit(".", 1)[-1]
+        for name, value in list(vars(mod).items()):
+            key = f"{short}.{name}"
+            if name.startswith("_") or not name.isupper() or key in gcl._EXEMPT:
+                continue
+            seen += 1
+            with _patched(mod, name, _perturbed(value)):
+                d = gcl.code_digest()
+            if d == base:
+                bad.append(f"{key} changed, the digest did not")
+    for key in gcl._EXTERNAL:
+        mod_name, name = key.split(".")
+        mod = sys.modules[mod_name]
+        seen += 1
+        with _patched(mod, name, _perturbed(getattr(mod, name))):
+            if gcl.code_digest() == base:
+                bad.append(f"{key} changed, the digest did not")
+    print(f"constants: {seen} constants, each changed alone; the digest {base} changed for "
+          f"{seen - len(bad)} -> {'ok' if not bad else 'FAILS: ' + ', '.join(bad[:5])}",
+          flush=True)
+    return bad
+
+
+def _omit_mesh_rev() -> dict[str, str]:
+    """gap_clear.code_constants without MESH_REV (fault `omit`)."""
+    out = _DIGESTED()
+    del out["gap_clear.MESH_REV"]
+    return out
+
+
+# ------------------------------------------------------------------ the device
+
+def device(ids: list[str]) -> list[str]:
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        fx = METRIC.fixed(b, cache=gcl.CACHE)
+        ms = {dev: dataclasses.replace(METRIC, factorization=gap_factor.factorization_of(dev))
+              .model(b, fx, demand=POP) for dev in ("cpu", "gpu")}
+        out: dict[str, dict[str, np.ndarray]] = {}
+        for dev, m in ms.items():
+            rng = np.random.default_rng(SEED + 4)
+            x = _random(m, rng)
+            r: dict[str, np.ndarray] = {}
+            r["baseline"] = np.array([m.base.P, m.base.Pq, m.base.J2])
+            r["baseline homes"] = m.base.u
+            L = m.lenses(x)
+            r["random"] = np.array([L.P, L.Pq, L.J2])
+            r["random homes"] = L.u
+            r["random J_2"] = np.array(m.exact(x, 2.0))
+            for power in (1.0, 2.0):
+                rel = m.relaxation(power, q=3.0, rtol=0.0, eps=GRAD_EPS)
+                for where, xf in (("start", np.full(m.n, BUDGET)),
+                                  ("random x", np.random.default_rng(SEED + 5).uniform(
+                                      0.1, 0.4, m.n))):
+                    J, g = rel.value_sgrad(xf)
+                    r[f"SIMP J_{power:g} {where}"] = np.concatenate([[J], g])
+            m.removed[:] = x
+            for restore in (False, True):
+                g = m.tension(1.0, restore=restore).g
+                r[f"tension {'restore' if restore else 'add'}"] = np.where(np.isfinite(g), g,
+                                                                           0.0)
+            m.removed[:] = False
+            r["polish eps world"] = np.array([m.relaxation(1.0, q=1.0, rtol=0.0, eps=1e-6)
+                                              .value(x.astype(float))])
+            out[dev] = r
+        worst = 0.0
+        parts = []
+        for key in out["cpu"]:
+            a, z = out["cpu"][key], out["gpu"][key]
+            fin = np.isfinite(a)
+            if not np.array_equal(fin, np.isfinite(z)):
+                bad.append(f"{bid} {key}: the devices part on which values are finite")
+                continue
+            err = float(np.abs(a[fin] - z[fin]).max() / max(np.abs(a[fin]).max(), 1e-300))
+            worst = max(worst, err)
+            parts.append(f"{key} {err:.1e}")
+            if err > DEVICE_TOL:
+                bad.append(f"{bid} {key} {err:.1e}")
+        print(f"{bid}: cuDSS against SuperLU, of the largest: " + ", ".join(parts)
+              + f"; worst {worst:.1e} -> {'ok' if worst <= DEVICE_TOL else 'FAILS'}", flush=True)
+    return bad
+
+
+_CUDSS_FACTOR = gap_factor._CuDSSPlan.factor
+
+
+def _perturb_one() -> contextlib.AbstractContextManager[None]:
+    """The second factorization on each cuDSS plan (after the baseline's: the random
+    clearing's) handed its values with the diagonal raised by PERTURB (fault `perturb`)."""
+    calls: dict[int, int] = {}
+
+    def factor(self: gap_factor._CuDSSPlan, data: np.ndarray, unknown: np.ndarray
+               ) -> gap_factor.Factor:
+        calls[id(self)] = calls.get(id(self), 0) + 1
+        if calls[id(self)] == 2:
+            p = self.pattern
+            rows = np.repeat(np.arange(p.n), np.diff(p.indptr))
+            data = np.where(rows == p.indices, data * (1.0 + PERTURB), data)
+        return _CUDSS_FACTOR(self, data, unknown)
+    return _patched(gap_factor._CuDSSPlan, "factor", factor)
+
+
 # ------------------------------------------------------------------ the run
 
 GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "baseline": baseline, "weights": weights, "reach": reach, "gradient": gradient,
-    "free": free, "identity": identity, "convex": convex}
+    "free": free, "identity": identity, "convex": convex, "pattern": pattern,
+    "constants": constants, "device": device}
 
 
 def _fault_exits():
@@ -454,6 +711,9 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "free": {"drop-crossing": lambda: _patched(gc, "free_first", _drop_crossing)},
     "identity": {"collide": lambda: _patched(gcl, "check_disjoint", lambda name: None)},
     "convex": {"multiply": lambda: _patched(gf.Terms, "value", _multiply)},
+    "pattern": {"drop-identity": lambda: _patched(gcl.Graph, "values", _drop_identity)},
+    "constants": {"omit": lambda: _patched(gcl, "code_constants", _omit_mesh_rev)},
+    "device": {"perturb": _perturb_one},
 }
 
 

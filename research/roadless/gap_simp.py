@@ -40,6 +40,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
+import gap_factor  # noqa: E402
 import gap_compare as gcmp  # noqa: E402
 import gap_complex as gc  # noqa: E402
 import gap_flow as gf  # noqa: E402
@@ -140,7 +141,8 @@ def run_one(job: tuple[str, str]) -> str | None:
         cost = pop / pop.sum()
         fs = gcmp.flow_spec(R, LEVELS)
         spec = gap_study.spec_of(gcmp.S_M)
-        m = gcl.ComplexMetric(spec=spec, fs=fs, form=form, lumped=False).clearing(
+        m = gcl.ComplexMetric(spec=spec, fs=fs, form=form, lumped=False, relax_lumped=False,
+                              factorization=gap_factor.SuperLU()).clearing(
             b, demand=common.PopulationDemand())
         t_model = time.time() - t0
         fr = gc.free_first(geo, spec, w=form.w, grow=0.0, budget=BUDGET, cost=cost, pop=pop,

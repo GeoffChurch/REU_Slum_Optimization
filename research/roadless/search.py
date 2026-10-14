@@ -39,7 +39,7 @@ cpu only): metrics.metric_of, resolved here and handed down (seam.Metric).
 spec: GP<grow>x<greedy picker>r<restore share per round>[m<shortlist>], e.g.
 GP3xS0.01catr0.005m8; FL<same>c<cap on the conditional adds' scorings>, e.g.
 FL3xS0.01catr0.005m8c100; SW<grow>-<grow>-...x<greedy picker>r<share>[m<shortlist>]
-.P<tries>w<width>[x2] (the polish's, as polish_greedy.py's), e.g.
+.P<tries>w<width>[x2][E] (the polish's, as polish_greedy.py's), e.g.
 SW3-1.5-1.2xS0.01catr0.005m8.P64w8; SIMP<relax plan>+<any of those>, e.g.
 SIMPfw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2+SW1.2xS0.01catr0.005m8.P64w8 (SIMP's default,
 then a 1.2x swing and the polish). Rows in clear.rows_dir(<spec>D<d_max>, ...), e.g.
@@ -781,6 +781,63 @@ def polish(world: Graded, *, budget: float, width: int, pairs: bool, pool: int,
                                          pool=pool, tries=tries)))
 
 
+@dataclass(frozen=True)
+class ExactScored:
+    """A polish's world that scores its candidates exactly (EXACT: the metric itself) and ranks
+    them by `ranker`'s gradient at the 0/1 clearing (its eps world's, as the eps-scored polish
+    ranks them)."""
+    ranker: Graded
+
+    def score(self, s: SearchState, removed: np.ndarray) -> Score:
+        return EXACT.score(s, removed)
+
+    def value_sgrad(self, x: np.ndarray) -> tuple[float, np.ndarray]:
+        return self.ranker.value_sgrad(x)
+
+
+class PolishScoring(Protocol):
+    """How a polish scores its candidates, the suffix of its spec (P<tries>w<width>[x2]<suffix>:
+    polish_greedy's, relax.Plan's, the swings'), from the eps world it ranks them in: in that
+    world (`InEps`, no suffix) or exactly (`Exactly`, `E`)."""
+
+    @property
+    def suffix(self) -> str: ...
+
+    def world(self, eps_world: Graded) -> Graded: ...
+
+
+@dataclass(frozen=True)
+class InEps:
+    """Candidates scored in the eps world they are ranked in."""
+
+    @property
+    def suffix(self) -> str:
+        return ""
+
+    def world(self, eps_world: Graded) -> Graded:
+        return eps_world
+
+
+@dataclass(frozen=True)
+class Exactly:
+    """Candidates scored exactly (ExactScored), ranked in the eps world."""
+
+    @property
+    def suffix(self) -> str:
+        return "E"
+
+    def world(self, eps_world: Graded) -> Graded:
+        return ExactScored(eps_world)
+
+
+def polish_scoring_of(suffix: str) -> PolishScoring:
+    """The polish scoring a spec's suffix names (`` or `E`), resolved where the spec is read."""
+    for scoring in (InEps(), Exactly()):
+        if scoring.suffix == suffix:
+            return scoring
+    raise ValueError(f"unknown polish scoring {suffix!r}: '' or 'E'")
+
+
 EPS_SCREEN = 1e-6               # the eps world the shortlist is scored in (the real one to ~1e-3)
 
 
@@ -1120,12 +1177,14 @@ class Swings:
     width: int                  # the polish's candidates scored per round
     pairs: bool                 # the polish's two-for-one moves
     pool: int                   # their candidates (relax.PAIR_POOL)
+    scoring: PolishScoring      # how the polish scores them
 
     @property
     def name(self) -> str:
         return (f"SW{'-'.join(f'{g:g}' for g in self.grows)}x{self.add.name}r{self.restore:g}"
                 + (f"m{self.shortlist}" if self.shortlist else "")
-                + f".P{self.tries}w{self.width}" + ("x2" if self.pairs else ""))
+                + f".P{self.tries}w{self.width}" + ("x2" if self.pairs else "")
+                + self.scoring.suffix)
 
     def build(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
               d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built:
@@ -1141,8 +1200,9 @@ class Swings:
         last = (Noted(archive=archive, label="before the polish", block_id=block_id, J0=J0,
                       power=power, t0=t0),
                 ToBest(archive),
-                With(Silent(), polish(polish_world, budget=d_max, width=self.width,
-                                      pairs=self.pairs, pool=self.pool, tries=self.tries)),
+                With(Silent(), polish(self.scoring.world(polish_world), budget=d_max,
+                                      width=self.width, pairs=self.pairs, pool=self.pool,
+                                      tries=self.tries)),
                 Kept(archive=archive, d_max=d_max))
         return Built(part=Seq((*swings, *last)), rows=rec)
 
@@ -1254,13 +1314,14 @@ def plan_of(spec: str, *, sweep: clear.Sweep, pool: int,
 
 
 def _unseeded(spec: str, *, sweep: clear.Sweep, pool: int) -> SearchPlan:
-    if m := re.fullmatch(r"SW([0-9.]+(?:-[0-9.]+)*)x(\S+?)r([0-9.]+)(?:m(\d+))?\.P(\d+)w(\d+)(x2)?",
-                         spec):
+    if m := re.fullmatch(r"SW([0-9.]+(?:-[0-9.]+)*)x(\S+?)r([0-9.]+)(?:m(\d+))?\.P(\d+)w(\d+)(x2)?"
+                         r"(E?)", spec):
         return Swings(grows=tuple(float(g) for g in m.group(1).split("-")),
                       add=greedy_round(m.group(2), sweep), restore=float(m.group(3)),
                       shortlist=0 if m.group(4) is None else int(m.group(4)),
                       screen_eps=EPS_SCREEN, tries=int(m.group(5)), width=int(m.group(6)),
-                      pairs=m.group(7) is not None, pool=pool)
+                      pairs=m.group(7) is not None, pool=pool,
+                      scoring=polish_scoring_of(m.group(8)))
     if m := re.fullmatch(r"(GP|FL)([0-9.]+)x(\S+?)r([0-9.]+)(?:m(\d+))?(?:c(\d+))?", spec):
         kind, cap = m.group(1), m.group(6)
         if (kind == "FL") != (cap is not None):
@@ -1283,7 +1344,7 @@ def prune_block(b: Any, plan: SearchPlan, *, metric: seam.Metric,
     built = plan.build(block_id=b.block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max,
                        t0=t0, screen=screen_of(c, power), polish_world=polish_of(c, power))
     built.part(SearchState.start(c, power=power, score=Score(J0, P0), world=EXACT), built.rows)
-    rows = built.rows.frame()
+    rows = built.rows.frame().assign(device=metric.device)
     print(f"{time.strftime('%H:%M:%S')} {b.block_id} n={c.n} {plan.name}: "
           f"{len(rows) - 1} rows; perm' {rows.perm.iloc[-1]:.3f} at D {rows.D.iloc[-1]:.3f}  "
           f"{time.time() - t0:.0f}s", flush=True)

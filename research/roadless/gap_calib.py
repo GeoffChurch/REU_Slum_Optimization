@@ -1,20 +1,27 @@
-"""The complex as the runtime, phase 1: calibration, the acceptance run and the timings (NOTES, "The
-complex as the runtime: one fixed mesh"; the brief .superpowers/sdd/2026-10-14-complex-runtime).
+"""The complex as the runtime: calibration, the acceptance runs and the timings (NOTES, "The complex
+as the runtime: one fixed mesh" and "... its speed and a GPU path"; the briefs
+.superpowers/sdd/2026-10-14-complex-runtime and 2026-10-14-complex-speed).
 
 The metric is the runtime's (METRIC: the shy distance at 0.5 m on the gap complex, its name
-carrying every constant that can change a score). The raster is uni+apwfs at h 0.5 (RASTER).
+carrying every constant that can change a score, the code's digest among them). The raster is
+uni+apwfs at h 0.5 (RASTER).
 
     S=research/roadless/gap_calib.py     # from the repo root, PYTHONPATH=., single-threaded
-    uv run python $S preset <id> <simp|cheap>      # one preset on the complex (cluster.py cpu)
+    uv run python $S preset <id> <simp|cheap>[E][L] <cpu|gpu>  # a preset on the complex
     uv run python $S baseline <ids,|@file> <procs>  # the fixed mesh's baseline against the rebuild
     uv run python $S clearings <ids,|@file> <procs> # every clearing on the fixed mesh and rebuilt
     uv run python $S rasterscore <id> <cpu|gpu>     # every clearing on the raster (cluster GPU)
-    uv run python $S timing <ids,|@file> <procs>    # the breakdowns, before and after
+    uv run python $S speed <ids,|@file> <procs> <cpu|gpu>  # the breakdowns on a device
+    uv run python $S rescore <ids,|@file> <procs>   # the stored runs re-scored under their name
     uv run python $S report                         # gap_rows/summary_runtime_*.csv
 
 `preset`: the cheap preset (polish_greedy, S0.01cat P64w8) or SIMP's default (relax.one, PLAN)
-at area D BUDGET, power 1 (P), free first, on the complex; their own rows (polish_rows/<METRIC>/,
-relax_rows/<METRIC>/).
+at area D BUDGET, power 1 (P), free first, on the complex, on the device's factorization; `E` the
+polish's candidates scored exactly (search.Exactly), `L` the metric's eps world with one cell per
+building's interior (+relaxlumped). Rows ROWS/preset/<device>/<item>/<id>.parquet (the run's row,
+its item, metric, host, peak memory and wall time; the device's memory in use at its end): the
+acceptance's own, so that a run on one device never overwrites another's or the stored rows
+(relax_rows/<METRIC>/, polish_rows/<METRIC>/, phase 1's, which `report` compares them with).
 
 `baseline`: per block the fixed mesh (built afresh: its time and peak memory) against the
 complex rebuilt (gap_compare.ComplexModel, gap_flow's mesh): P0, P_{1/2},0, J_2,0, the walled-in
@@ -28,24 +35,28 @@ population and count), and the homes each reaches against the complex grown by w
 `rasterscore`: every clearing of SOURCES present scored on the raster (RASTER, h 0.5: P,
 P_{1/2}, J_2, B (i), as width.cross scores); rows ROWS/raster/<id>.parquet.
 
-`timing`: per block, the fixed mesh's build and load, then the breakdown (factors, reach,
-assembly, factorization, solves, gradient) of an exact score (a random clearing at BUDGET, under
-the population's and P_{1/2}'s demands, as the scorer does), of a SIMP iteration (value_sgrad in
-the eps world at PLAN's eps and q 3), and of the tension, each TIMING_REPS times, AFTER (the
-runtime: one nested-dissection order restricted to each state's unknowns, solves refined to the
-backward-error floor) and BEFORE (as the mesh was first run: SuperLU's COLAMD at every
-factorization, solves refined toward a 1e-12 residual, eight steps where the floor is above it);
-a region (<id>@major) its baseline only. Rows ROWS/timing/<id>.parquet.
+`speed`: per block on the device, the fixed mesh's load and the model's baseline (with the
+factorization's plan), then the breakdown (factors, reach, assembly, factorization, solves,
+gradient) of an exact score (a random clearing at BUDGET, under the population's and P_{1/2}'s
+demands, as the scorer does), of a SIMP iteration (value_sgrad in the eps world at PLAN's eps and
+q 3) and of the tension, each SPEED_REPS times, and the SIMP iteration and the tension of the
++relaxlumped metric's eps world; a region (<id>@major) its baseline only. Rows
+ROWS/speed/<device>/<id>.parquet. (Phase 1's `timing`, BEFORE and AFTER, is in
+summary_runtime_timing.csv.)
+
+`rescore`: the stored runs of the complex's presets (SOURCES' cx_*), each clearing re-scored
+under the metric's name (its rows' directories migrated to it), against the score its row holds;
+rows ROWS/rescore/<id>.parquet.
 """
 from __future__ import annotations
 
 import multiprocessing
 import os
+import re
 import resource
 import socket
 import sys
 import time
-from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
@@ -57,14 +68,16 @@ import clear  # noqa: E402
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
 import gap_compare as gcmp  # noqa: E402
-import gap_flow as gf  # noqa: E402
+import gap_factor  # noqa: E402
 import gap_study  # noqa: E402
 import lifted  # noqa: E402
 import metrics  # noqa: E402
 import polish_greedy  # noqa: E402
 import relax  # noqa: E402
+import search  # noqa: E402
 
-METRIC = gcl.complex_of("cx+shy0.5+s0.125r1b1+R0.5g4x2q4")    # owner 2026-10-14
+BASE = "cx+shy0.5+s0.125r1b1+R0.5g4x2q4"                     # owner 2026-10-14
+METRIC = gcl.complex_of(f"{BASE}+v{gcl.CODE}", factorization=gap_factor.SuperLU())
 RASTER = "uni+apwfs"
 MESH = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
 PLAN = relax.plan_of("fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2")     # SIMP's default
@@ -73,8 +86,9 @@ BUDGET = relax.D_LENS                   # area D 0.05
 POWER = 1.0                             # P, the headline (owner 2026-10-12)
 POP = common.PopulationDemand()
 PQ = common.PriorityDemand(0.5)
-TIMING_REPS = 2
+SPEED_REPS = 2
 ROWS = HERE / "gap_rows" / "runtime"
+ITEM = re.compile(r"(simp|cheap)(E?)(L?)")    # a preset item: the polish scoring, the eps world
 
 
 def _peak_gb() -> float:
@@ -87,8 +101,8 @@ def sources(metric_name: str) -> dict[str, Path]:
     """Per preset its rows' directory under a metric (relax.rows_of, polish_greedy.rows_of)."""
     picker, tries, width, pairs = CHEAP
     return {"simp": relax.rows_of(PLAN, metric_name, BUDGET),
-            "cheap": polish_greedy.rows_of(picker, tries, width, pairs, MESH, metric_name,
-                                           BUDGET)}
+            "cheap": polish_greedy.rows_of(picker, tries, width, pairs, search.InEps(), MESH,
+                                           metric_name, BUDGET)}
 
 
 SOURCES = {f"{who}_{preset}": (name, preset) for who, name in (("raster", RASTER),
@@ -112,21 +126,35 @@ def clearings_of(bid: str, n: int) -> dict[str, np.ndarray]:
 
 # ------------------------------------------------------------------ preset
 
-def preset(bid: str, which: str) -> None:
-    metric = metrics.metric_of(METRIC.name, device="cpu", mesh=MESH)
+def _gpu_gb() -> float:
+    """The device's memory in use (one process a card: this run's), GB."""
+    import cupy
+    free, total = cupy.cuda.runtime.memGetInfo()
+    return (total - free) / 2 ** 30
+
+
+def preset(bid: str, item: str, device: str) -> None:
+    m = ITEM.fullmatch(item)
+    if m is None:
+        raise SystemExit(f"unknown preset item {item!r}: <simp|cheap>[E][L]")
+    which, exact, lumped = m.groups()
+    metric = metrics.metric_of(f"{BASE}{'+relaxlumped' if lumped else ''}+v{gcl.CODE}",
+                               device=device, mesh=MESH)
+    scoring = search.polish_scoring_of(exact)
+    out = ROWS / "preset" / device / item / f"{bid}.parquet"
+    t0 = time.time()
     if which == "simp":
-        out = relax.rows_of(PLAN, metric.name, BUDGET) / f"{bid}_p{POWER:g}.parquet"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        t0 = time.time()
-        row = relax.one(bid, POWER, metric, PLAN, BUDGET, demand=POP)
-        row.update(host=socket.gethostname(), peak_rss_gb=_peak_gb(), wall=time.time() - t0)
-        pd.DataFrame([row]).to_parquet(out)
-    elif which == "cheap":
-        picker, tries, width, pairs = CHEAP
-        polish_greedy.main(bid, POWER, metric, picker, tries, width, BUDGET, MESH, pairs)
+        row = relax.one(bid, POWER, metric, PLAN._replace(polish_scoring=scoring), BUDGET,
+                        demand=POP)
     else:
-        raise SystemExit(f"unknown preset {which!r}: simp or cheap")
-    print(f"{bid} {which}: peak {_peak_gb():.1f} GB", flush=True)
+        picker, tries, width, pairs = CHEAP
+        row = polish_greedy.run(bid, POWER, metric, picker, tries, width, BUDGET, MESH, pairs,
+                                scoring=scoring)
+    row.update(item=item, metric=metric.name, host=socket.gethostname(), peak_rss_gb=_peak_gb(),
+               gpu_gb=_gpu_gb() if device == "gpu" else np.nan, wall=time.time() - t0)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([row]).to_parquet(out)
+    print(f"{bid} {item} on {device}: peak {_peak_gb():.1f} GB, {row['wall']:.0f}s", flush=True)
 
 
 # ------------------------------------------------------------------ baseline
@@ -140,13 +168,10 @@ def baseline_one(bid: str) -> str | None:
         t0 = time.time()
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
-            fx = gcl.Fixed.of(b, METRIC.spec, METRIC.fs, METRIC.form, lumped=False,
-                              cache=Path(tmp))
+            fx = METRIC.fixed(b, cache=Path(tmp))
             t_build = time.time() - t0
             peak_build = _peak_gb()
-        m = gcl.Model(b, fx, spec=METRIC.spec, fs=METRIC.fs, form=METRIC.form,
-                      pop=common.POPULATIONS["area"].weights(np.asarray(b.buildings.outlines)),
-                      demand=POP)
+        m = METRIC.model(b, fx, demand=POP)
         t_model = time.time() - t0
         cm = gcmp.ComplexModel(b, METRIC.fs, METRIC.form)
         live = ~m.nodem & ~cm.walled
@@ -265,41 +290,7 @@ def rasterscore(bid: str, device: str) -> None:
     pd.DataFrame(rows).assign(t=time.time() - t0, host=socket.gethostname()).to_parquet(out)
 
 
-# ------------------------------------------------------------------ timing
-
-def _legacy_factor(A):
-    """The factorization as the fixed mesh was first run (the measurement's BEFORE): SuperLU's
-    COLAMD at every factorization, each solve refined toward a residual 1e-12 of the right-hand
-    side, at most eight steps (the floor sits near 1e-9: all eight taken)."""
-    from scipy.sparse.linalg import splu
-    Ac = A.tocsr()
-    lu = splu(A.tocsc(), permc_spec="COLAMD")
-
-    class _Legacy:
-        def solve(self, b):
-            x = lu.solve(b)
-            nb = float(np.abs(b).max())
-            if nb == 0.0:
-                return x
-            for _ in range(8):
-                r = b - Ac @ x
-                if float(np.abs(r).max()) <= 1e-12 * nb:
-                    return x
-                x = x + lu.solve(r)
-            return x
-    return _Legacy()
-
-
-@contextmanager
-def _before(m: gcl.Model):
-    """The model's factorizations as first run (_legacy_factor)."""
-    old = gf.factor_ordered
-    gf.factor_ordered = lambda A, p: _legacy_factor(A)
-    try:
-        yield
-    finally:
-        gf.factor_ordered = old
-
+# ------------------------------------------------------------------ speed
 
 def _measure(m: gcl.Model, what: str, fn) -> dict:
     m.timing = gcl.Timing()
@@ -309,68 +300,99 @@ def _measure(m: gcl.Model, what: str, fn) -> dict:
                 **{f"n_{k}": v for k, v in m.timing.n.items()})
 
 
-def timing_one(bid: str) -> str | None:
-    out = ROWS / "timing" / f"{bid}.parquet"
+_SPEED_DEVICE: list[str] = []      # the pool's device (speed's argument), set before it forks
+
+
+def speed_one(bid: str) -> str | None:
+    [device] = _SPEED_DEVICE
+    out = ROWS / "speed" / device / f"{bid}.parquet"
     if out.exists():
         return None
     try:
         [b] = common.build_blocks([bid])
-        import tempfile
         rows = []
-        with tempfile.TemporaryDirectory() as tmp:
-            t0 = time.time()
-            fx = gcl.Fixed.of(b, METRIC.spec, METRIC.fs, METRIC.form, lumped=False,
-                              cache=Path(tmp))
-            rows.append(dict(what="build", wall=time.time() - t0, peak_gb=_peak_gb()))
-            t0 = time.time()
-            fx = gcl.Fixed.of(b, METRIC.spec, METRIC.fs, METRIC.form, lumped=False,
-                              cache=Path(tmp))
-            rows.append(dict(what="load", wall=time.time() - t0, peak_gb=_peak_gb()))
         t0 = time.time()
-        m = gcl.Model(b, fx, spec=METRIC.spec, fs=METRIC.fs, form=METRIC.form,
-                      pop=common.POPULATIONS["area"].weights(np.asarray(b.buildings.outlines)),
-                      demand=POP)
-        rows.append(dict(what="model (baseline: the order, 4 solves)", wall=time.time() - t0,
-                         peak_gb=_peak_gb(), unknowns=m.cells0, cells=m.c.n))
-        region = "@" in bid
+        fx = METRIC.fixed(b, cache=gcl.CACHE)
+        rows.append(dict(what="load", wall=time.time() - t0, peak_gb=_peak_gb()))
+        models = {}
+        for lumped in ("", "+relaxlumped"):
+            if "@" in bid and lumped:
+                continue
+            metric = metrics.metric_of(f"{BASE}{lumped}+v{gcl.CODE}", device=device, mesh=MESH)
+            t0 = time.time()
+            assert isinstance(metric, gcl.ComplexMetric)
+            mdl = metric.model(b, fx, demand=POP)
+            models[lumped] = mdl
+            rows.append(dict(what=f"model{lumped} (baseline: the plan, 4 solves)",
+                             wall=time.time() - t0, peak_gb=_peak_gb(), unknowns=mdl.cells0,
+                             cells=mdl.relax_sys.n))
+        m = models[""]
         rng = np.random.default_rng(20261014)
         x = np.zeros(m.n, dtype=bool)
         order = rng.permutation(m.n)
         x[order[np.cumsum(m.cost[order]) <= BUDGET]] = True
-        rel = m.relaxation(POWER, q=PLAN.qmax, rtol=PLAN.rtol, eps=PLAN.eps)
         x_frac = np.full(m.n, BUDGET)
-        for when, ctx in (("after", None), ("before", _before)):
-            for rep in range(TIMING_REPS):
-                def score():
-                    m.lenses(x)
+        cases = []
+        if "@" in bid:
+            cases.append(("baseline score", m, lambda mm: mm.lenses(np.zeros(mm.n, dtype=bool))))
+        else:
+            cases.append(("exact score", m, lambda mm: mm.lenses(x)))
+            for lumped, mm in models.items():
+                rel = mm.relaxation(POWER, q=PLAN.qmax, rtol=PLAN.rtol, eps=PLAN.eps)
 
-                def iteration():
-                    rel.value_sgrad(x_frac)
-
-                def tension():
-                    m.removed[:] = x
-                    m.tension(POWER, restore=False)
-                    m.removed[:] = False
-
-                def baseline():
-                    m.lenses(np.zeros(m.n, dtype=bool))
-                cases = ([("baseline score", baseline)] if region else
-                         [("exact score", score), ("SIMP iteration", iteration),
-                          ("tension", tension)])
-                for what, fn in cases:
-                    if ctx is None:
-                        r = _measure(m, what, fn)
-                    else:
-                        with ctx(m):
-                            r = _measure(m, what, fn)
-                    rows.append(dict(r, when=when, rep=rep, peak_gb=_peak_gb()))
-                    print(f"{bid} {when} {what}: {r['wall']:.2f}s (factorization "
-                          f"{r['t_factorization']:.2f}s, solves {r['t_solves']:.2f}s); peak "
-                          f"{_peak_gb():.1f} GB", flush=True)
+                def tension(mm=mm):
+                    mm.removed[:] = x
+                    mm.tension(POWER, restore=False)
+                    mm.removed[:] = False
+                cases.append((f"SIMP iteration{lumped}", mm,
+                              lambda _mm, rel=rel: rel.value_sgrad(x_frac)))
+                cases.append((f"tension{lumped}", mm, lambda _mm, f=tension: f()))
+        for rep in range(SPEED_REPS):
+            for what, mm, fn in cases:
+                r = _measure(mm, what, lambda fn=fn, mm=mm: fn(mm))
+                rows.append(dict(r, rep=rep, peak_gb=_peak_gb()))
+                print(f"{bid} {device} {what}: {r['wall']:.2f}s (factorization "
+                      f"{r['t_factorization']:.2f}s, solves {r['t_solves']:.2f}s); peak "
+                      f"{_peak_gb():.1f} GB", flush=True)
         df = pd.DataFrame(rows).assign(block=bid, n=m.n, unknowns0=m.cells0, cells=m.c.n,
-                                       host=socket.gethostname())
+                                       device=device, host=socket.gethostname(),
+                                       gpu_gb=_gpu_gb() if device == "gpu" else np.nan)
         out.parent.mkdir(parents=True, exist_ok=True)
         df.to_parquet(out)
+        return None
+    except Exception as e:      # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        return f"{bid}: {e!r}"
+
+
+# ------------------------------------------------------------------ the migration's check
+
+def rescore_one(bid: str) -> str | None:
+    """Each stored run of the complex's presets on `bid` (its rows under METRIC's name), its
+    clearing re-scored: Lens A under P (perm, at power 1) against the row's."""
+    out = ROWS / "rescore" / f"{bid}.parquet"
+    try:
+        [b] = common.build_blocks([bid])
+        m = METRIC.clearing(b, demand=POP)
+        rows = []
+        for preset, d in sources(METRIC.name).items():
+            f = d / f"{bid}_p{POWER:g}.parquet"
+            if not f.exists():
+                continue
+            r = pd.read_parquet(f).iloc[0]
+            cleared = r.simp_cleared if preset == "simp" else r.cleared
+            stored = float(r.simp_perm if preset == "simp" else r.perm)
+            x = np.zeros(m.n, dtype=bool)
+            x[np.asarray(cleared, dtype=np.int64)] = True
+            J, _P = m.exact(x, POWER)
+            perm = 1.0 - J / m.baseline(POWER)[0]
+            rows.append(dict(block=bid, preset=preset, stored=stored, rescored=perm,
+                             diff=perm - stored, host=socket.gethostname()))
+            print(f"{bid} {preset}: stored {stored:.10f}, re-scored {perm:.10f} "
+                  f"({perm - stored:+.1e})", flush=True)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_parquet(out)
         return None
     except Exception as e:      # noqa: BLE001
         import traceback
@@ -385,6 +407,12 @@ LENSES = ("L_P", "L_Pq", "L_J2")
 
 def _read(sub: str) -> pd.DataFrame:
     fs = sorted((ROWS / sub).glob("*.parquet"))
+    return pd.concat([pd.read_parquet(f) for f in fs], ignore_index=True) if fs else pd.DataFrame()
+
+
+def _read_nested(sub: str) -> pd.DataFrame:
+    """Every row under ROWS/<sub>/, its subdirectories included."""
+    fs = sorted((ROWS / sub).rglob("*.parquet"))
     return pd.concat([pd.read_parquet(f) for f in fs], ignore_index=True) if fs else pd.DataFrame()
 
 
@@ -470,6 +498,40 @@ def report() -> None:
                              t=float(r.t)))
     if runs:
         pd.DataFrame(runs).round(6).to_csv(out / "summary_runtime_runs.csv", index=False)
+    resc = _read("rescore")
+    if len(resc):
+        resc.to_csv(out / "summary_runtime_rescore.csv", index=False, float_format="%.12g")
+    spd = _read_nested("speed")
+    if len(spd):
+        spd.round(4).to_csv(out / "summary_runtime_speed.csv", index=False)
+    pre = _read_nested("preset")
+    if len(pre):
+        ref = {preset: pd.DataFrame(
+            [dict(block=r.block, ref_perm=float(r.simp_perm if preset == "simp" else r.perm),
+                  ref_cleared=" ".join(map(str, sorted(
+                      r.simp_cleared if preset == "simp" else r.cleared))),
+                  ref_t=float(r.t))
+             for f in sorted(sources(METRIC.name)[preset].glob(f"*_p{POWER:g}.parquet"))
+             for r in [pd.read_parquet(f).iloc[0]]]) for preset in ("simp", "cheap")}
+        rows = []
+        for _i, r in pre.iterrows():
+            preset = "simp" if r.item.startswith("simp") else "cheap"
+            cl = r.simp_cleared if preset == "simp" else r.cleared
+            rf = ref[preset]
+            rf = rf[rf.block == r.block]
+            simp = preset == "simp"
+            rows.append(dict(
+                block=r.block, item=r.item, device=r.device, host=r.host,
+                perm=r.simp_perm if simp else r.perm, D=r.simp_D if simp else r.D,
+                enclosed=r.enclosed, free_D=r.free_D, t=r.t, wall=r.wall,
+                peak_rss_gb=r.peak_rss_gb, gpu_gb=r.gpu_gb,
+                cleared=" ".join(map(str, sorted(cl))),
+                phase1_perm=float(rf.ref_perm.iloc[0]) if len(rf) else np.nan,
+                phase1_same=bool(len(rf) and rf.ref_cleared.iloc[0] == " ".join(
+                    map(str, sorted(cl)))),
+                phase1_t=float(rf.ref_t.iloc[0]) if len(rf) else np.nan))
+        pd.DataFrame(rows).sort_values(["item", "device", "block"]).to_csv(
+            out / "summary_runtime_presets.csv", index=False, float_format="%.10g")
 
 
 # ------------------------------------------------------------------ the run
@@ -489,11 +551,14 @@ def main(argv: list[str]) -> None:
     cmd = argv[0]
     failed: list[str] = []
     if cmd == "preset":
-        preset(argv[1], argv[2])
+        preset(argv[1], argv[2], argv[3])
     elif cmd == "rasterscore":
         rasterscore(argv[1], argv[2])
-    elif cmd in ("baseline", "clearings", "timing"):
-        fn = {"baseline": baseline_one, "clearings": clearings_one, "timing": timing_one}[cmd]
+    elif cmd == "speed":
+        _SPEED_DEVICE.append(argv[3])
+        failed = _pool(speed_one, gap_study.ids_of(argv[1]), int(argv[2]))
+    elif cmd in ("baseline", "clearings", "rescore"):
+        fn = {"baseline": baseline_one, "clearings": clearings_one, "rescore": rescore_one}[cmd]
         failed = _pool(fn, gap_study.ids_of(argv[1]), int(argv[2]))
     elif cmd == "report":
         report()

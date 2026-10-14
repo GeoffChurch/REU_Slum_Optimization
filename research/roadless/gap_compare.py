@@ -491,6 +491,7 @@ def interiors(bids: list[str], token: str) -> None:
     0/1 clearing; the study's first run scored it in the eps world at 1e-9). Rows
     gap_rows/compare/interiors/<form>.parquet."""
     import gap_clear as gcl
+    import gap_factor
     form = form_of(token)
     fs = flow_spec(0.5, 4)
     rows = []
@@ -516,8 +517,9 @@ def interiors(bids: list[str], token: str) -> None:
         models = {}
         for lumped in (False, True):
             t0 = time.time()
-            m = gcl.ComplexMetric(spec=cm.spec, fs=fs, form=form, lumped=lumped).clearing(
-                b, demand=POP)
+            m = gcl.ComplexMetric(spec=cm.spec, fs=fs, form=form, lumped=lumped,
+                                  relax_lumped=False, factorization=gap_factor.SuperLU()
+                                  ).clearing(b, demand=POP)
             models["lumped" if lumped else "meshed"] = (m, time.time() - t0)
         for name, x in picks.items():
             r, _u = cm.score(~x, None)
