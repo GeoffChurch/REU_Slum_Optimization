@@ -10,11 +10,13 @@ edited): a guard passes on the code as it is and must fail under its fault.
     uv run python $S free - [fault]
 
 `conform`: on blocks, at every S_SENS, the complex conforms to the outlines: every segment of the
-open ground's densified rings is an edge of exactly one triangle, no edge lies in three, the
-triangles' area is the open ground's (to CONFORM_AREA of it) and no triangle's centroid lies in a
-footprint by more than INSIDE_TOL (gap_complex.triangulated's polygons: the parts under DUST_M2
-left out, their area reported). Fault `unconstrained`: the Delaunay triangulation of the same vertices (scipy), the
-triangles with their centroid in the open ground kept: an edge may cross a footprint.
+open ground's densified rings is an edge of exactly one triangle (its ends read as the complex's
+vertices within gap_complex.MERGE_M, a segment shorter than that merged away), no edge lies in
+three, the triangles' area is the open ground's (to CONFORM_AREA of it) and no triangle's centroid
+lies in a footprint by more than INSIDE_TOL (gap_complex.triangulated's polygons: the parts under
+DUST_M2 left out, their area reported). Fault `unconstrained`: the Delaunay triangulation of the
+same vertices (scipy), the triangles with their centroid in the open ground kept: an edge may
+cross a footprint.
 
 `delaunay`: the complex is constrained Delaunay: across every passage whose quadrilateral is
 strictly convex the two triangles' circumcentres lie in order along its normal, (cot a + cot b) / 2
@@ -49,11 +51,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
-import scipy.sparse as sp
 import shapely
-from scipy.spatial import Delaunay
+from scipy.spatial import Delaunay, cKDTree
 from shapely import affinity
-from shapely.geometry import LineString, MultiLineString, Polygon, box
+from shapely.geometry import MultiLineString, Polygon, box
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -91,6 +92,13 @@ def synthetic_block(boundary: Polygon, footprints: list, bid: str = "synthetic")
 
 # ------------------------------------------------------------------ conform
 
+def _vertex_ids(tree: cKDTree, c: np.ndarray) -> np.ndarray:
+    """Each point's vertex: the complex's within MERGE_M (gap_complex.vertices merges closer ones),
+    -1 none."""
+    d, i = tree.query(c, distance_upper_bound=gc.MERGE_M)
+    return np.where(np.isfinite(d), i, -1)
+
+
 def conform(ids: list[str]) -> list[str]:
     bad = []
     for bid in ids:
@@ -103,10 +111,7 @@ def conform(ids: list[str]) -> list[str]:
             inner, _band = gc._open_ground(geo, np.ones(n, dtype=bool), spec.band_m,
                                            carve=None, grow=0.0)
             nv = len(cx.xy)
-            vid = {tuple(p): i for i, p in enumerate(cx.xy)}
-
-            def snap(c):
-                return np.round(c / gc.SNAP_M) * gc.SNAP_M
+            tree = cKDTree(cx.xy)
             # every densified ring segment an edge of exactly one triangle
             e = np.sort(np.stack([cx.tri[:, [0, 1]], cx.tri[:, [1, 2]], cx.tri[:, [2, 0]]],
                                  axis=1).reshape(-1, 2), axis=1)
@@ -117,12 +122,11 @@ def conform(ids: list[str]) -> list[str]:
             dust = inner.area - float(sum(q.area for q in polys))
             for part in shapely.get_parts(polys):
                 for ring in [part.exterior, *part.interiors]:
-                    c = snap(shapely.get_coordinates(ring))
-                    for p, q in zip(c[:-1], c[1:], strict=True):
-                        i, j = vid.get(tuple(p)), vid.get(tuple(q))
-                        if i is not None and i == j:
-                            continue                    # a repeated vertex, snapped together
-                        if i is None or j is None:
+                    v = _vertex_ids(tree, shapely.get_coordinates(ring))
+                    for i, j in zip(v[:-1].tolist(), v[1:].tolist(), strict=True):
+                        if i >= 0 and i == j:
+                            continue                    # a repeated vertex, merged together
+                        if i < 0 or j < 0:
                             missing += 1
                             continue
                         k = min(i, j) * nv + max(i, j)
