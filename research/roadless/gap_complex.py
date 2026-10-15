@@ -115,6 +115,10 @@ class Geometry(NamedTuple):
         """`g` (the block's CRS: a road's corridor, say) in these local coordinates."""
         return _shifted(g, self.origin)
 
+    def utm(self, g: Any) -> Any:
+        """`g` (local coordinates) back in the block's CRS (`local`'s inverse)."""
+        return _shifted(g, (-self.origin[0], -self.origin[1]))
+
 
 def _shifted(g: Any, origin: tuple[float, float]) -> Any:
     return shapely.transform(g, lambda xy: xy - np.array(origin))

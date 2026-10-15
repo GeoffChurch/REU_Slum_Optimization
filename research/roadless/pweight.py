@@ -60,7 +60,12 @@ METRIC = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())  # 
 FW_ITERS = 40                  # the bound's Frank-Wolfe iterations (as relax220_p1's fw40)
 FW_RTOL = 0.0                  # the relaxation's iterative tolerance: none (the complex's solves
                                # are direct, refined to the floating-point floor)
-ROWS = HERE / "pweight_rows" / METRIC.name   # every row and summary, by the metric
+def rows_of(metric: str) -> Path:
+    """Every row and summary of the study under `metric`, by its name."""
+    return HERE / "pweight_rows" / metric
+
+
+ROWS = rows_of(METRIC.name)
 MARGIN = 0.005                 # questions 1 and 2: within this of J_2's clearing
 
 

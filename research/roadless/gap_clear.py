@@ -1264,6 +1264,13 @@ class Model:
         """The state of the clearing k (no road carved), its operator assembled and factored."""
         return self._state(self.sys, k, prefix=_NO_ROADS)
 
+    def road_factors(self, prefix: Prefix) -> State:
+        """A road network's prefix's factors and reach (no operator: the homes it reaches need no
+        solve)."""
+        if prefix.stop < 1:
+            raise ValueError(f"{prefix}: a road prefix has a stop from 1")
+        return self._factors(self.sys, np.zeros(self.n_), prefix=prefix)
+
     def road_state(self, prefix: Prefix) -> State:
         """The state of a road network's prefix (the carving's), no building cleared: the atoms it
         carves open (common.Carve's rule), its operator assembled and factored."""

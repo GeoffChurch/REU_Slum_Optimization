@@ -85,6 +85,7 @@ sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import free_roads as fr  # noqa: E402
 import lifted  # noqa: E402
+import metrics  # noqa: E402
 import road_rescore as rr  # noqa: E402
 import simp_compare  # noqa: E402
 import transparency_sets as ts  # noqa: E402
@@ -632,7 +633,7 @@ def _uniform(token: str) -> lifted.UniformMesh:
     return mesh
 
 
-FREE = fr.FreeEnclosed(budget=LENS_D, mesh=_uniform(MESH), population=common.AreaPopulation(),
+FREE = fr.FreeEnclosed(budget=LENS_D, metric=metrics.RUNTIME, population=common.AreaPopulation(),
                        target_margin_m=FREE_MARGIN_M, length_tie=FREE_LENGTH_TIE)
 
 

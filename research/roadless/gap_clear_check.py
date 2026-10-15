@@ -45,7 +45,11 @@ flow model's own reach agrees home for home (Model.free_first raises where it do
 `drop-crossing`: one crossing dropped from free first's answer (its claim kept).
 `identity`: the complex's names spell back (gap_clear.complex_of), and a complex metric whose name
 would be a raster row directory's (every directory under relax_rows/ and polish_rows/, and the
-conductances' names) raises. Fault `collide`: gap_clear.check_disjoint disabled.
+conductances' names) raises; phase 2b's ported scripts (road_rescore cx, the presets' rows,
+pweight) write under the runtime's name and no raster's, and a stored run under a raster name
+reads as the raster's metric, under the complex's as the complex's (clearings_check.metric_of_run).
+Fault `collide`: gap_clear.check_disjoint disabled (a raster-named complex metric accepted, and the
+ported scripts' rows under it written into the raster's directories).
 `convex` (the study's, from gap_flow_check.py): along CONVEX_LINES random segments of the
 clearing box, every passage's factor concave and P (q 1, eps GRAD_EPS) convex, under each of
 GRAD_FORMS. Fault `multiply`: a point's terms multiplied (transmittances in series: equal at every
@@ -436,16 +440,54 @@ def identity(_ids: list[str]) -> list[str]:
             def name(self) -> str:
                 return raster
         try:
-            Colliding(spec=METRIC.spec, fs=METRIC.fs, form=METRIC.form, lumped=False,
-                      search_eps=METRIC.search_eps, factorization=METRIC.factorization)
+            colliding = Colliding(spec=METRIC.spec, fs=METRIC.fs, form=METRIC.form,
+                                  lumped=False, search_eps=METRIC.search_eps,
+                                  factorization=METRIC.factorization)
         except ValueError:
             refused += 1
             continue
         bad.append(f"a complex metric named {raster!r} was accepted")
+        # what the ported scripts would then write: rows under the raster's directory
+        for where, path in _ported_paths(colliding).items():
+            if raster in path.parts:
+                bad.append(f"{where} would write under the raster's {raster!r}: {path}")
+    # the ported scripts' rows under the runtime's metric: its name, never a raster's
+    for where, path in _ported_paths(METRIC).items():
+        if METRIC.name not in path.parts or set(path.parts) & set(names):
+            bad.append(f"{where} writes under {path}")
+    # reading: a stored run under a raster name resolves to the raster's metric, never the
+    # complex's (clearings_check.metric_of_run, clearings_export.split_along); the complex's to it
+    import clearings
+    import clearings_check
+    import clearings_export
+    template = next(i for i in clearings.Store.committed().runs().values()
+                    if i.along == "uni" and i.mesh == "h0.5")
+    read_ok = 0
+    for raster in names:
+        metric_name, _search = clearings_export.split_along(raster)
+        got = clearings_check.metric_of_run(dataclasses.replace(template, along=metric_name))
+        if isinstance(got, gcl.ComplexMetric):
+            bad.append(f"a run under {raster!r} reads as the complex's {got.name}")
+        else:
+            read_ok += 1
+    got = clearings_check.metric_of_run(dataclasses.replace(template, along=NAME, mesh=""))
+    if not (isinstance(got, gcl.ComplexMetric) and got.name == NAME):
+        bad.append(f"a run under {NAME} reads as {got.name}")
     print(f"identity: names spelled back; {refused} of {len(names)} raster names refused as a "
-          f"complex metric's ({', '.join(names[:6])}, ...) -> {'ok' if not bad else 'FAILS'}",
-          flush=True)
+          f"complex metric's ({', '.join(names[:6])}, ...); the ported scripts' rows under "
+          f"{NAME} ({', '.join(_ported_paths(METRIC))}); {read_ok} of {len(names)} raster runs "
+          f"read as the raster's -> {'ok' if not bad else 'FAILS'}", flush=True)
     return bad
+
+
+def _ported_paths(metric: gcl.ComplexMetric) -> dict[str, Path]:
+    """Where each script ported in phase 2b writes its rows under `metric`."""
+    import pweight
+    import road_rescore as rr
+    import search
+    presets = rr.cx_presets(metric.name, search.Exactly())
+    return {"road_rescore cx": rr.cx_dir(ROAD_ROWS, metric), "SIMP's default": presets.simp,
+            "the cheap preset": presets.cheap, "pweight": pweight.rows_of(metric.name)}
 
 
 # ------------------------------------------------------------------ convexity (the study's)

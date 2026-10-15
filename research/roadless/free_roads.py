@@ -5,17 +5,20 @@ as B's optimizer frees them first by clearing (clear.free_first). `FreeEnclosed`
 as it does today.
 
 What it does, per block:
-1. The homes enclosed at baseline, as the scorer defines them (common.placement, the scorer's own:
-   lifted.Placement against the open space reaching the street), on the scorer's raster (`mesh`,
-   road_rescore.py's h 0.5).
+1. The homes enclosed at baseline, as the metric defines them: on the gap complex (`metric`, the
+   runtime's: gap_clear.complex_of), a home is walled in when no ground within its ring reaches
+   the street on the complex grown as the width form grows the footprints, read at the form's
+   filtration width (gap_complex.walled: free first's test, which the flow model's reach agrees
+   with home for home, gap_clear_check reach).
 2. For each, a road on the METHOD'S OWN routing graph (the one it built, handed in), from the
-   street or a road already held, whose corridor, carved as the scorer carves a road (Carve:
-   exactly the corridor, every road buffered by half its width), opens a cell that frees the home:
-   one of the home's near cells (within lifted.RING_M of its outline, its own footprint's
-   included), or a cell of the sealed pocket of open space those touch. Every edge and node of the
-   graph whose corridor comes within half the width (less `target_margin_m`, for the polygonal
-   buffer) of an inside sub-sample of those cells is a TARGET; the road is the cheapest path to a
-   target node, or through a target edge to its far end, in one Dijkstra a round.
+   street or a road already held, whose corridor, carved as the metric carves a road (Carve:
+   exactly the corridor, every road buffered by half its width), opens ground that frees the
+   home: ground within ring_m of its outline (its own footprint's included), or the sealed pocket
+   of the complex those touch (its components at the filtration width that hold a ring triangle
+   and not the street). Every edge and node of the graph whose corridor comes within half the
+   width (less `target_margin_m`, for the polygonal buffer) of that region is a TARGET; the road
+   is the cheapest path to a target node, or through a target edge to its far end, in one
+   Dijkstra a round.
 3. The route's cost is DISPLACEMENT, not length: an edge weighs the population share its own
    corridor displaces (`population`'s weights, the share of each footprint the buffered edge
    covers), plus `length_tie` per metre so that among equal displacements the shorter road wins
@@ -26,22 +29,25 @@ What it does, per block:
 4. Order and budget as free_first: each round the home whose road adds the least true
    displacement per unit of its population (`population`) is held, while the held roads' true
    displacement stays within `budget` under both weightings the prefixes are cut by (count and
-   area, road_rescore.POPS). Once held, the road must free its home by the metric's
-   own test (common.reached) or the stage raises; homes it frees in passing leave the queue.
+   area, road_rescore.POPS). Once held, the road must free its home by the metric's own test (the
+   complex rebuilt with the held roads' corridor carved, gap_complex.build) or the stage raises;
+   homes it frees in passing leave the queue.
 Homes no target is reachable for are left enclosed and reported (`Plan.unreachable`), as are the
 ones the budget leaves out (`Plan.over_budget`).
 
-Why not route through free_first's crossing (clear.RegionGraph). The crossing is a set of WHOLE
-buildings to clear, found on the raster; a road through it still pays for every building its 7 m
-corridor touches on the way there, and nothing in the crossing makes that less. Weighting the
-substrate's own edges by what their corridor displaces asks the road question directly, and needs
-no second graph: on the ten held-out blocks with enclosed homes it frees every home (21252's home
-631, in a 558 m^2 parcel whose corners are 12 m from it, only through a parcel diagonal across
-its pocket: hence the edge targets).
+Why not route through free_first's crossing (gap_complex.free_first). The crossing is a set of
+WHOLE buildings to clear; a road through it still pays for every building its 7 m corridor touches
+on the way there, and nothing in the crossing makes that less. Weighting the substrate's own edges
+by what their corridor displaces asks the road question directly, and needs no second graph: on
+the ten held-out blocks with enclosed homes it freed every home on the raster (21252's home 631,
+in a 558 m^2 parcel whose corners are 12 m from it, only through a parcel diagonal across its
+pocket: hence the edge targets). Phase 2b moved its enclosure and its test from the raster to the
+complex (NOTES, "The complex as the runtime: the ports and the cross-checks").
 
 The identity covers what the roads are computed from beyond the block and the method's graph (each
-in its own key): the fields, this module's and its research imports' source (no reblock closure
-reaches them), and reblock.budget's closure (road_corridor, the footprints' overlap).
+in its own key): the fields (the metric's name among them, its code's digest in it), this module's
+and its research imports' source (no reblock closure reaches them), and reblock.budget's closure
+(road_corridor, the footprints' overlap).
 
 The guards: transparency_check.py `hold-nothing`, `no-enclosed`, `free-roads` and `lead`.
 """
@@ -68,7 +74,9 @@ from shapely.ops import nearest_points, unary_union
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
-import lifted  # noqa: E402
+import gap_clear as gcl  # noqa: E402
+import gap_complex as gc  # noqa: E402
+import gap_factor  # noqa: E402
 
 from reblock.budget import road_corridor  # noqa: E402
 from reblock.contracts import Block  # noqa: E402
@@ -78,11 +86,7 @@ from reblock.methods.substrates import RoutingGraph  # noqa: E402
 from reblock.permeability import with_width  # noqa: E402
 
 # This module's code and its research imports', in every identity: no reblock closure reaches them.
-CODE = source_hash(Path(__file__), Path(common.__file__), Path(lifted.__file__))
-# The reach of open space (lifted.grounded, Grid.reach) reads only the solver's device, here the
-# CPU; Params' physics fields (turning length, headings, along-conductance) are its defaults, which
-# enter no reach and so no held road.
-REACH_P = lifted.Params(solver=lifted.CpuAMG(), cells=lifted.OpenFraction())
+CODE = source_hash(Path(__file__), Path(common.__file__), Path(gc.__file__))
 
 
 class Population(Protocol):
@@ -150,12 +154,13 @@ class _Targets(NamedTuple):
 @dataclass(frozen=True, kw_only=True)
 class FreeEnclosed:
     """Roads that free the homes enclosed at baseline (the module's docstring), within `budget` of
-    true displacement under both weightings, ordered and routed by `population`'s; on `mesh`, the
-    scorer's uniform raster; a target within half the road's width less `target_margin_m` of the
-    cells that free a home; `length_tie` per metre on every edge."""
+    true displacement under both weightings, ordered and routed by `population`'s; under `metric`,
+    a gap complex metric's name (gap_clear.complex_of: its Spec and width form give the homes it
+    walls in and its test of reach); a target within half the road's width less `target_margin_m`
+    of the ground that frees a home; `length_tie` per metre on every edge."""
 
     budget: float
-    mesh: lifted.UniformMesh
+    metric: str
     population: Population
     target_margin_m: float
     length_tie: float
@@ -166,6 +171,7 @@ class FreeEnclosed:
         if self.target_margin_m < 0.0 or self.length_tie <= 0.0:
             raise ValueError(f"target_margin_m >= 0 and length_tie > 0: {self.target_margin_m}, "
                              f"{self.length_tie}")
+        gcl.complex_of(self.metric, factorization=gap_factor.SuperLU())    # the name is one
 
     @property
     def identity(self) -> Hashable:
@@ -183,9 +189,10 @@ class FreeEnclosed:
         """The stage on `block`, its roads on `graph` at `width_m` (the module's docstring)."""
         bid = block.block_id
         polys = np.asarray(block.buildings.outlines)
-        grid = self.mesh.build(block, REACH_P, self.population)
-        pl = common.placement(grid, polys, REACH_P)
-        enclosed = np.flatnonzero(pl.enclosed)
+        metric = gcl.complex_of(self.metric, factorization=gap_factor.SuperLU())
+        geo = gc.geometry(block)
+        reach0 = _Reach.of(geo, metric, carve=None)
+        enclosed = np.flatnonzero(~reach0.live)
         if not len(enclosed):
             return Plan(block_id=bid, enclosed=(), steps=(), unreachable=(), over_budget=(),
                         D_area=0.0, D_count=0.0, share_before=0.0, share_after=0.0)
@@ -194,7 +201,7 @@ class FreeEnclosed:
         count_w = common.CountPopulation().weights(polys)
         g = _routing(block, graph, width_m, w, self.length_tie)
         reach = width_m / 2.0 - self.target_margin_m
-        targets = _targets(grid, pl, graph, g, enclosed, reach)
+        targets = _targets(geo, reach0, graph, g, enclosed, reach, metric.form.filtration_w)
         street = unary_union(list(block.streets.geometry))
         seeds = np.flatnonzero(shapely.dwithin(shapely.points(graph.pts), street, graph.net_tol))
         is_seed = np.zeros(len(graph.pts), dtype=bool)
@@ -215,7 +222,7 @@ class FreeEnclosed:
         held: list[HeldRoad] = []
         steps: list[Step] = []
         now, now_key = Displaced(by_area=0.0, by_count=0.0), 0.0
-        left = pl.enclosed.copy()
+        left = ~reach0.live
         routed: set[int] = set()            # the homes the last round found a road for
         while left.any():
             sources = np.unique(np.concatenate([seeds, *[np.asarray(r.nodes) for r in held]]))
@@ -240,7 +247,7 @@ class FreeEnclosed:
                 break
             h, road, after, after_key = best
             held.append(road)
-            freed = common.reached(pl, grid, _carve(grid, frame(held)), REACH_P)
+            freed = _Reach.of(geo, metric, carve=geo.local(road_corridor(frame(held)))).live
             if not freed[h]:
                 raise RuntimeError(
                     f"{bid}: the road held for home {h} ({len(road.nodes)} nodes, "
@@ -260,7 +267,7 @@ class FreeEnclosed:
         plan = Plan(block_id=bid, enclosed=tuple(int(h) for h in enclosed), steps=tuple(steps),
                     unreachable=unreachable, over_budget=over, D_area=now.by_area,
                     D_count=now.by_count,
-                    share_before=float(area_w[pl.enclosed].sum() / area_w.sum()),
+                    share_before=float(area_w[~reach0.live].sum() / area_w.sum()),
                     share_after=float(area_w[left].sum() / area_w.sum()))
         print(f"{bid} free roads: {len(enclosed) - int(left.sum())} of {len(enclosed)} enclosed "
               f"homes freed by {len(steps)} roads, D area {plan.D_area:.5f} count "
@@ -269,10 +276,21 @@ class FreeEnclosed:
         return plan
 
 
-def _carve(grid: lifted.Grid, roads: gpd.GeoDataFrame) -> NDArray[np.float64]:
-    """The open field `roads` leave, carved as the scorer carves a road (common.Carve: exactly
-    the corridor, budget.road_corridor)."""
-    return common.carved(grid, grid.sub_of(road_corridor(roads)))
+class _Reach(NamedTuple):
+    """The metric's reach on the complex with a corridor carved (gap_complex.build on the
+    footprints less `carve`, grown as the width form grows them): the complex, each home's ring,
+    and whether each home reaches the street at the form's filtration width."""
+    cx: gc.Complex
+    homes: gc.Homes
+    live: NDArray[np.bool_]
+
+    @staticmethod
+    def of(geo: gc.Geometry, metric: gcl.ComplexMetric, *, carve: BaseGeometry | None) -> _Reach:
+        cx = gc.build(geo, metric.spec, np.ones(len(geo.polys), dtype=bool), carve=carve,
+                      grow=metric.form.grow)
+        hm = gc.homes_of(geo, cx)
+        live = ~gc.walled(gc.home_exits(hm, gc.exit_widths(cx)), metric.form.filtration_w)
+        return _Reach(cx=cx, homes=hm, live=np.asarray(live))
 
 
 def _routing(block: Block, graph: RoutingGraph, width_m: float, w: NDArray[np.float64],
@@ -300,35 +318,28 @@ def _routing(block: Block, graph: RoutingGraph, width_m: float, w: NDArray[np.fl
     return _Graph(ui=ui, uj=uj, segs=segs, weight=weight, matrix=matrix)
 
 
-def _targets(grid: lifted.Grid, pl: lifted.Placement, graph: RoutingGraph, g: _Graph,
-             homes: NDArray[np.intp], reach: float) -> dict[int, _Targets]:
-    """Per home, its targets: the cells that free it are its near cells (lifted.Placement.near)
-    and the open pockets of those that can take demand (their components of the operator's cell
-    graph, lifted.components; a split cell takes none, lifted.demand_cells); a node or an edge
-    within `reach` of an inside sub-sample of one of them is a target."""
-    ny, nx = grid.inside.shape
-    o0 = grid.ff0.ravel()
-    F0 = REACH_P.cells.sub_factor(grid, grid.ff0, REACH_P.solver)
-    takes = lifted.demand_cells(grid, o0 > 0, F0)
-    comp = lifted.components(grid, o0, REACH_P)
-    near = pl.near.tocsc()
-    t = ((np.arange(grid.S) + 0.5) / grid.S - 0.5) * grid.h       # Grid._sub_xy's offsets
-    ox, oy = np.meshgrid(t, t)
+def _targets(geo: gc.Geometry, r: _Reach, graph: RoutingGraph, g: _Graph,
+             homes: NDArray[np.intp], reach: float, w: float) -> dict[int, _Targets]:
+    """Per home, its targets: the ground that frees it is within ring_m of its outline (its own
+    footprint's included) and the sealed pocket of the complex its ring touches (the components,
+    at the filtration width w, of its ring's triangles that do not hold the street); a node or an
+    edge within `reach` of that region is a target."""
+    comp, street = gc.components(r.cx, w)
+    ring = r.homes.ring.tocsr()
+    nodes = shapely.points(graph.pts)
     out: dict[int, _Targets] = {}
     for h in homes:
-        cells = near.indices[near.indptr[h]:near.indptr[h + 1]]
-        pockets = np.unique(comp[cells][takes[cells]])
-        cells = np.union1d(cells, np.flatnonzero(np.isin(comp, pockets)))
-        rr, cc = np.divmod(cells, nx)
-        xs = grid.xy[rr, cc, 0][:, None] + ox.ravel()[None, :]
-        ys = grid.xy[rr, cc, 1][:, None] + oy.ravel()[None, :]
-        inside = grid.isub[rr, cc, :]
-        pts = np.column_stack([xs[inside], ys[inside]])
-        d = cKDTree(pts).query(graph.pts, distance_upper_bound=reach)[0]
-        edges = shapely.STRtree(shapely.points(pts)).query(g.segs, predicate="dwithin",
-                                                            distance=reach)[0]
-        out[int(h)] = _Targets(nodes=np.flatnonzero(d <= reach),
-                               edges=np.unique(edges).astype(np.intp))
+        tris = ring.indices[ring.indptr[h]:ring.indptr[h + 1]]
+        pockets = np.unique(comp[tris])
+        pockets = pockets[pockets != street]
+        sealed = np.flatnonzero(np.isin(comp, pockets))
+        region = shapely.union_all([shapely.buffer(geo.polys[h], r.cx.spec.ring_m),
+                                    *r.cx.tri_geom[sealed]])
+        region = geo.utm(region)
+        shapely.prepare(region)
+        out[int(h)] = _Targets(
+            nodes=np.flatnonzero(shapely.dwithin(region, nodes, reach)),
+            edges=np.flatnonzero(shapely.dwithin(region, g.segs, reach)).astype(np.intp))
     return out
 
 

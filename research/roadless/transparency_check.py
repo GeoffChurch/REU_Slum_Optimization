@@ -68,10 +68,12 @@ proposed fresh is the held stage's network of record, frame for frame.
 
 `free-roads` (guard 3), on blocks with homes enclosed at baseline: FREE's plan on each plan method's
 graph and on its claim's routed one (TransparentSubstrate: the same nodes and edges), the same roads
-on all; then the scorer itself (common.Scorer at the stage's mesh, on the CPU) finds the same
-enclosed homes, each held road frees its home (and every home its step says it frees) once the
-roads up to it are carved, what the roads leave enclosed is the plan's share, and their true
-displacement under both weightings is the plan's and within its budget.
+on all; then the metric itself (`_Oracle`: since phase 2b the gap complex's flow model, its reach
+on the fixed mesh with the roads carved, independent of the stage's own test on the complex
+rebuilt; before, the raster scorer) finds the same enclosed homes, each held road frees its home
+(and every home its step says it frees) once the roads up to it are carved, what the roads leave
+enclosed is the plan's share, and their true displacement under both weightings is the plan's and
+within its budget.
 
 `lead <stage>` (guard 4), on a free stage's networks, ordered networks and prefix rows: every
 network holds FREE's roads first (its marked leading rows, WKB row for row), its ordered network
@@ -131,7 +133,6 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import free_roads as fr  # noqa: E402
-import lifted  # noqa: E402
 import transparency_sets as ts  # noqa: E402
 
 NETS = HERE / "road_rows" / "scratch" / "networks"
@@ -614,10 +615,9 @@ def no_enclosed(out: Path, procs: int, ids: list[str]) -> None:
     import transparency_run as tr
     problems = []
     for b in common.build_blocks(ids):
-        grid = tr.FREE.mesh.build(b, fr.REACH_P, common.AreaPopulation())
-        if common.placement(grid, np.asarray(b.buildings.outlines), fr.REACH_P).enclosed.any():
-            raise SystemExit(f"{b.block_id}: the scorer's placement finds homes enclosed at "
-                             "baseline: not a block for this guard")
+        if _Oracle(b).enclosed.any():
+            raise SystemExit(f"{b.block_id}: the metric finds homes enclosed at baseline: not a "
+                             "block for this guard")
         plans = _plans(b.block_id, b)
         p = next(iter(plans.values()))
         print(f"{b.block_id}: no home enclosed at baseline; the stage finds {len(p.enclosed)} "
@@ -638,22 +638,41 @@ def no_enclosed(out: Path, procs: int, ids: list[str]) -> None:
         raise SystemExit("\n".join(problems))
 
 
-def _cpu_scorer(b: Block) -> common.Scorer:
-    """The scorer road_rescore.py scores with (its mesh, physics and area population), its
-    solves on the CPU: B (i)'s test is its `pl` and `free_of`."""
-    import road_rescore as rr
-    import transparency_run as tr
-    cond = lifted.conductance_of(rr.ALONG, lifted.scans_of("cpu"))
-    p = lifted.Params(ell_m=rr.ELL_M, K=rr.K, along=cond.along, cells=cond.cells,
-                      solver=lifted.solver_of("cpu"))
-    return common.Scorer(b, tr.FREE.mesh, p, population=common.AreaPopulation(),
-                         demand=common.PopulationDemand())
+class _Oracle:
+    """B (i)'s test as the metric applies it, independent of the stage's own (free_roads._Reach,
+    the complex rebuilt): the flow model's reach on the fixed mesh (gap_clear.Model under FREE's
+    metric), the homes enclosed at baseline its walled-in homes, a road set's the reach of the
+    mesh with the roads' corridor carved into the footprints (gap_clear.Carving, one stop)."""
 
+    def __init__(self, b: Block):
+        import tempfile
 
-def _freed(sc: common.Scorer, roads: gpd.GeoDataFrame) -> NDArray[np.bool_]:
-    """Per home: enclosed at baseline and freed once `roads` are carved, by the scorer (its
-    free field, and B (i)'s test as Scorer.enclosed_left applies it)."""
-    return common.reached(sc.pl, sc.grid, sc.free_of(roads), sc.p)
+        import gap_clear as gcl
+        import gap_complex as gc
+        import gap_factor
+        import transparency_run as tr
+        self.b, self.tempfile, self.gcl, self.gc = b, tempfile, gcl, gc
+        self.metric = gcl.complex_of(tr.FREE.metric, factorization=gap_factor.SuperLU())
+        m = self.metric.clearing(b, demand=common.PopulationDemand())
+        self.enclosed, self.cost = m.walled0, m.cost
+
+    def freed(self, roads: gpd.GeoDataFrame) -> NDArray[np.bool_]:
+        """Per home: enclosed at baseline and reached once `roads` are carved."""
+        from reblock.budget import road_corridor
+        if not len(roads):
+            return np.zeros(len(self.enclosed), dtype=bool)
+        gcl = self.gcl
+        geo = self.gc.geometry(self.b)
+        carving = gcl.Carving.of(geo, [[geo.local(road_corridor(roads))]])
+        with self.tempfile.TemporaryDirectory() as tmp:
+            fx = self.metric.fixed(self.b, cache=Path(tmp), carving=carving)
+        m = self.metric.model(self.b, fx, demand=common.PopulationDemand())
+        live = m.live_homes_of(m.road_factors(gcl.Prefix(net=0, stop=1)))
+        return np.asarray(self.enclosed & live)
+
+    def enclosed_left(self, roads: gpd.GeoDataFrame) -> float:
+        left = self.enclosed & ~self.freed(roads)
+        return float(self.cost[left].sum())
 
 
 def _free_roads_one(bid: str) -> dict[str, object]:
@@ -665,22 +684,22 @@ def _free_roads_one(bid: str) -> dict[str, object]:
     p = next(iter(plans.values()))
     width = next(iter(_method_graphs(bid, b).values()))[1]
     t0 = time.perf_counter()
-    sc = _cpu_scorer(b)
+    sc = _Oracle(b)
     t_sc = time.perf_counter() - t0
     if tuple(int(h) for h in np.flatnonzero(sc.enclosed)) != p.enclosed:
         raise AssertionError(f"{bid}: the plan's enclosed homes {p.enclosed} are not the "
-                             f"scorer's {np.flatnonzero(sc.enclosed).tolist()}")
+                             f"metric's {np.flatnonzero(sc.enclosed).tolist()}")
     roads = [s.road.geometry for s in p.steps]
 
     def frame(k: int) -> gpd.GeoDataFrame:
         return with_width(gpd.GeoDataFrame(geometry=roads[:k], crs=b.crs), width)
 
     for k, s in enumerate(p.steps, start=1):
-        freed = _freed(sc, frame(k))
+        freed = sc.freed(frame(k))
         if not freed[s.home] or not all(freed[j] for j in s.freed):
             raise AssertionError(f"{bid}: road {k} (home {s.home}) does not free "
                                  f"{[j for j in s.freed if not freed[j]] or [s.home]}")
-    left = sc.enclosed_left(sc.free_of(frame(len(roads))))
+    left = sc.enclosed_left(frame(len(roads)))
     polys = np.asarray(b.buildings.outlines)
     d_area = common.displacement(b, frame(len(roads)), common.AreaPopulation().weights(polys))
     d_count = common.displacement(b, frame(len(roads)), common.CountPopulation().weights(polys))
@@ -719,7 +738,7 @@ def _lead_one(job: tuple[str, str]) -> list[dict[str, object]]:
     p = next(iter(_plans(bid, b).values()))
     want = _wkb_roads(p)
     allowed = set(p.unreachable) | set(p.over_budget)
-    sc = _cpu_scorer(b)
+    sc = _Oracle(b)
     rows = []
     for arm in stage.arms:
         net = gpd.read_parquet(stage.record_path(bid, arm.name))
@@ -735,7 +754,7 @@ def _lead_one(job: tuple[str, str]) -> list[dict[str, object]]:
             row = pre[(pre["pop"] == pop) & np.isclose(pre.budget, tr.LENS_D)].iloc[0]
             m = int(row.m)
             holds_all = bool(len(at) == len(want) and (at < m).all())
-            left = set(np.flatnonzero(sc.enclosed & ~_freed(sc, _head(ordered, m))).tolist())
+            left = set(np.flatnonzero(sc.enclosed & ~sc.freed(_head(ordered, m))).tolist())
             r.update({f"m_{pop}": m, f"holds_all_{pop}": holds_all,
                       f"left_{pop}": ",".join(map(str, sorted(left))),
                       f"ok_{pop}": bool(holds_all and left <= allowed)})

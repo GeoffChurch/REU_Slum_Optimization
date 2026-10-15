@@ -27,9 +27,10 @@ walled-in ground), so a lane narrower than a pixel keeps its share of the pixel.
     S=research/roadless/gap_maps.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S map <id> <arm,...> <full|zoom> <out.png>
 
-An arm is a store run (clearings.Store: `<run>`, its clearing on the block) or a road network's
-area prefix (`road:<network>:<budget>`, road_rescore's prefixes: the network's own carved mesh).
-Each arm's row: the flow before and after (log scale), its change (the corridors opened in red,
+An arm is `[<label>=]<what>`: a store run (clearings.Store: `<run>`, its clearing on the block) or
+a road network's area prefix (`road:<network>:<budget>`, road_rescore's prefixes: the network's
+own carved mesh). Each arm's row: the flow before and after (log scale from the before map's
+median to its 99.5th percentile, as the atlas's layers), its change (the corridors opened in red,
 the flow drawn away in blue) and the change in the escape time from each place.
 """
 from __future__ import annotations
@@ -37,12 +38,13 @@ from __future__ import annotations
 import sys
 import tempfile
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 import numpy as np
 import shapely
 from numba import njit
 from numpy.typing import NDArray
+from shapely.geometry.base import BaseGeometry
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -52,6 +54,9 @@ import gap_clear as gcl  # noqa: E402
 import gap_complex as gc  # noqa: E402
 import gap_factor  # noqa: E402
 import metrics  # noqa: E402
+
+if TYPE_CHECKING:
+    from reblock.contracts import Block
 
 SUB = 4                  # sub-samples a pixel's side (paint): a lane of 1/SUB of a pixel shows
 
@@ -152,7 +157,7 @@ class Frame(NamedTuple):
     @staticmethod
     def around(geo: gc.Geometry, h: float, pad: float) -> Frame:
         """The block's bounds padded by `pad`, at pixels of h."""
-        x0, y0, x1, y1 = shapely.bounds(geo.boundary)
+        x0, y0, x1, y1 = shapely.bounds(cast(BaseGeometry, geo.boundary))
         nx = int(np.ceil((x1 - x0 + 2 * pad) / h))
         ny = int(np.ceil((y1 - y0 + 2 * pad) / h))
         return Frame(x0=float(x0 - pad + h / 2), y0=float(y0 - pad + h / 2), h=h, ny=ny, nx=nx)
@@ -235,7 +240,7 @@ class Arm(NamedTuple):
     D: float
 
 
-def arms_of(b, specs: list[str], metric: gcl.ComplexMetric, plain: gcl.Model) -> list[Arm]:
+def arms_of(b: Block, specs: list[str], metric: gcl.ComplexMetric, plain: gcl.Model) -> list[Arm]:
     """The arms `specs` names (module docstring) on block `b`."""
     import geopandas as gpd
     import pandas as pd
@@ -243,7 +248,8 @@ def arms_of(b, specs: list[str], metric: gcl.ComplexMetric, plain: gcl.Model) ->
     import road_rescore as rr
     store = clearings.Store.committed()
     out = []
-    for spec in specs:
+    for arm in specs:
+        label, _, spec = arm.rpartition("=")
         if spec.startswith("road:"):
             _, net, budget = spec.split(":")
             every = pd.read_parquet(rr.prefix_dir(gcl.HERE / "road_rows")
@@ -257,14 +263,14 @@ def arms_of(b, specs: list[str], metric: gcl.ComplexMetric, plain: gcl.Model) ->
             with tempfile.TemporaryDirectory() as tmp:
                 fx = metric.fixed(b, cache=Path(tmp), carving=carving)
             mm = metric.model(b, fx, demand=common.PopulationDemand())
-            out.append(Arm(label=f"{net} at area D {budget} ({mk} roads)", model=mm,
+            out.append(Arm(label=label or f"{net} at area D {budget} ({mk} roads)", model=mm,
                            state=mm.road_state(gcl.Prefix(net=0, stop=1)),
                            D=float(pre.D_area.iloc[0])))
         else:
             ids = store.cleared(spec, b, step=1)
             x = np.zeros(plain.n)
             x[ids] = 1.0
-            out.append(Arm(label=spec, model=plain, state=plain.state(x),
+            out.append(Arm(label=label or spec, model=plain, state=plain.state(x),
                            D=float(plain.cost[ids].sum())))
     return out
 
@@ -287,12 +293,12 @@ def main_map(bid: str, specs: list[str], zoom: bool, out: Path) -> None:
     f0 = flow_of(plain, st0, plain.pop)
     s0, e0 = flow_image(plain, st0, f0, frame), escape_image(plain, st0, f0, frame)
     on0 = np.isfinite(s0) & (s0 > 0)
-    top = float(np.quantile(s0[on0], 0.999))
-    lognorm = mcolors.LogNorm(top * 1e-4, top, clip=True)
+    lo, hi = np.quantile(s0[on0], [0.5, 0.995])
+    lognorm = mcolors.LogNorm(float(lo), float(hi), clip=True)
     polys = geo.polys
     if zoom:
         cen = np.array([[q.centroid.x, q.centroid.y] for q in polys])
-        x0, y0, x1, y1 = shapely.bounds(geo.boundary)
+        x0, y0, x1, y1 = shapely.bounds(cast(BaseGeometry, geo.boundary))
         half = 0.125 * max(x1 - x0, y1 - y0)
         mx, my = np.median(cen, axis=0)
     fig, axes = plt.subplots(len(arms), 4, figsize=(40, 10.5 * len(arms)), squeeze=False)
