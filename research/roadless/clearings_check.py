@@ -3,7 +3,8 @@ rest are unit tests (tests/test_clearings.py).
 
     PYTHONPATH=. uv run python research/roadless/clearings_check.py blocks
     PYTHONPATH=. uv run python research/roadless/clearings_check.py banks
-    PYTHONPATH=. uv run python research/roadless/clearings_check.py rescore <ids,> <run[@step]>,...
+    PYTHONPATH=. uv run python research/roadless/clearings_check.py rescore <ids,> <run[@step]>,... \
+        <own|metric>
 
 From the repo root, on the CPU, single-threaded (OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1).
@@ -21,7 +22,9 @@ cluster saw, and those are the buildings of today. Reports the span of dates eac
 seen over, and every disagreement.
 
 `rescore`: on each block, each run's committed clearing read through the reader (the fingerprint
-checked), scored again on the CPU under the run's own metric, resolved from its name
+checked), scored again on the CPU under the run's own metric (`own`) or under the metric named (a
+complex metric's name, say: every clearing under it, keyed by the name, its lens beside the
+run's own as a cross-metric reading, not a match), resolved from its name
 (`metric_of_run`, metrics.metric_of: the gap complex's model for a complex name, keyed by it;
 the raster's for a conductance, on the run's grid) through the seam (seam.ClearingModel: the
 exact J_power and its baseline, B (i)), with the run's power and demand (`demand_of`: the
@@ -156,8 +159,11 @@ def metric_of_run(info: RunInfo) -> Any:
     return metrics.metric_of(name, device="cpu", mesh=common.mesh_of(info.mesh.removeprefix("h")))
 
 
-def rescore(store: Store, block_ids: Sequence[str], specs: Sequence[str]) -> None:
+def rescore(store: Store, block_ids: Sequence[str], specs: Sequence[str], under: str) -> None:
+    """`under`: `own` (each run under its own metric) or a metric's name (every run under it)."""
     import common
+    import lifted
+    import metrics
 
     runs = store.runs()
     for block in common.build_blocks(list(block_ids)):
@@ -174,7 +180,8 @@ def rescore(store: Store, block_ids: Sequence[str], specs: Sequence[str]) -> Non
             step = step_of(info, store, run, block.block_id, token or "1")
             ids = store.cleared(run, block, step=step)                # the fingerprint is checked
             row = t.loc[(t["block"] == block.block_id) & (t["step"] == step)].iloc[0]
-            metric = metric_of_run(info)
+            metric = (metric_of_run(info) if under == "own" else metrics.metric_of(
+                under, device="cpu", mesh=lifted.UniformMesh(0.5, offset=lifted.OFFSET)))
             key = (metric.name, info.mesh, info.population, info.demand)
             if info.population != "area":
                 raise ValueError(f"{run}: population {info.population}; the models' cost is the "
@@ -190,10 +197,12 @@ def rescore(store: Store, block_ids: Sequence[str], specs: Sequence[str]) -> Non
             enclosed = c.enclosed_left(removed)
             stored_enc = None if np.isnan(row.get("enclosed", np.nan)) else float(row["enclosed"])
             diff = perm - float(row["perm"])
+            verdict = ("MATCH" if abs(diff) <= MATCH else "DIFFERS") if under == "own" else (
+                "another metric")
             print(f"{block.block_id} n={c.n} {spec}  [{info.metric}] under {metric.name}  D "
                   f"{float(c.cost[removed].sum()):.6f} (stored {float(row['D']):.6f})  Lens A "
-                  f"{perm:.9f} (stored {float(row['perm']):.9f}, diff {diff:+.2e}, "
-                  f"{'MATCH' if abs(diff) <= MATCH else 'DIFFERS'})  enclosed {enclosed:.6f}"
+                  f"{perm:.9f} (stored {float(row['perm']):.9f}, diff {diff:+.2e}, {verdict})  "
+                  f"enclosed {enclosed:.6f}"
                   + ("" if stored_enc is None else f" (stored {stored_enc:.6f})"), flush=True)
         del models
 
@@ -206,6 +215,7 @@ def main(argv: Sequence[str]) -> None:
     rs = sub.add_parser("rescore")
     rs.add_argument("ids")
     rs.add_argument("runs")
+    rs.add_argument("under", help="own (each run under its own metric) or a metric's name")
     args = ap.parse_args(argv)
     store = Store.committed()
     if args.cmd == "blocks":
@@ -213,7 +223,7 @@ def main(argv: Sequence[str]) -> None:
     elif args.cmd == "banks":
         check_banks(store)
     else:
-        rescore(store, args.ids.split(","), args.runs.split(","))
+        rescore(store, args.ids.split(","), args.runs.split(","), args.under)
 
 
 if __name__ == "__main__":
