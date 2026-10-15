@@ -579,6 +579,9 @@ Not pursued, with what would change that:
   Would come back with: re-deciding after every block (a diagnostic closes most of the gap), a
   linear-loss target over the bracket, a per-arm drop for many-arm screens (feedback sent to its
   author).
+  Requested 2026-10-15 (owner: "Send the request to discuss each one with me"): the stepped
+  re-decision and the per-arm drop, each to be discussed with the owner before it is built; if
+  both land, the replay runs again under the same rule before the consolidated pass.
 - **Adaptive block selection** (first look done, NOTES "Which blocks tell methods apart": collapses dominate; screen = gated sentinel + random sample; picking 'discriminating' blocks beyond the sentinel misleads. Remaining value: sequential sample size; wiki `pages/methods/adaptive-benchmark-items.md`).
   Fit a factor model to the method x block matrix of paired differences (axes like "opens
   gated pockets", "spreads in dense bands"); for a new variant run first the blocks with the
