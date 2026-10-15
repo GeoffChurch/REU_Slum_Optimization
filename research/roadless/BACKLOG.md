@@ -339,10 +339,13 @@ items up front"), in the order proposed:
    formal home is 2.5 -- 3.6x as deep as a deep informal one under the boundary and the uniform
    leak (per block 0.02x), 1.1 -- 1.9x under the building-boundary leak; its self-trips small for
    the typical home but 9% population-weighted at 250 m, under 1% from 1,000 m; SIMP's default
-   leads the cheap preset under every configuration. **Open, the owner's**: which exits (the
-   decision-support list closes the section), and whether to run the boost's check (about 1.05
-   GPU-h a configuration). For the site: present both families, powers of the escape time (J_p) and
-   priority-weighted P, under established names.
+   leads the cheap preset under every configuration. **Adopted (owner 2026-10-15)**: the barriers
+   ("We can adopt the barriers"). **Open, the owner's**: the internal leak (the owner is tempted
+   by the uniform leak as the more realistic, "especially if you e.g. cleared an entire island so
+   all traffic was internal") and its lam; whether residential streets as finite leaks (proposed,
+   untested: the formal grid takes 75 -- 89% of the clearing under the boundary and the uniform
+   leak) and the boost's check (about 1.05 GPU-h a configuration) run. For the site: present both
+   families, powers of the escape time (J_p) and priority-weighted P, under established names.
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights
