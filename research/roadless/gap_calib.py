@@ -561,13 +561,13 @@ def report() -> None:
              for r in [pd.read_parquet(f).iloc[0]]]) for preset in ("simp", "cheap")}
         rows = []
         for _i, r in pre.iterrows():
-            preset = "simp" if r.item.startswith("simp") else "cheap"
+            preset = "simp" if r["item"].startswith("simp") else "cheap"
             cl = r.simp_cleared if preset == "simp" else r.cleared
             rf = ref[preset]
             rf = rf[rf.block == r.block]
             simp = preset == "simp"
             rows.append(dict(
-                block=r.block, item=r.item, device=r.device, host=r.host,
+                block=r.block, item=r["item"], device=r.device, host=r.host,
                 perm=r.simp_perm if simp else r.perm, D=r.simp_D if simp else r.D,
                 enclosed=r.enclosed, free_D=r.free_D, t=r.t, wall=r.wall,
                 peak_rss_gb=r.peak_rss_gb, gpu_gb=r.gpu_gb,
