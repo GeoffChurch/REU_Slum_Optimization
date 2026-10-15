@@ -335,11 +335,13 @@ def roads_report() -> pd.DataFrame:
             gr = r[(r.block == bid) & r.method.isin(g.method)].set_index("method")
             go = o[(o.block == bid) & o.method.isin(g.method)].set_index("method")
             gc_ = g.set_index("method")
-            for lens in rr.CX_LENSES:
-                for name, other in (("raster", gr), ("uni", go)):
-                    if lens not in other.columns or len(other) != len(gc_):
-                        continue
-                    other = other.loc[gc_.index]
+            for name, other, lenses in (("raster", gr, rr.CX_LENSES),
+                                        ("uni", go, tuple(LENS_OF_OLD))):
+                if set(other.index) != set(gc_.index):
+                    raise ValueError(f"{bid} D {budget:g}: {name}'s rows hold "
+                                     f"{sorted(other.index)}, the complex's {sorted(gc_.index)}")
+                other = other.loc[gc_.index]
+                for lens in lenses:
                     rank_o = rr._b_rank(other.reset_index(), "enclosed", lens)
                     rank_c = gc_[f"rank_{lens}"].to_numpy()
                     rows.append(dict(block=bid, budget=budget, lens=lens, against=name,
@@ -399,7 +401,7 @@ def clearings_report() -> pd.DataFrame:
                 wb = m[m.clearing == b_].set_index("block")
                 both = wa.index.intersection(wb.index)
                 if not len(both):
-                    continue
+                    raise ValueError(f"{a_} and {b_}: no block holds both")
                 ea, eb = wa.loc[both, f"enclosed_{x}"], wb.loc[both, f"enclosed_{x}"]
                 va, vb = wa.loc[both, f"{lens}_{x}"], wb.loc[both, f"{lens}_{x}"]
                 ahead = (ea < eb) | ((ea == eb) & (va > vb))
@@ -420,10 +422,7 @@ def weights_report() -> pd.DataFrame:
     rows = []
     for f in sorted(raster_dir(RASTER).glob("*__homes.parquet")):
         bid = f.name.split("__")[0]
-        g = d / f"{bid}__homes.parquet"
-        if not g.exists():
-            continue
-        hr, hc = pd.read_parquet(f), pd.read_parquet(g)
+        hr, hc = pd.read_parquet(f), pd.read_parquet(d / f"{bid}__homes.parquet")
         ok = (~hr.enclosed.to_numpy()) & (~hc.nodem.to_numpy())
         rows.append(dict(block=bid, homes=int(ok.sum()),
                          walled_apart=int((hr.enclosed.to_numpy() != hc.nodem.to_numpy()).sum()),
@@ -444,8 +443,6 @@ def weights_report() -> pd.DataFrame:
 
 def pictures_report() -> pd.DataFrame:
     df = rr._read_all(sorted((ROWS / "pictures").glob("*.parquet")))
-    if not len(df):
-        return df
     pd.set_option("display.width", 250)
     print("\nTHE CORRIDOR PICTURES, the raster's flow against the complex's on the raster's cells")
     cols = ["block", "state", "rho", "lanes_jaccard", "lanes_c_in_r", "lanes_r_dry", "flow_r_dry",
@@ -459,9 +456,7 @@ def report() -> None:
     """Every cross-check's summary (ROWS/summary_*.csv, committed)."""
     for name, fn in (("roads", roads_report), ("clearings", clearings_report),
                      ("weights", weights_report), ("pictures", pictures_report)):
-        df = fn()
-        if len(df):
-            df.to_csv(ROWS / f"summary_{name}.csv", index=False)
+        fn().to_csv(ROWS / f"summary_{name}.csv", index=False)
 
 
 if __name__ == "__main__":
