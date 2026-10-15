@@ -1385,15 +1385,13 @@ def main(ids: list[str], plan: SearchPlan, power: float, metric: seam.Metric,
 
 
 if __name__ == "__main__":
-    import lifted
     import metrics
     import relax
     import search       # run as a script this file would be `__main__`, and relax's `search`
                         # a second copy of the engine (its own EXACT and classes)
     power, device, along, d_max = (float(sys.argv[3]), sys.argv[4], sys.argv[5],
                                    float(sys.argv[6]))
-    metric = metrics.metric_of(along, device=device,
-                               mesh=lifted.UniformMesh(0.5, offset=lifted.OFFSET))
+    metric = metrics.metric_of(along, device=device)
 
     def simp_seeds(name: str) -> dict[str, search.Seed]:
         """SIMP plan `name`'s clearings at this run's budget, power and conductance."""

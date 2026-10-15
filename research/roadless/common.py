@@ -41,6 +41,24 @@ def recipients() -> list[str]:
     return sorted(rows["recipient"].unique())
 
 
+LARGE = HERE / "large82_area.parquet"     # the 82 large blocks (block, n, M_unknowns, ...)
+
+
+def large_blocks() -> list[str]:
+    """The 82 large blocks (LARGE), sorted."""
+    return sorted(pd.read_parquet(LARGE, columns=["block"])["block"])
+
+
+def ids_of(arg: str) -> list[str]:
+    """Block ids as a command line names them: `@<file>` (whitespace-separated), `all` (the 220
+    recipients and the 82 large blocks) or comma-separated."""
+    if arg.startswith("@"):
+        return Path(arg[1:]).read_text().split()
+    if arg == "all":
+        return sorted(set(recipients()) | set(large_blocks()))
+    return arg.split(",")
+
+
 BANK_ENV = "REBLOCK_BLOCK_BANK"
 
 

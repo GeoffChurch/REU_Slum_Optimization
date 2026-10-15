@@ -3,8 +3,9 @@ as the runtime: one fixed mesh" and "... its speed and a GPU path"; the briefs
 .superpowers/sdd/2026-10-14-complex-runtime and 2026-10-14-complex-speed).
 
 The metric is the runtime's (METRIC: the shy distance at 0.5 m on the gap complex, its name
-carrying every constant that can change a score, the code's digest among them). The raster is
-uni+apwfs at h 0.5 (RASTER).
+carrying every constant that can change a score, the code's digest among them). The raster it was
+calibrated against (uni+apwfs at h 0.5: `rasterscore`, the acceptance's raster side) is retired;
+its numbers are in NOTES and gap_rows/summary_runtime_acceptance.csv.
 
     S=research/roadless/gap_calib.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S warm <id>                      # the block's fixed mesh into gap_clear.CACHE
@@ -12,7 +13,6 @@ uni+apwfs at h 0.5 (RASTER).
     uv run python $S presets <id> <items,> <cpu|gpu>   # several, one after another (one GPU run)
     uv run python $S baseline <ids,|@file> <procs>  # the fixed mesh's baseline against the rebuild
     uv run python $S clearings <ids,|@file> <procs> # every clearing on the fixed mesh and rebuilt
-    uv run python $S rasterscore <id> <cpu|gpu>     # every clearing on the raster (cluster GPU)
     uv run python $S speed <ids,|@file> <procs> <cpu|gpu>  # the breakdowns on a device
     uv run python $S rescore <ids,|@file> <procs>   # the stored runs re-scored under their name
     uv run python $S roads <ids,|@file> <procs>     # carved meshes' prefixes against the rebuild
@@ -33,13 +33,9 @@ measured, dominated and deleted; NOTES) stay as measured.
 complex rebuilt (gap_compare.ComplexModel, gap_flow's mesh): P0, P_{1/2},0, J_2,0, the walled-in
 and no-demand homes, each home's escape time; rows ROWS/baseline/<id>.parquet.
 
-`clearings`: per block every clearing of SOURCES present (the raster's presets under P and the
-complex's), scored on the fixed mesh and on the complex rebuilt (P, P_{1/2}, J_2, the enclosed
+`clearings`: per block every clearing of SOURCES present (the complex's presets under P), scored on the fixed mesh and on the complex rebuilt (P, P_{1/2}, J_2, the enclosed
 population and count), and the homes each reaches against the complex grown by w / 2 at width 0
 (gap_complex's), home for home; rows ROWS/clearings/<id>.parquet.
-
-`rasterscore`: every clearing of SOURCES present scored on the raster (RASTER, h 0.5: P,
-P_{1/2}, J_2, B (i), as width.cross scores); rows ROWS/raster/<id>.parquet.
 
 `speed`: per block on the device, the fixed mesh's load and the model's baseline (with the
 factorization's plan), then the breakdown (factors, reach, assembly, factorization, solves,
@@ -76,14 +72,11 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import clear  # noqa: E402
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
 import gap_compare as gcmp  # noqa: E402
 import gap_complex as gc  # noqa: E402
 import gap_factor  # noqa: E402
-import gap_study  # noqa: E402
-import lifted  # noqa: E402
 import metrics  # noqa: E402
 import polish_greedy  # noqa: E402
 import relax  # noqa: E402
@@ -91,14 +84,11 @@ import road_rescore as rr  # noqa: E402
 import search  # noqa: E402
 
 METRIC = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())
-RASTER = "uni+apwfs"
-MESH = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
 PLAN = relax.plan_of(relax.SIMP_DEFAULT)
 CHEAP = polish_greedy.CHEAP
 BUDGET = relax.D_LENS                   # area D 0.05
 POWER = 1.0                             # P, the headline (owner 2026-10-12)
 POP = common.PopulationDemand()
-PQ = common.PriorityDemand(0.5)
 SPEED_REPS = 2
 GPU_SAMPLE_S = 0.5          # _GpuPeak's sampling (measurement only)
 ROWS = HERE / "gap_rows" / "runtime"
@@ -107,8 +97,21 @@ ITEM = re.compile(r"(simp|cheap)(E?)(@e[0-9.e-]+)?")   # a preset item: the poli
                                                       # metric's `@e<eps>`: phase 2b)
 
 
+OVERSIZED_M = 49.0      # the size classes' line: a large block over this many million unknowns on
+                        # the retired raster at h 0.5 (common.LARGE's M_unknowns) is oversized
+
+
 def _peak_gb() -> float:
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2 ** 20
+
+
+def size_of(bid: str) -> str:
+    """The block's size class, as NOTES names them: small (the 220 recipients), large or
+    oversized (OVERSIZED_M)."""
+    if bid in set(common.recipients()):
+        return "small"
+    big = pd.read_parquet(common.LARGE, columns=["block", "M_unknowns"]).set_index("block")
+    return "oversized" if float(big.M_unknowns.get(bid, 0.0)) > OVERSIZED_M else "large"
 
 
 # ------------------------------------------------------------------ the clearings
@@ -117,12 +120,10 @@ def sources(metric_name: str) -> dict[str, Path]:
     """Per preset its rows' directory under a metric (relax.rows_of, polish_greedy.rows_of)."""
     return {"simp": relax.rows_of(PLAN, metric_name, BUDGET),
             "cheap": polish_greedy.rows_of(CHEAP.picker, CHEAP.tries, CHEAP.width, CHEAP.pairs,
-                                           search.InEps(), MESH, metric_name, BUDGET)}
+                                           search.InEps(), metric_name, BUDGET)}
 
 
-SOURCES = {f"{who}_{preset}": (name, preset) for who, name in (("raster", RASTER),
-                                                               ("cx", METRIC.name))
-           for preset in ("simp", "cheap")}
+SOURCES = {f"cx_{preset}": (METRIC.name, preset) for preset in ("simp", "cheap")}
 
 
 def clearings_of(bid: str, n: int) -> dict[str, np.ndarray]:
@@ -188,7 +189,7 @@ def preset(bid: str, item: str, device: str) -> None:
     if m is None:
         raise SystemExit(f"unknown preset item {item!r}: <simp|cheap>[E][@e<eps>]")
     which, exact, search_eps = m.groups()
-    metric = metrics.metric_of(METRIC.name + (search_eps or ""), device=device, mesh=MESH)
+    metric = metrics.metric_of(METRIC.name + (search_eps or ""), device=device)
     scoring = search.polish_scoring_of(exact)
     out = ROWS / "preset" / device / item / f"{bid}.parquet"
     t0 = time.time()
@@ -198,7 +199,7 @@ def preset(bid: str, item: str, device: str) -> None:
             return relax.one(bid, POWER, metric, PLAN._replace(polish_scoring=scoring), BUDGET,
                              demand=POP)
         return polish_greedy.run(bid, POWER, metric, CHEAP.picker, CHEAP.tries, CHEAP.width,
-                                 BUDGET, MESH, CHEAP.pairs, scoring=scoring)
+                                 BUDGET, CHEAP.pairs, scoring=scoring)
     if device == "gpu":
         with _GpuPeak() as peak:
             row = run()
@@ -312,40 +313,6 @@ def clearings_one(bid: str) -> str | None:
         return f"{bid}: {e!r}"
 
 
-# ------------------------------------------------------------------ the raster's scores
-
-def rasterscore(bid: str, device: str) -> None:
-    """Every clearing of SOURCES present on the raster (width.cross's way)."""
-    import width
-    out = ROWS / "raster" / f"{bid}.parquet"
-    t0 = time.time()
-    [b] = common.build_blocks([bid])
-    p = width.params(RASTER, device)
-    sc = common.Scorer(b, MESH, p, population=common.POPULATIONS["area"], demand=POP)
-    g, n = sc.grid, len(sc.polys)
-    picks = clearings_of(bid, n)
-    inj_q = PQ.injection(sc.w, sc.u0, sc.enclosed)
-    f_q = sc.pl.field(inj_q, g.inside.shape)
-    sol_q = lifted.solve(g, sc.free0, f_q, p)
-    lab = g.label_sub(sc.polys)
-    rows = []
-    for key, x in picks.items():
-        o = width._open_of(g, lab, np.flatnonzero(x), n)
-        sy = lifted.System(g, o, p)
-        s1 = lifted.solve(g, o, sc.f, p, system=sy, rtol=clear.RTOL_SCORE)
-        sq = lifted.solve(g, o, f_q, p, system=sy, rtol=clear.RTOL_SCORE)
-        rows.append(dict(block=bid, clearing=key, n_cleared=int(x.sum()),
-                         D=float(sc.w[x].sum() / sc.w.sum()), enclosed=sc.enclosed_left(o),
-                         L_P=1.0 - s1.P / sc.P0, L_J2=sc.perm_p(sc.home_u_of(s1, o), 2.0),
-                         L_Pq=1.0 - sq.P / sol_q.P))
-        del sy
-        p.solver.release()
-        print(f"{bid} raster {key}: L_P {rows[-1]['L_P']:.4f} L_Pq {rows[-1]['L_Pq']:.4f} "
-              f"L_J2 {rows[-1]['L_J2']:.4f} enclosed {rows[-1]['enclosed']:.5f}", flush=True)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).assign(t=time.time() - t0, host=socket.gethostname()).to_parquet(out)
-
-
 # ------------------------------------------------------------------ speed
 
 def _measure(m: gcl.Model, what: str, fn) -> dict:
@@ -370,8 +337,7 @@ def speed_one(bid: str) -> str | None:
         t0 = time.time()
         fx = METRIC.fixed(b, cache=gcl.CACHE, carving=gcl.Carving.none(gc.geometry(b)))
         rows.append(dict(what="load", wall=time.time() - t0, peak_gb=_peak_gb()))
-        metric = metrics.metric_of(METRIC.name, device=device, mesh=MESH)
-        assert isinstance(metric, gcl.ComplexMetric)
+        metric = metrics.metric_of(METRIC.name, device=device)
         t0 = time.time()
         m = metric.model(b, fx, demand=POP)
         rows.append(dict(what="model (baseline: the plan, 4 solves)", wall=time.time() - t0,
@@ -505,20 +471,6 @@ def _read_nested(sub: str) -> pd.DataFrame:
     return pd.concat([pd.read_parquet(f) for f in fs], ignore_index=True) if fs else pd.DataFrame()
 
 
-def _kendall(a: np.ndarray, b: np.ndarray) -> float:
-    from scipy.stats import kendalltau
-    return float(kendalltau(a, b).statistic)
-
-
-def _b_rank(enclosed: pd.Series, lens: pd.Series) -> np.ndarray:
-    """Each clearing's place in B's order: the population it leaves walled in first (less is
-    better), then the lens (more is better)."""
-    order = np.lexsort((-lens.to_numpy(), enclosed.to_numpy()))
-    rank = np.empty(len(order))
-    rank[order] = np.arange(len(order))
-    return rank
-
-
 def report() -> None:
     """ROWS' summaries, gap_rows/summary_runtime_<name>.csv (committed; the rows are not)."""
     out = HERE / "gap_rows"
@@ -526,7 +478,7 @@ def report() -> None:
     if len(base):
         b = base.assign(dP0=base.P0 / base.P0_rebuild - 1, dPq0=base.Pq0 / base.Pq0_rebuild - 1,
                         dJ2_0=base.J2_0 / base.J2_0_rebuild - 1)
-        b = b.assign(size=[gap_study.size_of(x) for x in b.block])
+        b = b.assign(size=[size_of(x) for x in b.block])
         b[["block", "size", "n", "dP0", "dPq0", "dJ2_0", "walled", "walled_rebuild",
            "walled_alike", "home_rel_max", "home_rel_med", "nt", "nt_rebuild", "cells",
            "unknowns0", "cells_rebuild", "unflat", "splits", "rounds", "flat", "t_build",
@@ -541,34 +493,6 @@ def report() -> None:
            *(f"d{k}" for k in LENSES), "enclosed", "enclosed_rebuild", "n_enclosed",
            "n_enclosed_rebuild", "d_n_enclosed", "reach_apart", "unknowns", "t_fixed",
            "t_rebuild"]].round(6).to_csv(out / "summary_runtime_clearings.csv", index=False)
-    ras = _read("raster")
-    if len(cl) and len(ras):
-        rows = []
-        for bid, g in cl[cl.clearing != "baseline"].groupby("block"):
-            r = ras[ras.block == bid].set_index("clearing")
-            g = g.set_index("clearing")
-            keys = [k for k in g.index if k in r.index]
-            row = dict(block=bid, clearings=len(keys))
-            for lens in LENSES:
-                for k in keys:
-                    row[f"{k}_{lens}_cx"] = g.loc[k, lens]
-                    row[f"{k}_{lens}_raster"] = r.loc[k, lens]
-                if len(keys) >= 2:      # the clearings' order in B's order, metric against metric
-                    row[f"tau_{lens}"] = _kendall(
-                        _b_rank(g.loc[keys, "enclosed"], g.loc[keys, lens]),
-                        _b_rank(r.loc[keys, "enclosed"], r.loc[keys, lens]))
-            for k in keys:
-                row[f"{k}_enclosed_cx"] = g.loc[k, "enclosed"]
-                row[f"{k}_enclosed_raster"] = r.loc[k, "enclosed"]
-                row[f"{k}_D"] = g.loc[k, "D"]
-            for preset in ("simp", "cheap"):
-                a, z = f"raster_{preset}", f"cx_{preset}"
-                if a in g.index and z in g.index:
-                    xa = set(map(int, str(g.loc[a, "cleared"]).split()))
-                    xz = set(map(int, str(g.loc[z, "cleared"]).split()))
-                    row[f"jaccard_{preset}"] = len(xa & xz) / max(len(xa | xz), 1)
-            rows.append(row)
-        pd.DataFrame(rows).round(6).to_csv(out / "summary_runtime_acceptance.csv", index=False)
     tim = _read("timing")
     if len(tim):
         tim.round(4).to_csv(out / "summary_runtime_timing.csv", index=False)
@@ -654,15 +578,13 @@ def main(argv: list[str]) -> None:
     elif cmd == "presets":
         for item in argv[2].split(","):
             preset(argv[1], item, argv[3])
-    elif cmd == "rasterscore":
-        rasterscore(argv[1], argv[2])
     elif cmd == "speed":
         _SPEED_DEVICE.append(argv[3])
-        failed = _pool(speed_one, gap_study.ids_of(argv[1]), int(argv[2]))
+        failed = _pool(speed_one, common.ids_of(argv[1]), int(argv[2]))
     elif cmd in ("baseline", "clearings", "rescore", "roads"):
         fn = {"baseline": baseline_one, "clearings": clearings_one, "rescore": rescore_one,
               "roads": roads_one}[cmd]
-        failed = _pool(fn, gap_study.ids_of(argv[1]), int(argv[2]))
+        failed = _pool(fn, common.ids_of(argv[1]), int(argv[2]))
     elif cmd == "report":
         report()
     else:

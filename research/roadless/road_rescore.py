@@ -752,33 +752,23 @@ CX_POWER = 1.0                  # the presets' objective on the complex: P (deci
                                 # scored as the device's (`cx` main): E on a core, the eps world
                                 # on a GPU (phase 2a: the same clearings)
 CX_POP = "area"                 # the prefixes cut by area population (decision (2))
-CX_MESH = lifted.UniformMesh(0.5, offset=lifted.OFFSET)   # the presets' `mesh` argument: the
-                                                          # complex has no grid (h 0.5 unnamed)
 
 
 class Stored(NamedTuple):
     """The stored clearings scored on the complex beside the roads (clearings.Store's run ids):
-    SIMP's default and the cheap preset at area D 0.05 as the raster optimized them (J_2 under the
-    step rule before the face aperture: item 4's, the 60; P under uni+apwfs: phase 1's
-    acceptance, the 13) and as a complex metric did (P: phase 1's acceptance, the 13). A row's
-    `clearing` is its field's name."""
-    simp_uni: str
-    cheap_uni: str
-    simp_fws: str
-    cheap_fws: str
+    SIMP's default and the cheap preset at area D 0.05 as a complex metric optimized them (P:
+    phase 1's acceptance, the 13). A row's `clearing` is its field's name. (The raster's own
+    clearings, item 4's and phase 1's, were scored here too until its retirement: the 60's rows
+    hold them, the cross-checks' record.)"""
     simp_cx: str
     cheap_cx: str
 
 
 def cx_stored(metric: str) -> Stored:
-    """The stored clearings' runs, the complex's under `metric`."""
+    """The stored clearings' runs under the complex `metric`."""
     plan, c = relax.SIMP_DEFAULT, polish_greedy.CHEAP
     cheap = f"{c.picker}.P{c.tries}w{c.width}"
-    return Stored(simp_uni=f"relax_rows/uni/{plan}/D0.05.p2",
-                  cheap_uni=f"polish_rows/uni/{cheap}/D0.05.p2",
-                  simp_fws=f"relax_rows/uni+apwfs/{plan}/D0.05.p1",
-                  cheap_fws=f"polish_rows/uni+apwfs/{cheap}/D0.05.p1",
-                  simp_cx=f"relax_rows/{metric}/{plan}/D0.05.p1",
+    return Stored(simp_cx=f"relax_rows/{metric}/{plan}/D0.05.p1",
                   cheap_cx=f"polish_rows/{metric}/{cheap}/D0.05.p1")
 
 
@@ -796,7 +786,7 @@ def cx_presets(metric: str, scoring: search.PolishScoring) -> Presets:
     c = polish_greedy.CHEAP
     return Presets(simp=relax.rows_of(plan, metric, PRICE_BUDGET),
                    cheap=polish_greedy.rows_of(c.picker, c.tries, c.width, c.pairs, scoring,
-                                               CX_MESH, metric, PRICE_BUDGET))
+                                               metric, PRICE_BUDGET))
 
 
 def store_run(rows_dir: Path) -> str:
@@ -932,7 +922,7 @@ def cx_plain(rows: Path, metric: gcl.ComplexMetric, b: Block, *,
     ts = time.perf_counter()
     if not cheap_rows.exists():
         polish_greedy.main(bid, CX_POWER, metric, c.picker, c.tries, c.width, PRICE_BUDGET,
-                           CX_MESH, c.pairs, scoring=scoring)
+                           c.pairs, scoring=scoring)
     t_cheap = time.perf_counter() - ts
     m = metric.clearing(b, demand=pop)
     for key, f, ids_col, perm_col in ((f"simp_cx{scoring.suffix}", simp_rows, "simp_cleared",

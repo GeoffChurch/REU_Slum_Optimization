@@ -1,23 +1,22 @@
 """The optimizers' seam: what search.py, relax.py, polish_greedy.py and free first consume from a
 clearing model, written down as Protocols (NOTES, "The complex as the runtime: one fixed mesh").
 
-Two implementations, both live until phase 2 measures which dominates: the raster's
-(clear.Clearing, its eps world relax.Relaxation) and the gap complex's (gap_clear.Model, its eps
-world gap_clear.Relaxation). Which one a run uses is its metric (`Metric`), resolved once where the
-run's configuration is read (metrics.metric_of) and handed down; below that edge no code asks which
-it has.
+One implementation since the raster's retirement (NOTES, "The complex as the runtime: the raster
+retired"): the gap complex's (gap_clear.Model, its eps world gap_clear.Relaxation), its metric
+(`Metric`) resolved once where the run's configuration is read (metrics.metric_of) and handed
+down.
 
 What the consumers read, and where:
 - the state and its price: `removed` (the search's clearing; search.apply and the callers that
   seed a search change it), `n`, `cost` (each building's population share: D);
 - the footprints: `polys`, `tree` (search.Spaced's spacing);
 - scores: `baseline` (J_power and P with nothing cleared), `exact` (clear.exact: J_power and P of
-  a 0/1 clearing, real geometry), `enclosed_left` (B (i): the population share a clearing leaves
+  a 0/1 clearing), `enclosed_left` (B (i): the population share a clearing leaves
   walled in);
 - first order: `tension(power, restore=...)` (search.AddTension and RestoreTension: each
   building's gain from clearing it, or from putting it back), and through it the catchment's view
   of the tension's flow (`Tension.flow`, `Tension.weight`: clear.Catchment);
-- free first (B's first stage: clear.free_first, gap_complex.free_first);
+- free first (B's first stage: gap_complex.free_first);
 - the eps worlds (`relaxation`: SIMP's and the restore screen's; `Relaxed.metric_world`: the
   incumbent's and the polish's scorer, under the metric itself).
 

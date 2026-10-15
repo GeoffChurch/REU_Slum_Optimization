@@ -33,7 +33,13 @@ stop and its call. A loop runs b until it stops:
             fl=search,uni,FL3xS0.01catr0.005m8c100D0.05 cheap=polished,uni,S0.01cat.P64w8 \\
             fl/cheap); do <run b on $id>; done
 
-(specs as simp_compare.py's). a's and b's times must come from the same kind of card.
+A spec's kind and what: simp and a SIMP plan (relax.py `one`'s rows), polished and
+<picker>.P<t>w<w> (polish_greedy.py's), or search and search.py's <spec>D<d_max> (e.g.
+FL3xS0.01catr0.005m8c100D0.05); its <along> the run's metric name. a's and b's times must come
+from the same kind of card. The blocks: `tuning` (TUNING, the 13 large blocks the presets were
+tuned on) or `held` (the other large blocks that fit the raster's greedy at h 0.5, 46:
+large82_simp_vs_greedy.parquet). (The loaders were simp_compare.py's; its comparison and its
+loader of the raster greedy's own rows went with the raster.)
 """
 from __future__ import annotations
 
@@ -46,7 +52,14 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from simp_compare import LOADERS, blocks_of  # noqa: E402
+from clear import rows_dir  # noqa: E402
+from relax import plan_of, rows_of  # noqa: E402
+
+TUNING = ("ZAF.9.3.1_1_1558", "ZAF.9.3.1_1_18895", "ZAF.9.3.1_1_20269", "ZAF.9.3.1_1_20543",
+          "ZAF.9.3.1_1_22422", "ZAF.9.3.1_1_23597", "ZAF.9.3.1_1_30848", "ZAF.9.3.1_1_33717",
+          "ZAF.9.3.1_1_38616", "ZAF.9.3.1_1_46841", "ZAF.9.3.1_1_5810", "ZAF.9.5.4_1_9712",
+          "ZAF.9.5.4_1_9717")
+POWER = 2.0       # the search rows' power (J_2: the screens replayed so far)
 
 DRAWS = 4000      # Polya-urn paths per value
 MIN_BLOCKS = 15   # replayed on six held-out screens (NOTES): lower realized loss than 20 at 11 of
@@ -62,6 +75,41 @@ FUTURE = 820      # block runs a decision governs, the 82 large blocks about ten
 ORDER_SEED = 0
 ORDERS = 20       # random block orders replayed per comparison
 STOPPED = 10      # `next`'s exit when the screen has stopped (a Python error exits 1)
+
+
+def blocks_of(which: str) -> list[str]:
+    """`tuning` (TUNING) or `held` (the other large blocks the raster's greedy fit: 46)."""
+    large = pd.read_parquet(HERE / "large82_simp_vs_greedy.parquet").block    # the 59 that fit
+    return sorted(TUNING) if which == "tuning" else sorted(set(large) - set(TUNING))
+
+
+def simp(along: str, plan: str, budget: float) -> pd.DataFrame:
+    """relax.py `one`'s rows of SIMP plan `plan` under `along`: perm and t per block."""
+    d = pd.concat([pd.read_parquet(p) for p in rows_of(plan_of(plan), along, budget)
+                   .glob("*.parquet")], ignore_index=True)
+    return pd.DataFrame(d.set_index("block").rename(columns={"simp_perm": "perm"})[["perm", "t"]])
+
+
+def polished(along: str, name: str, budget: float) -> pd.DataFrame:
+    """polish_greedy.py's rows, `name` = <picker>.P<tries>w<width>."""
+    d = pd.concat([pd.read_parquet(p) for p in
+                   (HERE / "polish_rows" / along / name / f"D{budget:g}").glob("*.parquet")],
+                  ignore_index=True)
+    return pd.DataFrame(d.set_index("block")[["perm", "t"]])
+
+
+def searched(along: str, name: str, budget: float) -> pd.DataFrame:
+    """search.py's rows, `name` = <spec>D<d_max>: the best clearing at or below the budget (a
+    floating search's rows are its archive's best per level, not nested), `t` the whole run."""
+    best = {}
+    for f in rows_dir(name, 0.5, "area", POWER, along).glob("*.parquet"):     # a block each
+        g = pd.read_parquet(f)
+        best[g.block.iloc[0]] = (g.perm[g.D <= budget + 1e-12].max(), g.t.max())
+    return pd.DataFrame.from_dict(best, orient="index", columns=["perm", "t"])
+
+
+# A spec's kind, as typed on the command line: an unknown one raises.
+LOADERS = {"simp": simp, "polished": polished, "search": searched}
 
 
 class Screen(NamedTuple):

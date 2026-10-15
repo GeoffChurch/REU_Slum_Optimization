@@ -22,20 +22,15 @@ cluster saw, and those are the buildings of today. Reports the span of dates eac
 seen over, and every disagreement.
 
 `rescore`: on each block, each run's committed clearing read through the reader (the fingerprint
-checked), scored again on the CPU under the run's own metric (`own`) or under the metric named (a
-complex metric's name, say: every clearing under it, keyed by the name, its lens beside the
-run's own as a cross-metric reading, not a match), resolved from its name
-(`metric_of_run`, metrics.metric_of: the gap complex's model for a complex name, keyed by it;
-the raster's for a conductance, on the run's grid) through the seam (seam.ClearingModel: the
-exact J_power and its baseline, B (i)), with the run's power and demand (`demand_of`: the
-population's or priority-weighted P), and set beside the row's own D, Lens A (`perm`) and
-enclosed share. `run@step` names a nested run's row: a number, `last` or `mid` (a single-budget
-run is step 1, written `run` alone). A complex run must match: its name carries every constant
-that can move a score. A raster run named by a bare along-conductance was made under the step
-rule before the face aperture (2026-10-13) and is scored under that along's `+apwfs` form, the
-rule now, so a DIFFERS there measures the rule's change, not a fault; a row made before
-lifted.Placement (metric preB) also scored without the homes the nearest-building rule had given
-a neighbour.
+checked), scored again on the CPU under the run's own metric (`own`) or under the complex metric
+named (every clearing under it, keyed by the name, its lens beside the run's own as a
+cross-metric reading, not a match), resolved from its name (`metric_of_run`, metrics.metric_of:
+the gap complex's model, gap_clear.Model: the exact J_power and its baseline, B (i)), with the
+run's power and demand (`demand_of`: the population's or priority-weighted P), and set beside the
+row's own D, Lens A (`perm`) and enclosed share. `run@step` names a nested run's row: a number,
+`last` or `mid` (a single-budget run is step 1, written `run` alone). A complex run must match:
+its name carries every constant that can move a score. A run the retired raster made is a record:
+its clearings read under a complex metric named, never under its own (`own` raises).
 """
 from __future__ import annotations
 
@@ -145,29 +140,23 @@ def demand_of(name: str) -> Any:
 
 
 def metric_of_run(info: RunInfo) -> Any:
-    """The run's metric on the CPU (seam.Metric, metrics.metric_of): the gap complex's by its
-    name (no grid: the run's mesh is ''), or the raster's conductance on the run's grid; a bare
-    along-conductance (the step rule before the face aperture) as its `+apwfs` form."""
-    import common
-    import lifted
+    """The run's metric on the CPU (metrics.metric_of): the gap complex's by its name. A run under
+    another metric (the retired raster's, or another code's complex) is a record: it raises."""
     import metrics
-    if info.along.startswith(metrics.COMPLEX):
-        return metrics.metric_of(info.along, device="cpu",
-                                 mesh=lifted.UniformMesh(0.5, offset=lifted.OFFSET))
-    name = (info.along if info.along.endswith(f"+{lifted.APERTURE}")
-            else f"{info.along}+{lifted.APERTURE}")
-    return metrics.metric_of(name, device="cpu", mesh=common.mesh_of(info.mesh.removeprefix("h")))
+    if not info.along.startswith(metrics.COMPLEX):
+        raise ValueError(f"{info.run}: made under the retired raster's {info.along!r}, a record: "
+                         "not rescorable under its own metric (name a complex metric instead)")
+    return metrics.metric_of(info.along, device="cpu")
 
 
 def rescore(store: Store, block_ids: Sequence[str], specs: Sequence[str], under: str) -> None:
     """`under`: `own` (each run under its own metric) or a metric's name (every run under it)."""
     import common
-    import lifted
     import metrics
 
     runs = store.runs()
     for block in common.build_blocks(list(block_ids)):
-        models: dict[tuple[str, str, str, str], Any] = {}
+        models: dict[tuple[str, str, str], Any] = {}
         for spec in specs:
             run, _, token = spec.partition("@")
             info = runs[run]
@@ -180,9 +169,9 @@ def rescore(store: Store, block_ids: Sequence[str], specs: Sequence[str], under:
             step = step_of(info, store, run, block.block_id, token or "1")
             ids = store.cleared(run, block, step=step)                # the fingerprint is checked
             row = t.loc[(t["block"] == block.block_id) & (t["step"] == step)].iloc[0]
-            metric = (metric_of_run(info) if under == "own" else metrics.metric_of(
-                under, device="cpu", mesh=lifted.UniformMesh(0.5, offset=lifted.OFFSET)))
-            key = (metric.name, info.mesh, info.population, info.demand)
+            metric = (metric_of_run(info) if under == "own"
+                      else metrics.metric_of(under, device="cpu"))
+            key = (metric.name, info.population, info.demand)
             if info.population != "area":
                 raise ValueError(f"{run}: population {info.population}; the models' cost is the "
                                  "area population's")

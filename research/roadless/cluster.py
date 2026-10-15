@@ -1,19 +1,13 @@
 """reblock's cluster launcher: the project and its two kinds of run, on GeoffChurch/cluster_submit.
 
-`blocks` runs one task per block: a script command with `{id}` in it, with the block bank
-shipped as an input (a node has no source data; common.build_blocks reads the bank). Each task
-needs GPU memory for the eps world, every inside cell x 8 headings, about GB_PER_MILLION GB per
-million unknowns, and cluster_submit routes it to the smallest card that holds it. `--mesh` is
-the grid the tasks use (common.mesh_of: <h>, <h>a<d0>x<smax> or
-<h>g<d0>x<smax>f<factor>p<power>o<opening>), its cells counted here, SIZING_WORKERS blocks at a
-time (a goal mesh's: its target); `--scans` says the tasks' conductance scans the fine lattice
-(a sightline metric or search: SoftSightline), whose rasters peak when the solves' own memory is
-down to what a run holds, so the estimate is the larger of the two; `--gb` sets a floor under
-the estimate, to send a block known to need a bigger card to one. `--complex`: the tasks run the
-gap complex (gap_clear: cuDSS on the card, gap_factor.CuDSS), which has no raster grid: no
-`--mesh`, the card sized by `--gb` alone. `--unpack` ships a tar per
-block of inputs git does not carry (parquet rows, at their repo paths) and unpacks it in the
-task's checkout before the command. Results (parquet rows) come back to the same paths here,
+`blocks` runs one task per block on a GPU: a script command with `{id}` in it, with the block
+bank shipped as an input (a node has no source data; common.build_blocks reads the bank). The
+tasks run the gap complex (gap_clear: cuDSS on the card, gap_factor.CuDSS), and `--gb`, the GPU
+memory every task needs, routes each to the smallest card that holds it. (The retired raster's
+tasks were sized from the cells of their grid, `--mesh` and `--scans`, at GB_PER_MILLION GB per
+million unknowns: NOTES, "The complex as the runtime: the raster retired".) `--unpack` ships a
+tar per block of inputs git does not carry (parquet rows, at their repo paths) and unpacks it in
+the task's checkout before the command. Results (parquet rows) come back to the same paths here,
 never overwriting a local file.
 
 `cpu` runs one task per (block, item) on the CPUs of one node and no GPU: a script command with
@@ -29,9 +23,8 @@ each task unpacks its block's tar through cluster_unpack.py, which renames every
 a block's tasks unpack one tar at once into the checkout they share.
 
     uv run python research/roadless/cluster.py setup
-    uv run python research/roadless/cluster.py submit blocks <run> [--time T] [--gb G] [--gpus N] \
-        [--mesh M | --complex] [--scans] [--with FILE ...] [--unpack TAR] <ids,|@file> \
-        -- <script> <args with {id}>
+    uv run python research/roadless/cluster.py submit blocks <run> --gb G [--time T] [--gpus N] \
+        [--with FILE ...] [--unpack TAR] <ids,|@file> -- <script> <args with {id}>
     uv run python research/roadless/cluster.py submit cpu <run> --node orion|quadro2 --cpus C \
         --mem G --items <items,|@file> [--gpus N] [--time T] [--unpack TAR] <ids,|@file> \
         -- <script> <args with {id} and {item}>
@@ -48,7 +41,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -57,23 +49,6 @@ import cluster_submit as cs
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-GB_PER_MILLION = 0.95   # measured (2026-10-12): road_rescore.py's scoring of the 13 tuning blocks
-                        # peaks at 0.83 -- 0.87 GB per million unknowns on the nine over 14M
-                        # (22422's 0.866 the most), at 1.1 -- 1.4 on the four under 13M (a few
-                        # GB fixed, which any card holds), above 0.7 (the rate before) on all 13
-                        # and on item 4's 60, where 1558, 14401 and 20023 went to 32 GB cards
-                        # they would not fit and ran on bigger ones by luck. 0.95 is 22422's rate
-                        # with 10% to spare: a peak the 1 s sampling misses, and the spread
-                        # between runs (the 13's large blocks peaked up to 2% above item 4's).
-                        # SIMP and the greedies peak at ~0.65 (NOTES), so they get room to spare.
-                        # cluster_check.py `gpu` checks recorded runs' peaks against it; raise it
-                        # if a block runs out
-HELD_PER_MILLION = 0.6  # --scans: what a run holds between solves (472's translucent greedy on
-                        # a5x8, 34M unknowns: 19.8 GiB) ...
-RASTER_BYTES = 40       # ... plus five float64 rasters of the fine lattice (the painted field,
-                        # F, B, the vjp's weight and its sum): 472, 260M pixels, peaks at 30.0 GiB
-SIZING_WORKERS = 8      # processes counting the blocks' cells at submit: speed only (a shared
-                        # machine; the count is shapely and integer numpy, no BLAS threads)
 # The nodes a `cpu` run may go to, and the most of its tasks each runs at once (`--gpus`): the
 # cluster's two nodes whose GPUs are unusable (sites/ai.toml) and whose CPUs are fine (owner
 # 2026-10-12: "run the 13- and 60-block stages on orion/quadro2"). Slurm allocates whole cores
@@ -137,18 +112,8 @@ class Blocks:
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("ids", help="block ids, comma-separated, or @file of ids")
         parser.add_argument("--time", help="sbatch --time (default: the cluster's)")
-        parser.add_argument("--gb", type=float, default=0.0,
-                            help="a floor under each task's GPU-memory estimate, in GB")
-        parser.add_argument("--mesh", default="0.5",
-                            help="the grid the tasks use (<h> or <h>a<d0>x<smax>: relax.py's "
-                                 ".h<h> / .a<d0>x<smax>, or one of resolution_check.py's); "
-                                 "sets the memory estimate")
-        parser.add_argument("--complex", action="store_true",
-                            help="the tasks run the gap complex (no raster grid): the card "
-                                 "sized by --gb alone")
-        parser.add_argument("--scans", action="store_true",
-                            help="the tasks' conductance scans the fine lattice (ss/sl metric "
-                                 "or search): size for its rasters too")
+        parser.add_argument("--gb", type=float, required=True,
+                            help="the GPU memory each task needs, in GB: its card's size")
         parser.add_argument("--with", dest="extra", type=Path, action="append", default=[],
                             help="a file shipped beside the block bank (repeatable); a task "
                                  "reads it as $CLUSTER_SUBMIT_INPUTS/<its name>")
@@ -161,13 +126,8 @@ class Blocks:
 
         line = _command(args, "{id}")
         ids = _listed(args.ids)
-        if args.complex:
-            if args.scans or args.gb <= 0:
-                raise SystemExit("--complex: no --scans, and --gb sizes the card")
-        else:
-            mesh = common.mesh_of(args.mesh)
-            if not _names(line, args.mesh, mesh):
-                raise SystemExit(f"--mesh {args.mesh} but the command does not use it")
+        if args.gb <= 0:
+            raise SystemExit(f"--gb {args.gb}: a task's GPU memory is positive")
         unpack = _unpacks(args.unpack, ids)
 
         def task_line(b: str) -> str:
@@ -176,15 +136,8 @@ class Blocks:
                 return run
             return f'tar -xf "$CLUSTER_SUBMIT_INPUTS/{unpack[b].name}" && {run}'
 
-        bank = common.write_bank(ids, workdir / "bank.pkl")
-        if args.complex:
-            gb = [0.0] * len(ids)
-        else:
-            with ProcessPoolExecutor(min(SIZING_WORKERS, len(ids))) as ex:
-                gb = list(ex.map(_gb, [mesh] * len(ids), [bank[b] for b in ids],
-                                 [args.scans] * len(ids)))
-        tasks = tuple(cs.Task(task_line(b), max(g, args.gb))
-                      for b, g in zip(ids, gb, strict=True))
+        common.write_bank(ids, workdir / "bank.pkl")
+        tasks = tuple(cs.Task(task_line(b), args.gb) for b in ids)
         return cs.RunPlan(
             tasks=tasks, resources=cs.Resources(cpus=4, mem_gb=64, time=args.time, node=None),
             inputs=(workdir / "bank.pkl", *args.extra, *unpack.values()),
@@ -253,22 +206,6 @@ class Cpu:
 
     def more(self, ctx: cs.Context, rec: cs.RunRecord) -> bool:
         return False    # never asked: no exit of its is routine (cluster_submit's "Leases")
-
-
-def _gb(mesh, block, scans: bool) -> float:
-    """A task's GPU memory on `block` (a pool worker's task): the eps world's solves, every cell
-    x 8 headings, or (`scans`) what a run holds plus the scans' rasters, whichever is more."""
-    unknowns = mesh.cells(block) * 8 / 1e6
-    solves = unknowns * GB_PER_MILLION
-    if not scans:
-        return solves
-    return max(solves, unknowns * HELD_PER_MILLION + mesh.pixels(block) * RASTER_BYTES / 2 ** 30)
-
-
-def _names(line: str, token: str, mesh) -> bool:
-    """Whether the command uses `mesh`: the token among its words or comma lists
-    (resolution_check.py), or its suffix in a SIMP plan (relax.py; h 0.5 unnamed)."""
-    return token in line.replace(",", " ").split() or mesh.suffix in line
 
 
 # sacct_grace: how long a run is out of squeue before a task of it with no exit code and no sacct

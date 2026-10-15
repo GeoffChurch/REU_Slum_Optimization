@@ -330,33 +330,6 @@ def test_the_audit_refuses_a_column_it_does_not_know() -> None:
         exporter.audit([*cols, "brand_new"], exporter.SIMP, Path("f"))
 
 
-def test_the_mesh_of_a_plan_or_a_polish_spec_is_the_lifted_name() -> None:
-    mesh = exporter.mesh_name
-    assert mesh("fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2") == "h0.5"
-    assert mesh("fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2.a5x8") == "h0.5a5x8"
-    assert mesh("fw0.q3.i10.t0.001.e0.0001.k1s1e-06.h1.25") == "h1.25"
-    assert mesh("fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8.gS0.01cat") == "h0.5"   # a seed
-    assert mesh("S0.01cat.P64w8.a2.5x8") == "h0.5a2.5x8"
-    assert mesh("fw0.q3.i10.t0.001.e0.0001.k1s1e-06.g2.5x8f1.5p2o1") == "h0.5g2.5x8f1.5p2o1"
-
-
-@pytest.mark.parametrize("name, picker, h, pop, power, along", [
-    ("clear_rows_M4_h0.5", "M4", "0.5", None, None, None),
-    ("clear_rows_S0.01cat_h1_area_p2", "S0.01cat", "1", "area", "2", None),
-    ("clear_rows_S0.01cat_h0.5_area_p2_ss100k2n2r30@ss100k0.5n2r30", "S0.01cat", "0.5", "area", "2",
-     "ss100k2n2r30@ss100k0.5n2r30"),
-    ("clear_rows_SW3-1.5-1.2xS0.01catr0.005m8.P64w8D0.05_h0.5_area_p2",
-     "SW3-1.5-1.2xS0.01catr0.005m8.P64w8D0.05", "0.5", "area", "2", None),
-])
-def test_a_greedy_directory_name_parses_into_its_settings(
-        name: str, picker: str, h: str, pop: str | None, power: str | None,
-        along: str | None) -> None:
-    m = exporter.GREEDY_DIR.fullmatch(name)
-    assert m is not None
-    assert (m["picker"], m["h"], m["pop"], m["power"], m["along"]) == (picker, h, pop, power, along)
-    assert exporter.GREEDY_DIR.fullmatch(name + "_nonsense") is None
-
-
 def test_merging_keeps_what_the_sources_lost_adds_what_is_new_and_flags_an_overwrite(
         tmp_path: Path) -> None:
     s = clearings.Store(tmp_path)
@@ -371,10 +344,58 @@ def test_merging_keeps_what_the_sources_lost_adds_what_is_new_and_flags_an_overw
     assert exporter.merge(s, "r", over).changed == ["b"]          # the rewritten row is a conflict
 
 
-# ------------------------------------------------------------------ shipped rows, since overwritten
+# ------------------------------------------------------------------ the sources: this code's metric
 
+RUNTIME = exporter.metrics.RUNTIME         # this code's complex metric (its digest this code's)
 PLAN = "fw0.q3.i10.t0.001.e0.0001.k1s1e-06"
-RUN_DIR = f"relax_rows/uni/{PLAN}/D0.05"
+RUN_DIR = f"relax_rows/{RUNTIME}/{PLAN}/D0.05"
+
+
+@pytest.mark.parametrize("name, picker, power, along", [
+    (f"clear_rows_SW3-1.5-1.2xS0.01catr0.005m8.P64w8D0.05_p1_{RUNTIME}",
+     "SW3-1.5-1.2xS0.01catr0.005m8.P64w8D0.05", "1", RUNTIME),
+    (f"clear_rows_SIMP{PLAN}_p2_{RUNTIME}@e0.05", f"SIMP{PLAN}", "2", f"{RUNTIME}@e0.05"),
+])
+def test_a_greedy_directory_name_parses_into_its_settings(
+        name: str, picker: str, power: str, along: str) -> None:
+    """clear.rows_dir's names (the greedy's format under a complex metric) parse back."""
+    m = exporter.GREEDY_DIR.fullmatch(name)
+    assert m is not None
+    assert (m["picker"], m["power"], m["along"]) == (picker, power, along)
+    assert exporter.this_code(m["along"])
+
+
+@pytest.mark.parametrize("name", [
+    "clear_rows_M4_h0.5", "clear_rows_S0.01cat_h1_area_p2",
+    "clear_rows_S0.01cat_h0.5_area_p2_ss100k2n2r30@ss100k0.5n2r30",
+    "clear_rows_SW3-1.5-1.2xS0.01catr0.005m8.P64w8D0.05_h0.5_area_p2",
+])
+def test_the_raster_greedy_directories_are_records(name: str) -> None:
+    """The retired raster's greedy-format directories (`_h<h>` in the name) are records: no
+    pattern of this code's reads them, so no source does. Fault-injected: with `_record` answering
+    False for every path, every case failed."""
+    assert exporter._record(name + "/x.parquet")
+
+
+def test_only_this_codes_metric_is_a_source(tmp_path: Path) -> None:
+    """Under relax_rows, this code's complex metric's runs are read; the raster's metric names and
+    another code's complex (another digest) are records, listed and not read. Fault-injected: with
+    `this_code` answering True for every name, the raster's directories were read and this
+    failed."""
+    root = tmp_path / "roadless"
+    for metric in (RUNTIME, "uni", "uni+apwfs", "cx+shy0.5+s0.125r1b1+R0.5g4x2q4",
+                   RUNTIME.replace(exporter.gap_clear.CODE, "00000000")):
+        d = root / "relax_rows" / metric / PLAN / "D0.05"
+        d.mkdir(parents=True)
+        simp_row("blk", [3], along=metric, enclosed=0.0).to_parquet(d / "blk_p1.parquet")
+    [src] = exporter.SimpFamily().sources(root)
+    assert src.settings.run == f"{RUN_DIR}.p1" and src.settings.along == RUNTIME
+    assert sorted(exporter.records(root)) == sorted(
+        f"relax_rows/{m}" for m in ("uni", "uni+apwfs", "cx+shy0.5+s0.125r1b1+R0.5g4x2q4",
+                                    RUNTIME.replace(exporter.gap_clear.CODE, "00000000")))
+
+
+# ------------------------------------------------------------------ shipped rows, since overwritten
 
 
 def share(cleared: list[int]) -> float:
@@ -382,9 +403,10 @@ def share(cleared: list[int]) -> float:
     return float(areas[cleared].sum() / areas.sum())
 
 
-def simp_row(block: str, cleared: list[int], **extra: Any) -> pd.DataFrame:
+def simp_row(block: str, cleared: list[int], *, along: str = RUNTIME,
+             **extra: Any) -> pd.DataFrame:
     """A relax.py `one` row, as relax_rows holds it."""
-    return pd.DataFrame([dict(block=block, n=6, power=2.0, plan=PLAN, along="uni",
+    return pd.DataFrame([dict(block=block, n=6, power=2.0, plan=PLAN, along=along,
                               simp_perm=0.25, simp_D=share(cleared), simp_grey=0.01,
                               simp_cleared=cleared, simp_x=[0.5] * 6, t=12.0, **extra)])
 
@@ -418,11 +440,12 @@ def test_a_row_a_cluster_run_was_shipped_and_a_later_run_overwrote_is_recovered(
     local = tmp_path / "roadless"
     member = f"research/roadless/{RUN_DIR}/blk_p2.parquet"
     same_member = f"research/roadless/{RUN_DIR}/same_p2.parquet"
-    old, new = simp_row("blk", [1, 2]), simp_row("blk", [3])
+    old, new = simp_row("blk", [1, 2], enclosed=0.0), simp_row("blk", [3], enclosed=0.0)
     (local / RUN_DIR).mkdir(parents=True)
     new.to_parquet(local / RUN_DIR / "blk_p2.parquet")                  # what the local file says
-    simp_row("same", [4]).to_parquet(local / RUN_DIR / "same_p2.parquet")
-    shipped = {member: parquet_bytes(old), same_member: parquet_bytes(simp_row("same", [4]))}
+    same = simp_row("same", [4], enclosed=0.0)
+    same.to_parquet(local / RUN_DIR / "same_p2.parquet")
+    shipped = {member: parquet_bytes(old), same_member: parquet_bytes(same)}
     runs = tmp_path / "runs"
     put_tar(runs / "road-b" / "remote" / "inputs" / "blk.tar", shipped)
     put_tar(runs / "road-b-r1" / "remote" / "inputs" / "blk.tar", shipped)        # shipped again
@@ -438,10 +461,11 @@ def test_a_row_a_cluster_run_was_shipped_and_a_later_run_overwrote_is_recovered(
     assert mtime == 1_000_000_000                                 # the row's own writing time
 
 
-def test_a_row_made_after_the_placement_must_say_which_scorer_made_it(tmp_path: Path) -> None:
-    """Rows from before lifted.Placement have no `enclosed` and are preB by their date; rows made
-    since carry it (free first's). One written since without it has no known scorer and raises."""
-    import os
+def test_a_row_must_state_what_it_leaves_walled_in(tmp_path: Path) -> None:
+    """Every row of this code's metric states `enclosed` (B (i), free first's), and its run is the
+    B scorer's; a row without it raises. (The retired raster's rows before lifted.Placement had
+    none, and were told apart by their date: records now, read by no code.) Fault-injected: with
+    the check removed, the row without `enclosed` was read and this failed."""
     data = {"blk": block_data()}
     rows = tmp_path / "roadless"
     (rows / RUN_DIR).mkdir(parents=True)
@@ -456,12 +480,7 @@ def test_a_row_made_after_the_placement_must_say_which_scorer_made_it(tmp_path: 
     _frame, got = exporter.read_run(source_of(f), data)
     assert got.metric == "B"
     simp_row("blk", [3]).to_parquet(f)
-    before = exporter.B_EPOCH.timestamp() - 3600
-    os.utime(f, (before, before))
-    assert exporter.read_run(source_of(f), data)[1].metric == "preB"
-    after = exporter.B_EPOCH.timestamp() + 3600
-    os.utime(f, (after, after))
-    with pytest.raises(ValueError, match="which scorer made it"):
+    with pytest.raises(ValueError, match="B \\(i\\) unstated"):
         exporter.read_run(source_of(f), data)
 
 

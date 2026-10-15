@@ -55,6 +55,7 @@ import gap_complex as gc  # noqa: E402
 import gap_flow as gf  # noqa: E402
 import gap_study  # noqa: E402
 import lifted  # noqa: E402
+import metrics  # noqa: E402
 import road_rescore as rr  # noqa: E402
 import width  # noqa: E402
 
@@ -137,7 +138,7 @@ class ComplexModel:
     def __init__(self, b, fs: gf.FlowSpec, form: gf.Width):
         self.b, self.form = b, form
         self.geo = gc.geometry(b)
-        self.spec = gap_study.spec_of(S_M)
+        self.spec = metrics.spec_of(S_M)
         self.fs = fs
         n = len(self.geo.polys)
         self.n = n
@@ -696,15 +697,15 @@ def main(argv: list[str]) -> None:
     if cmd == "complex":
         R, levels, tokens = float(argv[3]), int(argv[4]), argv[5].split(",")
         failed = _pool(complex_one, [(i, R, levels, t) for t in tokens
-                                     for i in gap_study.ids_of(argv[1])], int(argv[2]))
+                                     for i in common.ids_of(argv[1])], int(argv[2]))
     elif cmd == "interiors":
-        interiors(gap_study.ids_of(argv[1]), argv[2])
+        interiors(common.ids_of(argv[1]), argv[2])
         failed = []
     elif cmd == "flowsweep":
         failed = _pool(flowsweep_one, [(i, t) for t in argv[3].split(",")
-                                       for i in gap_study.ids_of(argv[1])], int(argv[2]))
+                                       for i in common.ids_of(argv[1])], int(argv[2]))
     elif cmd == "gates":
-        gates(gap_study.ids_of(argv[1]))
+        gates(common.ids_of(argv[1]))
         failed = []
     elif cmd == "lanes":
         lanes()
@@ -717,7 +718,7 @@ def main(argv: list[str]) -> None:
         failed = []
     elif cmd == "iso":
         token = argv[3] if len(argv) > 3 else None
-        failed = _pool(iso_one, [(i, token) for i in gap_study.ids_of(argv[1])], int(argv[2]))
+        failed = _pool(iso_one, [(i, token) for i in common.ids_of(argv[1])], int(argv[2]))
     else:
         raise SystemExit(__doc__)
     if failed:

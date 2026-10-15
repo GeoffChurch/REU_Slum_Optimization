@@ -1,6 +1,6 @@
 """The road methods' free-first stage (BACKLOG 5; owner 2026-10-12, "Yes, let's try to free enclosed
 homes first"): before a method builds anything, roads that free the homes enclosed at baseline,
-as B's optimizer frees them first by clearing (clear.free_first). `FreeEnclosed` is a
+as B's optimizer frees them first by clearing (gap_clear.Model.free_first). `FreeEnclosed` is a
 `reblock.free_first.FreeFirst`: a method holding it commits these roads first and builds the rest
 as it does today.
 
@@ -49,7 +49,8 @@ in its own key): the fields (the metric's name among them, its code's digest in 
 and its research imports' source (no reblock closure reaches them), and reblock.budget's closure
 (road_corridor, the footprints' overlap).
 
-The guards: transparency_check.py `hold-nothing`, `no-enclosed`, `free-roads` and `lead`.
+The guard: free_roads_check.py `free-roads` (transparency_check.py's `hold-nothing`,
+`no-enclosed` and `lead`, the transparency experiment's, went with its code).
 """
 from __future__ import annotations
 

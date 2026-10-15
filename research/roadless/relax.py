@@ -1015,6 +1015,6 @@ if __name__ == "__main__":
     ids = common.recipients() if sys.argv[2] == "all" else sys.argv[2].split(",")
     plan = plan_of(sys.argv[5])
     main(sys.argv[1], ids, float(sys.argv[3]),
-         metrics.metric_of(sys.argv[6], device=sys.argv[4], mesh=plan.mesh), plan,
+         metrics.metric_of(sys.argv[6], device=sys.argv[4]), plan,
          int(sys.argv[7]) if len(sys.argv) > 7 else 1,
          float(sys.argv[8]) if len(sys.argv) > 8 else D_LENS)

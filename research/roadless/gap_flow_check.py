@@ -9,13 +9,14 @@ file edited): a guard passes on the code as it is and must fail under its fault.
     uv run python $S field - [fault]
     uv run python $S closed - [fault]
 
-The corridor is width.walled_channel's (W x L_C, walls footprints WALL_M thick, a dead end behind
-the demand, the street the far edge): its demand the open ground within 1 m of the dead end,
+The corridor is the effective-width study's walled channel (W x L_C, walls footprints WALL_M
+thick, a dead end behind the demand, the street the far edge; NOTES, "Uniform conductance with an
+effective width"): its demand the open ground within 1 m of the dead end,
 uniform by area, summing to 1, sigma 1. Beyond the dead end's metre the channel carries all of it
 to the band (u = 0 from L_C - 1), so P = (L_C - 2 + 1/3) / (sigma W) exactly in the continuum
 (the last third the demand's own spread).
 
-`angle`: P's max / min over width.ANGLES at the widths WIDTHS_ANGLE (R_CHECK): within ANGLE_TOL
+`angle`: P's max / min over ANGLES at the widths WIDTHS_ANGLE (R_CHECK): within ANGLE_TOL
 of 1 (an isotropic scheme on a mesh of the geometry is rotation-invariant up to meshing; the
 raster under Fws: 1.21 at 1 m).
 `shift`: P's max / min over SHIFTS lattice offsets (the Steiner lattice moved k / SHIFTS of R on
@@ -49,19 +50,18 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
-import scipy.sparse as sp
 import shapely
 from shapely.geometry import LineString, Point, Polygon
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import common  # noqa: E402
-import gap_compare as gcmp  # noqa: E402
 import gap_complex as gc  # noqa: E402
 import gap_flow as gf  # noqa: E402
-import width  # noqa: E402
 
 S_M = 0.125
+L_C = 40.0                       # the walled channel: its length (m) ...
+WALL_M = 3.0                     # ... its walls' thickness (m) ...
+ANGLES = (0, 2, 4, 6, 8, 10, 15, 20, 26.57, 30, 35, 40, 45)    # ... and its rotations (deg)
 R_CHECK = 0.25
 OPEN = gf.Closing(w=0.0)          # the uniform law, every passage open
 SIGMA = 1.0
@@ -99,8 +99,8 @@ def fspec(R: float, offset: tuple[float, float] = gf.OFFSET) -> gf.FlowSpec:
     return gf.FlowSpec(R=R, levels=0, grade=0.0, sigma=SIGMA, quad=QUAD, offset=offset)
 
 
-def corridor(alpha_deg: float, W: float, L: float = width.L_C):
-    """width.walled_channel's geometry as a block (its length L), and its demand region (in its
+def corridor(alpha_deg: float, W: float, L: float = L_C):
+    """The walled channel's geometry as a block (its length L), and its demand region (in its
     own frame)."""
     a = np.radians(alpha_deg)
     e, n = np.array([np.cos(a), np.sin(a)]), np.array([-np.sin(a), np.cos(a)])
@@ -112,7 +112,7 @@ def corridor(alpha_deg: float, W: float, L: float = width.L_C):
     def rect(s0: float, s1: float, t0: float, t1: float) -> Polygon:
         return Polygon([pt(s0, t0), pt(s1, t0), pt(s1, t1), pt(s0, t1)])
 
-    w2, T = W / 2, width.WALL_M
+    w2, T = W / 2, WALL_M
     block = rect(-T, L, -w2 - T, w2 + T)
     walls = [rect(-T, L, w2, w2 + T), rect(-T, L, -w2 - T, -w2), rect(-T, 0.0, -w2, w2)]
     street = LineString([pt(L, -w2 - T), pt(L, w2 + T)])
@@ -155,7 +155,7 @@ def P_of(b, src, fs: gf.FlowSpec, form: gf.Width) -> tuple[float, float]:
 
 
 def _exact(W: float) -> float:
-    return (width.L_C - 2.0 + 1.0 / 3.0) / (SIGMA * W)
+    return (L_C - 2.0 + 1.0 / 3.0) / (SIGMA * W)
 
 
 # ------------------------------------------------------------------ the guards
@@ -163,7 +163,7 @@ def _exact(W: float) -> float:
 def angle(_ids: list[str]) -> list[str]:
     bad = []
     for W in WIDTHS_ANGLE:
-        Ps = [P_of(*corridor(a, W), fspec(R_CHECK), OPEN)[0] for a in width.ANGLES]
+        Ps = [P_of(*corridor(a, W), fspec(R_CHECK), OPEN)[0] for a in ANGLES]
         r = max(Ps) / min(Ps)
         ok = bool(r <= 1.0 + ANGLE_TOL)
         print(f"W {W:g}: P's max / min over {len(Ps)} angles {r:.4f} (P / exact "

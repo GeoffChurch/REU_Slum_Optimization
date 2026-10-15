@@ -3,27 +3,22 @@ scripts it as cluster_submit's submit does (the plan a dry submit prints and the
 stages), and checks what a task would get.
 
     PYTHONPATH=. uv run python research/roadless/cluster_check.py cpu <ids,> <items,>
-    PYTHONPATH=. uv run python research/roadless/cluster_check.py gpu <recorded run> <rows root>
 
 `cpu`: a `cpu` run on each node of CPU_NODES at its own throttle is one CPU array pinned there
 (`--nodelist`), with no GPU request, the given cores and memory, every (block, item) one task that
 unpacks the block's tar through cluster_unpack.py and runs the command with both placeholders
 filled; a run without `--node` is refused, and one past the node's throttle. The tars are empty
-stand-ins (a plan checks only that they exist).
+stand-ins (a plan checks only that they exist). The command is gap_calib.py's `preset`, a
+(block, item) task.
 
-`gpu`: a scoring run (road_rescore.py `score`, a `blocks` run) planned again now from its submit
-as its record keeps it (.cluster_submit/runs/<run>.json, argv) gives the record's task lines, and
-puts every block on a card that holds the GPU peak its scoring measured (the setup rows under
-<rows root>, the most of any pass) with HEADROOM to spare: GB_PER_MILLION's check against what
-the scorer used. A card size may differ from the record's, as the rate has been recalibrated.
+(`gpu`, the retired raster's sizing checked against its scorer's measured peaks, went with it:
+NOTES, "The complex as the runtime: the raster retired".)
 """
 from __future__ import annotations
 
 import argparse
 import contextlib
 import io
-import json
-import re
 import sys
 import tarfile
 import tempfile
@@ -37,9 +32,7 @@ from cluster_submit.cli import parser  # noqa: E402
 from cluster_submit.submit import throttle_checked  # noqa: E402
 
 PROJECT = cluster.PROJECT
-COMMAND = ["--", "research/roadless/transparency_run.py", "tuning", "arm", "{id}", "{item}"]
-HEADROOM = 1.05         # gpu: a block's card holds its measured peak with this much to spare
-BLOCK_ID = re.compile(r"ZAF\.[0-9.]+_[0-9]+_[0-9]+")
+COMMAND = ["--", "research/roadless/gap_calib.py", "preset", "{id}", "{item}", "cpu"]
 
 
 def _parsed(argv: list[str]) -> argparse.Namespace:
@@ -90,8 +83,8 @@ def check_cpu(ids: list[str], items: list[str]) -> None:
                     "#SBATCH --mem=4G", f"#SBATCH --array=0-{len(ids) * len(items) - 1}%{at_once}"}
             gpu = [ln for ln in head if "gres" in ln or "--gpus" in ln]
             lines = [f'python -u research/roadless/cluster_unpack.py "$CLUSTER_SUBMIT_INPUTS/'
-                     f'{b}.tar" && python -u research/roadless/transparency_run.py tuning arm '
-                     f'{b} {item}' for b in ids for item in items]
+                     f'{b}.tar" && python -u research/roadless/gap_calib.py preset {b} {item} '
+                     'cpu' for b in ids for item in items]
             assert a.card_gb == 0 and a.node == node, f"{node}: {a.label} array on {a.node}"
             assert want <= set(head), f"{node}: header lacks {want - set(head)}"
             assert not gpu, f"{node}: a GPU request in a CPU array: {gpu}"
@@ -106,53 +99,9 @@ def check_cpu(ids: list[str], items: list[str]) -> None:
         print(f"without --node refused: {_refused(bare, tmp / 'work')}")
 
 
-def _peaks(rows: Path, mesh_token: str) -> dict[str, float]:
-    """Per block, the most GPU memory any pass of its scoring under `rows` measured (GB)."""
-    import road_rescore as rr
-    setup = sorted(rr.score_dir(rows, mesh_token, "area").glob("*__setup__*.parquet"))
-    st = rr._read_all(setup)
-    if st.empty:
-        raise SystemExit(f"no setup rows under {rows}: no measured peaks")
-    return {str(b): float(v) for b, v in st.groupby("block").gpu_peak_gb.max().items()}
-
-
-def check_gpu(run: str, rows: Path) -> None:
-    rec = json.loads((cluster.REPO / ".cluster_submit" / "runs" / f"{run}.json").read_text())
-    argv = list(rec["argv"])
-    if argv[:2] != ["submit", "blocks"]:
-        raise SystemExit(f"{run} is not a blocks run: {argv[:2]}")
-    argv[2] = f"{run}-check"
-    with tempfile.TemporaryDirectory() as d:
-        args, plan, arrays = _plan(argv[:3] + ["--dry"] + argv[3:], Path(d))
-    got = sorted(t for a in arrays for t in a.tasks)
-    want = sorted(t for a in rec["arrays"] for t in a["tasks"])
-    assert got == want, "the plan's task lines differ from the record's"
-    assert plan.resources == cluster.cs.Resources(cpus=4, mem_gb=64, time=args.time, node=None)
-    peaks = _peaks(rows, args.mesh)
-    slack = []
-    for a in arrays:
-        for t in a.tasks:
-            [bid] = set(BLOCK_ID.findall(t))
-            if bid not in peaks:
-                raise SystemExit(f"{bid}: no measured peak under {rows}")
-            assert a.card_gb >= HEADROOM * peaks[bid], (
-                f"{bid}: a {a.card_gb} GB card for a measured peak of {peaks[bid]:.1f} GB")
-            slack.append((a.card_gb - peaks[bid], bid, a.card_gb, peaks[bid]))
-    by_card = {a.card_gb: len(a.tasks) for a in arrays}
-    _, bid, card, peak = min(slack)
-    print(f"{run}: the record's {len(got)} task lines, now on "
-          + ", ".join(f"{n} at {c} GB" for c, n in sorted(by_card.items()))
-          + " (recorded: " + ", ".join(f"{len(a['tasks'])} at {a['card_gb']} GB"
-                                        for a in rec["arrays"])
-          + f"); every block's card holds its measured peak with {HEADROOM - 1:.0%} to spare, "
-          f"the least room {bid} ({peak:.1f} GB on {card} GB)")
-
-
 if __name__ == "__main__":
     a = sys.argv[1:]
     if a[0] == "cpu":
         check_cpu(a[1].split(","), a[2].split(","))
-    elif a[0] == "gpu":
-        check_gpu(a[1], Path(a[2]))
     else:
         raise SystemExit(f"unknown check {a[0]!r}")

@@ -67,6 +67,9 @@ def rows_of(metric: str) -> Path:
 
 ROWS = rows_of(METRIC.name)
 MARGIN = 0.005                 # questions 1 and 2: within this of J_2's clearing
+BOOT_DRAWS = 10_000            # the Bayesian bootstrap's draws ...
+BOOT_SEED = 20261012           # ... and its seed (one weight matrix for every comparison: the
+                               # transparency experiment's, whose report it shared)
 
 
 @dataclass(frozen=True)
@@ -270,12 +273,18 @@ def _q(s: pd.Series) -> dict[str, float]:
                 max=float(s.max()))
 
 
+def boot_weights(n: int) -> np.ndarray:
+    """The Bayesian bootstrap's weights over `n` blocks: BOOT_DRAWS Dirichlet(1, ..., 1) draws,
+    seeded BOOT_SEED, one matrix (draws x blocks) for every comparison, so the intervals are
+    paired."""
+    return np.random.default_rng(BOOT_SEED).dirichlet(np.ones(n), size=BOOT_DRAWS)
+
+
 def report() -> None:
     """The four questions (NOTES, "Priority-weighted P": the criteria, fixed before any result)
-    on the 220, paired by block, Bayesian-bootstrap 95% intervals (transparency_run.boot_weights:
-    10,000 Dirichlet(1, ..., 1) draws over the blocks, seeded, one matrix for every comparison).
+    on the 220, paired by block, Bayesian-bootstrap 95% intervals (boot_weights: BOOT_DRAWS
+    Dirichlet(1, ..., 1) draws over the blocks, seeded, one matrix for every comparison).
     Writes ROWS/summary_{lens,questions,bound,describe,cost}.csv."""
-    from transparency_run import boot_weights
     pd.set_option("display.width", 200)
     blocks = tuple(common.recipients())
     absent = [b for b in blocks if not score_path(b).exists()]

@@ -96,7 +96,6 @@ import common
 import gap_complex as gc
 import gap_factor
 import gap_flow as gf
-import lifted
 import relax
 import search
 from gap_complex import legalize
@@ -1620,18 +1619,20 @@ class ComplexMetric:
         raise ValueError(f"a coarse grid (h {h:g}) is the raster's: the complex has none")
 
 
+# The retired raster's metric names, a fixed grammar (its rows stay on disk as records under them):
+# an along-conductance (`uni`, Sightline `sl<beta>`, SoftSightline `ss<beta>k<kappa>[n<hill>r<r0>]`,
+# turn-boosted with a trailing `t`), bare as the rows before the face aperture name it, or as a
+# conductance `<along>[+<cells>]+apwfs` (the cells B_r `b<r>` or D_s `d<s>`); either with a search's
+# `@<along>`. Private: it is no constant of the complex's code (`code_constants`).
+_RASTER_ALONG = r"(?:uni|sl[^+@]+|ss[0-9.]+k[0-9.]+(?:n[0-9.]+r[0-9.]+)?t?)"
+_RASTER_NAME = re.compile(rf"{_RASTER_ALONG}(?:(?:\+[bd][0-9]+(?:\.[0-9]+)?)?\+apwfs)?")
+
+
 def check_disjoint(name: str) -> None:
-    """Raises if `name` reads as a raster conductance (lifted.conductance_of, or an along-
-    conductance of the rows before the face aperture, lifted.along_of; either with its search's
-    `@<along>`, as RasterMetric reads it): a complex's rows would sit in a raster run's
-    directories."""
-    head = name.split("@")[0]
-    for parse in (lambda: lifted.conductance_of(head, lifted.CpuScans()),
-                  lambda: lifted.along_of(head)):
-        try:
-            parse()
-        except ValueError:
-            continue
+    """Raises if `name`, less a search's `@...`, reads as one of the retired raster's metric names
+    (_RASTER_NAME): a complex's rows would sit in a raster run's directories, records of another
+    metric."""
+    if _RASTER_NAME.fullmatch(name.split("@")[0]):
         raise ValueError(f"{name!r} names a raster conductance: the complex's rows would be read "
                          "as the raster's")
 

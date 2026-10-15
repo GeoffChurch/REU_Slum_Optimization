@@ -60,7 +60,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import gap_complex as gc  # noqa: E402
-import lifted  # noqa: E402
+import metrics  # noqa: E402
 
 S_SENS = (0.125, 0.25, 0.5)
 CONFORM_AREA = 1e-9
@@ -76,10 +76,6 @@ def _patched(owner: object, name: str, value: object) -> Iterator[None]:
         yield
     finally:
         setattr(owner, name, old)
-
-
-def spec_of(s: float) -> gc.Spec:
-    return gc.Spec(s=s, ring_m=lifted.RING_M, band_m=lifted.BAND_M)
 
 
 def synthetic_block(boundary: Polygon, footprints: list, bid: str = "synthetic"):
@@ -106,7 +102,7 @@ def conform(ids: list[str]) -> list[str]:
         geo = gc.geometry(b)
         n = len(geo.polys)
         for s in S_SENS:
-            spec = spec_of(s)
+            spec = metrics.spec_of(s)
             cx = gc.build(geo, spec, np.ones(n, dtype=bool), carve=None, grow=0.0)
             inner, _band = gc._open_ground(geo, np.ones(n, dtype=bool), spec.band_m,
                                            carve=None, grow=0.0)
@@ -201,7 +197,7 @@ def delaunay(ids: list[str]) -> list[str]:
         geo = gc.geometry(b)
         n = len(geo.polys)
         for s in S_SENS:
-            cx = gc.build(geo, spec_of(s), np.ones(n, dtype=bool), carve=None,
+            cx = gc.build(geo, metrics.spec_of(s), np.ones(n, dtype=bool), carve=None,
                           grow=0.0)
             dl, convex = _facing_angles(cx)
             over = convex & (dl < -gc.DELAUNAY_TOL)
@@ -271,7 +267,7 @@ def apertures(_ids: list[str]) -> list[str]:
             for ang in APERTURE_ANGLES:
                 blk = _gap_block(g, ang)
                 geo = gc.geometry(blk)
-                cx = gc.build(geo, spec_of(s), np.ones(2, dtype=bool), carve=None,
+                cx = gc.build(geo, metrics.spec_of(s), np.ones(2, dtype=bool), carve=None,
                               grow=0.0)
                 vb = cx.vb.tocsr()
                 ua = np.asarray(vb[cx.pu].todense())
@@ -324,7 +320,7 @@ def filtration(_ids: list[str]) -> list[str]:
     for name, (blk, home), want in cases:
         geo = gc.geometry(blk)
         n = len(geo.polys)
-        cx = gc.build(geo, spec_of(s), np.ones(n, dtype=bool), carve=None,
+        cx = gc.build(geo, metrics.spec_of(s), np.ones(n, dtype=bool), carve=None,
                           grow=0.0)
         he = gc.home_exits(gc.homes_of(geo, cx), gc.exit_widths(cx))
         got = he[home]
@@ -336,7 +332,7 @@ def filtration(_ids: list[str]) -> list[str]:
     # a home whose ring reaches the band
     blk = synthetic_block(box(0, 0, 20, 20), [box(1.3, 5, 4, 8)])
     geo = gc.geometry(blk)
-    cx = gc.build(geo, spec_of(s), np.ones(1, dtype=bool), carve=None, grow=0.0)
+    cx = gc.build(geo, metrics.spec_of(s), np.ones(1, dtype=bool), carve=None, grow=0.0)
     got = gc.home_exits(gc.homes_of(geo, cx), gc.exit_widths(cx))[0]
     ok = got == np.inf
     print(f"a home 0.3 m from the band: exit width {got} (want inf) -> {'ok' if ok else 'FAILS'}",
@@ -390,7 +386,7 @@ def free(_ids: list[str]) -> list[str]:
     n = len(geo.polys)
     wpop = np.array([1.0, 0.05, 1.0, 1.2, 3.0, 3.0, 3.0])
     cost = wpop / wpop.sum()
-    spec = spec_of(0.125)
+    spec = metrics.spec_of(0.125)
     fr = gc.free_first(geo, spec, w=FREE_W, grow=0.0, budget=1.0, cost=cost, pop=wpop,
                        held0=np.zeros(n, dtype=bool), cx0=None)
     cx = gc.build(geo, spec, ~fr.held, carve=None, grow=0.0)

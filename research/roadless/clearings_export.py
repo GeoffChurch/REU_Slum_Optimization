@@ -10,33 +10,36 @@ against its block (the building count the row recorded; positions in range and d
 recomputed from the positions equal to the row's own D) and against the run's settings (the path's
 against the row's own columns), and writes the committed core.
 
-The sources, each a Family (a Strategy resolved here, where the directories are named) that finds
-its runs, parses the settings their names encode and reads one file into core rows:
+The sources are the rows of this code's metric (`this_code`: a gap complex metric's name that
+gap_clear.complex_of reads back, its code's digest this code's), each a Family (a Strategy resolved
+here, where the directories are named) that finds its runs, parses the settings their names encode
+and reads one file into core rows:
 
-    SimpFamily       relax_rows/<along>/<plan>/D<budget>/<block>_p<power>.parquet: SIMP's clearing
+    SimpFamily       relax_rows/<metric>/<plan>/D<budget>/<block>_p<power>.parquet: SIMP's clearing
                      (simp_cleared; run <dir>.p<power>) and, in the Frank-Wolfe plans' rows, the
                      rounding of the relaxation (cleared; run <dir>.p<power>.fw)
-    PolishFamily     polish_rows/<along>/<picker>.P<tries>w<width>[x2]<mesh>/D<budget>/..._p<power>
-    GreedyFamily     clear_rows_<picker>_h<h>[_area][_p<power>][_<along>[@<search>]]/<block>.parquet:
-                     the greedy and the searches that write its format (nested rows `cleared`,
-                     or a whole clearing a row `clearing`)
-    PweightFamily    pweight_rows/simp/<objective>/<block>.parquet (priority-weighted P)
-    CollectedFamily  the clearings the studies gathered into one parquet (fine_clearings, ...): a
-                     run for each (file, name), whose note says how many of its sets equal a set
-                     of a stored run
+    PolishFamily     polish_rows/<metric>/<picker>.P<tries>w<width>[x2][E]/D<budget>/..._p<power>
+    GreedyFamily     clear_rows_<spec>_p<power>_<metric>/<block>.parquet (clear.rows_dir): the
+                     searches that write the greedy's format (nested rows `cleared`, or a whole
+                     clearing a row `clearing`)
+    PweightFamily    pweight_rows/<metric>/simp/<objective>/<block>.parquet (priority-weighted P)
     ShippedFamily    rows of the stores above that a cluster run was shipped in its input tars
                      (.cluster_submit/runs/<run>/remote/inputs/<block>.tar) and that differ from
                      the local row now or are gone from it: the rows a later run overwrote in
                      place, read by the family of their store as run <run id>@<cluster run>
 
+Every other metric's rows are RECORDS, read by no code: the retired raster's (its conductances'
+names, uni+apwfs and the rest; clear_rows_<picker>_h<h>...; pweight_rows/simp, fw, score and
+uni+apwfs; the clearings the studies gathered into one parquet, RECORD_PARQUETS) and another code's
+complex (phase 1's undigested names). Their runs were exported before the raster's retirement
+(2026-10-15) and stay committed; `inventory` counts the records' directories.
+
 Every source column is committed, checked, or deliberately dropped with a reason (a Slot); one that
 is none of them raises, so a column a new optimizer adds is never silently left out. So does a
-directory under research/roadless that looks like a rows store and is neither exported nor in
-EXCLUDED with its reason.
-
-relax220_p1.parquet and relax220_p2.parquet (COPIES) copy the rows of a Frank-Wolfe run and are
-checked equal to its two committed runs, not exported again. Rows are read without SIMP's design x
-(a float a building, half the bytes of the rows, not the clearing).
+directory under research/roadless that looks like a rows store and is neither a store's, nor in
+EXCLUDED with its reason, and a top-level parquet holding clearings that is not a known record.
+Rows are read without SIMP's design x (a float a building, half the bytes of the rows, not the
+clearing). Every row states `enclosed` (B (i)): a run is the B scorer's (RunInfo.metric `B`).
 
 It is re-runnable: a (run, block) the sources no longer hold stays committed, one the sources hold
 and the store does not is added, and one that differs raises (the in-place overwrite this store
@@ -73,42 +76,28 @@ import gap_factor  # noqa: E402
 import metrics  # noqa: E402
 from clearings import BlockPrint, RunInfo, Store  # noqa: E402
 
-# lifted.Placement (7913fe4, 2026-10-11 16:21:16 -0400): the scorer from which a home with no ring
-# cell injects on its open side. A row written before it scored without those homes; one with
-# `enclosed` was made after.
-B_EPOCH = dt.datetime(2026, 10, 11, 16, 21, 16, tzinfo=dt.timezone(dt.timedelta(hours=-4)))
 D_TOL = 1e-9        # a row's D against the one recomputed from its positions (sums in another order)
 
 NUM = r"[0-9]+(?:\.[0-9]+)?"
-# A run's metric, as its rows' directory names it: a raster conductance (lifted.conductance_of,
-# `<along>[+<cells>]+apwfs`; a bare along-conductance, lifted.along_of, the step rule's before the
-# face aperture, 2026-10-13), with the search's after `@` where it differed; or the gap complex's
-# (gap_clear.complex_of: `cx+...`, its code's digest in it, read only if it is this code's)
-ALONG = rf"(?:uni|sl{NUM}|ss{NUM}k{NUM}(?:n{NUM}r{NUM})?t?)(?:\+[bd]{NUM})?(?:\+apwfs)?"
-ALONGS = rf"(?:{ALONG}(?:@{ALONG})?|cx\+[^/@]+(?:@e{NUM})?)"
-MESH_TAIL = re.compile(rf"^(?P<base>.*?)(?:\.h(?P<h>{NUM}))?"
-                       rf"(?P<local>\.[ag]{NUM}x{NUM}(?:f{NUM}p{NUM}o{NUM})?)?$")
 
 # Directories that look like rows stores and are not clearings, and the file-level equivalents.
 EXCLUDED: Mapping[str, str] = {
     "insulator_rows": "scenario scores of the insulator world; the clearings it scored are "
-                      "insulator_rows/walls_clearings.parquet, collected here",
+                      "insulator_rows/walls_clearings.parquet, a record (RECORD_PARQUETS)",
     "road_rows": "road networks and their scores (BACKLOG 4), no clearing",
     "transparency_rows": "road networks and their scores (BACKLOG 5), no clearing",
     "res_rows": "mesh-resolution rescoring of stored clearings: scores only",
     "rows_h0.5_ell3_K8": "the 220-block study's road-network scores, no clearing",
     "rows_h0.5_ell3_K8_area": "the 220-block study's road-network scores, no clearing",
     "rows_h0.5_ell3_K8_area_p1only": "the 220-block study's road-network scores, no clearing",
-    "pweight_rows/fw": "Frank-Wolfe bounds (numbers; the design x is not stored), no clearing",
-    "pweight_rows/score": "the clearings scored under every objective: scores only",
     "aperture_rows": "the grid fix's study (NOTES, 'The grid fix: steps that conduct by their "
                      "open width'): scores under the step rules it compared, and SIMP's clearing "
                      "under Fws on one block (simp/Fws), a study's record (summary_*.csv)",
     "width_rows": "the effective-width study (NOTES, 'Uniform conductance with an effective "
                   "width'): scores, and SIMP's clearings under B_r and D_s on the sentinel "
                   "(simp/<variant>), a study's record (summary_*.csv)",
-    "cross_rows": "the cross-checks of the complex against the raster (crosscheck.py, phase 2b): "
-                  "the raster's scores of the road prefixes and stored clearings, no clearing",
+    "cross_rows": "the cross-checks of the complex against the raster (phase 2b): the raster's "
+                  "scores of the road prefixes and stored clearings, no clearing",
     "gap_rows": "the gap complex's study and the runtime's calibration (NOTES, 'The gap complex' "
                 "and 'The complex as the runtime'): scores; simp/ the width forms' SIMP clearings "
                 "on the rebuilt complex (a study's record); runtime/preset/ the acceptance's "
@@ -116,13 +105,41 @@ EXCLUDED: Mapping[str, str] = {
                 "relax_rows/<metric> and polish_rows/<metric>, exported) and the dominated "
                 "+relaxlumped's (deleted; its numbers in NOTES)",
 }
-# Top-level parquets that copy rows of a run, checked equal to them at export.
-COPIES: Mapping[str, str] = {
-    "relax220_p1.parquet": "relax_rows/uni/fw40.q3.i20.t1e-05/D0.1.p1",
-    "relax220_p2.parquet": "relax_rows/uni/fw40.q3.i20.t1e-05/D0.1.p2",
+# Top-level parquets holding clearings: every one the retired raster's, a record read by no code
+# (their sets were exported to clearings/ as runs collected/<file>/<name> before its retirement).
+RECORD_PARQUETS: Mapping[str, str] = {
+    "fine_clearings.parquet": "clearings gathered for resolution_check.py (its clearings.parquet "
+                              "input; runs fine25, fine35), 2026-10-10",
+    "cheap_a5_clearings.parquet": "the cheap preset's clearings on the composite mesh a5x8, "
+                                  "gathered for resolution_check.py, 2026-10-08",
+    "ov_clearings.parquet": "the oversized blocks' coarse-h runs' clearings, kept when those runs "
+                            "were superseded (NOTES, 'Local coarsening: built'), 2026-10-08",
+    "ovgoal_clearings.parquet": "the oversized blocks' clearings gathered for resolution_check.py "
+                                "on goal meshes, 2026-10-08",
+    "res_clearings.parquet": "the five clearings of each of the 59 large blocks gathered for "
+                             "resolution_check.py (run res-mesh; NOTES, 'Local coarsening: "
+                             "built'), 2026-10-08",
+    "three_clearings.parquet": "14401, 32841 and 7851's clearings gathered for resolution_check.py "
+                               "(runs three-res, three-res2; NOTES, 'Local coarsening: built'), "
+                               "2026-10-08",
+    "relax220_p1.parquet": "a copy of relax_rows/uni/fw40.q3.i20.t1e-05/D0.1.p1's rows",
+    "relax220_p2.parquet": "a copy of relax_rows/uni/fw40.q3.i20.t1e-05/D0.1.p2's rows",
 }
-# Source columns of the clearing lists: a top-level parquet holding one is exported or in COPIES.
+# Source columns of the clearing lists: a top-level parquet holding one is a known record.
 ID_COLUMNS = ("cleared", "simp_cleared", "clearing")
+
+
+def this_code(metric: str) -> bool:
+    """Whether a rows directory's metric name is this code's (gap_clear.complex_of reads it back:
+    a gap complex metric whose code's digest is this code's, `@e<eps>` its translucent search).
+    Any other is a record no code reads: the retired raster's names, another code's complex."""
+    if not metric.startswith(metrics.COMPLEX):
+        return False
+    try:
+        gap_clear.complex_of(metric, factorization=gap_factor.SuperLU())
+    except ValueError:
+        return False
+    return True
 
 
 # ------------------------------------------------------------------ settings and sources
@@ -164,14 +181,6 @@ class Family(Protocol):
 
 def block_of(f: Path) -> str:
     return re.sub(r"_p[0-9.]+$", "", f.stem)
-
-
-def mesh_name(spec: str) -> str:
-    """lifted.MeshSpec.name of a plan's or a polish spec's mesh suffix (.h<h> and/or the local
-    or goal mesh; none: h 0.5)."""
-    m = MESH_TAIL.fullmatch(spec)
-    assert m is not None
-    return f"h{m['h'] or '0.5'}" + (m["local"][1:] if m["local"] else "")
 
 
 def ids(x: Any) -> np.ndarray:
@@ -229,8 +238,8 @@ SIMP = Slot(
     drop={"simp_x": "SIMP's final design, a float a building: not the clearing, and half the "
                     "rows' bytes", "x": "the Frank-Wolfe iterate, a float a building",
           "host": "the machine", "peak_rss_gb": "the machine",
-          "device": "the solves' device (seam.Metric.device): scores alike to the floating "
-                    "point, not the run's identity"},
+          "device": "the solves' device (gap_clear.ComplexMetric.device): scores alike to the "
+                    "floating point, not the run's identity"},
     sibling=("iters", "relaxed_perm", "bound_perm", "rounded_perm", "rounded_D", "frac_share",
              "frac_cost", "cleared"))
 FW = Slot(
@@ -269,54 +278,58 @@ def simp_reader(slot: Slot, meta: Settings) -> Callable[[Path], list[Row]]:
 
 
 def split_along(token: str) -> tuple[str, str]:
-    """(the run's metric, the search's where it differed: a raster's `@<along>`, the complex's
-    `@e<eps>`, the translucent search's eps world). A complex metric's name is checked whole
-    (gap_clear.complex_of: refused unless it spells a metric of this code's constants), so no other
-    code's rows are read as this code's."""
-    if token.startswith(metrics.COMPLEX):
-        gap_clear.complex_of(token, factorization=gap_factor.SuperLU())
+    """(the run's metric, its translucent search's `e<eps>` where it has one): a metric directory's
+    name, which this_code accepted."""
     metric, _, search = token.partition("@")
     return metric, search
 
 
-def mesh_of_run(spec: str, along: str) -> str:
-    """The grid a run optimized and scored on (mesh_name), none for the complex's ('')."""
-    return "" if along.startswith(metrics.COMPLEX) else mesh_name(spec)
+def _metric_dirs(root: Path, store: str) -> list[Path]:
+    """The metric directories under a store (relax_rows/<metric>, ...) whose metric is this
+    code's."""
+    base = root / store
+    return sorted(d for d in base.iterdir() if d.is_dir() and this_code(d.name)) \
+        if base.is_dir() else []
+
+
+def _by_power(d: Path) -> dict[str, list[Path]]:
+    by_power: dict[str, list[Path]] = defaultdict(list)
+    for f in sorted(d.glob("*.parquet")):
+        p = re.fullmatch(r".+_p(?P<power>[0-9.]+)", f.stem)
+        if p is None:
+            raise ValueError(f"{f}: not <block>_p<power>.parquet")
+        by_power[p["power"]].append(f)
+    return by_power
 
 
 @dataclass(frozen=True)
 class SimpFamily:
     def sources(self, root: Path) -> list[Source]:
         out: list[Source] = []
-        pat = re.compile(rf"^relax_rows/(?P<along>{ALONGS})/(?P<plan>[^/]+)/D(?P<budget>{NUM})$")
-        for d in sorted((root / "relax_rows").glob("*/*/D*")):
-            rel = d.relative_to(root).as_posix()
-            m = pat.fullmatch(rel)
-            if m is None:
-                raise ValueError(f"{rel}: not relax_rows/<along>/<plan>/D<budget>")
-            by_power: dict[str, list[Path]] = defaultdict(list)
-            for f in sorted(d.glob("*.parquet")):
-                p = re.fullmatch(r".+_p(?P<power>[0-9.]+)", f.stem)
-                if p is None:
-                    raise ValueError(f"{f}: not <block>_p<power>.parquet")
-                by_power[p["power"]].append(f)
-            along, search = split_along(m["along"])
-            for power, files in by_power.items():
-                base = Settings(run=f"{rel}.p{power}", family="simp", mode="whole", spec=m["plan"],
-                                power=float(power), demand="w", population="area", along=along,
-                                search_along=search, mesh=mesh_of_run(m["plan"], along),
-                                budget=float(m["budget"]), source=rel, note="")
-                out.append(Source(settings=base, files=tuple(files),
-                                  block_ids=tuple(block_of(f) for f in files),
-                                  read=simp_reader(SIMP, base)))
-                fw_files = tuple(f for f in files
-                                 if "rounded_perm" in pq.read_schema(f).names)
-                if fw_files:
-                    fw = replace(base, run=f"{rel}.p{power}.fw", family="simp-fw",
-                                 note="the relaxation's rounding (round_by_x), not SIMP's answer")
-                    out.append(Source(settings=fw, files=fw_files,
-                                      block_ids=tuple(block_of(f) for f in fw_files),
-                                      read=simp_reader(FW, fw)))
+        for md in _metric_dirs(root, "relax_rows"):
+            along, search = split_along(md.name)
+            for d in sorted(md.glob("*/D*")):
+                rel = d.relative_to(root).as_posix()
+                m = re.fullmatch(rf"relax_rows/[^/]+/(?P<plan>[^/]+)/D(?P<budget>{NUM})", rel)
+                if m is None:
+                    raise ValueError(f"{rel}: not relax_rows/<metric>/<plan>/D<budget>")
+                for power, files in _by_power(d).items():
+                    base = Settings(run=f"{rel}.p{power}", family="simp", mode="whole",
+                                    spec=m["plan"], power=float(power), demand="w",
+                                    population="area", along=along, search_along=search, mesh="",
+                                    budget=float(m["budget"]), source=rel, note="")
+                    out.append(Source(settings=base, files=tuple(files),
+                                      block_ids=tuple(block_of(f) for f in files),
+                                      read=simp_reader(SIMP, base)))
+                    fw_files = tuple(f for f in files
+                                     if "rounded_perm" in pq.read_schema(f).names)
+                    if fw_files:
+                        fw = replace(base, run=f"{rel}.p{power}.fw", family="simp-fw",
+                                     note="the relaxation's rounding (round_by_x), not SIMP's "
+                                          "answer")
+                        out.append(Source(settings=fw, files=fw_files,
+                                          block_ids=tuple(block_of(f) for f in fw_files),
+                                          read=simp_reader(FW, fw)))
         return out
 
 
@@ -327,66 +340,57 @@ POLISH = Slot(
             "greedy_D": "greedy_D", "moves": "moves", "scorings": "scorings", "t": "t",
             "t_greedy": "t_greedy", "free_D": "free_D", "free_cleared": "free_cleared",
             "enclosed": "enclosed"},
-    check=("block", "n", "picker", "mesh"),
-    drop={"device": SIMP.drop["device"]})
+    check=("block", "n", "picker"),
+    drop={"device": SIMP.drop["device"],
+          "mesh": "the retired raster's grid (lifted.MeshSpec.name), h0.5 in the complex's rows "
+                  "made before phase 3: a placeholder the complex ignored"})
 
 
 @dataclass(frozen=True)
 class PolishFamily:
     def sources(self, root: Path) -> list[Source]:
         out: list[Source] = []
-        pat = re.compile(rf"^polish_rows/(?P<along>{ALONGS})/(?P<spec>(?P<picker>S{NUM}cat"
-                         rf"(?:w[0-9]+)?)\.P[0-9]+w[0-9]+(?:x2)?[^/]*)/D(?P<budget>{NUM})$")
-        for d in sorted((root / "polish_rows").glob("*/*/D*")):
-            rel = d.relative_to(root).as_posix()
-            m = pat.fullmatch(rel)
-            if m is None:
-                raise ValueError(f"{rel}: not polish_rows/<along>/<picker>.P<t>w<w>[x2]/D<budget>")
-            by_power: dict[str, list[Path]] = defaultdict(list)
-            for f in sorted(d.glob("*.parquet")):
-                p = re.fullmatch(r".+_p(?P<power>[0-9.]+)", f.stem)
-                if p is None:
-                    raise ValueError(f"{f}: not <block>_p<power>.parquet")
-                by_power[p["power"]].append(f)
-            along, search = split_along(m["along"])
-            for power, files in by_power.items():
-                meta = Settings(run=f"{rel}.p{power}", family="polish", mode="whole",
-                                spec=m["spec"], power=float(power), demand="w",
-                                population="area", along=along, search_along=search,
-                                mesh=mesh_of_run(m["spec"], along), budget=float(m["budget"]),
-                                source=rel, note="")
-                out.append(Source(settings=meta, files=tuple(files),
-                                  block_ids=tuple(block_of(f) for f in files),
-                                  read=self._reader(meta, m["picker"])))
+        for md in _metric_dirs(root, "polish_rows"):
+            along, search = split_along(md.name)
+            for d in sorted(md.glob("*/D*")):
+                rel = d.relative_to(root).as_posix()
+                m = re.fullmatch(rf"polish_rows/[^/]+/(?P<spec>(?P<picker>S{NUM}cat(?:w[0-9]+)?)"
+                                 rf"\.P[0-9]+w[0-9]+(?:x2)?E?)/D(?P<budget>{NUM})", rel)
+                if m is None:
+                    raise ValueError(f"{rel}: not polish_rows/<metric>/<picker>.P<t>w<w>[x2][E]/"
+                                     "D<budget>")
+                for power, files in _by_power(d).items():
+                    meta = Settings(run=f"{rel}.p{power}", family="polish", mode="whole",
+                                    spec=m["spec"], power=float(power), demand="w",
+                                    population="area", along=along, search_along=search, mesh="",
+                                    budget=float(m["budget"]), source=rel, note="")
+                    out.append(Source(settings=meta, files=tuple(files),
+                                      block_ids=tuple(block_of(f) for f in files),
+                                      read=self._reader(m["picker"])))
         return out
 
     @staticmethod
-    def _reader(meta: Settings, picker: str) -> Callable[[Path], list[Row]]:
+    def _reader(picker: str) -> Callable[[Path], list[Row]]:
         def read(f: Path) -> list[Row]:
             df = pd.read_parquet(f)
             audit(df.columns, POLISH, f)
             [r] = (row for _, row in df.iterrows())
             same("block", r["block"], block_of(f), f)
             same("picker", r["picker"], picker, f)
-            # the row's own `mesh` is the grid its spec names (the complex's: a placeholder it
-            # ignores, h 0.5 unnamed)
-            same("mesh", r["mesh"], mesh_name(meta.spec), f)
             row = commit(r, POLISH)
             row.update(block=r["block"], step=1, n=int(r["n"]))
             return [row]
         return read
 
 
-# -- the greedy and the searches that write its format (clear.greedy_block, search.py)
+# -- the searches that write the greedy's format (search.py, relax.py `path`; clear.rows_dir)
 
 GREEDY = Slot(
     commit={"step": "step", "D": "D", "perm": "perm", "perm1": "perm1", "cleared": "cleared",
-            "clearing": "cleared", "P0": "P0", "t": "t"},
+            "clearing": "cleared", "P0": "P0", "t": "t", "enclosed": "enclosed"},
     check=("block", "n"),
-    drop={})
-GREEDY_DIR = re.compile(rf"^clear_rows_(?P<picker>.+?)_h(?P<h>{NUM})(?:_(?P<pop>area))?"
-                        rf"(?:_p(?P<power>{NUM}))?(?:_(?P<along>{ALONGS}))?"
-                        rf"(?P<trapped>\.trapped)?$")
+    drop={"device": SIMP.drop["device"]})
+GREEDY_DIR = re.compile(rf"^clear_rows_(?P<picker>[^_]+)_p(?P<power>{NUM})_(?P<along>cx\+[^/]+)$")
 
 
 def greedy_family(picker: str) -> str:
@@ -395,9 +399,7 @@ def greedy_family(picker: str) -> str:
     for prefix, family in (("GP", "grow-prune"), ("FL", "floating"), ("SW", "swing")):
         if picker.startswith(prefix):
             return family
-    if re.match(r"^(M|B|S)[0-9]", picker):
-        return "greedy"
-    raise ValueError(f"unknown picker {picker!r}")
+    raise ValueError(f"unknown search {picker!r}")
 
 
 @dataclass(frozen=True)
@@ -405,27 +407,22 @@ class GreedyFamily:
     def sources(self, root: Path) -> list[Source]:
         out: list[Source] = []
         for d in sorted(root.glob("clear_rows_*")):
-            if not d.is_dir():
-                continue
             m = GREEDY_DIR.fullmatch(d.name)
-            if m is None:
-                raise ValueError(f"{d.name}: not clear.rows_dir's name")
+            if not d.is_dir() or m is None or not this_code(m["along"]):
+                continue                    # a record (the raster's greedy rows), or no store
             files = tuple(sorted(d.glob("*.parquet")))
             if not files:
                 continue                    # an empty directory (a run that wrote nothing)
             names = pq.read_schema(files[0]).names
             mode = "whole" if "clearing" in names else "added"
             family = greedy_family(m["picker"])
-            along, search = split_along(m["along"] or "uni")
+            along, search = split_along(m["along"])
             budget = re.search(rf"D({NUM})$", m["picker"])
             meta = Settings(
                 run=d.name, family=family, mode=mode, spec=m["picker"],
-                power=float(m["power"] or 1.0), demand="w", population=m["pop"] or "count",
-                along=along, search_along=search, mesh=f"h{m['h']}",
-                budget=float(budget[1]) if budget and family != "greedy" else None,
-                source=d.name,
-                note="a renamed run: SIMP's cold nested path, whose switched-off buildings stay "
-                     "trapped (relax.path)" if m["trapped"] else "")
+                power=float(m["power"]), demand="w", population="area", along=along,
+                search_along=search, mesh="",
+                budget=float(budget[1]) if budget else None, source=d.name, note="")
             out.append(Source(settings=meta, files=files,
                               block_ids=tuple(block_of(f) for f in files),
                               read=self._reader(meta)))
@@ -456,102 +453,46 @@ class GreedyFamily:
         return read
 
 
-# -- priority-weighted P (pweight.py)
+# -- priority-weighted P (pweight.py: pweight_rows/<metric>/<simp|fw|score>/)
+
+PWEIGHT_NOT_CLEARINGS: Mapping[str, str] = {
+    "fw": "Frank-Wolfe bounds (numbers; the design x is not stored), no clearing",
+    "score": "the clearings scored under every objective: scores only",
+}
+
 
 @dataclass(frozen=True)
 class PweightFamily:
     def sources(self, root: Path) -> list[Source]:
         out: list[Source] = []
-        for d in sorted((root / "pweight_rows" / "simp").glob("*")):
-            files = tuple(sorted(d.glob("*.parquet")))
-            if not files:
-                continue
-            first = pd.read_parquet(files[0], columns=["power", "demand", "plan", "along",
-                                                       "budget", "objective"]).iloc[0]
-            same("objective", first["objective"], d.name, files[0])
-            meta = Settings(
-                run=f"pweight_rows/simp/{d.name}", family="simp", mode="whole",
-                spec=str(first["plan"]), power=float(first["power"]), demand=str(first["demand"]),
-                population="area", along=str(first["along"]), search_along="",
-                mesh=mesh_name(str(first["plan"])), budget=float(first["budget"]),
-                source=d.relative_to(root).as_posix(),
-                note=f"priority-weighted P, objective {d.name} (pweight.py), SIMP base with "
-                     "free first, on the CPU")
-            out.append(Source(settings=meta, files=files,
-                              block_ids=tuple(block_of(f) for f in files),
-                              read=simp_reader(SIMP, meta)))
-        return out
-
-
-# -- the clearings the studies gathered (one parquet, a name each)
-
-COLLECTED: Mapping[str, str] = {
-    "fine_clearings.parquet": "clearings gathered for resolution_check.py (its clearings.parquet "
-                              "input; runs fine25, fine35), 2026-10-10",
-    "cheap_a5_clearings.parquet": "the cheap preset's clearings on the composite mesh a5x8, "
-                                  "gathered for resolution_check.py, 2026-10-08",
-    "ov_clearings.parquet": "the oversized blocks' coarse-h runs' clearings, kept when those runs "
-                            "were superseded (NOTES, 'Local coarsening: built'); perm is Lens A "
-                            "on the block's own mesh `h`; 2026-10-08",
-    "ovgoal_clearings.parquet": "the oversized blocks' clearings gathered for resolution_check.py "
-                                "on goal meshes, 2026-10-08",
-    "res_clearings.parquet": "the five clearings of each of the 59 large blocks gathered for "
-                             "resolution_check.py (run res-mesh; NOTES, 'Local coarsening: "
-                             "built'); greedy_steps is a greedy's whole pick order, 2026-10-08",
-    "three_clearings.parquet": "14401, 32841 and 7851's clearings gathered for resolution_check.py "
-                               "(runs three-res, three-res2; NOTES, 'Local coarsening: built'), "
-                               "2026-10-08",
-    "insulator_rows/walls_clearings.parquet": "the walls study's stored clearings (SIMP's default "
-                                              "and the cheap preset on 16 large blocks) as they "
-                                              "stood before lifted.Placement, 2026-10-11 12:50; "
-                                              "perm is their stored Lens A of that day",
-}
-COLLECTED_PERM = {"stored_perm": "perm", "perm_h": "perm"}
-
-
-@dataclass(frozen=True)
-class CollectedFamily:
-    def sources(self, root: Path) -> list[Source]:
-        out: list[Source] = []
-        for rel, what in COLLECTED.items():
-            f = root / rel
-            df = pd.read_parquet(f)
-            extra = sorted(set(df.columns) - {"block", "name", "cleared", "h", "perm_h",
-                                              "stored_perm"})
-            if extra:
-                raise ValueError(f"{f}: columns {extra} are not classified")
-            for name in sorted(df["name"].unique()):
+        for md in _metric_dirs(root, "pweight_rows"):
+            for d in sorted((md / "simp").glob("*")):
+                files = tuple(sorted(d.glob("*.parquet")))
+                if not files:
+                    continue
+                first = pd.read_parquet(files[0], columns=["power", "demand", "plan", "along",
+                                                           "budget", "objective"]).iloc[0]
+                same("objective", first["objective"], d.name, files[0])
+                along, search = split_along(str(first["along"]))
+                same("metric", str(first["along"]), md.name, files[0])
+                rel = d.relative_to(root).as_posix()
                 meta = Settings(
-                    run=f"collected/{rel.removesuffix('.parquet')}/{name}", family="collected",
-                    mode="whole", spec=name, power=None, demand="w", population="area", along="",
-                    search_along="", mesh="", budget=None, source=f"{rel}[name={name}]",
-                    note=what)
-                blocks = tuple(sorted(df.loc[df["name"] == name, "block"]))
-                out.append(Source(settings=meta, files=(f,), block_ids=blocks,
-                                  read=self._reader(meta, name)))
+                    run=rel, family="simp", mode="whole", spec=str(first["plan"]),
+                    power=float(first["power"]), demand=str(first["demand"]), population="area",
+                    along=along, search_along=search, mesh="", budget=float(first["budget"]),
+                    source=rel,
+                    note=f"priority-weighted P, objective {d.name} (pweight.py), SIMP base with "
+                         "free first, on the CPU")
+                out.append(Source(settings=meta, files=files,
+                                  block_ids=tuple(block_of(f) for f in files),
+                                  read=simp_reader(SIMP, meta)))
         return out
-
-    @staticmethod
-    def _reader(meta: Settings, name: str) -> Callable[[Path], list[Row]]:
-        def read(f: Path) -> list[Row]:
-            df = pd.read_parquet(f)
-            out: list[Row] = []
-            for _, r in df[df["name"] == name].iterrows():
-                row: Row = dict(block=r["block"], step=1, cleared=ids(r["cleared"]))
-                for src, core in COLLECTED_PERM.items():
-                    if src in r.index:
-                        row[core] = r[src]
-                if "h" in r.index:
-                    row["h"] = r["h"]
-                out.append(row)
-            return out
-        return read
 
 
 # -- rows a cluster run was shipped, since overwritten (the cluster launcher's input tars)
 
-STORE_MEMBER = re.compile(r"^research/roadless/(?P<path>(?:relax_rows|polish_rows|pweight_rows|"
-                          r"clear_rows_[^/]+)/.+\.parquet)$")
+STORE_MEMBER = re.compile(r"^research/roadless/(?P<path>(?P<store>relax_rows|polish_rows|"
+                          r"pweight_rows|clear_rows_[^/]+)/.+\.parquet)$")
 
 
 @dataclass(frozen=True)
@@ -561,9 +502,8 @@ class ShippedFamily:
     file's, or whose local file is gone, taken from the earliest run that shipped those bytes and
     extracted under `scratch`. The families above read them from there, unchanged; a source's run
     is theirs plus @<cluster run>. Rows identical to the local ones are the local ones. Rows under
-    a gap complex metric that is not this code's (`foreign`: phase 1's runs shipped to the raster's
-    re-scoring, rcx-score*, before their migration to the digested name) are no rows of this code:
-    the migration (gap_calib rescore) carried them, and they are counted, not read."""
+    a metric not this code's (`_record`: the retired raster's, or another code's complex) are
+    records: counted, not read."""
     cluster_runs: Path
     scratch: Path
 
@@ -572,7 +512,7 @@ class ShippedFamily:
                       key=lambda p: (p.stat().st_mtime_ns, p.parts[-4], p.name))
         taken: set[tuple[str, str]] = set()
         shipped: dict[str, int] = defaultdict(int)
-        foreign: dict[str, int] = defaultdict(int)
+        records: dict[str, int] = defaultdict(int)
         for tar in tars:
             cluster_run = tar.parts[-4]
             with tarfile.open(tar) as tf:
@@ -580,8 +520,8 @@ class ShippedFamily:
                     hit = STORE_MEMBER.fullmatch(m.name) if m.isfile() else None
                     if hit is None:
                         continue
-                    if _foreign(hit["path"]):
-                        foreign[cluster_run] += 1
+                    if _record(hit["path"]):
+                        records[cluster_run] += 1
                         continue
                     fh = tf.extractfile(m)
                     if fh is None:
@@ -599,13 +539,13 @@ class ShippedFamily:
                     dest.write_bytes(data)
                     os.utime(dest, (m.mtime, m.mtime))
                     shipped[cluster_run] += 1
-        if foreign:
-            print(f"shipped rows under another code's complex metric, not read: "
-                  f"{sum(foreign.values())} in {', '.join(sorted(foreign))}", flush=True)
+        if records:
+            print(f"shipped rows under a metric not this code's (records), not read: "
+                  f"{sum(records.values())} in {len(records)} cluster runs", flush=True)
         out: list[Source] = []
         for cluster_run in sorted(shipped):
             sub = self.scratch / cluster_run
-            for fam in (SimpFamily(), PolishFamily(), GreedyFamily(), PweightFamily()):
+            for fam in FAMILIES:
                 for src in fam.sources(sub):
                     meta = src.settings
                     out.append(replace(src, settings=replace(
@@ -618,17 +558,13 @@ class ShippedFamily:
         return out
 
 
-def _foreign(path: str) -> bool:
-    """A rows path under a gap complex metric whose name is not this code's (gap_clear.complex_of
-    refuses it: another digest, or phase 1's undigested name)."""
+def _record(path: str) -> bool:
+    """A rows path (a store's, under research/roadless) under a metric not this code's."""
     parts = path.split("/")
-    if len(parts) < 2 or not parts[1].startswith(metrics.COMPLEX):
-        return False
-    try:
-        gap_clear.complex_of(parts[1], factorization=gap_factor.SuperLU())
-    except ValueError:
-        return True
-    return False
+    if parts[0].startswith("clear_rows_"):
+        m = GREEDY_DIR.fullmatch(parts[0])
+        return m is None or not this_code(m["along"])
+    return len(parts) < 2 or not this_code(parts[1])
 
 
 FAMILIES: tuple[Family, ...] = (SimpFamily(), PolishFamily(), GreedyFamily(), PweightFamily())
@@ -638,34 +574,45 @@ ROOTS = ("relax_rows", "polish_rows", "pweight_rows")
 CLUSTER_RUNS = HERE.parent.parent / ".cluster_submit" / "runs"      # the repo root's launcher dir
 
 
+def records(root: Path) -> list[str]:
+    """The rows directories the sources do not read (records: `this_code`): each store's metric
+    directories under another metric, and the greedy-format directories that are not this code's
+    (clear.rows_dir's)."""
+    out = [d.relative_to(root).as_posix() for r in ROOTS if (root / r).is_dir()
+           for d in sorted((root / r).iterdir()) if d.is_dir() and not this_code(d.name)]
+    return out + [d.name for d in sorted(root.glob("clear_rows_*"))
+                  if d.is_dir() and _record(d.name + "/x.parquet")]
+
+
 def discover(root: Path, shipped: ShippedFamily) -> list[Source]:
     """Every run the sources hold, with the closed-set audit: every directory holding parquets
-    under a store is exported or in EXCLUDED, and every top-level parquet with a clearing list is
-    collected or a copy."""
-    found = [s for fam in (*FAMILIES, CollectedFamily(), shipped) for s in fam.sources(root)]
+    under this code's metric in a store is exported or not clearings (pweight's fw and score),
+    every top-level directory that looks like a rows store is a store's or in EXCLUDED, and every
+    top-level parquet with a clearing list is a known record."""
+    found = [s for fam in (*FAMILIES, shipped) for s in fam.sources(root)]
     exported = {(root / s.settings.source) for s in found if "[" not in s.settings.source}
-
-    def excluded(rel: str) -> bool:
-        return any(rel == k or rel.startswith(k + "/") for k in EXCLUDED)
-
-    stores = [root / r for r in ROOTS] + sorted(d for d in root.glob("clear_rows_*") if d.is_dir())
-    for store in stores:
+    live = [md for r in ROOTS for md in _metric_dirs(root, r)] + [
+        d for d in sorted(root.glob("clear_rows_*")) if d.is_dir()
+        and not _record(d.name + "/x.parquet")]
+    for store in live:
         for d in sorted({f.parent for f in store.rglob("*.parquet")}):
             rel = d.relative_to(root).as_posix()
-            if d not in exported and not excluded(rel):
-                raise ValueError(f"{rel}: holds parquets, is neither exported nor in EXCLUDED")
+            sub = d.relative_to(store).parts
+            not_clearings = store.parent.name == "pweight_rows" and sub[0] in PWEIGHT_NOT_CLEARINGS
+            if d not in exported and not not_clearings:
+                raise ValueError(f"{rel}: holds parquets under this code's metric, is not exported")
     for d in sorted(root.iterdir()):
         looks = d.is_dir() and (d.name.endswith("_rows") or "_rows_" in d.name
                                 or d.name.startswith(("rows_", "clear_rows_")))
         if looks and d.name not in ROOTS and not d.name.startswith("clear_rows_") \
                 and d.name not in EXCLUDED:
-            raise ValueError(f"{d.name}: a rows store that is neither exported nor in EXCLUDED")
+            raise ValueError(f"{d.name}: a rows store that is neither a store's nor in EXCLUDED")
     for f in sorted(root.glob("*.parquet")):
-        if f.name in COLLECTED or f.name in COPIES:
+        if f.name in RECORD_PARQUETS:
             continue
         if any(fld.name in ID_COLUMNS and pa.types.is_list(fld.type) for fld in pq.read_schema(f)):
-            raise ValueError(f"{f.name}: holds clearings (a list column) but is neither collected "
-                             "nor a copy of a run")
+            raise ValueError(f"{f.name}: holds clearings (a list column) but is neither exported "
+                             "nor a known record")
     return found
 
 
@@ -770,20 +717,17 @@ def read_run(src: Source, data: Mapping[str, BlockData]) -> tuple[pd.DataFrame, 
     """Read, check and describe one run."""
     meta = src.settings
     rows: list[Row] = []
-    epochs: list[str] = []
     mtimes = [local_time(f.stat().st_mtime) for f in src.files]
-    for f, mt in zip(src.files, mtimes, strict=True):
+    for f in src.files:
         got = src.read(f)
         rows += got
-        has = any("enclosed" in r and not pd.isna(r["enclosed"]) for r in got)
-        if not has and mt >= B_EPOCH:
-            raise ValueError(f"{f}: written {stamp(mt)}, after lifted.Placement, with no "
-                             "`enclosed`: which scorer made it?")
-        epochs.append("B" if has else "preB")
+        if not all(stated(r, "enclosed") for r in got):
+            raise ValueError(f"{f}: a row with no `enclosed`: B (i) unstated (every writer of "
+                             "this code's metric states it)")
     if len(set(src.block_ids)) != len(src.block_ids) and len(src.files) > 1:
         raise ValueError(f"{meta.run}: two files for one block")
     check_rows(meta.run, meta.mode, meta.population, rows, data)
-    metric = epochs[0] if len(set(epochs)) == 1 else "mixed"
+    metric = "B"
     info = RunInfo(
         run=meta.run, family=meta.family, mode=meta.mode, spec=meta.spec, power=meta.power,
         demand=meta.demand, population=meta.population, along=meta.along,
@@ -842,53 +786,6 @@ def merged_info(old: RunInfo | None, info: RunInfo, frame: pd.DataFrame) -> RunI
                    ids=int(sum(len(c) for c in frame["cleared"])))
 
 
-# ------------------------------------------------------------------ copies and collected sets
-
-def check_copies(root: Path, store_frames: Mapping[str, pd.DataFrame]) -> list[str]:
-    """The top-level parquets that copy a run's rows (COPIES) equal to them: the same positions
-    and the same lens a block, for SIMP's clearing and the rounding. Returns what it checked."""
-    lines = []
-    for name, run in COPIES.items():
-        df = pd.read_parquet(root / name)
-        for column, perm, target in (("simp_cleared", "simp_perm", run),
-                                     ("cleared", "rounded_perm", run + ".fw")):
-            t = store_frames[target].set_index("block")
-            for _, r in df.iterrows():
-                got = t.loc[r["block"]]
-                if sorted(int(i) for i in r[column]) != sorted(int(i) for i in got["cleared"]):
-                    raise ValueError(f"{name} {r['block']}: {column} differs from {target}")
-                if abs(float(r[perm]) - float(got["perm"])) > 1e-12:
-                    raise ValueError(f"{name} {r['block']}: {perm} differs from {target}")
-        lines.append(f"{name}: {len(df)} blocks equal to {run} and {run}.fw")
-    return lines
-
-
-def collected_notes(frames: Mapping[str, pd.DataFrame], infos: Mapping[str, RunInfo]
-                    ) -> dict[str, str]:
-    """For each collected run, how many of its sets equal a set of a stored run (the same block,
-    the same buildings): the collected copies' provenance, counted rather than assumed."""
-    index: dict[tuple[str, frozenset[int]], int] = defaultdict(int)
-    for run, frame in frames.items():
-        info = infos[run]
-        if info.family == "collected":
-            continue
-        steps = info.steps
-        for block, g in frame.groupby("block", sort=False):
-            rows = [np.asarray(c, dtype=np.int64) for c in g.sort_values("step")["cleared"]]
-            for k in range(1, len(rows) + 1):
-                index[(str(block), frozenset(int(i) for i in steps.through(rows, k)))] += 1
-    out = {}
-    for run, frame in frames.items():
-        if infos[run].family != "collected":
-            continue
-        miss = [str(b) for b, c in zip(frame["block"], frame["cleared"], strict=True)
-                if (str(b), frozenset(int(i) for i in c)) not in index]
-        n = len(frame)
-        out[run] = (f"{n - len(miss)} of {n} sets equal a set of a stored run"
-                    + (f"; not elsewhere: {', '.join(sorted(miss))}" if miss else ""))
-    return out
-
-
 # ------------------------------------------------------------------ the commands
 
 def inventory(root: Path) -> None:
@@ -897,20 +794,22 @@ def inventory(root: Path) -> None:
 
 
 def _inventory(root: Path, src: list[Source]) -> None:
-    print(f"{'family':10s} {'p':>3s} {'pop':5s} {'mesh':11s} {'D':>5s} {'files':>5s} {'blocks':>6s} "
+    print(f"{'family':10s} {'p':>3s} {'pop':5s} {'D':>5s} {'files':>5s} {'blocks':>6s} "
           f"{'KB':>6s}  {'written (first .. last)':35s} along  run")
     for s in src:
         m = s.settings
         mt = [local_time(f.stat().st_mtime) for f in s.files]
         along = (m.along or "-") + (f"@{m.search_along}" if m.search_along else "")
         print(f"{m.family:10s} {m.power if m.power else '-'!s:>3.3s} {m.population:5s} "
-              f"{m.mesh or '-':11s} {m.budget if m.budget else '-'!s:>5.5s} {len(s.files):5d} "
+              f"{m.budget if m.budget else '-'!s:>5.5s} {len(s.files):5d} "
               f"{len(set(s.block_ids)):6d} {sum(f.stat().st_size for f in s.files) / 1e3:6.0f}  "
               f"{stamp(min(mt))} .. {stamp(max(mt))}  {along}  {m.run}")
-    rows = [s for s in src if s.settings.family != "collected"]
-    print(f"{len(src)} runs; {sum(len(s.files) for s in rows)} row files, "
-          f"{sum(f.stat().st_size for s in rows for f in s.files) / 1e6:.1f} MB "
-          "(a collected file is counted once per name)")
+    print(f"{len(src)} runs; {sum(len(s.files) for s in src)} row files, "
+          f"{sum(f.stat().st_size for s in src for f in s.files) / 1e6:.1f} MB")
+    rec = records(root)
+    print(f"{len(rec)} rows directories under a metric not this code's: records, not read "
+          f"({', '.join(rec[:4])}{', ...' if len(rec) > 4 else ''}); "
+          f"{len(RECORD_PARQUETS)} top-level parquets of clearings, records")
 
 
 def export(root: Path, store: Store, replace_runs: set[str]) -> None:
@@ -956,13 +855,6 @@ def _export(root: Path, store: Store, replace_runs: set[str], sources: list[Sour
         raise SystemExit("rows the sources hold differ from the committed ones (an overwrite in "
                          "place; the committed rows stand): re-run with --replace RUN to take "
                          "the new ones (the old stay in git's history)\n" + "\n".join(lines))
-
-    for line in check_copies(root, frames):
-        print(" ", line)
-    notes = collected_notes(frames, infos)
-    for run, note in notes.items():
-        info = infos[run]
-        infos[run] = replace(info, note=f"{info.note}; {note}")
 
     store.write_prints({**committed, **{b: d.print for b, d in data.items()}}.values())
     for run, frame in frames.items():
