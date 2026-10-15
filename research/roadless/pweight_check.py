@@ -27,7 +27,7 @@ P_{1/2}, P_1 and J_2 against P's, bit for bit. Fault `cost-from-demand`: the mod
 injection.
 
 `gradient`: the relaxation's gradient of P_q (q 1/2 and 1) and of P at a random fractional
-clearing, SIMP's q 1 and 3, in SIMP base's eps world (1e-4), against the closer of the central
+clearing, SIMP's q 1 and 3, in SIMP base's eps world (1e-4), against the closest of the central
 differences at GRAD_STEPS on GRAD_BUILDINGS buildings: the largest difference within GRAD_TOL of
 the largest |gradient| checked. Fault `J-population`: the model's J weighting the population while
 the solve injects the priority demand (lam = u is then not J's adjoint).
@@ -59,7 +59,11 @@ TOTAL_TOL = 1e-12
 GRAD_BUILDINGS = 6
 GRAD_SIMP_Q = (1.0, 3.0)
 GRAD_EPS = 1e-4          # SIMP base's (pweight.PLAN.eps)
-GRAD_STEPS = (1e-5, 1e-6)   # the closer central difference (the factors are piecewise linear)
+GRAD_STEPS = (1e-3, 1e-4, 1e-5)   # the closest central difference: the factors are piecewise
+                                  # linear (one step straddling a kink of the minimum, another
+                                  # not), and the solves' roundoff on P (9e4 on 20269) reaches
+                                  # 1e-4 of the gradient at a step of 1e-5 and 1e-3 at 1e-6
+                                  # (measured), where 1e-3 and 1e-4 agree within 6e-6
 GRAD_TOL = 1e-4          # as gap_clear_check's gradient guard
 WEIGHT_TOL = 1e-9        # the model's weights against the direct computation (a refined solve
                          # against an unrefined direct one: ~1e-12)
