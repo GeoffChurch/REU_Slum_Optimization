@@ -16,6 +16,7 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S device <ids,> [fault]      # fault: perturb (on a GPU: cluster.py --complex)
     uv run python $S roads <ids,> [fault]       # fault: one-face-closed
     uv run python $S flux <ids,> [fault]        # fault: flip-one
+    uv run python $S device-roads <ids,> [fault]   # fault: perturb (on a GPU)
 
 `baseline`: the fixed mesh (the runtime's metric, METRIC) against the complex rebuilt
 (gap_compare.ComplexModel, gap_flow's mesh under the shy distance at 0.5): P0, P_{1/2},0 and
@@ -85,6 +86,10 @@ clearings, the passages' and street faces' fluxes (gap_maps.flow_of) conserve cu
 open cell, the net outflow of an unknown cell equal to its injection within FLUX_TOL of the
 largest current through a cell, and the drainage (street faces and ground cells) equal to the
 injection in all. Fault `flip-one`: the largest passage flux's sign flipped.
+`device-roads` (phase 2b: the road lineup ran on cores): `device` on a carved mesh, cuDSS against
+SuperLU at the `roads` guard's prefixes: each prefix's P, P_{1/2} and J_2 and every home's escape
+time, within DEVICE_TOL. Run on a GPU node. Fault `perturb`: the first prefix's refactorization
+(each plan's second, after the baseline's) as in `device`.
 """
 from __future__ import annotations
 
@@ -95,7 +100,9 @@ import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING, NamedTuple
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
@@ -103,13 +110,25 @@ import shapely
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import clearings  # noqa: E402
+import clearings_check  # noqa: E402
+import clearings_export  # noqa: E402
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
 import gap_factor  # noqa: E402
 import gap_compare as gcmp  # noqa: E402
 import gap_complex as gc  # noqa: E402
 import gap_flow as gf  # noqa: E402
+import gap_maps  # noqa: E402
 import metrics  # noqa: E402
+import pweight  # noqa: E402
+import road_rescore as rr  # noqa: E402
+import search  # noqa: E402
+
+if TYPE_CHECKING:
+    from shapely.geometry.base import BaseGeometry
+
+    from reblock.contracts import Block
 
 NAME = metrics.RUNTIME            # the runtime's (owner 2026-10-14)
 METRIC = gcl.complex_of(NAME, factorization=gap_factor.SuperLU())
@@ -457,9 +476,6 @@ def identity(_ids: list[str]) -> list[str]:
             bad.append(f"{where} writes under {path}")
     # reading: a stored run under a raster name resolves to the raster's metric, never the
     # complex's (clearings_check.metric_of_run, clearings_export.split_along); the complex's to it
-    import clearings
-    import clearings_check
-    import clearings_export
     template = next(i for i in clearings.Store.committed().runs().values()
                     if i.along == "uni" and i.mesh == "h0.5")
     read_ok = 0
@@ -482,9 +498,6 @@ def identity(_ids: list[str]) -> list[str]:
 
 def _ported_paths(metric: gcl.ComplexMetric) -> dict[str, Path]:
     """Where each script ported in phase 2b writes its rows under `metric`."""
-    import pweight
-    import road_rescore as rr
-    import search
     presets = rr.cx_presets(metric.name, search.Exactly())
     return {"road_rescore cx": rr.cx_dir(ROAD_ROWS, metric), "SIMP's default": presets.simp,
             "the cheap preset": presets.cheap, "pweight": pweight.rows_of(metric.name)}
@@ -717,21 +730,47 @@ def device(ids: list[str]) -> list[str]:
             r["polish eps world"] = np.array([m.relaxation(1.0, q=1.0, rtol=0.0, eps=1e-6)
                                               .value(x.astype(float))])
             out[dev] = r
-        worst = 0.0
-        parts = []
-        for key in out["cpu"]:
-            a, z = out["cpu"][key], out["gpu"][key]
-            fin = np.isfinite(a)
-            if not np.array_equal(fin, np.isfinite(z)):
-                bad.append(f"{bid} {key}: the devices part on which values are finite")
-                continue
-            err = float(np.abs(a[fin] - z[fin]).max() / max(np.abs(a[fin]).max(), 1e-300))
-            worst = max(worst, err)
-            parts.append(f"{key} {err:.1e}")
-            if err > DEVICE_TOL:
-                bad.append(f"{bid} {key} {err:.1e}")
-        print(f"{bid}: cuDSS against SuperLU, of the largest: " + ", ".join(parts)
-              + f"; worst {worst:.1e} -> {'ok' if worst <= DEVICE_TOL else 'FAILS'}", flush=True)
+        bad += _devices_apart(bid, out)
+    return bad
+
+
+def _devices_apart(bid: str, out: dict[str, dict[str, np.ndarray]]) -> list[str]:
+    """Each quantity cuDSS gave (out["gpu"]) against SuperLU's (out["cpu"]), within DEVICE_TOL
+    of its largest magnitude; what parts."""
+    bad = []
+    worst = 0.0
+    parts = []
+    for key in out["cpu"]:
+        a, z = out["cpu"][key], out["gpu"][key]
+        fin = np.isfinite(a)
+        if not np.array_equal(fin, np.isfinite(z)):
+            bad.append(f"{bid} {key}: the devices part on which values are finite")
+            continue
+        err = float(np.abs(a[fin] - z[fin]).max() / max(np.abs(a[fin]).max(), 1e-300))
+        worst = max(worst, err)
+        parts.append(f"{key} {err:.1e}")
+        if err > DEVICE_TOL:
+            bad.append(f"{bid} {key} {err:.1e}")
+    print(f"{bid}: cuDSS against SuperLU, of the largest: " + ", ".join(parts)
+          + f"; worst {worst:.1e} -> {'ok' if worst <= DEVICE_TOL else 'FAILS'}", flush=True)
+    return bad
+
+
+def device_roads(ids: list[str]) -> list[str]:
+    bad = []
+    for bid in ids:
+        case = _road_case(bid)
+        out: dict[str, dict[str, np.ndarray]] = {}
+        for dev in ("cpu", "gpu"):
+            m = dataclasses.replace(METRIC, factorization=gap_factor.factorization_of(dev)).model(
+                case.block, case.fixed, demand=POP)
+            r: dict[str, np.ndarray] = {}
+            for k in ROAD_STOPS:
+                L = m.road_lenses(gcl.Prefix(net=0, stop=k))
+                r[f"stop {k}"] = np.array([L.P, L.Pq, L.J2])
+                r[f"stop {k} homes"] = L.u
+            out[dev] = r
+        bad += _devices_apart(bid, out)
     return bad
 
 
@@ -756,22 +795,32 @@ def _perturb_one() -> contextlib.AbstractContextManager[None]:
 
 # ------------------------------------------------------------------ roads
 
-def roads(ids: list[str]) -> list[str]:
-    import geopandas as gpd
+class RoadCase(NamedTuple):
+    """A block's ROAD_NETWORK area prefixes cut into its fixed mesh (the road guards')."""
+    block: Block
+    stops: list[int]            # each prefix's road count
+    corridors: list[BaseGeometry]   # each prefix's corridor, in the block's local frame
+    fixed: gcl.Fixed
 
-    import road_rescore as rr
+
+def _road_case(bid: str) -> RoadCase:
+    [b] = common.build_blocks([bid])
+    geo = gc.geometry(b)
+    pre = pd.read_parquet(rr.prefix_dir(ROAD_ROWS) / f"{bid}__{ROAD_NETWORK}.parquet")
+    stops = sorted({int(mk) for mk in pre[pre["pop"] == rr.CX_POP].m})
+    ordered = gpd.read_parquet(rr.ordered_path(ROAD_ROWS / "scratch", bid, ROAD_NETWORK))
+    cors = [geo.local(rr.corridor_of(ordered, mk)) for mk in stops]
+    with tempfile.TemporaryDirectory() as tmp:
+        fx = METRIC.fixed(b, cache=Path(tmp), carving=gcl.Carving.of(geo, [cors]))
+    return RoadCase(block=b, stops=stops, corridors=cors, fixed=fx)
+
+
+def roads(ids: list[str]) -> list[str]:
     bad = []
     for bid in ids:
-        [b] = common.build_blocks([bid])
-        geo = gc.geometry(b)
-        pre = pd.read_parquet(rr.prefix_dir(ROAD_ROWS) / f"{bid}__{ROAD_NETWORK}.parquet")
-        stops = sorted({int(mk) for mk in pre[pre["pop"] == rr.CX_POP].m})
-        ordered = gpd.read_parquet(rr.ordered_path(ROAD_ROWS / "scratch", bid, ROAD_NETWORK))
-        cors = [geo.local(rr.corridor_of(ordered, mk)) for mk in stops]
-        carving = gcl.Carving.of(geo, [cors])
-        with tempfile.TemporaryDirectory() as tmp:
-            fx = METRIC.fixed(b, cache=Path(tmp), carving=carving)
-        m = METRIC.model(b, fx, demand=POP)
+        case = _road_case(bid)
+        b, stops, cors, carving = case.block, case.stops, case.corridors, case.fixed.carving
+        m = METRIC.model(b, case.fixed, demand=POP)
         cm = gcmp.ComplexModel(b, METRIC.fs, METRIC.form)
         parts = []
         for k in ROAD_STOPS:
@@ -809,7 +858,6 @@ def _one_face_closed(self: gcl.Carving, prefix: gcl.Prefix) -> np.ndarray:
 # ------------------------------------------------------------------ the pictures' fluxes
 
 def flux(ids: list[str]) -> list[str]:
-    import gap_maps
     bad = []
     for bid in ids:
         [b] = common.build_blocks([bid])
@@ -837,7 +885,6 @@ def flux(ids: list[str]) -> list[str]:
 
 def _flip_one() -> contextlib.AbstractContextManager[None]:
     """gap_maps._passage_flux with the largest flux's sign flipped (fault `flip-one`)."""
-    import gap_maps
     flux_of = gap_maps._passage_flux
 
     def flipped(Tp: np.ndarray, u: np.ndarray, ea: np.ndarray, eb: np.ndarray) -> np.ndarray:
@@ -853,7 +900,8 @@ def _flip_one() -> contextlib.AbstractContextManager[None]:
 GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "baseline": baseline, "weights": weights, "reach": reach, "gradient": gradient,
     "free": free, "identity": identity, "convex": convex, "pattern": pattern,
-    "constants": constants, "device": device, "roads": roads, "flux": flux}
+    "constants": constants, "device": device, "roads": roads, "flux": flux,
+    "device-roads": device_roads}
 
 
 def _fault_exits():
@@ -873,6 +921,7 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "pattern": {"drop-identity": lambda: _patched(gcl.Graph, "values", _drop_identity)},
     "constants": {"omit": lambda: _patched(gcl, "code_constants", _omit_mesh_rev)},
     "device": {"perturb": _perturb_one},
+    "device-roads": {"perturb": _perturb_one},
     "roads": {"one-face-closed": lambda: _patched(gcl.Carving, "carved", _one_face_closed)},
     "flux": {"flip-one": _flip_one},
 }
