@@ -340,14 +340,16 @@ items up front"), in the order proposed:
    leak (per block 0.02x), 1.1 -- 1.9x under the building-boundary leak; its self-trips small for
    the typical home but 9% population-weighted at 250 m, under 1% from 1,000 m; SIMP's default
    leads the cheap preset under every configuration. **Adopted (owner 2026-10-15)**: the barriers
-   ("We can adopt the barriers") and the uniform leak at lam 500 m (the more realistic,
-   "especially if you e.g. cleared an entire island so all traffic was internal"). Streets: "more
-   conductive, but not make them leak more" (owner), so no street leak; the boost is the streets'
-   lever. **Open**: the formal grid takes 89% (SIMP) of U500's clearing, and formal homes stay 2.6x
-   as deep; whether the boost moves that (its check at U500, about 1.05 GPU-h), and whether the
-   uniform leak's destinations on vacant land are the cause (a baseline diagnostic, cores only).
-   For the site: present both families, powers of the escape time (J_p) and priority-weighted P,
-   under established names.
+   ("We can adopt the barriers") and internal trips ("especially if you e.g. cleared an entire
+   island so all traffic was internal"), leaking only at buildings and the boundary: "I had
+   thought we could have only buildings and the boundary leak, so open space wouldn't leak at
+   all", so the building-boundary family, no uniform leak (the owner first picked lam 500 m on the
+   uniform leak's trip lengths). Streets: "more conductive, but not make them leak more", so no
+   street leak; the boost is the streets' lever. **Open**: the building leak's strength (at the
+   same nominal lam its trips are shorter than the uniform leak's: a typical home's current
+   leaks inside 78% at H500, 49% at H1000, against U500's 41%), and the boost's check at the
+   adopted configuration (about 1.05 GPU-h). For the site: present both families, powers of the
+   escape time (J_p) and priority-weighted P, under established names.
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights
