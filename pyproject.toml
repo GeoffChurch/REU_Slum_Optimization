@@ -127,7 +127,7 @@ build-constraint-dependencies = ["hatchling==1.32.0"]
 
 [tool.uv.sources]
 topology = { path = "ext/topology", editable = true }
-cluster_submit = { git = "https://github.com/GeoffChurch/cluster_submit.git", rev = "e299a2b785343d5607e09443d17dedd66d770c55" }
+cluster_submit = { git = "https://github.com/GeoffChurch/cluster_submit.git", rev = "f0ac42dec3c7efddff0cd3458f0a9e02c40e9bf6" }
 
 # ---------------------------------------------------------------------------
 # Tooling config

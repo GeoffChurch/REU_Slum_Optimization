@@ -50,6 +50,7 @@ import argparse
 import sys
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 
 import cluster_submit as cs
@@ -189,6 +190,9 @@ class Blocks:
             inputs=(workdir / "bank.pkl", *args.extra, *unpack.values()),
             prelude=PRELUDE, describe=(f"{len(ids)} blocks: {line}",))
 
+    def more(self, ctx: cs.Context, rec: cs.RunRecord) -> bool:
+        return False    # never asked: no exit of its is routine (cluster_submit's "Leases")
+
 
 @dataclass(frozen=True)
 class Cpu:
@@ -247,6 +251,9 @@ class Cpu:
             inputs=(workdir / "bank.pkl", *unpack.values()), prelude=PRELUDE,
             describe=(f"{len(ids)} blocks x {len(items)} items on {args.node}: {line}",))
 
+    def more(self, ctx: cs.Context, rec: cs.RunRecord) -> bool:
+        return False    # never asked: no exit of its is routine (cluster_submit's "Leases")
+
 
 def _gb(mesh, block, scans: bool) -> float:
     """A task's GPU memory on `block` (a pool worker's task): the eps world's solves, every cell
@@ -264,8 +271,12 @@ def _names(line: str, token: str, mesh) -> bool:
     return token in line.replace(",", " ").split() or mesh.suffix in line
 
 
+# sacct_grace: how long a run is out of squeue before a task of it with no exit code and no sacct
+# row is taken as cancelled before it started (cluster_submit's "Settling a run": 10 minutes, the
+# cluster's accounting lag many times over; cx-raster, 2026-10-15, had 19 such tasks).
 PROJECT = cs.Project(name="reblock", repo=REPO, cluster=cs.load_cluster("ai"), env=ENV,
-                     kinds=(Blocks(), Cpu()), max_gpus=4)   # owner, 2026-10-03: a shared cluster
+                     kinds=(Blocks(), Cpu()), max_gpus=4,   # owner, 2026-10-03: a shared cluster
+                     sacct_grace=timedelta(minutes=10))
 
 if __name__ == "__main__":
     sys.path[:0] = [str(HERE), str(REPO)]   # common and the repo's scripts package, for Blocks.plan
