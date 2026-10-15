@@ -5901,6 +5901,7 @@ single-threaded, at most 8 processes: the guards three times (pass after steps 1
 both ways at the end, 1.9 h), the checks of the fold (19570's catchment and greedy, old against
 new) and of the preset (20269's cheapE@e0.05), the id guard, clearings_check: about 5 CPU-h
 [inferred from the runs' times].
+
 ### Pruning by epistemetry: a replay against seqscreen (owner 2026-10-14: "Yes"; BACKLOG, "Pruning by epistemetry's decision layer")
 
 Does GeoffChurch/epistemetry's decision layer decide which variants to keep better than
@@ -6098,5 +6099,5 @@ the others inferred):
 
 Compute: here, single-threaded, at most 8 processes: the fixed-rate run 1.4 h on 8 workers, the
 bracket run 1.1 h on 7, the stepped diagnostic 3.0 h on 4, the four guard runs 1.75 -- 1.85 h
-each. Rows (git-ignored, regenerable): epireplay.parquet, epireplay_bracket.parquet and its
-jobs' epireplay_bracket_jobs/.
+each. Rows (git-ignored): epireplay.parquet, epireplay_bracket.parquet and its jobs'
+epireplay_bracket_jobs/; epireplay.py, deleted in phase 3, regenerates them from 0c2e588e^.
