@@ -15,6 +15,7 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S constants - [fault]        # fault: omit
     uv run python $S device <ids,> [fault]      # fault: perturb (on a GPU: cluster.py --complex)
     uv run python $S roads <ids,> [fault]       # fault: one-face-closed
+    uv run python $S flux <ids,> [fault]        # fault: flip-one
 
 `baseline`: the fixed mesh (the runtime's metric, METRIC) against the complex rebuilt
 (gap_compare.ComplexModel, gap_flow's mesh under the shy distance at 0.5): P0, P_{1/2},0 and
@@ -75,6 +76,11 @@ state on it, against the complex rebuilt with the prefix carved (gap_compare.Com
 corridor common.Carve's rule frees): L_P, L_{P_1/2} and L_J2 within ROAD_TOL, the homes reached
 equal home for home. Fault `one-face-closed`: at every prefix the largest atom it carves left
 standing (a road face left closed).
+`flux` (phase 2b: the corridor pictures, gap_maps): at the baseline and FLUX_RANDOM random
+clearings, the passages' and street faces' fluxes (gap_maps.flow_of) conserve current at every
+open cell, the net outflow of an unknown cell equal to its injection within FLUX_TOL of the
+largest current through a cell, and the drainage (street faces and ground cells) equal to the
+injection in all. Fault `flip-one`: the largest passage flux's sign flipped.
 """
 from __future__ import annotations
 
@@ -133,6 +139,10 @@ ROAD_ROWS = HERE / "road_rows"      # item 4's road networks and their prefixes 
 ROAD_NETWORK = "resistance_lp"      # the network the guard carves: the lineup's leader
 ROAD_STOPS = (1, 3, 5)               # its area prefixes checked (D 0.02, 0.10, 0.20)
 ROAD_TOL = ONE_TOL                   # a prefix's lenses against the rebuild's, as a clearing's
+FLUX_RANDOM = 2
+FLUX_TOL = 1e-9          # a cell's imbalance, of the largest current through a cell (the solves
+                         # refined to the backward-error floor: 2e-11 -- 5e-11 on 19570
+                         # and 20269)
 
 
 @contextmanager
@@ -754,12 +764,54 @@ def _one_face_closed(self: gcl.Carving, prefix: gcl.Prefix) -> np.ndarray:
     return out
 
 
+# ------------------------------------------------------------------ the pictures' fluxes
+
+def flux(ids: list[str]) -> list[str]:
+    import gap_maps
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        m = _model(b)
+        rng = np.random.default_rng(SEED + 6)
+        states = {"baseline": np.zeros(m.n)}
+        for k in range(FLUX_RANDOM):
+            states[f"random{k}"] = _random(m, rng).astype(float)
+        parts = []
+        for name, k_ in states.items():
+            st = m.state(k_)
+            fl = gap_maps.flow_of(m, st, m.pop)
+            bal = gap_maps.conservation(st, fl)
+            worst = float(np.abs(bal).max())
+            total = float(fl.drain.sum() / fl.inj.sum() - 1.0)
+            ok = worst <= FLUX_TOL and abs(total) <= FLUX_TOL
+            parts.append(f"{name}: {int(st.reach.live.sum())} open cells, worst imbalance "
+                         f"{worst:.1e}, drainage / injection - 1 {total:+.1e}"
+                         + ("" if ok else " FAILS"))
+            if not ok:
+                bad.append(f"{bid} {name}")
+        print(f"{bid}: " + "; ".join(parts), flush=True)
+    return bad
+
+
+def _flip_one() -> contextlib.AbstractContextManager[None]:
+    """gap_maps._passage_flux with the largest flux's sign flipped (fault `flip-one`)."""
+    import gap_maps
+    flux_of = gap_maps._passage_flux
+
+    def flipped(Tp: np.ndarray, u: np.ndarray, ea: np.ndarray, eb: np.ndarray) -> np.ndarray:
+        F = flux_of(Tp, u, ea, eb).copy()
+        i = int(np.argmax(np.abs(F)))
+        F[i] = -F[i]
+        return F
+    return _patched(gap_maps, "_passage_flux", flipped)
+
+
 # ------------------------------------------------------------------ the run
 
 GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "baseline": baseline, "weights": weights, "reach": reach, "gradient": gradient,
     "free": free, "identity": identity, "convex": convex, "pattern": pattern,
-    "constants": constants, "device": device, "roads": roads}
+    "constants": constants, "device": device, "roads": roads, "flux": flux}
 
 
 def _fault_exits():
@@ -780,6 +832,7 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "constants": {"omit": lambda: _patched(gcl, "code_constants", _omit_mesh_rev)},
     "device": {"perturb": _perturb_one},
     "roads": {"one-face-closed": lambda: _patched(gcl.Carving, "carved", _one_face_closed)},
+    "flux": {"flip-one": _flip_one},
 }
 
 

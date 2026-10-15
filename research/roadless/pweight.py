@@ -1,19 +1,21 @@
 """Priority-weighted P: can it replace J_2 as the equity view? (BACKLOG 4, the metric decisions;
 owner 2026-10-12: "what would happen if you first set the current emitted by deeper buildings
 quadratically higher and then did P? Would you get something like J_2? ... Let's see how weighted
-P behaves. It would be nice if it could replace J_2.") NOTES, "Priority-weighted P".
+P behaves. It would be nice if it could replace J_2.") NOTES, "Priority-weighted P"; decided
+2026-10-13: P_{1/2} is the equity view beside P.
 
 P_q: home i injects w_i a_i, a_i = u0_i^q / mean_w(u0^q) (common.PriorityDemand), u0_i its escape
 time at baseline under the population's own demand; P_q = f_q^T L^-1 f_q, its lens 1 - P_q / P_q0.
 Four objectives (OBJECTIVES: P, J_2, P_{1/2}, P_1), one optimizer for all: SIMP base (PLAN, the
-presets' base plan) with free first (relax.one), on the CPU, at area D 0.05 (BUDGET), on the 220
-small blocks (common.recipients()), h 0.5, ALONG, area population, B's placement. For the convex
-ones (power 1 under a fixed demand) the relaxation's Frank-Wolfe bound too: relax.frank_wolfe from
-x = 0 with nothing held, in SIMP base's eps world, so it bounds every clearing within the budget.
-`score` scores every clearing under every objective, with each home's escape time under the
-population's demand (the tails), B (i), how deep the cleared buildings sit and how far apart the
-clearings are; `report` answers the four questions by the criteria fixed in NOTES before any
-result, and writes the summaries.
+presets' base plan) with free first (relax.one), at area D 0.05 (BUDGET), area population, on the
+runtime's metric (METRIC: the gap complex, phase 2b; its model's baseline gives the weights,
+gap_clear.Model.inj_q), on the CPU. For the convex ones (power 1 under a fixed demand) the
+relaxation's Frank-Wolfe bound too: relax.frank_wolfe from x = 0 with nothing held, in SIMP base's
+eps world, so it bounds every clearing within the budget. `score` scores every clearing under
+every objective on the complex's model, with each home's escape time under the population's demand
+(the tails), B (i), how deep the cleared buildings sit and how far apart the clearings are;
+`report` answers the four questions by the criteria fixed in NOTES before any result, and writes
+the summaries.
 
     S=research/roadless/pweight.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S task <id> <item>             # one (block, item): a cluster.py `cpu` task
@@ -23,8 +25,9 @@ result, and writes the summaries.
 An item is simp-<objective> (SIMP base) or fw-<objective> (the bound; convex objectives only), an
 objective P, J<p> (J_p) or Pq<q> (P_q): ITEMS. Rows: ROWS/<simp|fw>/<objective>/<id>.parquet and
 ROWS/score/<id>.parquet (ignored); the summaries ROWS/summary_*.csv (committed). ROWS is
-pweight_rows/<ALONG>: the study's own runs, under the step rule before the face aperture (uni),
-are pweight_rows/<simp|fw|score>/ and pweight_rows/summary_*.csv.
+pweight_rows/<METRIC's name>. The study itself ran on the raster (uni, then uni+apwfs:
+pweight_rows/<simp|fw|score>/ with its summary_*.csv, and pweight_rows/uni+apwfs/), the record of
+its answer; its code was the raster scorer's, ported here (phase 2b).
 """
 from __future__ import annotations
 
@@ -43,7 +46,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import clear  # noqa: E402
 import common  # noqa: E402
-import lifted  # noqa: E402
+import gap_clear as gcl  # noqa: E402
+import gap_factor  # noqa: E402
+import metrics  # noqa: E402
 import relax  # noqa: E402
 import road_rescore as rr  # noqa: E402
 
@@ -51,13 +56,11 @@ import road_rescore as rr  # noqa: E402
 # Everything that can change a number is here, and named in the rows (the run's identity).
 PLAN = relax.plan_of("fw0.q3.i10.t0.001.e0.0001.k1s1e-06")    # SIMP base: the presets' base plan
 BUDGET = relax.D_LENS          # area D 0.05 (one SIMP run is one budget: D 0.10 would be a second)
-ALONG = "uni+apwfs"            # the conductance (lifted.conductance_of)
-DEVICE = "cpu"
-FW_ITERS = 40                  # the bound's Frank-Wolfe iterations (as relax220_p1's fw40) ...
-FW_RTOL = 1e-4                 # ... and its solves' tolerance (on 41132 its bound is 1e-5's to
-                               # 3e-6 at iteration 15, in 0.85x the time)
-SCORE_RTOL = clear.RTOL_SCORE  # every score: the optimizers' exact one
-ROWS = HERE / "pweight_rows" / ALONG     # every row and summary, by the conductance
+METRIC = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())  # the CPU's
+FW_ITERS = 40                  # the bound's Frank-Wolfe iterations (as relax220_p1's fw40)
+FW_RTOL = 0.0                  # the relaxation's iterative tolerance: none (the complex's solves
+                               # are direct, refined to the floating-point floor)
+ROWS = HERE / "pweight_rows" / METRIC.name   # every row and summary, by the metric
 MARGIN = 0.005                 # questions 1 and 2: within this of J_2's clearing
 
 
@@ -107,8 +110,9 @@ def bound(bid: str, obj: Objective) -> dict[str, object]:
     real clearing within the budget, free first or not), FW_ITERS iterations at FW_RTOL."""
     if not obj.convex:
         raise SystemExit(f"{obj.name}: J_{obj.power:g} is not convex, its gap bounds nothing")
-    c = relax._clearing(bid, DEVICE, ALONG, PLAN.mesh, demand=obj.demand)
-    rel = relax.Relaxation(c, obj.power, rtol=FW_RTOL, eps=PLAN.eps)
+    [b] = common.build_blocks([bid])
+    c = METRIC.clearing(b, demand=obj.demand)
+    rel = c.relaxation(obj.power, q=1.0, rtol=FW_RTOL, eps=PLAN.eps)
     t0 = time.time()
     fw = relax.frank_wolfe(rel, BUDGET, FW_ITERS,
                            log=lambda s: print(f"{bid} {obj.name} {s}", flush=True))
@@ -131,9 +135,7 @@ def task(bid: str, item: str) -> None:
     out = row_path(stage, obj, bid)
     t0 = time.time()
     if stage == "simp":
-        row = relax.one(bid, obj.power,
-                        relax.RasterMetric(along=ALONG, device=DEVICE, mesh=PLAN.mesh), PLAN,
-                        BUDGET, demand=obj.demand)
+        row = relax.one(bid, obj.power, METRIC, PLAN, BUDGET, demand=obj.demand)
     elif stage == "fw":
         row = bound(bid, obj)
     else:
@@ -147,77 +149,71 @@ def task(bid: str, item: str) -> None:
 
 # ------------------------------------------------------------------ every clearing, every lens
 
-def _J(inj: np.ndarray, u: np.ndarray, live: np.ndarray, power: float) -> float:
-    """common.Scorer.J with the injection `inj`: sum over the homes not enclosed of inj u^power."""
-    return float((inj[live] * u[live] ** power).sum())
-
-
 POPULATION = common.PopulationDemand()      # the people's own escape: the tails and the depths
 
 
 def score_block(bid: str) -> None:
     """Every objective's SIMP clearing on `bid` (its simp rows) scored under every objective on
-    one scorer: each objective's demand makes its injection and baseline from the population's
-    baseline (Demand.baseline, as the optimizer's scorer did), then one system per clearing and
-    one solve per demand. Per (block, clearing): every objective's lens (L_<objective>), each
-    home's escape time under the population's demand relative to baseline at the median, p95 and
-    max home (umed, u95, umax: tails.py's ratios of quantiles), B (i) (`enclosed`), the area
-    displacement, the depth of the cleared buildings relative to the population-weighted mean
-    escape time at baseline (depth_own: their own homes' escape time, area-weighted;
-    depth_served: the escape time of the homes whose flow passes through them in the clearing,
-    flow-weighted, clear.Catchment's shares in the tension's eps world), the Jaccard overlap of
-    the cleared set with every other objective's (jac_<objective>), and the clearing's own lens
-    against its row's (`own_minus_row`: the scorer reproduces the optimizer's)."""
+    the complex's model (gap_clear.Model, the population's demand): each objective's demand makes
+    its injection from the baseline's escape times under the population's demand (Demand.injection,
+    as the optimizer's model did), then one state per clearing and one solve per demand. Per
+    (block, clearing): every objective's lens (L_<objective>), each home's escape time under the
+    population's demand relative to baseline at the median, p95 and max home (umed, u95, umax:
+    tails.py's ratios of quantiles), B (i) (`enclosed`), the area displacement, the depth of the
+    cleared buildings relative to the population-weighted mean escape time at baseline
+    (depth_own: their own homes' escape time, area-weighted; depth_served: the escape time of the
+    homes whose flow passes through them in the clearing, flow-weighted, clear.Catchment's shares
+    in the tension's eps world), the Jaccard overlap of the cleared set with every other
+    objective's (jac_<objective>), and the clearing's own lens against its row's
+    (`own_minus_row`: the model reproduces the optimizer's)."""
     rows = {o.name: pd.read_parquet(row_path("simp", o, bid)).iloc[0] for o in OBJECTIVES}
     t0 = time.time()
-    c = relax._clearing(bid, DEVICE, ALONG, PLAN.mesh, demand=POPULATION)
-    sc, p, g = c.sc, c.p, c.sc.grid
-    live = ~sc.enclosed
-    sol_pop = lifted.solve(g, sc.free0, sc.f, p)
-    base = {d: d.baseline(sc, sol_pop) for d in dict.fromkeys(o.demand for o in OBJECTIVES)}
-    inj = {d: b[0] for d, b in base.items()}
-    field = {d: sc.pl.field(v, g.inside.shape) for d, v in inj.items()}
-    u_base = {d: sc.home_u_of(b[1], sc.free0) for d, b in base.items()}
+    [b] = common.build_blocks([bid])
+    m = METRIC.clearing(b, demand=POPULATION)
+    live = ~m.nodem
+    demands = list(dict.fromkeys(o.demand for o in OBJECTIVES))
+    inj = {d: d.injection(m.pop, m.u_pop0, m.nodem) for d in demands}
+    st0 = m.state(np.zeros(m.n))
+    u_base = {d: m.home_u(st0, m.solve(st0, inj[d])) for d in demands}
     u0 = u_base[POPULATION]
-    mean_u0 = float((sc.w[live] * u0[live]).sum() / sc.w[live].sum())
-    cleared = {name: np.zeros(c.n, dtype=bool) for name in rows}
+    mean_u0 = float((m.pop[live] * u0[live]).sum() / m.pop[live].sum())
+    cleared = {name: np.zeros(m.n, dtype=bool) for name in rows}
     for name, r in rows.items():
         cleared[name][np.asarray(r.simp_cleared, dtype=np.int64)] = True
     catch = clear.Catchment(clear.CpuSweep())
     out = []
     for name, r in rows.items():
         x = cleared[name]
-        op = c.open_(x)
-        sy = lifted.System(g, op, p)
-        u = {d: sc.home_u_of(lifted.solve(g, op, f, p, system=sy, rtol=SCORE_RTOL), op)
-             for d, f in field.items()}
+        st = m.state(x.astype(np.float64))
+        u = {d: m.home_u(st, m.solve(st, inj[d])) for d in demands}
         lens = {}
         for o in OBJECTIVES:
-            J = _J(inj[o.demand], u[o.demand], live, o.power)
-            J0 = _J(inj[o.demand], u_base[o.demand], live, o.power)
+            J = m.J(u[o.demand], inj[o.demand], o.power)
+            J0 = m.J(u_base[o.demand], inj[o.demand], o.power)
             lens[o.name] = 1.0 - (J / J0) ** (1.0 / o.power)
         uw = u[POPULATION]
         cand = np.flatnonzero(x)
         own = cand[live[cand]]
-        c.removed[:] = x
-        V = catch.shares(c.tension(1.0, restore=False).flow(cand.tolist()), len(cand))
-        c.removed[:] = False
-        flow = sc.w[:, None] * V * live[:, None]
+        m.removed[:] = x
+        V = catch.shares(m.tension(1.0, restore=False).flow(cand.tolist()), len(cand))
+        m.removed[:] = False
+        flow = m.pop[:, None] * V * live[:, None]
         out.append(dict(
-            block=bid, n=c.n, objective=name, n_cleared=int(x.sum()), D=float(c.cost @ x),
-            free_D=float(r.free_D), enclosed=sc.enclosed_left(op), enclosed0=sc.enclosed0,
+            block=bid, n=m.n, objective=name, n_cleared=int(x.sum()), D=float(m.cost @ x),
+            free_D=float(r.free_D), enclosed=m.enclosed_left(x),
+            enclosed0=float(m.cost[m.walled0].sum()),
             **{f"L_{k}": v for k, v in lens.items()},
             umed=float(np.nanmedian(uw) / np.nanmedian(u0)),
             u95=float(np.nanpercentile(uw, 95) / np.nanpercentile(u0, 95)),
             umax=float(np.nanmax(uw) / np.nanmax(u0)),
-            depth_own=float((c.cost[own] * u0[own]).sum() / c.cost[own].sum() / mean_u0),
+            depth_own=float((m.cost[own] * u0[own]).sum() / m.cost[own].sum() / mean_u0),
             depth_served=float((flow * np.nan_to_num(u0)[:, None]).sum() / flow.sum()
                                / mean_u0),
             **{f"jac_{k}": float((x & v).sum() / (x | v).sum()) for k, v in cleared.items()},
             own_minus_row=float(lens[name] - r.simp_perm), row_perm=float(r.simp_perm),
             t_simp=float(r.t), host=str(r.host)))
     for d, v in inj.items():                       # the demands' spread, for the description
-        a = v[live] / sc.w[live]
+        a = v[live] / m.pop[live]
         for row in out:
             row[f"amax_{d.name}"] = float(a.max())
             row[f"amin_{d.name}"] = float(a.min())
@@ -225,7 +221,7 @@ def score_block(bid: str) -> None:
         row["t_score"] = time.time() - t0
     score_path(bid).parent.mkdir(parents=True, exist_ok=True)
     rr.write_parquet(pd.DataFrame(out), score_path(bid))
-    print(f"{time.strftime('%H:%M:%S')} {bid} n={c.n} scored in {time.time() - t0:.0f}s; own "
+    print(f"{time.strftime('%H:%M:%S')} {bid} n={m.n} scored in {time.time() - t0:.0f}s; own "
           f"lens against the rows within {max(abs(o['own_minus_row']) for o in out):.1e}",
           flush=True)
 

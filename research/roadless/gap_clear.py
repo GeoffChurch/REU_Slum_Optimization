@@ -696,7 +696,10 @@ class Carving(NamedTuple):
     def of(geo: gc.Geometry, networks: list[list[Any]]) -> Carving:
         """The atoms of `geo`'s footprints cut by each network's nested stop corridors (local
         coordinates, in order); refuses a network whose corridors are not nested (a prefix's
-        corridor holds every shorter one's)."""
+        corridor holds every shorter one's, but for slivers under the linework's precision,
+        LINE_SNAP_M along the shorter one's outline: each corridor is unioned afresh, as the
+        rebuild and the raster carve it, and two unions part by such slivers, 3.4e-6 m^2 on
+        18895)."""
         if not networks or not all(networks):
             raise ValueError("a carving needs a network with a stop: Carving.none is the plain "
                              "mesh")
@@ -704,7 +707,7 @@ class Carving(NamedTuple):
         for i, cs in enumerate(nets):
             for k in range(1, len(cs)):
                 out = shapely.area(shapely.difference(cs[k - 1], cs[k]))
-                if out > gc.DUST_M2:
+                if out > LINE_SNAP_M * shapely.length(cs[k - 1]):
                     raise ValueError(f"network {i}: stop {k + 1}'s corridor misses {out:.2e} m^2 "
                                      f"of stop {k}'s: not one network's nested prefixes")
         polys = np.asarray(geo.polys, dtype=object)
