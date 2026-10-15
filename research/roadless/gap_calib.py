@@ -55,8 +55,9 @@ rows ROWS/rescore/<id>.parquet.
 
 `roads` (phase 2b): ROAD_CAL's networks' area prefixes as road_rescore's 60-block run scored them
 on their carved fixed meshes (its rows, on a core) against the complex rebuilt with each prefix
-carved (gap_compare.ComplexModel.scored): the lenses, the homes walled in; rows
-ROWS/roads/<id>.parquet.
+carved (gap_compare.ComplexModel.scored): the lenses, the baseline's P and the state's (a lens
+parts from the rebuild's by both: the baseline's necks, phase 1's, and the carving's own), the
+homes walled in; rows ROWS/roads/<id>.parquet.
 """
 from __future__ import annotations
 
@@ -476,8 +477,10 @@ def roads_one(bid: str) -> str | None:
                                         geo.local(rr.corridor_of(ordered, mk)))
                 rows.append(dict(block=bid, method=name, m=mk, D_area=float(f.D_area),
                                  L_P=float(f.L_P), L_Pq=float(f.L_Pq), L_J2=float(f.L_J2),
+                                 P0=float(f.P0), P=float((1.0 - f.L_P) * f.P0),
                                  n_enclosed=int(f.n_enclosed), L_P_rebuild=r["L_P"],
                                  L_Pq_rebuild=r["L_Pq0.5"], L_J2_rebuild=r["L_J2"],
+                                 P0_rebuild=cm.P0, P_rebuild=r["P"],
                                  n_enclosed_rebuild=r["n_enclosed"],
                                  walled_rebuild=int((~live).sum()), t_rebuild=r["t"]))
                 print(f"{bid} {name} {mk} roads: L_P {f.L_P:.5f} / rebuilt {r['L_P']:.5f} "
