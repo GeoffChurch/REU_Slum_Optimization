@@ -12,7 +12,7 @@ area D BUDGET with free first, optimizing P under the area population.
 
     S=research/roadless/region_leaks.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S warm <id> <label>              # the label's fixed mesh into gap_clear.CACHE
-    uv run python $S run <id> <label> <simp|cheap> <cpu|gpu>   # a preset under a configuration
+    uv run python $S run <id> <label> <simp|cheap|prior> <cpu|gpu>   # a preset, or the prior
     uv run python $S members <procs>                # the member kblocks' baselines (per block)
     uv run python $S baseline <label>               # the region's baseline under a configuration
     uv run python $S score <label>                  # its runs' clearings: lenses, flows, maps
@@ -33,9 +33,14 @@ rest leaves by the boundary), every home's escape time, and for a leaky configur
 self-absorption of ABSORB_N homes drawn at random (a home's unit injection solved alone: the share
 of its current that leaks on the cells where its own building's injection lands, its own
 building's share of that leak (HomeLeak: the self-trips), and the share that leaks anywhere); the
-flow painted (gap_maps) at baseline and in the no-buildings prior (every footprint cleared on the
-fixed mesh, the atlas's prior) on FRAME_H pixels. ROWS/baseline/<label>[_homes|_absorb].parquet,
-ROWS/images/<label>/{baseline,prior}.npz.
+flow painted (gap_maps) at baseline on FRAME_H pixels. ROWS/baseline/<label>[_homes|_absorb]
+.parquet, ROWS/images/<label>/baseline.npz.
+
+`run ... prior`: the no-buildings prior (every footprint cleared on the fixed mesh, the atlas's
+prior: the same homes' flow to the same exits) and its P, painted on PRIOR_H pixels (the maps'
+frame). Every cell is then an unknown (16M on the region), past SuperLU's 32-bit indices on a core:
+it runs on a GPU (cuDSS); ROWS/baseline/<label>_prior.parquet (its row, the frame among it) and
+<label>_prior_image.parquet (the pixels, flattened: parquet, as a cluster run's rows come back).
 
 `score`: each run of the configuration (both presets; under `edge` also the raster run's picks,
 RASTER_RUNS) scored on its model: L_P, L_{P_1/2}, L_J2 and the population left walled in; its flow
@@ -73,8 +78,9 @@ import os
 import socket
 import sys
 import time
-from pathlib import Path
+import warnings
 from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, cast
 
 import numpy as np
@@ -143,6 +149,8 @@ RASTER_RUNS = {
 ABSORB_N = 300          # self-absorption: homes drawn
 ABSORB_SEED = 20261015
 FRAME_H = 1.0           # the painted flow's pixel (m)
+PRIOR_H = 2.0           # the prior's and the maps' pixel (m: FRAME_H's 2 x 2, on the same edges)
+FRAME_PAD = 2.0         # the frames' margin about the region (m: a multiple of both pixels)
 STREET_CLASSES = ("residential", "living_street", "unclassified")   # a formal home's street
 DRIVE_CLASSES = (*STREET_CLASSES, "service", "tertiary", "secondary", "primary", "trunk",
                  "motorway")                                # a deep home is far from all of them
@@ -317,8 +325,8 @@ class Painted(NamedTuple):
     exits: NDArray[np.bool_]
 
 
-def painted_of(m: gcl.Model) -> Painted:
-    fr = gap_maps.Frame.around(m.geo, FRAME_H, 2.0 * FRAME_H)
+def painted_of(m: gcl.Model, h: float) -> Painted:
+    fr = gap_maps.Frame.around(m.geo, h, FRAME_PAD)
     xs = fr.x0 + np.arange(fr.nx) * fr.h
     ys = fr.y0 + np.arange(fr.ny) * fr.h
     X, Y = np.meshgrid(xs, ys)
@@ -354,7 +362,7 @@ def _save_image(label: str, what: str, img: NDArray[np.float32], pt: Painted) ->
 def baseline(label: str) -> None:
     b, m, t_model = _model(label)
     homes = homes_of(b)
-    pt = painted_of(m)
+    pt = painted_of(m, FRAME_H)
     t0 = time.time()
     img0, fl0, st0 = _paint_state(m, np.zeros(m.n), pt)
     _save_image(label, "baseline", img0, pt)
@@ -369,16 +377,33 @@ def baseline(label: str) -> None:
     (ROWS / "baseline").mkdir(parents=True, exist_ok=True)
     pd.DataFrame({"u0": m.u_pop0, "walled": m.walled0, "nodem": m.nodem,
                   "member": homes.member.astype(str), "formal": homes.formal,
-                  "deep": homes.deep, "street_m": homes.street_m,
-                  "drive_m": homes.drive_m}).to_parquet(ROWS / "baseline" / f"{label}_homes.parquet")
-    if not isinstance(m.exits.leak, gx.NoLeak):
-        absorb(label, m, st0).to_parquet(ROWS / "baseline" / f"{label}_absorb.parquet")
-    imgp, flp, _stp = _paint_state(m, np.ones(m.n), pt)
-    _save_image(label, "prior", imgp, pt)
-    row.update(P_prior=float(m._rhs(_stp, m.pop) @ flp.u), t_states=time.time() - t0,
-               peak_gb=gap_calib.peak_gb())
+                  "deep": homes.deep, "street_m": homes.street_m, "drive_m": homes.drive_m}
+                 ).to_parquet(ROWS / "baseline" / f"{label}_homes.parquet")
+    row.update(t_state=time.time() - t0)
+    absorbed = ROWS / "baseline" / f"{label}_absorb.parquet"
+    if not isinstance(m.exits.leak, gx.NoLeak) and not absorbed.exists():
+        absorb(label, m, st0).to_parquet(absorbed)
+    row.update(peak_gb=gap_calib.peak_gb())
     pd.DataFrame([row]).to_parquet(ROWS / "baseline" / f"{label}.parquet")
     print(f"{label}: {row}", flush=True)
+
+
+def prior(bid: str, label: str, device: str) -> None:
+    """The no-buildings prior (module docstring)."""
+    [b] = common.build_blocks([bid])
+    t0 = time.time()
+    m = metric_of(label, "simp", device).clearing(b, demand=POP)
+    pt = painted_of(m, PRIOR_H)
+    img, fl, st = _paint_state(m, np.ones(m.n), pt)
+    row = dict(label=label, P_prior=float(m._rhs(st, m.pop) @ fl.u), P0=m.base.P,
+               leak_share_prior=float(fl.leak.sum() / fl.drain.sum()), t=time.time() - t0,
+               device=device, host=socket.gethostname(), peak_gb=gap_calib.peak_gb(),
+               x0=pt.frame.x0, y0=pt.frame.y0, h=pt.frame.h, ny=pt.frame.ny, nx=pt.frame.nx)
+    (ROWS / "baseline").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"flow": img.ravel(), "inside": pt.inside.ravel()}).to_parquet(
+        ROWS / "baseline" / f"{label}_prior_image.parquet")
+    pd.DataFrame([row]).to_parquet(ROWS / "baseline" / f"{label}_prior.parquet")
+    print(f"{label} prior: {row}", flush=True)
 
 
 def absorb(label: str, m: gcl.Model, st0: gcl.State) -> pd.DataFrame:
@@ -414,7 +439,7 @@ def absorb(label: str, m: gcl.Model, st0: gcl.State) -> pd.DataFrame:
 
 def score(label: str) -> None:
     b, m, _t = _model(label)
-    pt = painted_of(m)
+    pt = painted_of(m, FRAME_H)
     runs: dict[str, NDArray[np.int64]] = {p: cleared_of(label, p) for p in PRESETS
                                           if run_path(label, p, REGION).exists()}
     if label == "edge":
@@ -500,6 +525,19 @@ def loop_rows() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _coarse(img: NDArray[np.float32], shape: tuple[int, int]) -> NDArray[np.float64]:
+    """A FRAME_H image on PRIOR_H's pixels (the same edges): each the mean of its 2 x 2 pixels
+    painted (NaN where none is), the frame's last row and column padded."""
+    k = int(round(PRIOR_H / FRAME_H))
+    ny, nx = shape
+    out = np.full((ny * k, nx * k), np.nan)
+    h, w = min(img.shape[0], ny * k), min(img.shape[1], nx * k)
+    out[:h, :w] = img[:h, :w]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)     # a block with no pixel painted: NaN
+        return np.asarray(np.nanmean(out.reshape(ny, k, nx, k), axis=(1, 3)))
+
+
 def _jaccard(a: NDArray[np.int64], b: NDArray[np.int64]) -> float:
     sa, sb = set(a.tolist()), set(b.tolist())
     return len(sa & sb) / max(len(sa | sb), 1)
@@ -512,18 +550,19 @@ def maps(label: str, homes: Homes, polys: NDArray[np.object_]) -> list[Path]:
     matplotlib.use("Agg")
     import matplotlib.colors as mcolors
     import matplotlib.pyplot as plt
-    with np.load(ROWS / "images" / label / "baseline.npz") as z:
-        x0, y0, h = (float(v) for v in z["frame"])
-        ny, nx = (int(v) for v in z["shape"])
-    inside, _exits = _masks(label)
+    r = pd.read_parquet(ROWS / "baseline" / f"{label}_prior.parquet").iloc[0]
+    x0, y0, h, ny, nx = float(r.x0), float(r.y0), float(r.h), int(r.ny), int(r.nx)
+    px = pd.read_parquet(ROWS / "baseline" / f"{label}_prior_image.parquet")
+    sp_ = px.flow.to_numpy().reshape(ny, nx)
+    inside = px.inside.to_numpy().reshape(ny, nx)
     ext = (x0 - h / 2, x0 + (nx - 0.5) * h, y0 - h / 2, y0 + (ny - 0.5) * h)
-    s0, sp_ = _image(label, "baseline"), _image(label, "prior")
+    s0 = _coarse(_image(label, "baseline"), (ny, nx))
     sel = homes.member == SEED_KBLOCK
     out = []
     for preset in PRESETS:
         if not (ROWS / "images" / label / f"{preset}.npz").exists():
             continue
-        s1 = _image(label, preset)
+        s1 = _coarse(_image(label, preset), (ny, nx))
         ids = cleared_of(label, preset)
         ok = inside & np.isfinite(s1) & (s1 > 0) & np.isfinite(sp_) & (sp_ > 0)
         rel = np.full(s1.shape, np.nan)
@@ -560,8 +599,37 @@ def maps(label: str, homes: Homes, polys: NDArray[np.object_]) -> list[Path]:
     return out
 
 
+def barrier_rows(b: Block) -> pd.DataFrame:
+    """The barriers on the region (BARRIERS.parts): what they cut, the crossings by kind, the
+    region's parts with and without the crossings' gaps, the footprints they touch."""
+    bp = BARRIERS.parts(b)
+    face = cast("BaseGeometry", b.boundary)
+    rows = [dict(what="strips in the face (m^2)", value=float(shapely.area(
+                 shapely.intersection(bp.strips, face)))),
+            dict(what="water areas in the face (m^2)", value=float(shapely.area(
+                 shapely.intersection(bp.areas, face)))),
+            dict(what="cut from the face (m^2)", value=float(shapely.area(
+                 shapely.intersection(bp.barrier, face)))),
+            dict(what="the gaps (m^2)", value=float(shapely.area(bp.gaps)))]
+    for kind in ("bridge", "tunnel", "node"):
+        rows.append(dict(what=f"crossings: {kind}", value=float(
+            sum(k == kind for k, _g in bp.crossings))))
+    for what, cut in (("with the gaps", bp.barrier),
+                      ("without them", shapely.union(bp.strips, bp.areas))):
+        parts = [p for p in shapely.get_parts(shapely.make_valid(shapely.difference(face, cut)))
+                 if shapely.area(p) > 1.0]
+        rows.append(dict(what=f"the face's parts {what}", value=float(len(parts))))
+        rows.append(dict(what=f"the largest part {what} (m^2)", value=float(max(
+            shapely.area(p) for p in parts))))
+    polys = np.asarray(b.buildings.outlines)
+    rows.append(dict(what="footprints touching a barrier", value=float(
+        shapely.intersects(polys, bp.barrier).sum())))
+    return pd.DataFrame(rows)
+
+
 def report() -> None:
     [b] = common.build_blocks([REGION])
+    barrier_rows(b).to_csv(ROWS / "summary_barriers.csv", index=False)
     homes = homes_of(b)
     geo = gc.geometry(b)
     polys = geo.polys
@@ -676,6 +744,8 @@ def main(argv: list[str]) -> None:
         warm(common.ids_of(argv[1])[0], argv[2])
     elif cmd == "run" and len(argv) == 5 and argv[3] in PRESETS:
         run(common.ids_of(argv[1])[0], argv[2], argv[3], argv[4])
+    elif cmd == "run" and len(argv) == 5 and argv[3] == "prior" and argv[2] in CONFIGS:
+        prior(common.ids_of(argv[1])[0], argv[2], argv[4])
     elif cmd == "members" and len(argv) == 2:
         members(int(argv[1]))
     elif cmd in ("baseline", "score") and len(argv) == 2 and argv[1] in CONFIGS:

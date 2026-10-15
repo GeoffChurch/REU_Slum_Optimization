@@ -1352,7 +1352,7 @@ def loop_index(_ids: list[str]) -> list[str]:
     for kind in ("grid", "ladder", "comb"):
         b, want = _index_block(kind)
         m = _model(b)
-        pt = region_leaks.painted_of(m)
+        pt = region_leaks.painted_of(m, region_leaks.FRAME_H)
         img, _fl, _st = region_leaks._paint_state(m, np.zeros(m.n), pt)
         got = region_leaks.loops(img, pt.inside, pt.exits, float(np.finfo(np.float32).tiny),
                                  region_leaks.FRAME_H, contract=_CONTRACT[0])
