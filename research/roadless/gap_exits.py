@@ -21,14 +21,19 @@ LEAKS (`Leak`), conductances to ground on the diagonal of the system, on the cel
 unknowns at baseline (live and not ground with every footprint standing) and nowhere else, the
 same for every state: B's enclosed homes stay enclosed, a cleared building's interior and shy zone
 conduct but do not leak, the sparsity pattern is unchanged and P stays convex in the clearing.
-`NoLeak`: the boundary only. `UniformLeak(lam)`: on every such cell sigma |c| / lam^2 (|c| its
-area, sigma the sheet conductance): the screened Laplacian -div(sigma grad u) + (sigma / lam^2) u
-= f discretized cell by cell, whose point source decays as K0(r / lam) (the `leak-scale` guard).
-For a walker it ends a trip at a constant rate per unit time anywhere on the open ground: a trip's
-straight-line length r then has the density (r / lam^2) K0(r / lam), mean (pi / 2) lam and root
-mean square 2 lam. `HomeLeak(lam)`: destinations at buildings by area population, the leak on the
-cells where the homes inject (gap_flow.demand_on's points), weighted as the injection is, its
-total the uniform family's at the same lam.
+`NoLeak`: the boundary only. `InternalLeak(s, lam)`: destinations inside the region, one family
+with two parameters (NOTES, "The region's leaks: destinations at buildings and on open ground
+(5810@major)"). Its total is sigma |A| / lam^2, |A| the area of the cells live at baseline and
+sigma the sheet conductance; a share `s` of it lies at buildings, on the cells where the homes
+inject (gap_flow.demand_on's points) in proportion to each cell's population injection at
+baseline, and 1 - s on open ground, sigma |c| / lam^2 on every such cell (|c| its area). s = 0 is
+the screened Laplacian -div(sigma grad u) + (sigma / lam^2) u = f discretized cell by cell, whose
+point source decays as K0(r / lam) (the `leak-scale` guard): for a walker it ends a trip at a
+constant rate per unit time anywhere on the open ground, a trip's straight-line length r then
+having the density (r / lam^2) K0(r / lam), median 1.257 lam, mean (pi / 2) lam and root mean
+square 2 lam. s = 1 puts every destination at the buildings, by area population. At a given lam
+the trips are shorter the larger s is: the region's lam is calibrated to a median trip instead
+(region_leaks `calibrate`), and recorded in the name.
 
 BOOST (`Boost`): `NoBoost`; `StreetBoost(factor)`: the sheet conductance times `factor` on the
 triangles whose centroid lies within BOOST_M of an OSM way's line (a passage by the harmonic mean
@@ -36,7 +41,7 @@ of its two triangles' factors, a street face by its triangle's): a check only.
 
 THE NAME. The per-block metric (no barriers, no leak, no boost: the block's whole street ring the
 exit) has no suffix, so its name and digest are as before. Any other names its parts in a suffix
-`+x[B<line_m>c<cross_m>][U<lam>|H<lam>][S<factor>]v<EXITS_CODE>` before the search's `@e<eps>`;
+`+x[B<line_m>c<cross_m>][L<lam>s<s>][S<factor>]v<EXITS_CODE>` before the search's `@e<eps>`;
 EXITS_CODE digests this module's constants (digests.constants_of), so editing them renames only
 the metrics that use them. `exits_of` parses a suffix back.
 
@@ -133,36 +138,39 @@ class NoLeak:
 
 
 @dataclass(frozen=True, kw_only=True)
-class UniformLeak:
-    """sigma |c| / lam^2 on every cell live at baseline (module docstring)."""
+class InternalLeak:
+    """Destinations inside the region (module docstring): the total sigma |A| / lam^2 over the
+    cells live at baseline, the share `s` of it at buildings by each cell's population injection
+    at baseline and 1 - s on open ground by area. At s = 0 and s = 1 each cell's conductance is
+    the other share's term times 0 added to its own: the open ground's alone and the buildings'
+    alone, bit for bit (the `leak-fold` guard)."""
+    s: float
     lam: float
+
+    def __post_init__(self) -> None:
+        if not (0.0 <= self.s <= 1.0 and self.lam > 0.0):
+            raise ValueError(f"a leak's building share s in [0, 1] and lam > 0: s {self.s}, "
+                             f"lam {self.lam}")
 
     @property
     def name(self) -> str:
-        return f"U{self.lam:g}"
-
-    def per_cell(self, site: LeakSite) -> NDArray[np.float64]:
-        return np.where(site.live, site.sigma * site.area / self.lam ** 2, 0.0)
-
-
-@dataclass(frozen=True, kw_only=True)
-class HomeLeak:
-    """Destinations at buildings (module docstring): kappa times each cell's population injection
-    at baseline, kappa making the total the uniform family's at lam, sigma sum |c| / lam^2 over
-    the cells live at baseline."""
-    lam: float
-
-    @property
-    def name(self) -> str:
-        return f"H{self.lam:g}"
+        return f"L{self.lam:g}s{self.s:g}"
 
     def total(self, site: LeakSite) -> float:
-        """The uniform family's total at lam (and so this one's)."""
+        """sigma |A| / lam^2, |A| the cells' area live at baseline."""
         return float(site.sigma * site.area[site.live].sum() / self.lam ** 2)
 
+    def kappa(self, site: LeakSite) -> float:
+        """The buildings' share's conductance per unit of population injection: s times the total
+        over the injection on the cells live at baseline (a home's own building's destination
+        drains kappa pop_h times its potential where it injects: region_leaks' self-trips)."""
+        return self.s * self.total(site) / float(np.where(site.live, site.inj, 0.0).sum())
+
     def per_cell(self, site: LeakSite) -> NDArray[np.float64]:
+        open_ground = np.where(site.live, site.sigma * site.area / self.lam ** 2, 0.0)
         inj = np.where(site.live, site.inj, 0.0)
-        return self.total(site) * inj / float(inj.sum())
+        buildings = self.total(site) * inj / float(inj.sum())
+        return (1.0 - self.s) * open_ground + self.s * buildings
 
 
 # ------------------------------------------------------------------ barriers
@@ -308,7 +316,7 @@ class StreetBoost:
 class Exits:
     """The three Strategies a metric holds (module docstring), named by `suffix`."""
     barriers: OsmBarriers | NoBarriers
-    leak: NoLeak | UniformLeak | HomeLeak
+    leak: NoLeak | InternalLeak
     boost: NoBoost | StreetBoost
 
     @property
@@ -324,14 +332,14 @@ def per_block() -> Exits:
 
 
 _N = r"[0-9]+(?:\.[0-9]+)?(?:e-?[0-9]+)?"
-# the suffix as gap_clear's name grammar embeds it: barriers, leak, boost, digest (5 groups)
-SUFFIX_RE = rf"(?:\+x(?:B({_N})c({_N}))?(?:([UH])({_N}))?(?:S({_N}))?v([0-9a-f]+))?"
+# the suffix as gap_clear's name grammar embeds it: barriers, leak, boost, digest (6 groups)
+SUFFIX_RE = rf"(?:\+x(?:B({_N})c({_N}))?(?:L({_N})s({_N}))?(?:S({_N}))?v([0-9a-f]+))?"
 
 
 def exits_of(groups: tuple[str | None, ...]) -> Exits:
     """The Exits SUFFIX_RE's groups name (none matched: the per-block exits); a digest not this
     code's raises (the rows are another code's)."""
-    line, cross, kind, lam, factor, code = groups
+    line, cross, lam, share, factor, code = groups
     if code is None:
         return per_block()
     if code != EXITS_CODE:
@@ -339,9 +347,8 @@ def exits_of(groups: tuple[str | None, ...]) -> Exits:
                          "(its rows are another code's)")
     barriers: OsmBarriers | NoBarriers = (NoBarriers() if line is None else OsmBarriers(
         line_m=float(line), cross_m=float(str(cross))))
-    leak: NoLeak | UniformLeak | HomeLeak = (
-        NoLeak() if kind is None else
-        UniformLeak(lam=float(str(lam))) if kind == "U" else HomeLeak(lam=float(str(lam))))
+    leak: NoLeak | InternalLeak = (NoLeak() if lam is None else InternalLeak(
+        s=float(str(share)), lam=float(lam)))
     boost: NoBoost | StreetBoost = (NoBoost() if factor is None
                                     else StreetBoost(factor=float(factor)))
     return Exits(barriers=barriers, leak=leak, boost=boost)

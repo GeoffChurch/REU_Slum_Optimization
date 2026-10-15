@@ -1,12 +1,16 @@
-"""The region model on the complex: exits as leaks to ground, tested on 5810@major (BACKLOG 4,
-decision (4); NOTES, "Exits as leaks: the region model on the complex (5810@major)"; the brief
-.superpowers/sdd/2026-10-13-region-leaks).
+"""The region model on the complex: exits as leaks to ground, on 5810@major (BACKLOG 4, decision
+(4); NOTES, "Exits as leaks: the region model on the complex (5810@major)" and "The region's
+leaks: destinations at buildings and on open ground (5810@major)"; the briefs
+.superpowers/sdd/2026-10-13-region-leaks and 2026-10-15-region-mixed-leak).
 
-The configurations (CONFIGS, each a gap_exits.Exits, the metric's suffix naming it): the boundary
-only with no barriers (`edge`: the raster run's setting, the per-block metric's name), the
-boundary with the barriers (`bar`: the reference), with uniform leaks at lam 250, 500 and 1000 m
-(`U250` ...), with building-boundary leaks at the same lam (`H250` ...), and the street boost as a
-check (`S3`, `S3U500`), all with BARRIERS but `edge`. Each is run with the cheap preset
+The configurations (CONFIGS, each a Config: its gap_exits.Exits, the metric's suffix naming them,
+and the median trip its lam was calibrated to): the boundary only with no barriers (`edge`: the
+raster run's setting, the per-block metric's name), the boundary with the barriers (`bar`: the
+reference), the internal leak (gap_exits.InternalLeak) at a nominal lam 250, 500 and 1000 m with
+its destinations all on open ground (s 0: `L250s0` ...) or all at buildings (s 1: `L250s1` ...),
+the region test's; the internal leak with lam calibrated to a median internal trip of TRIP_M at
+the building shares SHARES (`T500s0.75` ...: CALIBRATED); and the street boost as a check (`S3`,
+`L500s0S3`, `T500s0.9S3`), all with BARRIERS but `edge`. Each is run with the cheap preset
 (polish_greedy.CHEAP: its runs named `<metric>@e0.05`) and SIMP's default (relax.SIMP_DEFAULT) at
 area D BUDGET with free first, optimizing P under the area population.
 
@@ -14,14 +18,22 @@ area D BUDGET with free first, optimizing P under the area population.
     uv run python $S warm <id> <label>              # the label's fixed mesh into gap_clear.CACHE
     uv run python $S run <id> <label> <simp|cheap|prior> <cpu|gpu>   # a preset, or the prior
     uv run python $S members <procs>                # the member kblocks' baselines (per block)
+    uv run python $S calibrate <s> <T> <-|S<factor>> <procs>   # lam for a median trip T at s
     uv run python $S baseline <label>               # the region's baseline under a configuration
     uv run python $S score <label>                  # its runs' clearings: lenses, flows, maps
     uv run python $S cross <label> <labels,>        # other configurations' clearings under it
     uv run python $S report                         # the summaries (ROWS/summary_*.csv)
 
-`run`'s row (relax.one's or polish_greedy.run's, with the label, the metric's name, the host, the
-peak host memory, the device's peak memory on a GPU and the wall time) in
-ROWS/runs/<label>/<preset>/<id>.parquet.
+`run`'s row (relax.one's or polish_greedy.run's, with the label, the metric's name, the median
+trip its lam was calibrated to (`trip_m`, None for a nominal lam), the host, the peak host memory,
+the device's peak memory on a GPU and the wall time) in ROWS/runs/<label>/<preset>/<id>.parquet.
+
+`calibrate`: the lam at which the region's median internal trip (THE TRIPS, below) is T, at the
+building share s, with the barriers and the boost named (`-` none), at baseline;
+ROWS/calib/T<T>s<s><boost>.parquet (each step's lam, median, the pooled share of the current
+leaking inside, time) and _boot.parquet (the bootstrap's medians at the lam chosen). The lam
+chosen is copied into CALIBRATED, where the configurations read it (`report` checks the two
+agree).
 
 `members`: each member kblock of the region (regions.build's `member`) under the per-block metric
 (its own street ring the exit) on a core: every home's escape time at baseline (the population's
@@ -31,11 +43,11 @@ kblock's potentials times its mean footprint area over the region's); ROWS/membe
 `baseline`: the region's model under a configuration on a core: P0, P_{1/2},0, J_2,0, the homes
 walled in, the leaks' total and the share of the injected current they drain at baseline (the
 rest leaves by the boundary), every home's escape time, and for a leaky configuration the
-self-absorption of ABSORB_N homes drawn at random (a home's unit injection solved alone: the share
-of its current that leaks on the cells where its own building's injection lands, its own
-building's share of that leak (HomeLeak: the self-trips), and the share that leaks anywhere); the
-flow painted (gap_maps) at baseline on FRAME_H pixels. ROWS/baseline/<label>.parquet (and
-_homes, _absorb), ROWS/images/<label>/baseline.npz.
+self-absorption of ABSORB_N homes drawn at random (a home's unit injection solved alone,
+home_solves: the share of its current that leaks on the cells where its own building's injection
+lands, its own building's share of the buildings' leak (InternalLeak.kappa: the self-trips), and
+the share that leaks anywhere); the flow painted (gap_maps) at baseline on FRAME_H pixels.
+ROWS/baseline/<label>.parquet (and _homes, _absorb), ROWS/images/<label>/baseline.npz.
 
 `run ... prior`: the no-buildings prior (every footprint cleared on the fixed mesh, the atlas's
 prior: the same homes' flow to the same exits) and its P, painted on PRIOR_H pixels (the maps'
@@ -48,8 +60,8 @@ RASTER_RUNS) scored on its model: L_P, L_{P_1/2}, L_J2 and the population left w
 painted; ROWS/score/<label>.parquet, ROWS/images/<label>/<run>.npz.
 
 `cross`: the runs of other configurations (both presets) scored under this one's model: what a
-clearing chosen under one exit model is worth under another (the street boost's check, its own
-runs cut for the GPU budget: NOTES); ROWS/cross/<label>.parquet.
+clearing chosen under one exit model is worth under another (the street boost's check);
+ROWS/cross/<label>.parquet, its rows of the sources named replaced and the others' kept.
 
 `report`: the barriers (summary_barriers), the baselines and self-absorption, the lens table, the
 loop index (`loops`) of every painted state, the other configurations' clearings under each
@@ -72,6 +84,20 @@ baseline's flow over the open pixels (the top tenth of its area at 0.9), the sam
 of a configuration; reported per km^2 of the region, for the network after a clearing and for the
 corridors it induces (the pixels whose flow rose by at least T).
 
+THE TRIPS (`calibrate`; NOTES, "The region's leaks"). At baseline under a configuration's leak, a
+home's trips are its current leaking inside: its unit injection solved alone (home_solves), the
+current to ground through each cell's leak (gap_maps.leak_drain) a trip's end, the trip's length
+the straight-line distance from the centroid of the home's injection points (weighted as it
+injects) to the cell's centroid, its weight that current. The current leaving by the boundary
+(the street faces and the ground cells) is no trip of the leak and is not counted. Trips pool
+over TRIP_N homes drawn by population (with replacement, seeded: among the homes with demand not
+walled in at baseline), each draw its home's trips per unit of its injection; the median trip is
+the pooled distribution's (TRIP_BIN_M bins, linear within a bin). lam is found by bisection in
+log lam over whole metres, after a bracketing search (secant steps in log-log), the same draws
+at every step, until the median is within TRIP_TOL of T; the draws' uncertainty on the median is
+a bootstrap over the draws (TRIP_BOOT resamples). Checked where the answer is known (gap_clear_check
+`trip-calibration`): on open ground at s 0 the median is the screened point source's, 1.257 lam.
+
 Typed as `search.py`'s docstring says:
 
     MYPYPATH=research/roadless uv run mypy --strict --follow-imports=silent \\
@@ -87,7 +113,7 @@ import socket
 import sys
 import time
 import warnings
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple, cast
 
@@ -128,25 +154,58 @@ CHEAP = polish_greedy.CHEAP
 # crossing's gap 3 m (a footway's: the region's one crossing of the railway inside it is an
 # unpaved path)
 BARRIERS = gx.OsmBarriers(line_m=8.0, cross_m=3.0)
-LAMS = (250.0, 500.0, 1000.0)
+LAMS = (250.0, 500.0, 1000.0)    # the region test's nominal lam (m), at s 0 and 1
 BOOST = gx.StreetBoost(factor=3.0)
+TRIP_M = 500.0          # the median internal trip the leak is calibrated to (m; owner 2026-10-15:
+                        # "What if we just use T=500m?")
+SHARES = (0.75, 0.9, 1.0)   # the building shares s calibrated to TRIP_M (0.9 the central setting;
+                            # owner 2026-10-15: "some small leakage in open space ... buildings
+                            # should have greater leakage")
+# lam (m) calibrated to TRIP_M (`calibrate`, ROWS/calib/): per (s, the boost's factor, 1 none)
+CALIBRATED: dict[tuple[float, float], float] = {}
 
 
-def _exits(*, barriers: gx.OsmBarriers | gx.NoBarriers, leak: gx.NoLeak | gx.UniformLeak
-           | gx.HomeLeak, boost: gx.NoBoost | gx.StreetBoost) -> gx.Exits:
-    return gx.Exits(barriers=barriers, leak=leak, boost=boost)
+class Config(NamedTuple):
+    """A configuration: its exits, and the median internal trip (m) its lam was calibrated to
+    (`trip_m`: TRIP_M; None for the boundary only and the region test's nominal lam)."""
+    exits: gx.Exits
+    trip_m: float | None
 
 
-CONFIGS: dict[str, gx.Exits] = {
-    "edge": gx.per_block(),
-    "bar": _exits(barriers=BARRIERS, leak=gx.NoLeak(), boost=gx.NoBoost()),
-    **{f"U{lam:g}": _exits(barriers=BARRIERS, leak=gx.UniformLeak(lam=lam), boost=gx.NoBoost())
-       for lam in LAMS},
-    **{f"H{lam:g}": _exits(barriers=BARRIERS, leak=gx.HomeLeak(lam=lam), boost=gx.NoBoost())
-       for lam in LAMS},
-    "S3": _exits(barriers=BARRIERS, leak=gx.NoLeak(), boost=BOOST),
-    "S3U500": _exits(barriers=BARRIERS, leak=gx.UniformLeak(lam=500.0), boost=BOOST),
-}
+def _bar(leak: gx.NoLeak | gx.InternalLeak, boost: gx.NoBoost | gx.StreetBoost) -> gx.Exits:
+    return gx.Exits(barriers=BARRIERS, leak=leak, boost=boost)
+
+
+def label_of(exits: gx.Exits, trip_m: float | None) -> str:
+    """A configuration's label: `bar` for the barriers alone, else its leak's and its boost's
+    names (gap_exits: `L<lam>s<s>`, `S<factor>`), a calibrated leak's lam named by its trip
+    instead (`T<trip>s<s>`)."""
+    if exits.barriers != BARRIERS:
+        raise ValueError("a labelled configuration has the barriers (but `edge`)")
+    leak = exits.leak
+    if trip_m is None:
+        return leak.name + exits.boost.name or "bar"
+    if not isinstance(leak, gx.InternalLeak):
+        raise ValueError("a configuration calibrated to a trip has an internal leak")
+    return f"T{trip_m:g}s{leak.s:g}" + exits.boost.name
+
+
+def _configs() -> dict[str, Config]:
+    nominal = [_bar(gx.InternalLeak(s=s, lam=lam), gx.NoBoost()) for s in (0.0, 1.0)
+               for lam in LAMS]
+    checks = [_bar(gx.NoLeak(), BOOST), _bar(gx.InternalLeak(s=0.0, lam=500.0), BOOST)]
+    calibrated = [_bar(gx.InternalLeak(s=s, lam=lam), gx.NoBoost() if factor == 1.0
+                       else gx.StreetBoost(factor=factor))
+                  for (s, factor), lam in CALIBRATED.items()]
+    out = {"edge": Config(exits=gx.per_block(), trip_m=None)}
+    for exits in (_bar(gx.NoLeak(), gx.NoBoost()), *nominal, *checks):
+        out[label_of(exits, None)] = Config(exits=exits, trip_m=None)
+    for exits in calibrated:
+        out[label_of(exits, TRIP_M)] = Config(exits=exits, trip_m=TRIP_M)
+    return out
+
+
+CONFIGS = _configs()
 PRESETS = ("simp", "cheap")
 # the raster run's picks on 5810@major (NOTES, "A region whose only exit is its edge"; J_2, on
 # the composite raster): their rows, read as records
@@ -156,6 +215,14 @@ RASTER_RUNS = {
                     / f"{REGION}_p2.parquet")}
 ABSORB_N = 300          # self-absorption: homes drawn
 ABSORB_SEED = 20261015
+TRIP_N = 2000           # the trips: homes drawn by population (with replacement)
+TRIP_SEED = 20261016
+TRIP_BIN_M = 1.0        # ... a trip's length binned (m)
+TRIP_TOL = 0.01         # ... the bisection stops at a median within this of T (relative)
+TRIP_BOOT = 2000        # ... the bootstrap's resamples of the draws
+TRIP_BOOT_SEED = 20261017
+SECANT_MAX = 4.0        # ... a bracketing step changes lam by at most this factor
+LAM_RES_M = 1.0         # ... lam calibrated to whole metres (its name: InternalLeak.name)
 FRAME_H = 1.0           # the painted flow's pixel (m)
 PRIOR_H = 2.0           # the prior's and the maps' pixel (m: FRAME_H's 2 x 2, on the same edges)
 FRAME_PAD = 2.0         # the frames' margin about the region (m: a multiple of both pixels)
@@ -178,7 +245,7 @@ EXIT_PX_M = 2.0         # ... the exits: pixels within this of the street line (
 def metric_of(label: str, preset: str, device: str) -> gcl.ComplexMetric:
     """The configuration's metric for a preset (the cheap preset's search its own: `@e0.05`)."""
     base = dataclasses.replace(metrics.metric_of(metrics.RUNTIME, device=device),
-                               exits=CONFIGS[label])
+                               exits=CONFIGS[label].exits)
     return {"simp": base, "cheap": CHEAP.on(base)}[preset]
 
 
@@ -215,7 +282,8 @@ def run(bid: str, label: str, preset: str, device: str) -> None:
         gpu_gb = peak.peak
     else:
         row, gpu_gb = go(), float("nan")
-    row.update(label=label, preset=preset, metric=metric.name, host=socket.gethostname(),
+    row.update(label=label, preset=preset, metric=metric.name, trip_m=CONFIGS[label].trip_m,
+               host=socket.gethostname(),
                peak_rss_gb=gap_calib.peak_gb(), gpu_gb=gpu_gb, wall=time.time() - t0)
     out.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame([row]).to_parquet(out)
@@ -408,7 +476,7 @@ def baseline(label: str) -> None:
         ROWS / "baseline" / f"{label}_homes.parquet")
     row.update(t_state=time.time() - t0)
     absorbed = ROWS / "baseline" / f"{label}_absorb.parquet"
-    if not isinstance(m.exits.leak, gx.NoLeak) and not absorbed.exists():
+    if isinstance(m.exits.leak, gx.InternalLeak) and not absorbed.exists():
         absorb(label, m, st0).to_parquet(absorbed)
     row.update(peak_gb=gap_calib.peak_gb())
     pd.DataFrame([row]).to_parquet(ROWS / "baseline" / f"{label}.parquet")
@@ -433,35 +501,265 @@ def prior(bid: str, label: str, device: str) -> None:
     print(f"{label} prior: {row}", flush=True)
 
 
+class HomeSolve(NamedTuple):
+    """A home's unit injection solved alone at a factored state (home_solves): the home, its
+    injection per cell on the state's unknowns (`b`: its column of System.Pc there), that
+    injection's total (`q`: 1 less what lands on ground cells and the open band, escaping at
+    once) and the potential per cell (`u`)."""
+    home: int
+    b: NDArray[np.float64]
+    q: float
+    u: NDArray[np.float64]
+
+
+def home_solves(st: gcl.State, homes: NDArray[np.int64]) -> Iterator[HomeSolve]:
+    """Each of `homes`' unit injection solved alone at the factored state `st`, one solve a home:
+    self-absorption's and the trips'."""
+    assert st.factor is not None
+    Pc = st.sys.Pc.tocsc()
+    unk = st.reach.unknown
+    for h in homes:
+        col = np.zeros(st.sys.n)
+        lo, hi = Pc.indptr[h], Pc.indptr[h + 1]
+        col[Pc.indices[lo:hi]] = Pc.data[lo:hi]
+        b = col * unk
+        yield HomeSolve(home=int(h), b=b, q=float(b.sum()), u=st.factor.solve(b))
+
+
 def absorb(label: str, m: gcl.Model, st0: gcl.State) -> pd.DataFrame:
     """Self-absorption (module docstring) at baseline, ABSORB_N homes with demand drawn at random:
     each home's unit injection solved alone."""
-    assert st0.factor is not None
     leak = st0.sys.graph.leak
-    Pc = st0.sys.Pc.tocsc()
-    unk = st0.reach.unknown
-    own_k = 0.0
-    if isinstance(m.exits.leak, gx.HomeLeak):
-        site = m.leak_site
-        own_k = m.exits.leak.total(site) / float(np.where(site.live, site.inj, 0.0).sum())
+    leak_family = m.exits.leak
+    if not isinstance(leak_family, gx.InternalLeak):
+        raise ValueError(f"{label}: self-absorption needs an internal leak")
+    own_k = leak_family.kappa(m.leak_site)
     ok = np.flatnonzero(~m.nodem & ~m.walled0)
     pick = np.sort(np.random.default_rng(ABSORB_SEED).choice(ok, min(ABSORB_N, len(ok)),
                                                               replace=False))
     rows = []
-    for h in pick:
-        col = np.zeros(st0.sys.n)
-        lo, hi = Pc.indptr[h], Pc.indptr[h + 1]
-        col[Pc.indices[lo:hi]] = Pc.data[lo:hi]
-        bvec = col * unk
-        q = float(bvec.sum())
-        u = st0.factor.solve(bvec)
-        ring = bvec > 0
-        rows.append(dict(home=int(h), injected=q, pop=float(m.pop[h]),
-                         own_building=own_k * float(m.pop[h]) * float(bvec @ u) / q,
-                         own_cells=float((leak[ring] * u[ring]).sum()) / q,
-                         anywhere=float((leak * u).sum()) / q))
+    for hs in home_solves(st0, pick):
+        ring = hs.b > 0
+        rows.append(dict(home=hs.home, injected=hs.q, pop=float(m.pop[hs.home]),
+                         own_building=own_k * float(m.pop[hs.home]) * float(hs.b @ hs.u) / hs.q,
+                         own_cells=float((leak[ring] * hs.u[ring]).sum()) / hs.q,
+                         anywhere=float((leak * hs.u).sum()) / hs.q))
     print(f"{label}: self-absorption over {len(rows)} homes done", flush=True)
     return pd.DataFrame(rows)
+
+
+# ------------------------------------------------------------------ the trips
+
+class TripSite(NamedTuple):
+    """Where a model's trips start and end (module docstring): per cell its centroid (`cell_xy`:
+    gap_maps.cell_geometry), per home the centroid of its injection points (`home_xy`, weighted
+    as it injects: gap_flow.PointDemand.S), and the bins (`nbins` of TRIP_BIN_M, past the
+    farthest cell from any home)."""
+    cell_xy: NDArray[np.float64]
+    home_xy: NDArray[np.float64]
+    nbins: int
+
+
+def trip_site(m: gcl.Model) -> TripSite:
+    cell_xy = gap_maps.cell_geometry(m.fm, m.c).xy
+    S = m.dem.S
+    w = np.asarray(S.sum(axis=0)).ravel()
+    home_xy = np.asarray(S.T @ m.dem.xy) / np.maximum(w, 1e-300)[:, None]
+    span = float(np.hypot(*(cell_xy.max(axis=0) - cell_xy.min(axis=0))))
+    return TripSite(cell_xy=cell_xy, home_xy=home_xy,
+                    nbins=int(np.ceil(span / TRIP_BIN_M)) + 2)
+
+
+def trip_origins(site: TripSite, homes: NDArray[np.int64]) -> NDArray[np.float64]:
+    """Where each of `homes`' trips start: its injection's centroid."""
+    return site.home_xy[homes]
+
+
+def trip_rows(st: gcl.State, site: TripSite, homes: NDArray[np.int64]) -> NDArray[np.float64]:
+    """Per home of `homes` its internal trips (module docstring) at the factored state `st`: the
+    current leaking at each cell under its unit injection (gap_maps.leak_drain: the boundary's
+    drainage apart), binned by the straight-line distance from its injection's centroid to the
+    cell's centroid (homes x TRIP_BIN_M bins)."""
+    out = np.zeros((len(homes), site.nbins))
+    origins = trip_origins(site, homes)
+    for i, hs in enumerate(home_solves(st, homes)):
+        mass = gap_maps.leak_drain(st, hs.u)
+        on = np.flatnonzero(mass)
+        d = np.hypot(*(site.cell_xy[on] - origins[i]).T)
+        out[i] = np.bincount((d / TRIP_BIN_M).astype(np.int64), weights=mass[on],
+                             minlength=site.nbins)
+    return out
+
+
+class _TripJob(NamedTuple):
+    st: gcl.State
+    site: TripSite
+
+
+_JOB: list[_TripJob] = []      # the forked workers' state and site (set before the pool forks)
+
+
+def _trip_chunk(homes: NDArray[np.int64]) -> NDArray[np.float64]:
+    [job] = _JOB
+    return trip_rows(job.st, job.site, homes)
+
+
+def trip_rows_of(st: gcl.State, site: TripSite, homes: NDArray[np.int64],
+                 procs: int) -> NDArray[np.float64]:
+    """trip_rows over `procs` processes forked after the factorization (its factor shared), in
+    `homes`' order."""
+    if procs == 1:
+        return trip_rows(st, site, homes)
+    _JOB[:] = [_TripJob(st=st, site=site)]
+    try:
+        with multiprocessing.get_context("fork").Pool(procs) as pool:
+            parts = pool.map(_trip_chunk, np.array_split(homes, 4 * procs))
+    finally:
+        _JOB.clear()
+    return np.concatenate(parts)
+
+
+def trip_median(hist: NDArray[np.float64]) -> float:
+    """The median of a pooled histogram of trips (TRIP_BIN_M bins), linear within its bin."""
+    cum = np.cumsum(hist)
+    half = 0.5 * float(cum[-1])
+    k = int(np.searchsorted(cum, half))
+    below = float(cum[k - 1]) if k else 0.0
+    return (k + (half - below) / float(hist[k])) * TRIP_BIN_M
+
+
+class TripSample(NamedTuple):
+    """The homes the trips are solved for (`homes`, each once) and each one's weight in the pool
+    (`w`: its draws, or its population when every home is taken)."""
+    homes: NDArray[np.int64]
+    w: NDArray[np.float64]
+
+
+def trip_sample(m: gcl.Model, *, n: int, seed: int) -> TripSample:
+    """`n` homes drawn by population with replacement (seeded), among those with demand not walled
+    in at baseline: each draw weighs alike."""
+    ok = np.flatnonzero(~m.nodem & ~m.walled0)
+    draws = np.random.default_rng(seed).choice(ok, n, replace=True, p=m.pop[ok] / m.pop[ok].sum())
+    homes, counts = np.unique(draws, return_counts=True)
+    return TripSample(homes=homes.astype(np.int64), w=counts.astype(np.float64))
+
+
+def every_home(m: gcl.Model) -> TripSample:
+    """Every home with demand not walled in at baseline, weighted by its population."""
+    ok = np.flatnonzero(~m.nodem & ~m.walled0).astype(np.int64)
+    return TripSample(homes=ok, w=m.pop[ok])
+
+
+class TripStep(NamedTuple):
+    """One lam of the calibration: its pooled median trip (m), the share of the pool's current
+    leaking inside, and the factorization's and solves' time (s)."""
+    lam: float
+    median: float
+    inside: float
+    t: float
+
+
+def trip_step(m: gcl.Model, *, s: float, lam: float, sample: TripSample, site: TripSite,
+              procs: int) -> tuple[TripStep, NDArray[np.float64]]:
+    """The median trip at (s, lam) on `m`'s exits otherwise (its barriers and boost), and the
+    sample's rows."""
+    t0 = time.time()
+    st = m.leaked_state(gx.InternalLeak(s=s, lam=lam), np.zeros(m.n))
+    rows = trip_rows_of(st, site, sample.homes, procs)
+    pooled = sample.w @ rows
+    return TripStep(lam=lam, median=trip_median(pooled),
+                    inside=float(pooled.sum() / sample.w.sum()), t=time.time() - t0), rows
+
+
+def calibrate_lam(m: gcl.Model, *, s: float, target: float, tol: float, lam0: float,
+                  resolution: float, sample: TripSample, site: TripSite, procs: int
+                  ) -> tuple[list[TripStep], NDArray[np.float64]]:
+    """The lam (a multiple of `resolution`, m) at which the sample's median trip is within `tol`
+    (relative) of `target`, at the building share s: a bracketing search from lam0 by secant
+    steps in log-log, then bisection in log lam (module docstring). Every step, and the rows at
+    the last (the lam chosen). The median falls as the leak grows: it rises with lam."""
+    def snap(x: float) -> float:
+        return float(max(round(x / resolution), 1) * resolution)
+    steps: list[TripStep] = []
+    lo: TripStep | None = None
+    hi: TripStep | None = None
+    lam = snap(lam0)
+    while True:
+        step, rows = trip_step(m, s=s, lam=lam, sample=sample, site=site, procs=procs)
+        steps.append(step)
+        print(f"  lam {lam:g}: median {step.median:.1f} m, inside {step.inside:.3f} "
+              f"({step.t:.0f}s)", flush=True)
+        if abs(step.median / target - 1.0) <= tol:
+            return steps, rows
+        if step.median < target:
+            lo = step
+        else:
+            hi = step
+        if lo is not None and hi is not None:
+            if hi.lam - lo.lam <= resolution * 1.5:
+                raise RuntimeError(f"no lam between {lo.lam:g} and {hi.lam:g} (at {resolution:g} "
+                                   f"m) gives a median within {tol:g} of {target:g}")
+            lam = min(max(snap((lo.lam * hi.lam) ** 0.5), snap(lo.lam + resolution)),
+                      snap(hi.lam - resolution))
+            continue
+        # not yet bracketed: a secant step in log-log toward the target (slope 1 at first), at
+        # most a factor SECANT_MAX
+        slope = 1.0
+        if len(steps) > 1:
+            a, b = steps[-2], steps[-1]
+            slope = float(np.log(b.median / a.median) / np.log(b.lam / a.lam))
+        ratio = (target / step.median) ** (1.0 / slope) if slope > 0.0 else SECANT_MAX
+        ratio = min(max(ratio, 1.0 / SECANT_MAX), SECANT_MAX)
+        if (ratio > 1.0) != (step.median < target):
+            raise RuntimeError(f"the median trip does not rise with lam: {steps}")
+        lam = snap(lam * ratio)
+
+
+def trip_boot(rows: NDArray[np.float64], sample: TripSample, *, n: int,
+              seed: int) -> NDArray[np.float64]:
+    """The median trip over `n` bootstrap resamples of the sample's draws (each home's draws
+    `sample.w` taken as draws)."""
+    draws = np.repeat(np.arange(len(sample.homes)), sample.w.astype(np.int64))
+    rng = np.random.default_rng(seed)
+    out = np.empty(n)
+    for k0 in range(0, n, 100):
+        idx = rng.integers(0, len(draws), size=(min(100, n - k0), len(draws)))
+        W = np.stack([np.bincount(draws[i], minlength=len(sample.homes)) for i in idx])
+        for j, pooled in enumerate(W.astype(np.float64) @ rows):
+            out[k0 + j] = trip_median(pooled)
+    return out
+
+
+def calib_path(s: float, target: float, boost: gx.NoBoost | gx.StreetBoost) -> Path:
+    return ROWS / "calib" / f"T{target:g}s{s:g}{boost.name}.parquet"
+
+
+def calibrate(s: float, target: float, boost: gx.NoBoost | gx.StreetBoost, procs: int) -> None:
+    """The region's lam for a median internal trip `target` at the building share s (module
+    docstring), with the barriers and `boost`."""
+    [b] = common.build_blocks([REGION])
+    lam0 = target / 1.257      # the screened point source's median on open ground
+    exits = _bar(gx.InternalLeak(s=s, lam=float(round(lam0))), boost)
+    metric = dataclasses.replace(metrics.metric_of(metrics.RUNTIME, device="cpu"), exits=exits)
+    t0 = time.time()
+    m = metric.clearing(b, demand=POP)
+    site = trip_site(m)
+    sample = trip_sample(m, n=TRIP_N, seed=TRIP_SEED)
+    print(f"calibrate s {s:g}, T {target:g}{boost.name}: the model in {time.time() - t0:.0f}s; "
+          f"{len(sample.homes)} homes of {TRIP_N} draws, {site.nbins} bins", flush=True)
+    steps, rows = calibrate_lam(m, s=s, target=target, tol=TRIP_TOL, lam0=lam0,
+                                resolution=LAM_RES_M, sample=sample, site=site, procs=procs)
+    boot = trip_boot(rows, sample, n=TRIP_BOOT, seed=TRIP_BOOT_SEED)
+    out = calib_path(s, target, boost)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame([st._asdict() for st in steps])
+    df = df.assign(s=s, target=target, boost=boost.name, tol=TRIP_TOL, n_draws=TRIP_N,
+                   n_homes=len(sample.homes), seed=TRIP_SEED, chosen=df.index == len(df) - 1,
+                   boot_sd=float(boot.std(ddof=1)), boot_lo=float(np.quantile(boot, 0.025)),
+                   boot_hi=float(np.quantile(boot, 0.975)), peak_gb=gap_calib.peak_gb())
+    df.to_parquet(out)
+    pd.DataFrame({"median": boot}).to_parquet(out.with_name(out.stem + "_boot.parquet"))
+    print(df.to_string(), flush=True)
 
 
 def score(label: str) -> None:
@@ -506,8 +804,14 @@ def cross(label: str, sources: list[str]) -> None:
                              L_P=1.0 - L.P / m.base.P, L_Pq=1.0 - L.Pq / m.base.Pq,
                              L_J2=1.0 - (L.J2 / m.base.J2) ** 0.5, enclosed=L.enclosed))
             print(f"{label} <- {src} {preset}: {rows[-1]}", flush=True)
-    (ROWS / "cross").mkdir(parents=True, exist_ok=True)
-    pd.DataFrame(rows).to_parquet(ROWS / "cross" / f"{label}.parquet")
+    out = ROWS / "cross" / f"{label}.parquet"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    new = pd.DataFrame(rows)
+    if out.exists():
+        old = pd.read_parquet(out)
+        keep = cast("pd.DataFrame", old.loc[~old["source"].isin(sources)])
+        new = pd.concat([keep, new], ignore_index=True)
+    new.to_parquet(out)
 
 
 # ------------------------------------------------------------------ the loop index
@@ -686,9 +990,28 @@ def barrier_rows(b: Block) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def calib_rows() -> pd.DataFrame:
+    """Every calibration's steps (ROWS/calib/), each lam chosen checked against CALIBRATED (the
+    configurations' lam): they must agree."""
+    steps = []
+    for (s, factor), lam in CALIBRATED.items():
+        boost: gx.NoBoost | gx.StreetBoost = (gx.NoBoost() if factor == 1.0
+                                               else gx.StreetBoost(factor=factor))
+        df = pd.read_parquet(calib_path(s, TRIP_M, boost))
+        chosen = float(df.loc[df["chosen"], "lam"].iloc[0])
+        if chosen != lam:
+            raise ValueError(f"s {s:g}{boost.name}: CALIBRATED's lam {lam:g}, the calibration's "
+                             f"{chosen:g}")
+        steps.append(df.assign(label=label_of(_bar(gx.InternalLeak(s=s, lam=lam), boost),
+                                              TRIP_M)))
+    return pd.concat(steps, ignore_index=True)
+
+
 def report() -> None:
     [b] = common.build_blocks([REGION])
     barrier_rows(b).to_csv(ROWS / "summary_barriers.csv", index=False)
+    if CALIBRATED:
+        calib_rows().to_csv(ROWS / "summary_calib.csv", index=False)
     homes = homes_of(b, formal_grid(b))
     geo = gc.geometry(b)
     polys = geo.polys
@@ -704,7 +1027,7 @@ def report() -> None:
         runs.append(dict(label=label, preset=preset, objective=float(
             r.simp_perm if preset == "simp" else r.perm), t=float(r.t), wall=float(r.wall),
             gpu_gb=float(r.gpu_gb), peak_rss_gb=float(r.peak_rss_gb), host=r.host,
-            free_D=float(r.free_D), metric=r.metric))
+            free_D=float(r.free_D), metric=r.metric, trip_m=r.trip_m))
     runs_df = pd.DataFrame(runs)
     scores = pd.concat([pd.read_parquet(p) for p in sorted((ROWS / "score").glob("*.parquet"))],
                        ignore_index=True)
@@ -815,6 +1138,9 @@ def main(argv: list[str]) -> None:
         prior(common.ids_of(argv[1])[0], argv[2], argv[4])
     elif cmd == "members" and len(argv) == 2:
         members(int(argv[1]))
+    elif cmd == "calibrate" and len(argv) == 5 and (argv[3] == "-" or argv[3].startswith("S")):
+        calibrate(float(argv[1]), float(argv[2]), gx.NoBoost() if argv[3] == "-"
+                  else gx.StreetBoost(factor=float(argv[3][1:])), int(argv[4]))
     elif cmd in ("baseline", "score") and len(argv) == 2 and argv[1] in CONFIGS:
         {"baseline": baseline, "score": score}[cmd](argv[1])
     elif cmd == "cross" and len(argv) == 3 and argv[1] in CONFIGS:

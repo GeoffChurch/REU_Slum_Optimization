@@ -94,7 +94,7 @@ def flow_of(m: gcl.Model, st: gcl.State, inj: NDArray[np.float64]) -> CellFlow:
     rhs = m._rhs(st, inj)
     n = c.n
     out = (np.bincount(c.ea, weights=F, minlength=n) - np.bincount(c.eb, weights=F, minlength=n))
-    leak = np.where(r.unknown, st.sys.graph.leak * u, 0.0)     # to ground through the leaks
+    leak = leak_drain(st, u)
     drain = np.bincount(c.fc, weights=Ff, minlength=n) + leak
     drain = np.where(r.ground, -out, drain)              # a ground cell drains its inflow
     # the mean current density: outflows at their midpoints, less the injections at their points
@@ -117,15 +117,11 @@ def flow_of(m: gcl.Model, st: gcl.State, inj: NDArray[np.float64]) -> CellFlow:
     s_pt = np.asarray(pts.S @ inj)[on] * r.unknown[pcell]
     for k in range(2):
         mom[:, k] -= np.bincount(pcell, weights=s_pt * pts.xy[on, k], minlength=n)
-    tri_area = 0.5 * np.abs(_cross(fm.xy, fm.tri))
-    area = np.bincount(c.cell, weights=tri_area, minlength=n)
+    cg = cell_geometry(fm, c)
     # the leaks' drainage, at each cell's centroid
-    tcen = fm.xy[fm.tri].mean(axis=1)
     for k in range(2):
-        cen = (np.bincount(c.cell, weights=tri_area * tcen[:, k], minlength=n)
-               / np.maximum(area, 1e-300))
-        mom[:, k] += leak * cen
-    j = mom / np.maximum(area, 1e-300)[:, None]
+        mom[:, k] += leak * cg.xy[:, k]
+    j = mom / np.maximum(cg.area, 1e-300)[:, None]
     jt = np.where(r.live[c.cell], np.hypot(j[c.cell, 0], j[c.cell, 1]), 0.0)
     return CellFlow(u=u, F=F, Ff=Ff, inj=rhs, drain=drain, j=j, jt=jt, leak=leak)
 
@@ -133,6 +129,28 @@ def flow_of(m: gcl.Model, st: gcl.State, inj: NDArray[np.float64]) -> CellFlow:
 def _cross(xy: NDArray[np.float64], tri: NDArray[np.int64]) -> NDArray[np.float64]:
     a, b, c = xy[tri[:, 0]], xy[tri[:, 1]], xy[tri[:, 2]]
     return (b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1]) - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0])
+
+
+def leak_drain(st: gcl.State, u: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Per cell the current to ground through its leak (gap_exits) at the potential `u`, 0 off the
+    state's unknowns: the leaks' share of the drainage (CellFlow.leak), the street's apart."""
+    return np.where(st.reach.unknown, st.sys.graph.leak * u, 0.0)
+
+
+class CellGeometry(NamedTuple):
+    """Per cell of a cell structure its `area` (its triangles', m^2) and its centroid `xy` (their
+    centroids', area-weighted)."""
+    area: NDArray[np.float64]
+    xy: NDArray[np.float64]
+
+
+def cell_geometry(fm: gcl.FullMesh, c: gcl.FullCells) -> CellGeometry:
+    tri_area = 0.5 * np.abs(_cross(fm.xy, fm.tri))
+    area = np.bincount(c.cell, weights=tri_area, minlength=c.n)
+    tcen = fm.xy[fm.tri].mean(axis=1)
+    return CellGeometry(area=area, xy=np.column_stack([
+        np.bincount(c.cell, weights=tri_area * tcen[:, k], minlength=c.n)
+        / np.maximum(area, 1e-300) for k in range(2)]))
 
 
 def conservation(st: gcl.State, fl: CellFlow) -> NDArray[np.float64]:

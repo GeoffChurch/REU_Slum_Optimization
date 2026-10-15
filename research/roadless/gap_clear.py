@@ -1317,6 +1317,13 @@ class Model:
         """The state of the clearing k (no road carved), its operator assembled and factored."""
         return self._state(self.sys, k, prefix=_NO_ROADS)
 
+    def leaked_state(self, leak: gx.Leak, k: NDArray[np.float64]) -> State:
+        """The state of the clearing k (no road carved) with `leak` in place of the exits' own,
+        on the same cells (leak_site), pattern and plan: a leak's other lam without the model
+        built again (region_leaks' trip calibration)."""
+        sys = self.sys.with_graph(self.sys.graph.with_leak(leak.per_cell(self.leak_site)))
+        return self._state(sys, k, prefix=_NO_ROADS)
+
     def road_factors(self, prefix: Prefix) -> State:
         """A road network's prefix's factors and reach (no operator: the homes it reaches need no
         solve)."""
@@ -1694,7 +1701,7 @@ def complex_of(name: str, *, factorization: gap_factor.Factorization) -> Complex
     if m is None:
         raise ValueError(f"unknown complex metric {name!r}: cx+<form><w>+s<s>r<ring>b<band>+"
                          "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped]+v<code>"
-                         "[+x[B<line>c<cross>][U<lam>|H<lam>][S<boost>]v<exits code>]"
+                         "[+x[B<line>c<cross>][L<lam>s<s>][S<boost>]v<exits code>]"
                          "[@e<search eps>]")
     (kind, w, ramp_s, s_, ring, band, R, levels, grade, quad, sigma, ox, oy,
      lumped, code, *exits, search) = m.groups()
