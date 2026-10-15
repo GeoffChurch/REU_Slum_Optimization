@@ -14,6 +14,7 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S pattern <ids,> [fault]     # fault: drop-identity
     uv run python $S constants - [fault]        # fault: omit
     uv run python $S device <ids,> [fault]      # fault: perturb (on a GPU: cluster.py --complex)
+    uv run python $S roads <ids,> [fault]       # fault: one-face-closed
 
 `baseline`: the fixed mesh (the runtime's metric, METRIC) against the complex rebuilt
 (gap_compare.ComplexModel, gap_flow's mesh under the shy distance at 0.5): P0, P_{1/2},0 and
@@ -68,6 +69,12 @@ the tension (adding and putting back) at the random clearing and the polish's ep
 each within DEVICE_TOL of its largest magnitude. Run on a GPU node. Fault `perturb`: one
 refactorization (the random clearing's) handed its values with the diagonal raised by 1e-6
 (relative).
+`roads` (phase 2b: road re-scoring on the complex): a road network's prefixes (ROAD_NETWORK's area
+prefixes, road_rescore's rows) cut into one fixed mesh (gap_clear.Carving), each of ROAD_STOPS a
+state on it, against the complex rebuilt with the prefix carved (gap_compare.ComplexModel, the
+corridor common.Carve's rule frees): L_P, L_{P_1/2} and L_J2 within ROAD_TOL, the homes reached
+equal home for home. Fault `one-face-closed`: at every prefix the largest atom it carves left
+standing (a road face left closed).
 """
 from __future__ import annotations
 
@@ -80,7 +87,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import scipy.sparse as sp
+import shapely
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -90,8 +99,9 @@ import gap_factor  # noqa: E402
 import gap_compare as gcmp  # noqa: E402
 import gap_complex as gc  # noqa: E402
 import gap_flow as gf  # noqa: E402
+import metrics  # noqa: E402
 
-NAME = f"cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v{gcl.CODE}"     # the runtime's (owner 2026-10-14)
+NAME = metrics.RUNTIME            # the runtime's (owner 2026-10-14)
 METRIC = gcl.complex_of(NAME, factorization=gap_factor.SuperLU())
 BUDGET = 0.05
 BASE_TOL = 2e-3          # the baseline against the rebuild: the rebuild's own lattice, moved,
@@ -119,6 +129,10 @@ PATTERN_P_TOL = 1e-9     # ... and P from its refined solve against an unrefined
 DEVICE_TOL = 1e-8        # cuDSS against SuperLU, of the largest magnitude (both refined to the
                          # floating-point floor: 1e-12 -- 1e-10 apart on 19570 and 20269)
 PERTURB = 1e-6           # fault `perturb`: the diagonal's relative rise
+ROAD_ROWS = HERE / "road_rows"      # item 4's road networks and their prefixes (road_rescore)
+ROAD_NETWORK = "resistance_lp"      # the network the guard carves: the lineup's leader
+ROAD_STOPS = (1, 3, 5)               # its area prefixes checked (D 0.02, 0.10, 0.20)
+ROAD_TOL = ONE_TOL                   # a prefix's lenses against the rebuild's, as a clearing's
 
 
 @contextmanager
@@ -134,7 +148,7 @@ def _patched(owner: object, name: str, value: object) -> Iterator[None]:
 def _model(b, metric: gcl.ComplexMetric = METRIC) -> gcl.Model:
     """The block's model meshed afresh (a temporary cache: a fault in the meshing is seen)."""
     with tempfile.TemporaryDirectory() as tmp:
-        fx = metric.fixed(b, cache=Path(tmp))
+        fx = metric.fixed(b, cache=Path(tmp), carving=gcl.Carving.none(gc.geometry(b)))
     return metric.model(b, fx, demand=POP)
 
 
@@ -413,7 +427,7 @@ def identity(_ids: list[str]) -> list[str]:
                 return raster
         try:
             Colliding(spec=METRIC.spec, fs=METRIC.fs, form=METRIC.form, lumped=False,
-                      factorization=METRIC.factorization)
+                      search_eps=METRIC.search_eps, factorization=METRIC.factorization)
         except ValueError:
             refused += 1
             continue
@@ -621,7 +635,7 @@ def device(ids: list[str]) -> list[str]:
     bad = []
     for bid in ids:
         [b] = common.build_blocks([bid])
-        fx = METRIC.fixed(b, cache=gcl.CACHE)
+        fx = METRIC.fixed(b, cache=gcl.CACHE, carving=gcl.Carving.none(gc.geometry(b)))
         ms = {dev: dataclasses.replace(METRIC, factorization=gap_factor.factorization_of(dev))
               .model(b, fx, demand=POP) for dev in ("cpu", "gpu")}
         out: dict[str, dict[str, np.ndarray]] = {}
@@ -688,12 +702,64 @@ def _perturb_one() -> contextlib.AbstractContextManager[None]:
     return _patched(gap_factor._CuDSSPlan, "factor", factor)
 
 
+# ------------------------------------------------------------------ roads
+
+def roads(ids: list[str]) -> list[str]:
+    import geopandas as gpd
+
+    import road_rescore as rr
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        geo = gc.geometry(b)
+        pre = pd.read_parquet(rr.prefix_dir(ROAD_ROWS) / f"{bid}__{ROAD_NETWORK}.parquet")
+        stops = sorted({int(mk) for mk in pre[pre["pop"] == rr.CX_POP].m})
+        ordered = gpd.read_parquet(rr.ordered_path(ROAD_ROWS / "scratch", bid, ROAD_NETWORK))
+        cors = [geo.local(rr.corridor_of(ordered, mk)) for mk in stops]
+        carving = gcl.Carving.of(geo, [cors])
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = METRIC.fixed(b, cache=Path(tmp), carving=carving)
+        m = METRIC.model(b, fx, demand=POP)
+        cm = gcmp.ComplexModel(b, METRIC.fs, METRIC.form)
+        parts = []
+        for k in ROAD_STOPS:
+            L = m.road_lenses(gcl.Prefix(net=0, stop=k))
+            r, _u, live = cm.scored(np.ones(m.n, dtype=bool), cors[k - 1])
+            d = {"L_P": (1.0 - L.P / m.base.P) - r["L_P"],
+                 "L_Pq": (1.0 - L.Pq / m.base.Pq) - r["L_Pq0.5"],
+                 "L_J2": (1.0 - (L.J2 / m.base.J2) ** 0.5) - r["L_J2"]}
+            apart = np.flatnonzero(L.live ^ live)
+            ok = max(abs(v) for v in d.values()) <= ROAD_TOL and not len(apart)
+            parts.append(f"stop {k} ({stops[k - 1]} roads): " + ", ".join(
+                f"{key} {v:+.1e}" for key, v in d.items()) + f", {len(apart)} homes apart"
+                + ("" if ok else " FAILS"))
+            if not ok:
+                bad.append(f"{bid} stop {k}")
+        print(f"{bid} {ROAD_NETWORK}, {carving.n} atoms ({int((carving.stop > 0).sum())} carved): "
+              + "; ".join(parts), flush=True)
+    return bad
+
+
+_CARVED = gcl.Carving.carved
+
+
+def _one_face_closed(self: gcl.Carving, prefix: gcl.Prefix) -> np.ndarray:
+    """gap_clear.Carving.carved with the largest atom the prefix carves left standing (fault
+    `one-face-closed`)."""
+    out = _CARVED(self, prefix)
+    if out.any():
+        on = np.flatnonzero(out)
+        out = out.copy()
+        out[on[int(np.argmax(shapely.area(self.polys[on])))]] = False
+    return out
+
+
 # ------------------------------------------------------------------ the run
 
 GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "baseline": baseline, "weights": weights, "reach": reach, "gradient": gradient,
     "free": free, "identity": identity, "convex": convex, "pattern": pattern,
-    "constants": constants, "device": device}
+    "constants": constants, "device": device, "roads": roads}
 
 
 def _fault_exits():
@@ -713,6 +779,7 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "pattern": {"drop-identity": lambda: _patched(gcl.Graph, "values", _drop_identity)},
     "constants": {"omit": lambda: _patched(gcl, "code_constants", _omit_mesh_rev)},
     "device": {"perturb": _perturb_one},
+    "roads": {"one-face-closed": lambda: _patched(gcl.Carving, "carved", _one_face_closed)},
 }
 
 

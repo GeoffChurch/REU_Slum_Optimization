@@ -38,6 +38,7 @@ from scipy.sparse.csgraph import connected_components
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import clear  # noqa: E402
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
 import gap_factor  # noqa: E402
@@ -141,7 +142,7 @@ def run_one(job: tuple[str, str]) -> str | None:
         cost = pop / pop.sum()
         fs = gcmp.flow_spec(R, LEVELS)
         spec = gap_study.spec_of(gcmp.S_M)
-        m = gcl.ComplexMetric(spec=spec, fs=fs, form=form, lumped=False,
+        m = gcl.ComplexMetric(spec=spec, fs=fs, form=form, lumped=False, search_eps=clear.EPS,
                               factorization=gap_factor.SuperLU()).clearing(
             b, demand=common.PopulationDemand())
         t_model = time.time() - t0

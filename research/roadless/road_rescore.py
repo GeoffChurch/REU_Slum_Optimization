@@ -25,6 +25,16 @@ summary tables beside the rows (<rows>/summary_*.csv, committed).
     uv run python $S report <rows> <lineup,> <mesh> <composite mesh>
     uv run python $S sizes <rows> <composite mesh> <procs>
     uv run python $S project <rows> <lineup,> <mesh> <composite mesh>
+    uv run python $S cx <rows> <scratch> <metric> <cpu|gpu> <id> <items,>    # on the complex
+
+ON THE COMPLEX (phase 2b; NOTES, "The complex as the runtime: the ports and the cross-checks"):
+`cx` scores the area prefixes (decision (2)) on the gap complex's metric (<metric>, refused unless
+it is one: gap_clear.complex_of), each item of a block in turn: a network of <rows>' prefixes
+(cx_network: the network's fixed mesh with its prefixes' corridors cut into the footprints,
+gap_clear.Carving, built in a temporary directory; every prefix a state on it, L_P, L_{P_1/2},
+L_J2 and B (i)), or `plain` (cx_plain: the block's plain mesh, its homes' P_{1/2} weights, the
+stored clearings of cx_stored, then SIMP's default and the cheap preset under P at D 0.05, their
+polish scored as the device's). Rows under <rows>/<metric>/<device>/area_<budgets>/.
 
 <rows> is the rows root and <lineup,> the networks it scores, both required: item 4 ran with
 research/roadless/road_rows and common.LINEUP (clearance,clearance_looped,cycle_native,
@@ -54,20 +64,38 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, cast
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import clearings  # noqa: E402
 import common  # noqa: E402
+import gap_clear as gcl  # noqa: E402
+import gap_complex as gc  # noqa: E402
+import gap_factor  # noqa: E402
+import lifted  # noqa: E402
+import polish_greedy  # noqa: E402
+import relax  # noqa: E402
+import search  # noqa: E402
+
+from reblock.budget import road_corridor  # noqa: E402
+
+if TYPE_CHECKING:
+    from shapely.geometry.base import BaseGeometry
+
+    from reblock.contracts import Block
 
 ROADLESS = common.REPO / "research" / "roadless"
 
@@ -710,6 +738,219 @@ def score(rows: Path, lineup: tuple[str, ...], scratch: Path, mesh_token: str, p
         p.solver.release()
 
 
+# ------------------------------------------------------------------ score on the complex
+# NOTES, "The complex as the runtime: the ports and the cross-checks". Each (block, network) is
+# its own fixed mesh with the network's prefix corridors cut into the footprints
+# (gap_clear.Carving), every area prefix a state on it; the block's plain mesh scores the stored
+# clearings and runs the two presets, under P.
+
+CX_POWER = 1.0                  # the presets' objective on the complex: P (decision (1))
+CX_PLAN = "fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2"   # SIMP's default; its polish scores
+                                                          # as the device's (`cx` main): E on a
+CX_CHEAP = ("S0.01cat", 64, 8, False)    # core, the eps world on a GPU (phase 2a, the same
+                                         # clearings); the cheap preset: picker, tries, width,
+                                         # pairs
+CX_POP = "area"                 # the prefixes cut by area population (decision (2))
+CX_MESH = lifted.UniformMesh(0.5, offset=lifted.OFFSET)   # the presets' `mesh` argument: the
+                                                          # complex has no grid (h 0.5 unnamed)
+
+
+def cx_stored(metric: str) -> dict[str, str]:
+    """The stored clearings scored on the complex beside the roads (clearings.Store's runs):
+    SIMP's default and the cheap preset at area D 0.05 as the raster optimized them (J_2 under the
+    step rule before the face aperture: item 4's, the 60; P under uni+apwfs: phase 1's
+    acceptance, the 13) and as the complex `metric` did (P: phase 1's acceptance, the 13)."""
+    plan, (picker, tries, width, _pairs) = CX_PLAN, CX_CHEAP
+    cheap = f"{picker}.P{tries}w{width}"
+    return {"simp_uni": f"relax_rows/uni/{plan}/D0.05.p2",
+            "cheap_uni": f"polish_rows/uni/{cheap}/D0.05.p2",
+            "simp_fws": f"relax_rows/uni+apwfs/{plan}/D0.05.p1",
+            "cheap_fws": f"polish_rows/uni+apwfs/{cheap}/D0.05.p1",
+            "simp_cx": f"relax_rows/{metric}/{plan}/D0.05.p1",
+            "cheap_cx": f"polish_rows/{metric}/{cheap}/D0.05.p1"}
+
+
+class Presets(NamedTuple):
+    """The two presets' rows directories under one complex metric and polish scoring
+    (relax.rows_of, polish_greedy.rows_of; a run's id in the store is its directory with
+    `.p<power>`, store_run): SIMP's default and the cheap preset."""
+    simp: Path
+    cheap: Path
+
+
+def cx_presets(metric: str, scoring: search.PolishScoring) -> Presets:
+    """The presets' rows under the complex `metric`, their polish scored by `scoring`."""
+    plan = relax.plan_of(CX_PLAN)._replace(polish_scoring=scoring)
+    picker, tries, width, pairs = CX_CHEAP
+    return Presets(simp=relax.rows_of(plan, metric, PRICE_BUDGET),
+                   cheap=polish_greedy.rows_of(picker, tries, width, pairs, scoring, CX_MESH,
+                                               metric, PRICE_BUDGET))
+
+
+def store_run(rows_dir: Path) -> str:
+    """A rows directory's run id in the store (clearings_export: the path with `.p<power>`)."""
+    return f"{rows_dir.relative_to(ROADLESS).as_posix()}.p{CX_POWER:g}"
+
+
+def cx_dir(rows: Path, metric: gcl.ComplexMetric) -> Path:
+    """The complex's rows: under the metric's name (its rows never a raster run's: the name is
+    gap_clear.check_disjoint's), then the device (the same scores to the floating-point level:
+    each run keeps its own)."""
+    return rows / metric.name / metric.device / f"{CX_POP}_{budgets_tag()}"
+
+
+def corridor_of(ordered: gpd.GeoDataFrame, m: int) -> BaseGeometry:
+    """The corridor of an ordered network's first `m` roads (reblock.budget.road_corridor: each
+    buffered by half its width, unioned), the prefix Carve frees."""
+    return road_corridor(cast("gpd.GeoDataFrame", ordered.iloc[:m]))
+
+
+def _lens_row(m: gcl.Model, L: gcl.Lenses) -> dict[str, float]:
+    """A state's lenses on the model's baseline: L_P, L_{P_1/2}, L_J2 (Lens A's form at p 2),
+    B (i)."""
+    return dict(L_P=1.0 - L.P / m.base.P, L_Pq=1.0 - L.Pq / m.base.Pq,
+                L_J2=1.0 - (L.J2 / m.base.J2) ** 0.5, enclosed=L.enclosed,
+                n_enclosed=L.n_enclosed, unknowns=L.unknowns)
+
+
+def _block_row(m: gcl.Model) -> dict[str, object]:
+    return dict(n=m.n, P0=m.base.P, Pq0=m.base.Pq, J2_0=m.base.J2, cells0=m.cells,
+                enclosed0=float(m.cost[m.walled0].sum()), n_enclosed0=int(m.walled0.sum()),
+                nodem=int(m.nodem.sum()), host=socket.gethostname())
+
+
+def cx_network(rows: Path, scratch: Path, metric: gcl.ComplexMetric, b: Block,
+               name: str) -> None:
+    """One network on the complex: its area prefixes' corridors (prefix_dir's rows: every budget
+    and the whole network) cut into the footprints, one mesh (built in a temporary directory:
+    it serves this network only), each prefix a state; the rows, the prefix rows with the lenses
+    added, to cx_dir."""
+    bid = b.block_id
+    out = cx_dir(rows, metric) / f"{bid}__{name}.parquet"
+    if out.exists():
+        return
+    t0 = time.perf_counter()
+    every = pd.read_parquet(prefix_dir(rows) / f"{bid}__{name}.parquet")
+    pre = every[every["pop"] == CX_POP].reset_index(drop=True)
+    ordered = gpd.read_parquet(ordered_path(scratch, bid, name))
+    stops = sorted({int(m) for m in pre.m})
+    geo = gc.geometry(b)
+    carving = gcl.Carving.of(geo, [[geo.local(corridor_of(ordered, m)) for m in stops]])
+    t_carve = time.perf_counter() - t0
+    with tempfile.TemporaryDirectory() as tmp:
+        fx = metric.fixed(b, cache=Path(tmp), carving=carving)
+    t_mesh = time.perf_counter() - t0 - t_carve
+    m = metric.model(b, fx, demand=common.PopulationDemand())
+    t_model = time.perf_counter() - t0 - t_carve - t_mesh
+    got = {}
+    for k, mk in enumerate(stops, start=1):
+        ts = time.perf_counter()
+        got[mk] = dict(_lens_row(m, m.road_lenses(gcl.Prefix(net=0, stop=k))),
+                       t_state=time.perf_counter() - ts)
+    df = pd.DataFrame([dict(r.to_dict(), **got[int(r.m)]) for _, r in pre.iterrows()]).assign(
+        metric=metric.name, device=metric.device, atoms=carving.n,
+        carved=int((carving.stop > 0).any(axis=1).sum()), nt=fx.fm.nt,
+        **{k: v for k, v in _block_row(m).items() if k != "n"}, t_carve=t_carve,
+        t_mesh=t_mesh, t_model=t_model, t_total=time.perf_counter() - t0,
+        peak_rss_gb=_status_gb("VmHWM"))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    write_parquet(df, out)
+    at = df[np.isclose(df.budget, PRICE_BUDGET)]
+    print(f"{time.strftime('%H:%M:%S')} {bid} {name}: {len(stops)} prefixes, {carving.n} atoms, "
+          f"mesh {fx.fm.nt} triangles in {t_mesh:.0f}s, model {t_model:.0f}s, states "
+          f"{sum(v['t_state'] for v in got.values()):.0f}s; at D {PRICE_BUDGET:g} L_P "
+          + ", ".join(f"{v:.4f}" for v in at.L_P), flush=True)
+
+
+def cx_plain(rows: Path, metric: gcl.ComplexMetric, b: Block, *,
+             scoring: search.PolishScoring) -> None:
+    """The block's plain mesh (the node's cache): its baseline and each home's P_{1/2} weight
+    (`<id>__homes`), the stored clearings (cx_stored) scored, then SIMP's default and the cheap
+    preset run under P at D PRICE_BUDGET (their rows where relax.py and polish_greedy.py keep them,
+    their polish scored by `scoring`) and their clearings scored (`<id>__plain`)."""
+    bid = b.block_id
+    d = cx_dir(rows, metric)
+    out = d / f"{bid}__plain.parquet"
+    if out.exists():
+        return
+    d.mkdir(parents=True, exist_ok=True)
+    pop = common.PopulationDemand()
+    t0 = time.perf_counter()
+    m = metric.clearing(b, demand=pop)
+    write_parquet(pd.DataFrame(dict(block=bid, home=np.arange(m.n), pop=m.pop, u0=m.u_pop0,
+                                    a_q=m.inj_q / m.pop, nodem=m.nodem, walled0=m.walled0)),
+                  d / f"{bid}__homes.parquet")
+    store = clearings.Store.committed()
+    out_rows = [dict(clearing="baseline", run="", n_cleared=0, D=0.0, stored_perm=np.nan,
+                     **_lens_row(m, m.base), t=0.0)]
+
+    def score(key: str, run: str, ids: np.ndarray, stored: float) -> None:
+        x = np.zeros(m.n, dtype=bool)
+        x[ids] = True
+        ts = time.perf_counter()
+        out_rows.append(dict(clearing=key, run=run, n_cleared=int(x.sum()),
+                             D=float(m.cost[x].sum()), stored_perm=stored,
+                             **_lens_row(m, m.lenses(x)), t=time.perf_counter() - ts))
+        print(f"  {bid} {key}: L_P {out_rows[-1]['L_P']:.4f} L_Pq {out_rows[-1]['L_Pq']:.4f} L_J2 "
+              f"{out_rows[-1]['L_J2']:.4f} enclosed {out_rows[-1]['enclosed']:.5f}", flush=True)
+
+    runs = store.runs()
+    for key, run in cx_stored(metric.name).items():
+        if run not in runs:
+            raise SystemExit(f"{run}: not in the store (clearings_export.py export first)")
+        t = store.table(run)
+        if not (t["block"] == bid).any():
+            continue
+        [stored] = t.loc[t["block"] == bid, "perm"].to_numpy(dtype=float)
+        score(key, run, store.cleared(run, b, step=1), stored)
+    t_stored = time.perf_counter() - t0
+    del m
+    # the presets under P on the complex (B's optimizer: free first, then the search)
+    plan = relax.plan_of(CX_PLAN)._replace(polish_scoring=scoring)
+    picker, tries, width, pairs = CX_CHEAP
+    dirs = cx_presets(metric.name, scoring)
+    simp_rows = dirs.simp / f"{bid}_p{CX_POWER:g}.parquet"
+    ts = time.perf_counter()
+    if not simp_rows.exists():
+        simp_rows.parent.mkdir(parents=True, exist_ok=True)
+        write_parquet(pd.DataFrame([relax.one(bid, CX_POWER, metric, plan, PRICE_BUDGET,
+                                              demand=pop)]), simp_rows)
+    t_simp = time.perf_counter() - ts
+    cheap_rows = dirs.cheap / f"{bid}_p{CX_POWER:g}.parquet"
+    ts = time.perf_counter()
+    if not cheap_rows.exists():
+        polish_greedy.main(bid, CX_POWER, metric, picker, tries, width, PRICE_BUDGET, CX_MESH,
+                           pairs, scoring=scoring)
+    t_cheap = time.perf_counter() - ts
+    m = metric.clearing(b, demand=pop)
+    for key, f, ids_col, perm_col in ((f"simp_cx{scoring.suffix}", simp_rows, "simp_cleared",
+                                       "simp_perm"),
+                                      (f"cheap_cx{scoring.suffix}", cheap_rows, "cleared",
+                                       "perm")):
+        r = pd.read_parquet(f).iloc[0]
+        score(key, store_run(f.parent), np.asarray(r[ids_col], dtype=np.int64),
+              float(r[perm_col]))
+    write_parquet(pd.DataFrame(out_rows).assign(
+        block=bid, metric=metric.name, device=metric.device, **_block_row(m),
+        t_stored=t_stored, t_simp=t_simp, t_cheap=t_cheap, t_total=time.perf_counter() - t0,
+        peak_rss_gb=_status_gb("VmHWM")), out)
+    print(f"{time.strftime('%H:%M:%S')} {bid} plain: {len(out_rows)} states, SIMP {t_simp:.0f}s, "
+          f"cheap {t_cheap:.0f}s, total {time.perf_counter() - t0:.0f}s", flush=True)
+
+
+def cx(rows: Path, scratch: Path, metric: gcl.ComplexMetric, bid: str, items: list[str], *,
+       scoring: search.PolishScoring) -> None:
+    """The block's items on the complex, one after another: `plain` (cx_plain) or a network of
+    prefix_dir (cx_network)."""
+    _check_single_threaded()
+    [b] = common.build_blocks([bid])
+    for item in items:
+        if item == "plain":
+            cx_plain(rows, metric, b, scoring=scoring)
+        else:
+            cx_network(rows, scratch, metric, b, item)
+
+
 # ------------------------------------------------------------------ report
 
 SHORT = {"clearance": "clear", "clearance_looped": "clear_loop", "cycle_native": "cycle",
@@ -1173,6 +1414,15 @@ if __name__ == "__main__":
     elif cmd == "score":
         score(Path(a[1]), lineup_of(a[2]), Path(a[3]), a[4], a[5].split(","), Scored.parse(a[6]),
               a[7].split(","))
+    elif cmd == "cx":
+        if len(a) != 7:
+            raise SystemExit("cx <rows> <scratch> <metric> <cpu|gpu> <id> <items,>")
+        # the device resolves the factorization and the presets' polish scoring (phase 2a: E on
+        # a core, the eps world on a GPU; the same clearings)
+        polish = {"cpu": "E", "gpu": ""}[a[4]]
+        cx(Path(a[1]), Path(a[2]),
+           gcl.complex_of(a[3], factorization=gap_factor.factorization_of(a[4])), a[5],
+           a[6].split(","), scoring=search.polish_scoring_of(polish))
     elif cmd == "report":
         report(Path(a[1]), lineup_of(a[2]), a[3], a[4])
     elif cmd == "sizes":

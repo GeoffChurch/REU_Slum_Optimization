@@ -645,6 +645,134 @@ def full_cells(fm: FullMesh, *, lumped: bool) -> FullCells:
                      pg=np.flatnonzero(~finite))
 
 
+# ------------------------------------------------------------------ the footprints' atoms: carving
+
+class Prefix(NamedTuple):
+    """A road network's prefix as a state of a carving (Carving): `net` the network (its position
+    among the carving's), `stop` its stop (1 .. that network's stops; 0 carves nothing)."""
+    net: int
+    stop: int
+
+
+_NO_ROADS = Prefix(net=0, stop=0)      # a clearing's state: no road carved
+
+
+class Carving(NamedTuple):
+    """The footprints a fixed mesh is built on, its ATOMS, and how road networks' prefixes carve
+    them (common.Carve's rule on the complex: exactly a prefix's corridor freed; NOTES, "The
+    complex as the runtime: the ports and the cross-checks"). A network's scored prefixes are its
+    STOPS, their corridors nested, C_1 within C_2 ... within C_K (each the union of the prefix's
+    roads buffered by half their width: reblock.budget.road_corridor, in the block's local
+    coordinates). Every footprint is cut by every network's corridors: its atoms are the pieces of
+    their arrangement, each carved by a network from the first of its stops whose corridor holds
+    it (0: never; pieces under gap_complex.DUST_M2 dropped, as the open ground's dust); a building
+    no corridor touches is one atom, itself. A state at a network's stop k stands the atoms of
+    every building it does not clear less those that network has carved by then: b less C_k, the
+    footprint the complex rebuilt with the prefix carved stands (gap_complex.obstacles), and a
+    footprint's zone (within w / 2 of it) is the union of its standing atoms' zones, so the shy
+    distance's factor is exact on the atoms. Homes (the demand, the ring, the population and B (i))
+    stay the buildings. No networks: every building one atom, the plain mesh. `polys` per atom its
+    footprint, `parent` its building, `stop` per atom and network the stop it is carved from;
+    `stops` per network its stops; `digest` the corridors' identity (the mesh cache's file name;
+    '' for none)."""
+    polys: NDArray[np.object_]
+    parent: NDArray[np.int64]
+    stop: NDArray[np.int64]               # (atoms, networks)
+    stops: tuple[int, ...]
+    digest: str
+
+    @property
+    def n(self) -> int:
+        return len(self.polys)
+
+    @staticmethod
+    def none(geo: gc.Geometry) -> Carving:
+        """No roads: every building one atom (the plain fixed mesh)."""
+        n = len(geo.polys)
+        return Carving(polys=geo.polys, parent=np.arange(n, dtype=np.int64),
+                       stop=np.zeros((n, 0), dtype=np.int64), stops=(), digest="")
+
+    @staticmethod
+    def of(geo: gc.Geometry, networks: list[list[Any]]) -> Carving:
+        """The atoms of `geo`'s footprints cut by each network's nested stop corridors (local
+        coordinates, in order); refuses a network whose corridors are not nested (a prefix's
+        corridor holds every shorter one's)."""
+        if not networks or not all(networks):
+            raise ValueError("a carving needs a network with a stop: Carving.none is the plain "
+                             "mesh")
+        nets = [[shapely.make_valid(c) for c in cs] for cs in networks]
+        for i, cs in enumerate(nets):
+            for k in range(1, len(cs)):
+                out = shapely.area(shapely.difference(cs[k - 1], cs[k]))
+                if out > gc.DUST_M2:
+                    raise ValueError(f"network {i}: stop {k + 1}'s corridor misses {out:.2e} m^2 "
+                                     f"of stop {k}'s: not one network's nested prefixes")
+        polys = np.asarray(geo.polys, dtype=object)
+        parent = np.arange(len(polys), dtype=np.int64)
+        tag = np.zeros((len(polys), len(nets)), dtype=np.int64)
+        for i, cs in enumerate(nets):
+            for k, c in enumerate(cs, start=1):
+                hit = np.unique(shapely.STRtree(polys).query(c, predicate="intersects"))
+                hit = hit[tag[hit, i] == 0]
+                if not len(hit):
+                    continue
+                inside = shapely.intersection(polys[hit], c)
+                outside = shapely.difference(polys[hit], c)
+                new_p, new_par, new_tag = [], [], []
+                for j, a, z in zip(hit, inside, outside, strict=True):
+                    for part in _polygons(a):
+                        new_p.append(part)
+                        new_par.append(parent[j])
+                        t = tag[j].copy()
+                        t[i] = k
+                        new_tag.append(t)
+                    for part in _polygons(z):
+                        new_p.append(part)
+                        new_par.append(parent[j])
+                        new_tag.append(tag[j].copy())
+                keep = np.ones(len(polys), dtype=bool)
+                keep[hit] = False
+                polys = np.concatenate([polys[keep], np.asarray(new_p + [None], dtype=object)[:-1]])
+                parent = np.concatenate([parent[keep], np.asarray(new_par, dtype=np.int64)])
+                tag = np.concatenate([tag[keep], np.asarray(new_tag, dtype=np.int64).reshape(
+                    -1, len(nets))])
+        o = np.lexsort((*tag.T[::-1], parent))
+        h = hashlib.sha256()
+        for cs in nets:
+            h.update(b"".join(shapely.to_wkb(np.asarray(cs, dtype=object), hex=False,
+                                             output_dimension=2, byte_order=1)))
+            h.update(b"|")
+        return Carving(polys=polys[o], parent=parent[o], stop=tag[o],
+                       stops=tuple(len(cs) for cs in nets), digest=h.hexdigest()[:16])
+
+    def carved(self, prefix: Prefix) -> NDArray[np.bool_]:
+        """Per atom: carved by `prefix` (stop 0: none)."""
+        if prefix.stop == 0:
+            return np.zeros(self.n, dtype=bool)
+        if not 1 <= prefix.stop <= self.stops[prefix.net]:
+            raise ValueError(f"{prefix}: network {prefix.net} has stops 1 .. "
+                             f"{self.stops[prefix.net]}")
+        s = self.stop[:, prefix.net]
+        return (s >= 1) & (s <= prefix.stop)
+
+    def atom_k(self, k: NDArray[np.float64], *, prefix: Prefix) -> NDArray[np.float64]:
+        """Per atom its clearing: its building's k, or 1 where `prefix` carves it."""
+        return np.where(self.carved(prefix), 1.0, k[self.parent])
+
+    def to_buildings(self, g: NDArray[np.float64], n: int, *,
+                     prefix: Prefix) -> NDArray[np.float64]:
+        """A per-atom derivative summed to the buildings (the atoms `prefix` carves held at 1)."""
+        return np.bincount(self.parent, weights=np.where(self.carved(prefix), 0.0, g),
+                           minlength=n)
+
+
+def _polygons(g: Any) -> list[Any]:
+    """The polygons of a piece (an intersection's or difference's result), each of at least
+    gap_complex.DUST_M2."""
+    parts = shapely.get_parts(g)
+    return [p for p in parts if shapely.get_type_id(p) == 3 and shapely.area(p) >= gc.DUST_M2]
+
+
 # ------------------------------------------------------------------ the fixed mesh, cached
 
 _CACHE_FORMAT = 2      # what a cached mesh's file holds (in its key; a storage detail, no score's):
@@ -652,17 +780,20 @@ _CACHE_FORMAT = 2      # what a cached mesh's file holds (in its key; a storage 
 
 
 class Fixed(NamedTuple):
-    """A block's fixed mesh and what its baseline fixes (module docstring): the mesh, the demand
-    on the triangles reaching the street with every footprint standing (gap_flow.demand_on; per
-    point its triangle `ptri`, -1 in the band), each home's ring (gap_flow.ring_of) and the
+    """A block's fixed mesh and what its baseline fixes (module docstring): the mesh, built on the
+    footprints' atoms (`carving`: the buildings themselves, or a road network's pieces), the
+    demand on the triangles reaching the street with every footprint standing (gap_flow.demand_on;
+    per point its triangle `ptri`, -1 in the band), each home's ring (gap_flow.ring_of) and the
     complex grown as the form grows its footprints with every footprint standing (`cx0`, its
-    arrays: gap_complex.complex_arrays), free first's baseline."""
+    arrays: gap_complex.complex_arrays), free first's baseline. The demand, the rings and cx0 are
+    the buildings', whatever the atoms."""
     fm: FullMesh
     dem: gf.PointDemand
     ptri: NDArray[np.int64]
     ring: gf.Ring
     cx0: dict[str, NDArray[Any]]
     t_build: float
+    carving: Carving
 
     def complex0(self, spec: gc.Spec) -> gc.Complex:
         """Free first's baseline complex (gap_complex.free_first's cx0)."""
@@ -683,18 +814,23 @@ class Fixed(NamedTuple):
         return hashlib.sha256(json.dumps(ident, sort_keys=True).encode()).hexdigest()[:24]
 
     @classmethod
-    def of(cls, block, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width, *, cache: Path) -> Fixed:
-        """The block's fixed mesh: from `cache` if built before, else built and stored there."""
-        path = cache / f"{block.block_id}__{cls.key(block, spec, fs, form)}.npz"
+    def of(cls, block, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width, *, cache: Path,
+           carving: Carving) -> Fixed:
+        """The block's fixed mesh on the atoms `carving` (Carving.none: the buildings): from
+        `cache` if built before, else built and stored there (a carved mesh's file named by its
+        corridors' digest beside the block's identity)."""
+        tag = f"__c{carving.digest}" if carving.stops else ""
+        path = cache / f"{block.block_id}{tag}__{cls.key(block, spec, fs, form)}.npz"
         if path.exists():
-            return cls._load(path)
+            return cls._load(path, carving)
         t0 = time.time()
         geo = gc.geometry(block)
-        fm = full_mesh(geo, spec, fs, form)
+        atoms = geo._replace(polys=carving.polys)
+        fm = full_mesh(atoms, spec, fs, form)
         cells = full_cells(fm, lumped=False)
         # the baseline's reach: every footprint standing
-        k0 = np.zeros(len(geo.polys))
-        kt = form.terms(geo, fm, fs.quad).value(k0)
+        k0 = np.zeros(carving.n)
+        kt = form.terms(atoms, fm, fs.quad).value(k0)
         fe, fb = form.fill_pairs(fm)
         kp, _binds = _passage_factors(fm, kt, k0, Fill(e=fe, b=fb))
         live0 = Graph(fm, cells).reach(fm, kt, kp).live[cells.cell]
@@ -708,7 +844,8 @@ class Fixed(NamedTuple):
         ring = gf.ring_of(geo, spec.ring_m, fm.xy, fm.tri, band_open)
         cx0 = gc.complex_arrays(gc.build(geo, spec, np.ones(len(geo.polys), dtype=bool),
                                          carve=None, grow=form.grow))
-        fx = cls(fm=fm, dem=dem, ptri=ptri, ring=ring, cx0=cx0, t_build=time.time() - t0)
+        fx = cls(fm=fm, dem=dem, ptri=ptri, ring=ring, cx0=cx0, t_build=time.time() - t0,
+                 carving=carving)
         cls._store(fx, path)
         return fx
 
@@ -739,7 +876,7 @@ class Fixed(NamedTuple):
         os.replace(tmp, path)
 
     @classmethod
-    def _load(cls, path: Path) -> Fixed:
+    def _load(cls, path: Path, carving: Carving) -> Fixed:
         z = np.load(path)
 
         def csr(name: str) -> sp.csr_matrix:
@@ -753,10 +890,13 @@ class Fixed(NamedTuple):
                       rounds=int(rounds), flat=int(flat), skipped=int(skipped))
         dem = gf.PointDemand(xy=z["dem_xy"], band=z["dem_band"], S=csr("dem_S"),
                              walled=z["dem_walled"], shadowed=z["dem_shadowed"])
+        if fm.fcov.shape[1] != carving.n:
+            raise ValueError(f"{path.name}: a mesh of {fm.fcov.shape[1]} atoms, the carving has "
+                             f"{carving.n}")
         return cls(fm=fm, dem=dem, ptri=z["ptri"],
                    ring=gf.Ring(tri=csr("ring_tri"), band=z["ring_band"]),
                    cx0={name[3:]: z[name] for name in z.files if name.startswith("cx_")},
-                   t_build=float(t_build))
+                   t_build=float(t_build), carving=carving)
 
 
 # ------------------------------------------------------------------ the state
@@ -959,10 +1099,12 @@ class System:
 
 
 class State(NamedTuple):
-    """A clearing's state on one System of the fixed mesh: the factors (per building `k`, per
-    triangle `kt`, per passage `kp`, whether its fill binds), its reach and, once factored, its
-    operator on the pattern (cells x cells) and the operator's factorization."""
+    """A clearing's state on one System of the fixed mesh: the road prefix carved (`prefix`: none,
+    or a Carving's network at a stop), the factors (per atom `k`, per triangle `kt`, per passage
+    `kp`, whether its fill binds), its reach and, once factored, its operator on the pattern
+    (cells x cells) and the operator's factorization."""
     sys: System
+    prefix: Prefix
     k: NDArray[np.float64]
     kt: NDArray[np.float64]
     kp: NDArray[np.float64]
@@ -1035,16 +1177,24 @@ class Model:
     """One block's clearing model on its fixed mesh (module docstring): the baseline, the scorer,
     free first and the seam's ClearingModel. `pop` each building's population (area: the
     owner's), `demand` what each home injects in J_power (common.Demand); `factorization` the
-    run's (gap_factor: its device); `lumped` every building's interior one cell."""
+    run's (gap_factor: its device); `lumped` every building's interior one cell; `tension_eps`
+    the eps world the tension ranks in (clear.EPS, or the translucent search's). The mesh's atoms
+    (fx.carving: the buildings, or a road network's pieces) carry the width form's factors; a
+    clearing k is per building and each atom takes its building's k, or 1 where the state's road
+    prefix (`stop`) carves it (`road_state`); the homes are the buildings."""
 
     def __init__(self, block, fx: Fixed, *, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width,
                  pop: NDArray[np.float64], demand: common.Demand,
-                 factorization: gap_factor.Factorization, lumped: bool):
+                 factorization: gap_factor.Factorization, lumped: bool, tension_eps: float):
         self.block, self.fx, self.spec, self.fs, self.form = block, fx, spec, fs, form
+        self.tension_eps = tension_eps
         self.geo = gc.geometry(block)
         self.fm = fx.fm
         self.n_ = len(self.geo.polys)
-        self.terms = form.terms(self.geo, self.fm, fs.quad)
+        self.carving = fx.carving
+        if self.carving.parent.max(initial=-1) >= self.n_:
+            raise ValueError("the carving's atoms belong to buildings the block lacks")
+        self.terms = form.terms(self.geo._replace(polys=self.carving.polys), self.fm, fs.quad)
         fe, fb = form.fill_pairs(self.fm)
         self.fill = Fill(e=fe, b=fb)
         self.pop = pop
@@ -1078,18 +1228,20 @@ class Model:
 
     # -- the state
 
-    def _factors(self, sys: System, k: NDArray[np.float64]) -> State:
+    def _factors(self, sys: System, k: NDArray[np.float64], *, prefix: Prefix) -> State:
         t = time.time()
-        kt = self.terms.value(k)
-        kp, binds = _passage_factors(self.fm, kt, k, self.fill)
+        ka = self.carving.atom_k(k, prefix=prefix)
+        kt = self.terms.value(ka)
+        kp, binds = _passage_factors(self.fm, kt, ka, self.fill)
         self.timing.add("factors", time.time() - t)
         t = time.time()
         r = sys.graph.reach(self.fm, kt, kp)
         self.timing.add("reach", time.time() - t)
-        return State(sys=sys, k=k, kt=kt, kp=kp, binds=binds, reach=r, A=None, factor=None)
+        return State(sys=sys, prefix=prefix, k=ka, kt=kt, kp=kp, binds=binds, reach=r, A=None,
+                     factor=None)
 
-    def _state(self, sys: System, k: NDArray[np.float64]) -> State:
-        st = self._factors(sys, k)
+    def _state(self, sys: System, k: NDArray[np.float64], *, prefix: Prefix) -> State:
+        st = self._factors(sys, k, prefix=prefix)
         t = time.time()
         data = sys.graph.values(st.reach)
         p = sys.graph.pattern
@@ -1101,13 +1253,20 @@ class Model:
         return st._replace(A=A, factor=f)
 
     def factors(self, k: NDArray[np.float64]) -> State:
-        """The state of the clearing k: its factors and reach (no operator: the enclosed homes
-        need no solve)."""
-        return self._factors(self.sys, k)
+        """The state of the clearing k (no road carved): its factors and reach (no operator: the
+        enclosed homes need no solve)."""
+        return self._factors(self.sys, k, prefix=_NO_ROADS)
 
     def state(self, k: NDArray[np.float64]) -> State:
-        """The state of the clearing k, its operator assembled and factored."""
-        return self._state(self.sys, k)
+        """The state of the clearing k (no road carved), its operator assembled and factored."""
+        return self._state(self.sys, k, prefix=_NO_ROADS)
+
+    def road_state(self, prefix: Prefix) -> State:
+        """The state of a road network's prefix (the carving's), no building cleared: the atoms it
+        carves open (common.Carve's rule), its operator assembled and factored."""
+        if prefix.stop < 1:
+            raise ValueError(f"{prefix}: a road prefix has a stop from 1")
+        return self._state(self.sys, np.zeros(self.n_), prefix=prefix)
 
     def _rhs(self, st: State, inj: NDArray[np.float64]) -> NDArray[np.float64]:
         """The right-hand side per cell of the injection `inj` per home (a point in a ground cell
@@ -1159,7 +1318,8 @@ class Model:
             gp_all[c.pe] = gp
             sel = st.binds[self.fill.e]
             dk += np.bincount(self.fill.b[sel], weights=gp_all[self.fill.e[sel]],
-                              minlength=self.n_)
+                              minlength=self.carving.n)
+        dk = self.carving.to_buildings(dk, self.n_, prefix=st.prefix)
         self.timing.add("gradient", time.time() - t)
         return np.asarray(dk)
 
@@ -1178,6 +1338,10 @@ class Model:
 
     def lenses(self, removed: NDArray[np.bool_]) -> Lenses:
         return self.lenses_of(self.state(self.k_of(removed)))
+
+    def road_lenses(self, prefix: Prefix) -> Lenses:
+        """The lenses of a road network's prefix (road_state)."""
+        return self.lenses_of(self.road_state(prefix))
 
     @staticmethod
     def k_of(removed: NDArray[np.bool_]) -> NDArray[np.float64]:
@@ -1222,10 +1386,11 @@ class Model:
 
     def tension(self, power: float, *, restore: bool) -> Tension:
         """clear.Clearing.tension on the fixed mesh: the gradient of J_power at the eps world
-        (clear.EPS) of the current clearing, a building's gain the first-order change of moving
-        its k from where it is to where the move takes it (adding: eps to 1; putting back: 1 to
-        eps). One solve, two for power != 1."""
-        eps = clear.EPS
+        (`tension_eps`: clear.EPS, or more translucent for the translucent search) of the current
+        clearing, a building's gain the first-order change of moving its k from where it is to
+        where the move takes it (adding: eps to 1; putting back: 1 to eps). One solve, two for
+        power != 1."""
+        eps = self.tension_eps
         k = np.where(self.removed, 1.0, eps)
         st = self.state(k)
         u = self.solve(st, self.inj)
@@ -1292,7 +1457,7 @@ class Tension:
         cell = st.sys.cells.cell
         rows, cols = [], []
         for col, j in enumerate(cand):
-            nodes = np.unique(cell[tri_of[terms.b == j]])
+            nodes = np.unique(cell[tri_of[m.carving.parent[terms.b] == j]])
             nodes = nodes[unk[nodes]]
             rows.append(nodes)
             cols.append(np.full(len(nodes), col, dtype=np.int64))
@@ -1383,12 +1548,16 @@ class ComplexMetric:
     the FlowSpec (R, its grading, sigma, the demand's quadrature, the lattice offset), the width
     form, `lumped` (one node per building: the study's alternative) and the code's constants
     (CODE), every one in its name, which no raster conductance's can be (`check_disjoint`): its rows
-    never read as the raster's. `factorization` is the run's device (gap_factor): it moves
+    never read as the raster's. `search_eps`: the eps world the tension ranks in (the greedy's
+    and the polish's ranking: clear.EPS, the metric's own, or a larger one, the translucent search,
+    the raster's `@<search>` on the complex), its name's `@e<eps>` where it differs from clear.EPS;
+    every score is under the metric. `factorization` is the run's device (gap_factor): it moves
     scores only at the floating-point level, so it is not in the name; the rows record it."""
     spec: gc.Spec
     fs: gf.FlowSpec
     form: gf.Width
     lumped: bool
+    search_eps: float
     factorization: gap_factor.Factorization
 
     def __post_init__(self) -> None:
@@ -1397,7 +1566,8 @@ class ComplexMetric:
     @property
     def name(self) -> str:
         return (f"cx+{self.form.name}+s{self.spec.s:g}r{self.spec.ring_m:g}b{self.spec.band_m:g}"
-                f"+{self.fs.name}" + ("+lumped" if self.lumped else "") + f"+v{CODE}")
+                f"+{self.fs.name}" + ("+lumped" if self.lumped else "") + f"+v{CODE}"
+                + ("" if self.search_eps == clear.EPS else f"@e{self.search_eps:g}"))
 
     @property
     def device(self) -> str:
@@ -1412,13 +1582,18 @@ class ComplexMetric:
         """The block's model on its fixed mesh `fx` (`clearing`'s, or one meshed afresh)."""
         return Model(block, fx, spec=self.spec, fs=self.fs, form=self.form,
                      pop=common.POPULATIONS["area"].weights(np.asarray(block.buildings.outlines)),
-                     demand=demand, factorization=self.factorization, lumped=self.lumped)
+                     demand=demand, factorization=self.factorization, lumped=self.lumped,
+                     tension_eps=self.search_eps)
 
-    def fixed(self, block, *, cache: Path) -> Fixed:
-        return Fixed.of(block, self.spec, self.fs, self.form, cache=cache)
+    def fixed(self, block, *, cache: Path, carving: Carving) -> Fixed:
+        """The block's fixed mesh on `carving`'s atoms: Carving.none, the metric's own mesh (every
+        clearing a state); a road network's (Carving.of), its prefixes states too."""
+        return Fixed.of(block, self.spec, self.fs, self.form, cache=cache, carving=carving)
 
     def clearing(self, block, *, demand: common.Demand) -> Model:
-        return self.model(block, self.fixed(block, cache=CACHE), demand=demand)
+        return self.model(block, self.fixed(block, cache=CACHE,
+                                            carving=Carving.none(gc.geometry(block))),
+                          demand=demand)
 
     def coarse(self, h: float) -> ComplexMetric:
         raise ValueError(f"a coarse grid (h {h:g}) is the raster's: the complex has none")
@@ -1444,7 +1619,7 @@ _NUM = r"([0-9]+(?:\.[0-9]+)?(?:e-?[0-9]+)?)"
 _NAME = re.compile(rf"cx\+(close|shy|ramp){_NUM}(?:s{_NUM})?\+s{_NUM}r{_NUM}b{_NUM}"
                    rf"\+R{_NUM}(?:g([0-9]+)x{_NUM})?q([0-9]+)(?:k{_NUM})?"
                    rf"(?:o(-?{_NUM[1:-1]}),(-?{_NUM[1:-1]}))?(\+lumped)?"
-                   r"\+v([0-9a-f]+)")
+                   rf"\+v([0-9a-f]+)(?:@e{_NUM})?")
 
 
 def complex_of(name: str, *, factorization: gap_factor.Factorization) -> ComplexMetric:
@@ -1453,9 +1628,10 @@ def complex_of(name: str, *, factorization: gap_factor.Factorization) -> Complex
     m = _NAME.fullmatch(name)
     if m is None:
         raise ValueError(f"unknown complex metric {name!r}: cx+<form><w>+s<s>r<ring>b<band>+"
-                         "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped]+v<code>")
+                         "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped]+v<code>"
+                         "[@e<search eps>]")
     (kind, w, ramp_s, s_, ring, band, R, levels, grade, quad, sigma, ox, oy,
-     lumped, code) = m.groups()
+     lumped, code, search) = m.groups()
     if code != CODE:
         raise ValueError(f"{name!r}: code {code}, but this code's constants digest to {CODE} "
                          "(its rows are another code's)")
@@ -1472,6 +1648,7 @@ def complex_of(name: str, *, factorization: gap_factor.Factorization) -> Complex
                      offset=gf.OFFSET if ox is None else (float(ox), float(oy)))
     metric = ComplexMetric(spec=gc.Spec(s=float(s_), ring_m=float(ring), band_m=float(band)),
                            fs=fs, form=form, lumped=lumped is not None,
+                           search_eps=clear.EPS if search is None else float(search),
                            factorization=factorization)
     if metric.name != name:
         raise ValueError(f"{name!r} spells the complex metric {metric.name!r}")

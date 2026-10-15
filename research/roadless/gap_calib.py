@@ -8,7 +8,7 @@ uni+apwfs at h 0.5 (RASTER).
 
     S=research/roadless/gap_calib.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S warm <id>                      # the block's fixed mesh into gap_clear.CACHE
-    uv run python $S preset <id> <simp|cheap>[E] <cpu|gpu>  # a preset on the complex
+    uv run python $S preset <id> <simp|cheap>[E][@e<eps>] <cpu|gpu>  # a preset on the complex
     uv run python $S presets <id> <items,> <cpu|gpu>   # several, one after another (one GPU run)
     uv run python $S baseline <ids,|@file> <procs>  # the fixed mesh's baseline against the rebuild
     uv run python $S clearings <ids,|@file> <procs> # every clearing on the fixed mesh and rebuilt
@@ -19,12 +19,14 @@ uni+apwfs at h 0.5 (RASTER).
 
 `preset`: the cheap preset (polish_greedy, S0.01cat P64w8) or SIMP's default (relax.one, PLAN)
 at area D BUDGET, power 1 (P), free first, on the complex, on the device's factorization; `E` the
-polish's candidates scored exactly (search.Exactly). Rows ROWS/preset/<device>/<item>/<id>.parquet
-(the run's row, its item, metric, host, peak memory and wall time; on a GPU the device's memory in
-use, its most over the run, `gpu_gb`): the acceptance's own, so that a run on one device never
-overwrites another's or the stored rows (relax_rows/<METRIC>/, polish_rows/<METRIC>/, phase 1's,
-which `report` compares them with). The rows of items `L` (the eps world with one cell per
-building's interior, +relaxlumped: measured, dominated and deleted; NOTES) stay as measured.
+polish's candidates scored exactly (search.Exactly); `@e<eps>` the translucent search (phase 2b:
+the tension ranking in the eps world at <eps>, gap_clear.ComplexMetric.search_eps). Rows
+ROWS/preset/<device>/<item>/<id>.parquet (the run's row, its item, metric, host, peak memory and
+wall time; on a GPU the device's memory in use, its most over the run, `gpu_gb`): the
+acceptance's own, so that a run on one device never overwrites another's or the stored rows
+(relax_rows/<METRIC>/, polish_rows/<METRIC>/, phase 1's, which `report` compares them with).
+The rows of items `L` (the eps world with one cell per building's interior, +relaxlumped:
+measured, dominated and deleted; NOTES) stay as measured.
 
 `baseline`: per block the fixed mesh (built afresh: its time and peak memory) against the
 complex rebuilt (gap_compare.ComplexModel, gap_flow's mesh): P0, P_{1/2},0, J_2,0, the walled-in
@@ -70,6 +72,7 @@ import clear  # noqa: E402
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
 import gap_compare as gcmp  # noqa: E402
+import gap_complex as gc  # noqa: E402
 import gap_factor  # noqa: E402
 import gap_study  # noqa: E402
 import lifted  # noqa: E402
@@ -78,8 +81,7 @@ import polish_greedy  # noqa: E402
 import relax  # noqa: E402
 import search  # noqa: E402
 
-BASE = "cx+shy0.5+s0.125r1b1+R0.5g4x2q4"                     # owner 2026-10-14
-METRIC = gcl.complex_of(f"{BASE}+v{gcl.CODE}", factorization=gap_factor.SuperLU())
+METRIC = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())
 RASTER = "uni+apwfs"
 MESH = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
 PLAN = relax.plan_of("fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2")     # SIMP's default
@@ -91,7 +93,9 @@ PQ = common.PriorityDemand(0.5)
 SPEED_REPS = 2
 GPU_SAMPLE_S = 0.5          # _GpuPeak's sampling (measurement only)
 ROWS = HERE / "gap_rows" / "runtime"
-ITEM = re.compile(r"(simp|cheap)(E?)")    # a preset item: the polish's scoring
+ITEM = re.compile(r"(simp|cheap)(E?)(@e[0-9.e-]+)?")   # a preset item: the polish's scoring, and
+                                                      # the translucent search's eps (the
+                                                      # metric's `@e<eps>`: phase 2b)
 
 
 def _peak_gb() -> float:
@@ -166,7 +170,7 @@ def warm(bid: str) -> None:
     run's tasks for the block load it at once."""
     [b] = common.build_blocks([bid])
     t0 = time.time()
-    fx = METRIC.fixed(b, cache=gcl.CACHE)
+    fx = METRIC.fixed(b, cache=gcl.CACHE, carving=gcl.Carving.none(gc.geometry(b)))
     print(f"{bid}: the fixed mesh, {fx.fm.nt} triangles, {time.time() - t0:.0f}s (built in "
           f"{fx.t_build:.0f}s); peak {_peak_gb():.1f} GB", flush=True)
 
@@ -174,9 +178,9 @@ def warm(bid: str) -> None:
 def preset(bid: str, item: str, device: str) -> None:
     m = ITEM.fullmatch(item)
     if m is None:
-        raise SystemExit(f"unknown preset item {item!r}: <simp|cheap>[E]")
-    which, exact = m.groups()
-    metric = metrics.metric_of(METRIC.name, device=device, mesh=MESH)
+        raise SystemExit(f"unknown preset item {item!r}: <simp|cheap>[E][@e<eps>]")
+    which, exact, search_eps = m.groups()
+    metric = metrics.metric_of(METRIC.name + (search_eps or ""), device=device, mesh=MESH)
     scoring = search.polish_scoring_of(exact)
     out = ROWS / "preset" / device / item / f"{bid}.parquet"
     t0 = time.time()
@@ -212,7 +216,8 @@ def baseline_one(bid: str) -> str | None:
         t0 = time.time()
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
-            fx = METRIC.fixed(b, cache=Path(tmp))
+            fx = METRIC.fixed(b, cache=Path(tmp),
+                              carving=gcl.Carving.none(gc.geometry(b)))
             t_build = time.time() - t0
             peak_build = _peak_gb()
         m = METRIC.model(b, fx, demand=POP)
@@ -356,7 +361,7 @@ def speed_one(bid: str) -> str | None:
         [b] = common.build_blocks([bid])
         rows = []
         t0 = time.time()
-        fx = METRIC.fixed(b, cache=gcl.CACHE)
+        fx = METRIC.fixed(b, cache=gcl.CACHE, carving=gcl.Carving.none(gc.geometry(b)))
         rows.append(dict(what="load", wall=time.time() - t0, peak_gb=_peak_gb()))
         metric = metrics.metric_of(METRIC.name, device=device, mesh=MESH)
         assert isinstance(metric, gcl.ComplexMetric)

@@ -162,19 +162,26 @@ class ComplexModel:
 
     def score(self, standing: np.ndarray, carve) -> tuple[dict, np.ndarray]:
         """(the lenses of a clearing, its escape times per home)."""
+        r, u, _live = self.scored(standing, carve)
+        return r, u
+
+    def scored(self, standing: np.ndarray, carve) -> tuple[dict, np.ndarray, np.ndarray]:
+        """(the lenses of a clearing, its escape times per home, the homes it reaches: some open
+        ground within ring_m of the outline reaching the street, gap_flow.live_homes)."""
         t0 = time.time()
         m = gf.mesh(self.geo, self.spec, self.fs, self.form, standing, carve=carve)
         c = gf.cells(m)
         sc = gf.Scores(m, c, self.dem)
         P, u = sc.u_home(self.pop)
         Pq, _ = sc.u_home(self.inj_q)
-        left = self.walled & ~gf.live_homes(self.geo, m, c)
+        live = gf.live_homes(self.geo, m, c)
+        left = self.walled & ~live
         J2 = float(np.nansum(self.pop * u ** 2))
         return dict(P=P, Pq=Pq, L_P=1.0 - P / self.P0, L_J2=1.0 - (J2 / self.J2_0) ** 0.5,
                     **{"L_Pq0.5": 1.0 - Pq / self.Pq0},
                     enclosed=float(self.cost[left].sum()), n_enclosed=int(left.sum()),
                     unknowns=int((~c.ground).sum()), nt=m.nt, dropped=sc.dropped,
-                    t=time.time() - t0), u
+                    t=time.time() - t0), u, live
 
     def free_first(self, held: np.ndarray) -> np.ndarray:
         """gap_complex.free_first at the form's w from `held` (no budget): the held set grown (the
@@ -182,12 +189,6 @@ class ComplexModel:
         fr = gc.free_first(self.geo, self.spec, w=self.form.w, grow=0.0, budget=1.0,
                            cost=self.cost, pop=self.pop, held0=held, cx0=None)
         return fr.held
-
-
-def _local(geo: gc.Geometry, g):
-    if g is None:
-        return None
-    return shapely.transform(g, lambda xy: xy - np.array(geo.origin))
 
 
 def _homes_path(rows: Path) -> Path:
@@ -213,7 +214,7 @@ def complex_one(job: tuple[str, float, int, str]) -> str | None:
         cm = ComplexModel(b, fs, form)
         rows, per_home = [], {"u0": cm.u0, "uq0": cm.u_q0}
         for name, (kind, x, corridor) in fields_of(b, cm.n).items():
-            carve = _local(cm.geo, corridor)
+            carve = None if corridor is None else cm.geo.local(corridor)
             D = float(cm.cost[x].sum()) if kind != "road" else _road_D(b, name)
             r, u = cm.score(~x, carve)
             rows.append(dict(field=name, kind=kind, D=D, added="", **r))
@@ -518,6 +519,7 @@ def interiors(bids: list[str], token: str) -> None:
         for lumped in (False, True):
             t0 = time.time()
             m = gcl.ComplexMetric(spec=cm.spec, fs=fs, form=form, lumped=lumped,
+                                  search_eps=clear.EPS,
                                   factorization=gap_factor.SuperLU()).clearing(b, demand=POP)
             models["lumped" if lumped else "meshed"] = (m, time.time() - t0)
         for name, x in picks.items():
@@ -554,7 +556,7 @@ def converge(bid: str, Rs: list[float], levels: int, token: str) -> None:
         fields = fields_of(b, cm.n)
         for name in CONVERGE_FIELDS:
             kind, x, corridor = fields[name]
-            r, _u = cm.score(~x, _local(cm.geo, corridor))
+            r, _u = cm.score(~x, None if corridor is None else cm.geo.local(corridor))
             rows.append(dict(block=bid, form=form.name, R=R, flow=fs.name, field=name, P0=cm.P0,
                              cells0=cm.cells0, nt0=cm.nt0, t_all=time.time() - t0, **r))
             print(f"{bid} {form.name} {fs.name}: {name} P0 {cm.P0:.2f} L_P {r['L_P']:.4f} L_J2 "

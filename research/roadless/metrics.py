@@ -19,6 +19,9 @@ import relax
 import seam
 
 COMPLEX = "cx+"           # every complex metric's name starts so (gap_clear.ComplexMetric.name)
+# The runtime's metric (owner 2026-10-14: the shy distance at 0.5 m on the gap complex, its Spec and
+# FlowSpec as phase 1 fixed them), this code's constants' digest ending its name
+RUNTIME = f"cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v{gap_clear.CODE}"
 
 
 def metric_of(token: str, *, device: str, mesh: lifted.MeshSpec) -> seam.Metric:

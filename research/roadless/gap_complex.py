@@ -111,16 +111,21 @@ class Geometry(NamedTuple):
     streets: object
     origin: tuple[float, float]
 
+    def local(self, g: Any) -> Any:
+        """`g` (the block's CRS: a road's corridor, say) in these local coordinates."""
+        return _shifted(g, self.origin)
+
+
+def _shifted(g: Any, origin: tuple[float, float]) -> Any:
+    return shapely.transform(g, lambda xy: xy - np.array(origin))
+
 
 def geometry(block) -> Geometry:
-    x0, y0 = block.boundary.bounds[:2]
-
-    def local(g):
-        return shapely.transform(g, lambda xy: xy - np.array([x0, y0]))
-    return Geometry(boundary=local(block.boundary),
-                    polys=local(np.asarray(block.buildings.outlines)),
-                    streets=local(shapely.union_all(list(block.streets.geometry))),
-                    origin=(float(x0), float(y0)))
+    origin = (float(block.boundary.bounds[0]), float(block.boundary.bounds[1]))
+    return Geometry(boundary=_shifted(block.boundary, origin),
+                    polys=_shifted(np.asarray(block.buildings.outlines), origin),
+                    streets=_shifted(shapely.union_all(list(block.streets.geometry)), origin),
+                    origin=origin)
 
 
 @dataclass(frozen=True, eq=False)
