@@ -41,7 +41,30 @@ over orders; wrong calls summed over designs, orders and rates); many-arm, `Thre
 arms, against the sum of seqscreen's pairwise screens per order (the same statistics over the
 many-arm designs).
 
-    EPI='epistemetry @ git+https://github.com/GeoffChurch/epistemetry@fc921f1'
+The amendment (the coordinator, 2026-10-15, committed here before any adopt/keep/ask run; the
+fixed-rate runs above, at fc921f1, are reported under the original rule, as a secondary table):
+the pin moves to c1784af, and the primary comparison is epistemetry's AdoptKeepAsk over seqscreen's
+own bracket (RATES' ends; a unit's gain and its extra GPU-seconds two columns of one ball), scored
+with AsksApart (an ask is never wrong; a definite call is wrong where it differs from the whole
+design's call over the bracket, an ask included). It runs twice: with no veto anywhere
+(seqscreen's patched off inside the process, no file edited; the truth without it), and with the
+veto everywhere (seqscreen's own, the wrapper around epistemetry's policy, the truth "keep" on a
+collapse). Asks go to the owner, so they are a cost. The rule, amended: adopt epistemetry only
+if, against seqscreen in the same veto setting, (1) its median realized loss is below seqscreen's
+at every judged rate, (2) it makes no more wrong calls in all and (3) no more asks in all.
+Realized loss at rate r: |mu - r x extra| where the call resolved at r (an ask answered at r from
+the screen's own means, as seqscreen's question is) differs from the whole design's call at r,
+plus r / FUTURE x the GPU-seconds spent. The statistics as before: per rate the sum over the
+designs of each one's median over orders; wrong calls and asks summed over designs and orders.
+Candidates: pairwise, AdoptKeepAsk in each veto setting (it must pass in both); many-arm,
+AdoptKeepAsk over every arm (no veto: no many-arm design has a collapse) against seqscreen's
+screens of each variant summed per order. Its price: seqscreen prices a GPU-second at the
+bracket's mean rate over FUTURE, and AdoptKeepAsk's risk is a probability of another call, so
+the price is that over the Lens A a wrong call costs at the means so far, at that rate. Reported
+beside them: how often the likeliest call at a stop differs from the posterior mean's (seqscreen's
+call on the same blocks).
+
+    EPI='epistemetry @ git+https://github.com/GeoffChurch/epistemetry@c1784af'
     uv run --with "$EPI" python research/roadless/epireplay.py run        # every job -> ROWS
     uv run --with "$EPI" python research/roadless/epireplay.py guards [floor|ignored|shuffled]
     uv run --with "$EPI" python research/roadless/epireplay.py report
@@ -524,7 +547,8 @@ def _run_one(job: Job) -> list[dict]:
 
 
 def run() -> None:
-    todo = jobs(floor=ss.MIN_BLOCKS, mc=MC)
+    todo = sorted(jobs(floor=ss.MIN_BLOCKS, mc=MC),     # the many-arm screens, the longest, first
+                  key=lambda j: j.plan not in MANY or j.arm is not None)
     for p in PAIRS + MANY:
         x = data(p)
         print(f"{p.name:14s} {len(x.blocks):2d} blocks ({p.card}), dropped {len(x.dropped)}: "
