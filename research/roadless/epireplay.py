@@ -497,12 +497,27 @@ class EpiBracket:
 
 
 @dataclass(eq=False)
+class Stepped:
+    """A diagnostic, not a candidate (added after the bracket comparison's results): the inner
+    policy asked again after every block, as seqscreen is, instead of running the whole horizon
+    KG* picked. The stop still weighs every horizon."""
+    inner: EpiBracket
+
+    def next(self, seen: np.ndarray, seen_costs: np.ndarray, upcoming: np.ndarray, *,
+             rng: np.random.Generator) -> int:
+        return min(self.inner.next(seen, seen_costs, upcoming, rng=rng), 1)
+
+    def calls(self, seen: np.ndarray, *, population: int, rng: np.random.Generator) -> np.ndarray:
+        return self.inner.calls(seen, population=population, rng=rng)
+
+
+@dataclass(eq=False)
 class Vetoed:
     """reblock's collapse veto around a policy of one variant: a block more than COLLAPSE below
     the base (its gain, the first column) stops the screen with `keep`. The inner policy's batches
     run a block at a time (`pending`), so the veto sees every block as seqscreen's does; the inner
     policy is asked at the same blocks with the same generator as without the veto."""
-    inner: Epi | EpiBracket
+    inner: Epi | EpiBracket | Stepped
     keep: bool | int    # the inner policy's call of keep
     pending: int = 0    # blocks of the inner policy's last batch still to run
 
@@ -633,15 +648,17 @@ class SeqBracketMaker:
 @dataclass(frozen=True)
 class EpiBracketMaker:
     veto: bool
+    stepped: bool       # the diagnostic: asked again after every block (`Stepped`)
     floor: int
     mc: MonteCarlo
 
     @property
     def name(self) -> str:
-        return f"adopt/keep/ask{'+veto' if self.veto else ''}"
+        return f"adopt/keep/ask{' stepped' if self.stepped else ''}{'+veto' if self.veto else ''}"
 
     def make(self, x: Data, o: int, trace: Trace) -> Policy:
-        p = EpiBracket(x.ta, self.floor, self.mc, trace)
+        e = EpiBracket(x.ta, self.floor, self.mc, trace)
+        p = Stepped(e) if self.stepped else e
         return Vetoed(p, keep=KEEP) if self.veto else p
 
 
@@ -655,10 +672,11 @@ class BracketJob(NamedTuple):
 
 def bracket_jobs(*, floor: int, mc: MonteCarlo) -> list[BracketJob]:
     out = [BracketJob(p, None, m, veto) for veto in (False, True) for p in PAIRS
-           for m in (SeqBracketMaker(floor), EpiBracketMaker(veto, floor, mc))]
+           for m in (SeqBracketMaker(floor), EpiBracketMaker(veto, False, floor, mc),
+                     EpiBracketMaker(veto, True, floor, mc))]
     for p in MANY:      # no veto: a collapse would drop one arm, and none of them has one
         out += [BracketJob(p, j, SeqBracketMaker(floor), False) for j in range(len(p.variants))]
-        out.append(BracketJob(p, None, EpiBracketMaker(False, floor, mc), False))
+        out.append(BracketJob(p, None, EpiBracketMaker(False, False, floor, mc), False))
     return out
 
 
@@ -798,7 +816,7 @@ def guard_degenerate(*, floor: int) -> bool:
     x = degenerate()
     ok = True
     for veto in (True, False):
-        m_ = EpiBracketMaker(veto, floor, MC)
+        m_ = EpiBracketMaker(veto, False, floor, MC)
         runs = [replay(bracket_design(x), m_.make(x, o, Trace()), orders=[order],
                        rng=np.random.default_rng([ss.ORDER_SEED, o]),
                        scoring=AsksApart(ask=ASK)).runs[0]
@@ -847,7 +865,8 @@ def guard_orders(*, shuffled: bool) -> bool:
             for r in run_job(job)]
     for bj in bracket_jobs(floor=ss.MIN_BLOCKS, mc=MC):
         if bj.plan == p:
-            fault = shuffled and isinstance(bj.maker, EpiBracketMaker) and not bj.veto
+            fault = (shuffled and isinstance(bj.maker, EpiBracketMaker) and not bj.veto
+                     and not bj.maker.stepped)
             rows += run_bracket_job(bj, given=given if fault else None)
     return same_orders(pd.DataFrame(rows))
 
@@ -1049,7 +1068,9 @@ def report_bracket() -> None:
     print("\nthe amended rule:")
     for sel, veto, cand, against in ((pairs, False, "adopt/keep/ask", "seqscreen"),
                                      (pairs, True, "adopt/keep/ask+veto", "seqscreen"),
-                                     (mt, False, "adopt/keep/ask", SUMMED)):
+                                     (mt, False, "adopt/keep/ask", SUMMED),
+                                     (pairs, False, "adopt/keep/ask stepped", "seqscreen"),
+                                     (pairs, True, "adopt/keep/ask stepped+veto", "seqscreen")):
         u = sel[sel.veto == veto]
         med = u.groupby(["policy", "plan"])[loss].median().groupby("policy").sum()
         wrong, asks = u.groupby("policy").wrong.sum(), u.groupby("policy").asks.sum()
