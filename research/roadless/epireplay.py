@@ -108,7 +108,7 @@ JOBS_BRACKET = HERE / "epireplay_bracket_jobs"     # a parquet a job, kept: a re
 VETO = ss.COLLAPSE                             # the veto's; patched to inf where it is off
 PRICE_RATE = float(BRACKET.mean())             # seqscreen prices its stop's GPU-seconds at it
 CODE = {"keep": KEEP, "ask": ASK, "adopt": ADOPT}   # seqscreen's calls as AdoptKeepAsk's
-WORKERS = 8
+WORKERS = 7          # with one process left for a report or guard, at most 8 in all
 ORDERS = 100        # orders a design: seqscreen.main's ORDERS first, then more from its generator
 
 
