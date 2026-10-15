@@ -36,9 +36,10 @@ measured, dominated and deleted; NOTES) stay as measured.
 complex rebuilt (gap_compare.ComplexModel, gap_flow's mesh): P0, P_{1/2},0, J_2,0, the walled-in
 and no-demand homes, each home's escape time; rows ROWS/baseline/<id>.parquet.
 
-`clearings`: per block every clearing of SOURCES present (the complex's presets under P), scored on the fixed mesh and on the complex rebuilt (P, P_{1/2}, J_2, the enclosed
-population and count), and the homes each reaches against the complex grown by w / 2 at width 0
-(gap_complex's), home for home; rows ROWS/clearings/<id>.parquet.
+`clearings`: per block every clearing of SOURCES present (the complex's presets under P), scored
+on the fixed mesh and on the complex rebuilt (P, P_{1/2}, J_2, the enclosed population and count),
+and the homes each reaches against the complex grown by w / 2 at width 0 (gap_complex's), home for
+home; rows ROWS/clearings/<id>.parquet.
 
 `speed`: per block on the device, the fixed mesh's load and the model's baseline (with the
 factorization's plan), then the breakdown (factors, reach, assembly, factorization, solves,
@@ -192,7 +193,8 @@ def warm(bid: str) -> None:
 def preset(bid: str, item: str, device: str) -> None:
     m = ITEM.fullmatch(item)
     if m is None:
-        raise SystemExit(f"unknown preset item {item!r}: <simp|cheap>[E][@e<eps>]")
+        raise SystemExit(f"unknown preset item {item!r}: simp[E] or "
+                         f"cheap[E]@e{CHEAP.search_eps:g}")
     which, exact, search_eps = m.groups()
     base = metrics.metric_of(METRIC.name, device=device)
     metric = CHEAP.on(base) if which == "cheap" else base       # SIMP's default: the metric's own

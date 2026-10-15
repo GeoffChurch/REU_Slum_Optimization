@@ -460,9 +460,9 @@ CX_POP = "area"                 # the prefixes cut by area population (decision 
 class Stored(NamedTuple):
     """The stored clearings scored on the complex beside the roads (clearings.Store's run ids):
     SIMP's default and the cheap preset (its plain form, the metric's own tension) at area D 0.05
-    as a complex metric optimized them (P: phase 1's acceptance, the 13: records). A row's `clearing` is its field's name. (The raster's own
-    clearings, item 4's and phase 1's, were scored here too until its retirement: the 60's rows
-    hold them, the cross-checks' record.)"""
+    as a complex metric optimized them (P: phase 1's acceptance, the 13: records). A row's
+    `clearing` is its field's name. (The raster's own clearings, item 4's and phase 1's, were
+    scored here too until its retirement: the 60's rows hold them, the cross-checks' record.)"""
     simp_cx: str
     cheap_cx: str
 

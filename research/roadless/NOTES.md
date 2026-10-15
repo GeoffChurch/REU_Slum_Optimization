@@ -5694,6 +5694,213 @@ adoption), the composite and goal meshes (local coarsening, the o1 goal mesh), t
 (phase 2a: the complex's presets at 0.38 and 0.93 of its GPU time), the cross-checks above, and
 +relaxlumped (phase 2a).
 
+### The complex as the runtime: the raster retired (owner 2026-10-15: "Delete the finished studies' code"; "Make translucent the cheap preset and delete the plain version")
+
+BACKLOG 4, decision (3): phase 3 (the brief: .superpowers/sdd/2026-10-15-retire-raster). The
+raster, its lift and turning cost, and the finished studies' code are deleted; the complex is the
+only runtime. The metric is unchanged, `cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a`: no constant of
+the complex's code moved (its digest is the same at every step), and every row keeps its name.
+Python under research/roadless: 125 tracked modules and 34,899 lines before, 67 modules and 17,826
+lines after (fft_homog's 3,236 of them; outside it 31,342 lines before, 14,590 after). Every row,
+summary, log and picture stays on disk: no code reads the raster's rows, they are records.
+
+**Moved** (step 1), so the deletions broke nothing kept: the runtime's Spec at a spacing, ring and
+band read from RUNTIME's name (metrics.spec_of, metrics.py:33; gap_study.spec_of and gap_check's
+copy read lifted.RING_M and BAND_M); a fixed, private grammar of the raster's names in
+gap_clear.check_disjoint (gap_clear.py:1619; it agrees with lifted's parsers on all 25 names on
+disk and in the store, and is no constant of the code's digest); the block-id parser common.ids_of
+and LARGE (common.py:44 -- 69, from gap_study); gap_calib.size_of (gap_calib.py:103 -- 117; the
+size classes' line, 49M unknowns on the raster at h 0.5, kept as data); the walled channel's L_C,
+WALL_M and ANGLES (gap_flow_check.py:62 -- 64, from width); seqscreen's loaders, TUNING and
+blocks_of (seqscreen.py:58 -- 112, from simp_compare, the raster greedy's own loader dropped);
+pweight.boot_weights (pweight.py:68 -- 69, 274, from transparency_run); transparency_check's
+`free-roads` guard as free_roads_check.py with FREE's configuration (below). Cut from the kept
+modules' paths: the `mesh` argument the complex ignored (polish_greedy, road_rescore: rows no
+longer carry `mesh`; the exporter drops the old rows' placeholder by name); metrics.metric_of's
+raster branch (it takes a complex name and a device); clearings_check.metric_of_run's (a raster run
+is a record, not rescorable under its own metric: it raises); cluster.py's raster sizing (`--mesh`,
+`--scans`, `--complex`, GB_PER_MILLION, HELD_PER_MILLION, RASTER_BYTES, `_gb`: `--gb` now sizes
+every card) and cluster_check's `gpu`, its guard (`cpu` now plans gap_calib's `preset`);
+gap_calib's `rasterscore`, its raster SOURCES and the acceptance's comparison with the raster
+(summary_runtime_acceptance.csv the record); road_rescore's cx_stored without the raster's runs.
+The exporter (clearings_export) reads this code's metric only (`this_code`: a complex name
+complex_of reads back): every other metric's rows (the raster's names, clear_rows_<picker>_h<h>...,
+pweight_rows/simp, fw, score and uni+apwfs, phase 1's undigested complex name) are records it
+counts and does not read (57 directories), the raster's collected parquets are records, and a row
+must state `enclosed` (the preB epoch went with the raster's rows). Its `inventory` raised on phase
+1's undigested directories before this phase; it runs again.
+
+**Deleted** (step 2): 58 modules. The raster's own (b), 29: lifted, width, width_check,
+aperture_check, checks, angle_h, angle_q, sightline_angle, sightline_checks, line_scale,
+transparency, conductance_map, current_map, opened_map, render_clear, render_alongs, render_simp,
+atlas/block5810/export_ss, composite_proto/proto, offset_check, resolution_check, rescore_grid,
+gramprobe, memprobe_greedy, profile_round, releaseprobe, solver_bench, timing, conv; and crosscheck
+(the cross-checks' raster side). The finished studies (c), 20: study, tail, tails, rescore,
+compare_clear, area_match, along_lineup, picker_compare, simp_compare, mono_cross,
+transparency_run, transparency_check, gap_simp, fft_homog's extract, extract2, extract_gated,
+lifted_ref, region_extract and region_score_gpu, atlas/region5810/export. Eight more the inventory
+did not list (none imported a module of the raster's own): gap_study (left empty once spec_of and
+ids_of moved: the rest the gap complex's stage-1 study), gap_report (its report), epireplay (the
+replay against seqscreen, whose arms are the raster's rows), transparency_sets (the transparency
+experiment's sets), mesh_bias (resolution_check's rows), area_share (the raster greedy's rows),
+atlas/block5810/vectors_ss (export_ss's arm) and atlas/region5810/compare (the raster region run's
+clearings). The mixed modules' raster parts: clear (Clearing, its Tension, loo, exact, RegionGraph,
+free_first, GpuSweep, the greedy's runs, sweep_of, cleared_through, RTOL_TENSION); relax
+(Relaxation, RasterMetric, _clearing, the coarse plans `.c` and `.C` and the grids `.h`, `.a`,
+`.g<d0>x<smax>...`); common (Scorer, Obliterate, Carve, placement, carved, reached, GoalMesh,
+goal_indicator, mesh_of, the Demands' `baseline`); road_rescore (`score`, Corridors, GpuWatch,
+`report`, `sizes`, `project` and their helpers); gap_compare (all but ComplexModel and form_of: the
+stage-2 study's commands). clear.rows_dir, the greedy format's directory, is the complex's:
+clear_rows_<spec>_p<power>_<metric>, no `_h`, so no complex run's directory reads as a raster
+record's (none existed in the old form).
+
+**Folded** (step 3): seam.py's Protocols each had one implementation once the raster's went, so the
+callers use the concrete types (gap_clear.Model, Relaxation, Tension, ComplexMetric) and seam.py is
+deleted; Flow moved to clear without its device fields (xp, to_host: the complex's flow is on the
+host); clear's Sweep and CpuSweep and GramSource folded into Catchment (one sweep, CATCH_COLUMNS 16
+a pass, the same chunks as CpuSweep's, so the same shares), search.greedy_round and plan_of no
+longer take a sweep, ComplexMetric.sweep and .coarse and Model.release gone; the relaxation's
+`rtol`, kept for the seam (the raster's iterative tolerance; every solve on the complex is direct),
+gone from Model.relaxation, with polish_greedy.RTOL, pweight.FW_RTOL and clear.RTOL_SCORE. The
+factorization Strategy stays (SuperLU on a core, cuDSS on a GPU: both live).
+
+**The cheap preset is the translucent search** (step 4): polish_greedy.CHEAP is S0.01cat P64w8 with
+`search_eps` 0.05 (Preset.on gives the metric its runs are made and named under, `<metric>@e0.05`),
+phase 2b's measure of it standing (+0.0099 [+0.0046, +0.0192] over the plain form on the 13, ahead
+on 11, 1.03x its time). No named spec of the plain form is left: gap_calib's items spell their
+preset's search (`simp[E]`, `cheap[E]@e0.05`; a bare `cheap` and an `@e` on `simp` are refused, so
+no new row lands under the plain form's names), road_rescore's `cx` runs the cheap preset under its
+search (its rows under polish_rows/<metric>@e0.05/, its clearing `cheap_cx<E>@e0.05` in a block's
+plain rows, cxreport reading either). SIMP's default and its polish keep the metric's own tension
+(search eps clear.EPS); the search eps stays a required field of ComplexMetric, in its name. The
+plain form's rows stay under their names (polish_rows/<metric>/S0.01cat.P64w8[E]/,
+gap_rows/runtime/preset/<device>/cheap[E]/: records, read as phase 1's references by gap_calib's
+report and as the 13's stored clearing by road_rescore's cx_stored).
+
+**An unknown block id raises** (step 5): common.build_blocks checks every id against what builds it
+(`_known`: the bank's ids, or the source's blocks once built, its building floor applied) and names
+every id it lacks; write_bank goes through it, so a submit's plan refuses a mistyped id before any
+task is staged; and the entry points that take ids parse them with common.ids_of, which builds them
+(CHECK_BATCH at a time) at the boundary, before any work: relax, search, road_rescore's propose-all
+and prefixes, pweight's score, gap_calib, clearings_check's rescore, and the guards
+(gap_clear_check, gap_check, pweight_check, free_roads_check); the single-block ones build at once.
+Phase 2b's ZAF.9.3.1_1_7851 (for ZAF.9.5.4_1_7851) is a block the source holds under its building
+floor, so it yielded nothing and write_bank wrote a bank without it. The guard, cluster_check
+`ids`: the mistyped id is refused by ids_of, write_bank, a `blocks` submit's plan and build_blocks
+on a bank that lacks it, and the id spelt right parses and plans; fault `no-check` (`_known` a
+no-op): ids_of and write_bank accept it, the bank written with ZAF.9.5.4_1_7851 alone, and the plan
+stages a task for it, as in phase 2b (both ways here, 14 s each).
+
+**The guards** (each passes on the final code and fails under its fault; on a core here, the device
+guards on the cluster's cards): after step 1 (moves) and after step 2 (deletions) all 28 then on a
+core passed (f3ac2de5, 0c2e588e: pass only, 0.9 h each); at the final code (c86f030a) every guard
+both ways here, 7 single-threaded processes at once: 29 pass and each of their 31 faults is seen
+(60 runs, 1.9 h of core time). gap_clear_check: baseline (20269 P0 -1.6e-4 against the rebuild,
+singles within 3.9e-6; faults interior, its single 4.0e-3 off, and exits, P0 +68%), weights
+(no-conform: the mesh refused, 728 passages), reach (threshold), gradient (within 4.8e-6 of the
+largest; tie 7.3e-2), free (drop-crossing), identity (7 of 7 raster names refused, each raster run
+a record; collide: 0 of 7), convex (multiply), pattern (drop-identity), constants (28 constants,
+the digest 34d40e8a; omit), roads (18895's resistance_lp L_P +1.2e-4 at 38 roads, +3.2e-4 at 260;
+one-face-closed -5.2e-3), flux (imbalance 2.7e-11 -- 5.0e-11; flip-one 1.0); gap_check conform
+(unconstrained), delaunay (flip, geos), apertures (corners: 1.70 for a gap of 1 m), filtration
+(narrowest), free (no-rebuild); gap_flow_check angle (1.0003 at 4 m), shift, channel, field
+(centroids each), law (no-grow 0.82), closed (no-clearance); pweight_check identity
+(no-population), total (brief 0.47), displacement (cost-from-demand), gradient (J-population),
+weights (1.1e-11; swap-time 0.65); free_roads_check free-roads (one-short, above); cluster_check
+ids (no-check, above). cluster_check cpu plans on both nodes. On the cluster's cards (run cx-p3-dev
+at c86f030a, one submit, gap_clear_check's new `both-ways` running both guards and their faults in
+one task, 20269 and 18895 with their road rows shipped): device passes within 1.5e-10 and 5.1e-11
+and fails under perturb (0.97 and 0.86 off), device-roads within 8.7e-11 and 3.6e-11 and perturb
+0.88 and 0.69. clearings_check rescore: the complex's SIMP default and cheap preset on 20269 under
+their own metric MATCH (diff 0); a raster run under its own is refused. clearings_check blocks: all
+303 committed blocks rebuild through the checked build_blocks as the blocks their clearings were
+committed for, and the 61,525 rows of the 157 runs pass the row checks (70 s).
+
+**The tests** (tests/test_clearings.py, 36 pass): the exporter's tests ported to this code's
+metric; deleted with the code they tested: the mesh name of a plan (clearings_export.mesh_name) and
+the raster greedy directories' parse into settings (GREEDY_DIR's old form); new: the complex's
+greedy directories parse back, the raster's are records, only this code's metric is a source (the
+raster's names and another digest's complex listed as records), and a row must state `enclosed`
+(each failing under its fault: `_record` False, `this_code` True, the check removed). mypy --strict
+passes on the modules that were clean (metrics, search, polish_greedy, clearings, clearings_export,
+clearings_check, free_roads, gap_maps, gap_factor, cluster_unpack, seqscreen; seam deleted) and on
+free_roads_check, clear, cluster and cluster_check (new or newly clean); `ruff check .` passes.
+
+**Choices the brief left open** (each the option that deletes the least knowledge):
+- Finished-study code the inventory did not list was deleted where it read only the raster's rows
+  or lost its input or its last caller (the eight above), and kept where neither: fft_homog's
+  solver and two-scale code (fftk, ts, region_* and the rest: the FFT screening layer is a tracked
+  lead, BACKLOG 4(c)), perm_floor, atlas/nbhd, the region page's style and vectors. They read no
+  raster code; the consolidated pass can weigh them.
+- transparency_check's `free-roads` guard moved to free_roads_check.py: it guards free_roads, which
+  stays (the consolidated pass's road free-first stage), while the transparency experiment's code
+  went. Its plans are held on the three plan methods' own graphs (clearance_looped's tree,
+  cycle_native, resistance_lp); the claims' routed graphs (TransparentSubstrate over the stored
+  raster clearings) were the experiment's. FREE's configuration (budget 0.05, margin 0.05 m, the
+  length tie) moved with it. Its fault `one-short`, ad hoc in phase 2b, is coded: every road the
+  stage routes one point short; it bites on 18895 (its road of 2 nodes and 8.5 m held 1 node short:
+  the stage raises, home 510 not freed by the metric's test); 20269's road is a single node at the
+  street, nothing to shorten.
+- road_rescore's `cx` scores no raster clearings now: the 60's plain rows hold them (the
+  cross-checks' record); a block run anew gets the complex's.
+- gap_compare keeps ComplexModel (the guards' and the calibration's rebuild) under its name.
+- relax.Plan's `t<rtol>` stays in the plan's name: it moves nothing on the complex, but dropping it
+  renames every stored SIMP run (relax_rows/<metric>/fw0.q3.i10.t0.001..., the store's run ids); a
+  migration for the consolidated pass, not done here.
+- clearings.py's RunInfo keeps `mesh` and `metric` (B/preB): the store's schema, which the raster's
+  committed runs fill.
+
+**Not deleted, and why**: the raster's rows, summaries, logs and pictures (records, as the brief
+says); clearings.py's schema fields above; cupy and pyamg in the `gpu` group (cupy reads the card's
+memory in gap_calib and serves fft_homog; pyamg is fft_homog's solver); free_roads.CODE hashes
+common.py's source, so FreeEnclosed's identity changed with common (its derive-cache entries are
+recomputed once); the docstrings' history (what a deleted module did, by name, where it explains a
+rule the complex keeps: the raster's Placement, its free first, its ground).
+
+**For the wiki's dead-end record** (the controller writes it; each retired variant with its numbers
+and where NOTES has them):
+- The lifted metric (the heading lift and its turning cost, ell 3 m, K 8): its boundary layer loses
+  0.3 m of a lane at each wall in a 1 m lane, 0.5 in 2 m, 0.7 in 4 m, 0.8 -- 1.1 m in 8 -- 16 m
+  (lanes conduct 0.33 -- 0.89 of their width's share): the old superlinear width law was the
+  lift's; it orders the methods as the raster's isotropic model does (tau median 1.00 on P and J_2,
+  0.93 on P_{1/2}) and reads levels 0.04 -- 0.06 higher ("The gap complex: passability, enclosure
+  and flow without the raster").
+- The raster's lattice: its isotropic model conducts a lane like one 0.14 -- 0.29 m narrower at
+  each wall (the complex within 3e-4 at every width); 22422's 14 m lane, 0.25 -- 0.4 m wide, it
+  resists 4x as much (the same section). Under Fws the angle error at 1 m is 1.21 (U before the fix
+  1.66), the levels' drift 0.027 ("The grid fix").
+- The sightline family (Sightline, SoftSightline, TurnBoosted): the angle error 5.32 at 1 m against
+  U's 1.66 ("The sightline metric's angle error"); parked 2026-10-13 with decision (3); its
+  translucent search's +0.014 [+0.002, +0.022] on the 45 held out ("Sightline on the held-out
+  blocks at D 0.05") is what the complex's `@e` search ported.
+- B_r and D_s (effective width): no new corridors at r up to 1.5 m, U's method order kept (tau
+  1.00), angle errors 1.72 -- 1.85 and 2.39, SIMP under B_r no gain on its own lens ("Uniform
+  conductance with an effective width").
+- A, Aw and Aws (the face aperture's rivals): angle ratios 1.54 -- 1.83 (A) and 1.07 -- 1.22 (Aw,
+  Aws) against Fws's 1.03 -- 1.21, 7 -- 33% of demand cells unreached; deleted with Fws's adoption
+  ("The grid fix").
+- The composite and goal meshes: a5x8 reads Lens A low by a mean 0.0026 (14401 0.0095); the goal
+  mesh g2.5x8f1.4p2o1 at the same cells 0.0004 (4.9x closer, median) ("Local coarsening: built",
+  "Goal-oriented refinement"); the complex needs neither (one fixed mesh a block).
+- The raster's speed: on its GPU (H100 or the tesla node) the presets took 26 -- 337 s (SIMP) and 8
+  -- 166 s (the cheap preset) on the 13, the complex on one core 3.7 -- 73x that (median 11x) and
+  4.7 -- 40x (median 13x) (phase 1: "one fixed mesh"); on a GPU the complex's presets take a median
+  0.38 (SIMP) and 0.93 (the cheap preset) of the raster's GPU time (phase 2a: "its speed and a GPU
+  path").
+- The cross-checks (phase 2b, "the ports and the cross-checks"): the road order the raster's at
+  Kendall tau +0.83 (+1.00 where B (i) ties); P_{1/2}'s weights Spearman +0.99; the corridors agree
+  (the raster's main lanes open on the complex but for 0.1 -- 1.0% of their cells); each metric
+  ranks its own optimizer's clearings first; where they part it is the shy distance (the metric's
+  choice) or the raster's lattice (its error).
+- +relaxlumped (the eps world's interiors one cell a building): Lens A lower by 0.023 and 0.017
+  (SIMP, core), 0.011 and 0.010 (the cheap preset), slower on both devices ("its speed and a GPU
+  path").
+
+**Compute**: GPU 0.31 GPU-h (the device guards: 10 and 8.5 min on tesla2). CPU here,
+single-threaded, at most 8 processes: the guards three times (pass after steps 1 and 2, 0.9 h each;
+both ways at the end, 1.9 h), the checks of the fold (19570's catchment and greedy, old against
+new) and of the preset (20269's cheapE@e0.05), the id guard, clearings_check: about 5 CPU-h
+[inferred from the runs' times].
 ### Pruning by epistemetry: a replay against seqscreen (owner 2026-10-14: "Yes"; BACKLOG, "Pruning by epistemetry's decision layer")
 
 Does GeoffChurch/epistemetry's decision layer decide which variants to keep better than

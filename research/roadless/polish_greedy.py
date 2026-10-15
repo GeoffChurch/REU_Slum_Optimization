@@ -5,11 +5,11 @@ every building, ranked by the eps-world gradient at the 0/1 clearing (the tensio
 scored in the eps world at 1e-6 as SIMP's incumbent does (or, `E`, exactly:
 search.PolishScoring), the result exactly.
 
-First it frees (B's first stage, gap_clear.Model.free_first): the crossings that free the homes enclosed
-at baseline, cheapest per unit of population, within the budget. The greedy starts from them
-(its D counts them; its clearing is them and its picks while they fit the rest of the budget)
-and the polish never moves them. Where no home is enclosed nothing is held and the run is as
-before.
+First it frees (B's first stage, gap_clear.Model.free_first): the crossings that free the homes
+walled in at baseline, cheapest per unit of population, within the budget. The greedy starts from
+them (its D counts them; its clearing is them and its picks while they fit the rest of the
+budget) and the polish never moves them. Where no home is walled in nothing is held and the run is
+as before.
 
     PYTHONPATH=. uv run python research/roadless/polish_greedy.py <id> <p> <cpu|gpu> <picker> \\
         <tries> <width> <metric> <budget> [x2] [E]
@@ -77,8 +77,8 @@ def rows_of(picker: str, tries: int, width: int, pairs: bool, scoring: search.Po
             / f"D{budget:g}")
 
 
-def main(bid: str, power: float, metric: gap_clear.ComplexMetric, picker_spec: str, tries: int, width: int,
-         budget: float, pairs: bool, *, scoring: search.PolishScoring) -> None:
+def main(bid: str, power: float, metric: gap_clear.ComplexMetric, picker_spec: str, tries: int,
+         width: int, budget: float, pairs: bool, *, scoring: search.PolishScoring) -> None:
     """`metric` the run's (metrics.metric_of); its row (`run`'s) in rows_of."""
     out = (rows_of(picker_spec, tries, width, pairs, scoring, metric.name, budget)
            / f"{bid}_p{power:g}.parquet")
@@ -87,8 +87,9 @@ def main(bid: str, power: float, metric: gap_clear.ComplexMetric, picker_spec: s
     pd.DataFrame([row]).to_parquet(out)
 
 
-def run(bid: str, power: float, metric: gap_clear.ComplexMetric, picker_spec: str, tries: int, width: int,
-        budget: float, pairs: bool, *, scoring: search.PolishScoring) -> dict[str, object]:
+def run(bid: str, power: float, metric: gap_clear.ComplexMetric, picker_spec: str, tries: int,
+        width: int, budget: float, pairs: bool, *,
+        scoring: search.PolishScoring) -> dict[str, object]:
     """The greedy and its polish on `bid` (module docstring): the run's row."""
     [b] = common.build_blocks([bid])
     c = metric.clearing(b, demand=common.PopulationDemand())

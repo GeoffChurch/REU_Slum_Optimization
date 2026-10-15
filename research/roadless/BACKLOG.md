@@ -231,9 +231,10 @@ items up front"), in the order proposed:
    interiors and the shy distance's zone strips meshed with the open ground, every face boundary
    split until the mesh is Delaunay, so no weight is clipped; cached by identity), a clearing a
    re-weighting of its passages with no GEOS call; the scorer, free first on the complex grown by w
-   / 2, and the optimizers' seam (seam.py's Protocols, the metric resolved where a run is
-   configured: metrics.metric_of), the raster and the complex both behind it, the raster's numbers
-   bit for bit as before; the metric `cx+shy0.5+s0.125r1b1+R0.5g4x2q4`, its rows under that name.
+   / 2, and the optimizers' seam (seam.py's Protocols, folded in phase 3; the metric resolved
+   where a run is configured: metrics.metric_of), the raster and the complex both behind it, the
+   raster's numbers bit for bit as before; the metric `cx+shy0.5+s0.125r1b1+R0.5g4x2q4`, its rows
+   under that name.
    Against the rebuild: the baselines within 2.3e-4 on 16 of 18 blocks and every clearing's lenses
    within 3.3e-4 on 12 of 13, reach equal home for home; the outliers are necks a few millimetres
    wide (46841's 2.1 mm), where the rebuild converges toward the fixed mesh as s refines. An exact
@@ -291,7 +292,21 @@ items up front"), in the order proposed:
    inventory's (c)) is deleted with the raster ("Delete the finished studies' code"), their numbers
    staying in NOTES and their summaries committed; the cheap preset becomes the translucent search
    at eps 0.05 and its plain form is deleted ("Make translucent the cheap preset and delete the
-   plain version").
+   plain version"). **Phase 3: done** (NOTES, "The complex as the runtime: the raster retired"):
+   the raster, its lift and turning cost and the finished studies' code deleted (59 modules;
+   research/roadless's Python from 125 modules and 34,899 lines to 67 and 17,826), their rows,
+   summaries and pictures kept as records that no code reads (the exporter reads this code's
+   metric only); the shared parts moved first (the runtime's Spec from its name, a fixed grammar
+   of the raster's names in check_disjoint, the block-id parser, seqscreen's loaders, the
+   free-roads guard as free_roads_check.py); seam's Protocols folded into the complex's types,
+   the catchment's sweep into Catchment (bit for bit), the relaxation's dead `rtol` gone; the cheap
+   preset the translucent search at eps 0.05 (`@e0.05`; the plain form's rows stay under their
+   names); an unknown block id raises at the boundary (common.ids_of, write_bank, build_blocks;
+   phase 2b's misspelt 7851 refused). Left for the consolidated pass: relax.Plan's `t<rtol>`, which
+   moves nothing on the complex (dropping it renames every stored SIMP run), and the finished
+   studies' code that reads no raster code (fft_homog's solver and two-scale code, perm_floor,
+   atlas/nbhd, the region page's style and vectors). **Next**: the region test on the complex
+   (decision (4)), then the consolidated pass.
    (4) **Exits: the region model** (owner: "we'd still only leak at the
    outer boundary, so all current must exit ... some of the outer boundary might not leak at all
    and might have 0 conductance (like a railroad)"; "we can adjust boundary leakage, uniform
@@ -375,10 +390,10 @@ can be done after we've done the entire website/README/examples revamp"):
   blocks, 3.5 MB in git, read through `clearings.py`, which refuses a block whose footprints no
   longer match their fingerprint; the 12 blocks' pre-B rows the free-first runs overwrote were
   recovered from run road-b's shipped inputs (`D0.05.p2@road-b`). Still to do: the optimizers'
-  no-overwrite guard (in the consolidated pass), and, before any re-run under Fws, the scripts
-  that write rows without naming the metric keyed by it (study.py, which resumes into its old
-  rows; rescore.py, tails.py, the atlas and fft exports), so the old rule's rows and the new
-  cannot mix. The re-export after the priority-weighted P run is done (2026-10-13: its four runs
+  no-overwrite guard (in the consolidated pass). The scripts that wrote rows without naming their
+  metric (study.py, rescore.py, tails.py, the atlas's and fft's exports) went with the raster
+  (phase 3), and the exporter reads only this code's metric: the old rows cannot mix with the
+  new. The re-export after the priority-weighted P run is done (2026-10-13: its four runs
   on all 220 blocks, the store 61,351 rows).
 - **`.superpowers/sdd/`'s reports** (6.6 MB since July, git-ignored): checked for findings not
   recorded elsewhere, those filed, the finished plans' workspaces deleted. Done 2026-10-13: five
@@ -523,7 +538,8 @@ Not pursued, with what would change that:
 
 - **Pruning by epistemetry's decision layer** (owner 2026-10-14: "Yes"; replayed 2026-10-15,
   NOTES "Pruning by epistemetry: a replay against seqscreen"): **seqscreen stays** for the
-  consolidated pass. epireplay.py ran epistemetry's ValueOfMoreUnits on the finite-population
+  consolidated pass. epireplay.py (deleted in phase 3 with the raster's rows it read; its rows
+  stay) ran epistemetry's ValueOfMoreUnits on the finite-population
   bootstrap (c1784af, an overlay, no dependency) against seqscreen.py on 13 pairwise and 5
   many-arm finished designs, 100 orders each. Under the amended rule (loss below at every rate, no
   more wrong calls, no more asks) its adopt/keep/ask over the bracket fails in both veto settings:
