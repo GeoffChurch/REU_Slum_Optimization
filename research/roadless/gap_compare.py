@@ -518,8 +518,7 @@ def interiors(bids: list[str], token: str) -> None:
         for lumped in (False, True):
             t0 = time.time()
             m = gcl.ComplexMetric(spec=cm.spec, fs=fs, form=form, lumped=lumped,
-                                  relax_lumped=False, factorization=gap_factor.SuperLU()
-                                  ).clearing(b, demand=POP)
+                                  factorization=gap_factor.SuperLU()).clearing(b, demand=POP)
             models["lumped" if lumped else "meshed"] = (m, time.time() - t0)
         for name, x in picks.items():
             r, _u = cm.score(~x, None)

@@ -397,8 +397,7 @@ def _raster_names() -> list[str]:
 def identity(_ids: list[str]) -> list[str]:
     bad = []
     for name in (NAME, f"cx+close0.125+s0.125r1b1+R0.5g4x2q4+v{gcl.CODE}",
-                 f"cx+ramp0.5s0.5+s0.125r1b1+R0.25q4+lumped+v{gcl.CODE}",
-                 f"cx+shy0.5+s0.125r1b1+R0.5g4x2q4+relaxlumped+v{gcl.CODE}"):
+                 f"cx+ramp0.5s0.5+s0.125r1b1+R0.25q4+lumped+v{gcl.CODE}"):
         try:
             back = gcl.complex_of(name, factorization=gap_factor.SuperLU()).name
         except ValueError as e:
@@ -414,7 +413,7 @@ def identity(_ids: list[str]) -> list[str]:
                 return raster
         try:
             Colliding(spec=METRIC.spec, fs=METRIC.fs, form=METRIC.form, lumped=False,
-                      relax_lumped=False, factorization=METRIC.factorization)
+                      factorization=METRIC.factorization)
         except ValueError:
             refused += 1
             continue
@@ -506,7 +505,7 @@ def pattern(ids: list[str]) -> list[str]:
         states = {"baseline": m.state(np.zeros(m.n)),
                   "random": m.state(_random(m, rng).astype(float)),
                   "fractional": m.state(rng.uniform(0.0, 1.0, m.n)),
-                  "eps": m.relaxed_state(np.full(m.n, GRAD_EPS)),
+                  "eps": m.state(np.full(m.n, GRAD_EPS)),
                   "free first": m.state(fr.astype(float))}
         parts = []
         for name, st in states.items():

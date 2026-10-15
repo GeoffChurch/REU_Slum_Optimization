@@ -8,7 +8,7 @@ uni+apwfs at h 0.5 (RASTER).
 
     S=research/roadless/gap_calib.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S warm <id>                      # the block's fixed mesh into gap_clear.CACHE
-    uv run python $S preset <id> <simp|cheap>[E][L] <cpu|gpu>  # a preset on the complex
+    uv run python $S preset <id> <simp|cheap>[E] <cpu|gpu>  # a preset on the complex
     uv run python $S presets <id> <items,> <cpu|gpu>   # several, one after another (one GPU run)
     uv run python $S baseline <ids,|@file> <procs>  # the fixed mesh's baseline against the rebuild
     uv run python $S clearings <ids,|@file> <procs> # every clearing on the fixed mesh and rebuilt
@@ -19,12 +19,12 @@ uni+apwfs at h 0.5 (RASTER).
 
 `preset`: the cheap preset (polish_greedy, S0.01cat P64w8) or SIMP's default (relax.one, PLAN)
 at area D BUDGET, power 1 (P), free first, on the complex, on the device's factorization; `E` the
-polish's candidates scored exactly (search.Exactly), `L` the metric's eps world with one cell per
-building's interior (+relaxlumped). Rows ROWS/preset/<device>/<item>/<id>.parquet (the run's row,
-its item, metric, host, peak memory and wall time; on a GPU the device's memory in use, its most
-over the run, `gpu_gb`): the
-acceptance's own, so that a run on one device never overwrites another's or the stored rows
-(relax_rows/<METRIC>/, polish_rows/<METRIC>/, phase 1's, which `report` compares them with).
+polish's candidates scored exactly (search.Exactly). Rows ROWS/preset/<device>/<item>/<id>.parquet
+(the run's row, its item, metric, host, peak memory and wall time; on a GPU the device's memory in
+use, its most over the run, `gpu_gb`): the acceptance's own, so that a run on one device never
+overwrites another's or the stored rows (relax_rows/<METRIC>/, polish_rows/<METRIC>/, phase 1's,
+which `report` compares them with). The rows of items `L` (the eps world with one cell per
+building's interior, +relaxlumped: measured, dominated and deleted; NOTES) stay as measured.
 
 `baseline`: per block the fixed mesh (built afresh: its time and peak memory) against the
 complex rebuilt (gap_compare.ComplexModel, gap_flow's mesh): P0, P_{1/2},0, J_2,0, the walled-in
@@ -42,8 +42,7 @@ P_{1/2}, J_2, B (i), as width.cross scores); rows ROWS/raster/<id>.parquet.
 factorization's plan), then the breakdown (factors, reach, assembly, factorization, solves,
 gradient) of an exact score (a random clearing at BUDGET, under the population's and P_{1/2}'s
 demands, as the scorer does), of a SIMP iteration (value_sgrad in the eps world at PLAN's eps and
-q 3) and of the tension, each SPEED_REPS times, and the SIMP iteration and the tension of the
-+relaxlumped metric's eps world; a region (<id>@major) its baseline only. Rows
+q 3) and of the tension, each SPEED_REPS times; a region (<id>@major) its baseline only. Rows
 ROWS/speed/<device>/<id>.parquet. (Phase 1's `timing`, BEFORE and AFTER, is in
 summary_runtime_timing.csv.)
 
@@ -92,7 +91,7 @@ PQ = common.PriorityDemand(0.5)
 SPEED_REPS = 2
 GPU_SAMPLE_S = 0.5          # _GpuPeak's sampling (measurement only)
 ROWS = HERE / "gap_rows" / "runtime"
-ITEM = re.compile(r"(simp|cheap)(E?)(L?)")    # a preset item: the polish scoring, the eps world
+ITEM = re.compile(r"(simp|cheap)(E?)")    # a preset item: the polish's scoring
 
 
 def _peak_gb() -> float:
@@ -175,10 +174,9 @@ def warm(bid: str) -> None:
 def preset(bid: str, item: str, device: str) -> None:
     m = ITEM.fullmatch(item)
     if m is None:
-        raise SystemExit(f"unknown preset item {item!r}: <simp|cheap>[E][L]")
-    which, exact, lumped = m.groups()
-    metric = metrics.metric_of(f"{BASE}{'+relaxlumped' if lumped else ''}+v{gcl.CODE}",
-                               device=device, mesh=MESH)
+        raise SystemExit(f"unknown preset item {item!r}: <simp|cheap>[E]")
+    which, exact = m.groups()
+    metric = metrics.metric_of(METRIC.name, device=device, mesh=MESH)
     scoring = search.polish_scoring_of(exact)
     out = ROWS / "preset" / device / item / f"{bid}.parquet"
     t0 = time.time()
@@ -360,42 +358,30 @@ def speed_one(bid: str) -> str | None:
         t0 = time.time()
         fx = METRIC.fixed(b, cache=gcl.CACHE)
         rows.append(dict(what="load", wall=time.time() - t0, peak_gb=_peak_gb()))
-        models = {}
-        for lumped in ("", "+relaxlumped"):
-            if "@" in bid and lumped:
-                continue
-            metric = metrics.metric_of(f"{BASE}{lumped}+v{gcl.CODE}", device=device, mesh=MESH)
-            t0 = time.time()
-            assert isinstance(metric, gcl.ComplexMetric)
-            mdl = metric.model(b, fx, demand=POP)
-            models[lumped] = mdl
-            rows.append(dict(what=f"model{lumped} (baseline: the plan, 4 solves)",
-                             wall=time.time() - t0, peak_gb=_peak_gb(), unknowns=mdl.cells0,
-                             cells=mdl.relax_sys.n))
-        m = models[""]
+        metric = metrics.metric_of(METRIC.name, device=device, mesh=MESH)
+        assert isinstance(metric, gcl.ComplexMetric)
+        t0 = time.time()
+        m = metric.model(b, fx, demand=POP)
+        rows.append(dict(what="model (baseline: the plan, 4 solves)", wall=time.time() - t0,
+                         peak_gb=_peak_gb(), unknowns=m.cells0, cells=m.c.n))
         rng = np.random.default_rng(20261014)
         x = np.zeros(m.n, dtype=bool)
         order = rng.permutation(m.n)
         x[order[np.cumsum(m.cost[order]) <= BUDGET]] = True
         x_frac = np.full(m.n, BUDGET)
-        cases = []
-        if "@" in bid:
-            cases.append(("baseline score", m, lambda mm: mm.lenses(np.zeros(mm.n, dtype=bool))))
-        else:
-            cases.append(("exact score", m, lambda mm: mm.lenses(x)))
-            for lumped, mm in models.items():
-                rel = mm.relaxation(POWER, q=PLAN.qmax, rtol=PLAN.rtol, eps=PLAN.eps)
+        rel = m.relaxation(POWER, q=PLAN.qmax, rtol=PLAN.rtol, eps=PLAN.eps)
 
-                def tension(mm=mm):
-                    mm.removed[:] = x
-                    mm.tension(POWER, restore=False)
-                    mm.removed[:] = False
-                cases.append((f"SIMP iteration{lumped}", mm,
-                              lambda _mm, rel=rel: rel.value_sgrad(x_frac)))
-                cases.append((f"tension{lumped}", mm, lambda _mm, f=tension: f()))
+        def tension() -> None:
+            m.removed[:] = x
+            m.tension(POWER, restore=False)
+            m.removed[:] = False
+        cases = ([("baseline score", lambda: m.lenses(np.zeros(m.n, dtype=bool)))] if "@" in bid
+                 else [("exact score", lambda: m.lenses(x)),
+                       ("SIMP iteration", lambda: rel.value_sgrad(x_frac)),
+                       ("tension", tension)])
         for rep in range(SPEED_REPS):
-            for what, mm, fn in cases:
-                r = _measure(mm, what, lambda fn=fn, mm=mm: fn(mm))
+            for what, fn in cases:
+                r = _measure(m, what, fn)
                 rows.append(dict(r, rep=rep, peak_gb=_peak_gb()))
                 print(f"{bid} {device} {what}: {r['wall']:.2f}s (factorization "
                       f"{r['t_factorization']:.2f}s, solves {r['t_solves']:.2f}s); peak "

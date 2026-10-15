@@ -43,9 +43,7 @@ The run's factorization (gap_factor, a Strategy resolved where the run is config
 a core, restricting the pattern to the state's unknowns in one nested-dissection order; cuDSS on
 a GPU, refactoring the whole pattern) makes one plan per pattern, so exact scores, tensions,
 SIMP's iterations and the polish share it. Potentials, right-hand sides and the adjoint are per
-cell (0 off the unknowns). The exact world's cells are `sys`; the eps world's (SIMP's, the
-tension's, the eps-world polish's) `relax_sys`, the same unless a metric lumps the interiors there
-(+relaxlumped).
+cell (0 off the unknowns).
 
 THE IDENTITY (`ComplexMetric.name`): every configurable constant, and the code's own: every
 public module-level constant of this module, gap_complex, gap_flow and gap_factor (and clear.EPS,
@@ -80,8 +78,8 @@ import json
 import os
 import re
 import time
-from dataclasses import dataclass
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -1037,12 +1035,11 @@ class Model:
     """One block's clearing model on its fixed mesh (module docstring): the baseline, the scorer,
     free first and the seam's ClearingModel. `pop` each building's population (area: the
     owner's), `demand` what each home injects in J_power (common.Demand); `factorization` the
-    run's (gap_factor: its device); `lumped` every building's interior one cell in both worlds,
-    `relax_lumped` in the eps world (SIMP's, the tension's, the polish's scorer) at least."""
+    run's (gap_factor: its device); `lumped` every building's interior one cell."""
 
     def __init__(self, block, fx: Fixed, *, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width,
                  pop: NDArray[np.float64], demand: common.Demand,
-                 factorization: gap_factor.Factorization, lumped: bool, relax_lumped: bool):
+                 factorization: gap_factor.Factorization, lumped: bool):
         self.block, self.fx, self.spec, self.fs, self.form = block, fx, spec, fs, form
         self.geo = gc.geometry(block)
         self.fm = fx.fm
@@ -1058,9 +1055,6 @@ class Model:
         self.timing = Timing()
         self.sys = System(self.fm, full_cells(self.fm, lumped=lumped), dem=fx.dem, ptri=fx.ptri,
                           factorization=factorization)
-        self.relax_sys = (self.sys if relax_lumped == lumped else
-                          System(self.fm, full_cells(self.fm, lumped=relax_lumped), dem=fx.dem,
-                                 ptri=fx.ptri, factorization=factorization))
         self.dem = fx.dem
         self.nodem = fx.dem.walled            # the homes with no demand point: out of every J
         # the baseline, every footprint standing: the walled-in homes, the escape times under the
@@ -1080,7 +1074,6 @@ class Model:
 
     @property
     def c(self) -> FullCells:
-        """The exact world's cells."""
         return self.sys.cells
 
     # -- the state
@@ -1108,17 +1101,13 @@ class Model:
         return st._replace(A=A, factor=f)
 
     def factors(self, k: NDArray[np.float64]) -> State:
-        """The exact world's state of the clearing k: its factors and reach (no operator: the
-        enclosed homes need no solve)."""
+        """The state of the clearing k: its factors and reach (no operator: the enclosed homes
+        need no solve)."""
         return self._factors(self.sys, k)
 
     def state(self, k: NDArray[np.float64]) -> State:
-        """The exact world's state of the clearing k, its operator assembled and factored."""
+        """The state of the clearing k, its operator assembled and factored."""
         return self._state(self.sys, k)
-
-    def relaxed_state(self, k: NDArray[np.float64]) -> State:
-        """The eps world's state of k (its cells `relax_sys`'s), assembled and factored."""
-        return self._state(self.relax_sys, k)
 
     def _rhs(self, st: State, inj: NDArray[np.float64]) -> NDArray[np.float64]:
         """The right-hand side per cell of the injection `inj` per home (a point in a ground cell
@@ -1238,7 +1227,7 @@ class Model:
         eps). One solve, two for power != 1."""
         eps = clear.EPS
         k = np.where(self.removed, 1.0, eps)
-        st = self.relaxed_state(k)
+        st = self.state(k)
         u = self.solve(st, self.inj)
         uh = self.home_u(st, u)
         lam = u if power == 1.0 else self.solve(
@@ -1314,7 +1303,7 @@ class Tension:
 
 
 class Relaxation:
-    """A seam.Relaxed of the fixed mesh: J_power in the eps world (the model's relax_sys), k_b =
+    """A seam.Relaxed of the fixed mesh: J_power in the eps world, k_b =
     eps + (1 - eps) proj(x_b)^q (relax.project), its gradient in the projected clearing by the
     adjoint. `rtol` is the raster's iterative tolerance, kept for the seam: every solve here is
     direct, refined to the floating-point floor (gap_factor.Refined)."""
@@ -1351,11 +1340,11 @@ class Relaxation:
         return self.m.J(uh, self.m.inj, self.power_), u, uh
 
     def value(self, x: NDArray[np.float64]) -> float:
-        return self._J(self.m.relaxed_state(self.k_of(x)))[0]
+        return self._J(self.m.state(self.k_of(x)))[0]
 
     def value_sgrad(self, x: NDArray[np.float64]) -> tuple[float, NDArray[np.float64]]:
         m = self.m
-        st = m.relaxed_state(self.k_of(x))
+        st = m.state(self.k_of(x))
         J, u, uh = self._J(st)
         p = self.power_
         lam = u if p == 1.0 else m.solve(
@@ -1392,30 +1381,23 @@ class Relaxation:
 class ComplexMetric:
     """The metric on the complex (seam.Metric): its identity the complex's Spec (s, ring, band),
     the FlowSpec (R, its grading, sigma, the demand's quadrature, the lattice offset), the width
-    form, `lumped` (one node per building in both worlds: the study's alternative),
-    `relax_lumped` (one node per building in the eps world only: SIMP's, the tension's and the
-    eps-world polish's; the exact scores the meshed interiors') and the code's constants (CODE),
-    every one in its name, which no raster conductance's can be (`check_disjoint`): its rows
+    form, `lumped` (one node per building: the study's alternative) and the code's constants
+    (CODE), every one in its name, which no raster conductance's can be (`check_disjoint`): its rows
     never read as the raster's. `factorization` is the run's device (gap_factor): it moves
     scores only at the floating-point level, so it is not in the name; the rows record it."""
     spec: gc.Spec
     fs: gf.FlowSpec
     form: gf.Width
     lumped: bool
-    relax_lumped: bool
     factorization: gap_factor.Factorization
 
     def __post_init__(self) -> None:
-        if self.lumped and self.relax_lumped:
-            raise ValueError("+lumped lumps the eps world's interiors too: +relaxlumped is "
-                             "meshed interiors' alternative")
         check_disjoint(self.name)
 
     @property
     def name(self) -> str:
         return (f"cx+{self.form.name}+s{self.spec.s:g}r{self.spec.ring_m:g}b{self.spec.band_m:g}"
-                f"+{self.fs.name}" + ("+lumped" if self.lumped else "")
-                + ("+relaxlumped" if self.relax_lumped else "") + f"+v{CODE}")
+                f"+{self.fs.name}" + ("+lumped" if self.lumped else "") + f"+v{CODE}")
 
     @property
     def device(self) -> str:
@@ -1430,8 +1412,7 @@ class ComplexMetric:
         """The block's model on its fixed mesh `fx` (`clearing`'s, or one meshed afresh)."""
         return Model(block, fx, spec=self.spec, fs=self.fs, form=self.form,
                      pop=common.POPULATIONS["area"].weights(np.asarray(block.buildings.outlines)),
-                     demand=demand, factorization=self.factorization, lumped=self.lumped,
-                     relax_lumped=self.lumped or self.relax_lumped)
+                     demand=demand, factorization=self.factorization, lumped=self.lumped)
 
     def fixed(self, block, *, cache: Path) -> Fixed:
         return Fixed.of(block, self.spec, self.fs, self.form, cache=cache)
@@ -1462,7 +1443,7 @@ def check_disjoint(name: str) -> None:
 _NUM = r"([0-9]+(?:\.[0-9]+)?(?:e-?[0-9]+)?)"
 _NAME = re.compile(rf"cx\+(close|shy|ramp){_NUM}(?:s{_NUM})?\+s{_NUM}r{_NUM}b{_NUM}"
                    rf"\+R{_NUM}(?:g([0-9]+)x{_NUM})?q([0-9]+)(?:k{_NUM})?"
-                   rf"(?:o(-?{_NUM[1:-1]}),(-?{_NUM[1:-1]}))?(\+lumped)?(\+relaxlumped)?"
+                   rf"(?:o(-?{_NUM[1:-1]}),(-?{_NUM[1:-1]}))?(\+lumped)?"
                    r"\+v([0-9a-f]+)")
 
 
@@ -1472,10 +1453,9 @@ def complex_of(name: str, *, factorization: gap_factor.Factorization) -> Complex
     m = _NAME.fullmatch(name)
     if m is None:
         raise ValueError(f"unknown complex metric {name!r}: cx+<form><w>+s<s>r<ring>b<band>+"
-                         "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped]"
-                         "[+relaxlumped]+v<code>")
+                         "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped]+v<code>")
     (kind, w, ramp_s, s_, ring, band, R, levels, grade, quad, sigma, ox, oy,
-     lumped, relax_lumped, code) = m.groups()
+     lumped, code) = m.groups()
     if code != CODE:
         raise ValueError(f"{name!r}: code {code}, but this code's constants digest to {CODE} "
                          "(its rows are another code's)")
@@ -1492,7 +1472,7 @@ def complex_of(name: str, *, factorization: gap_factor.Factorization) -> Complex
                      offset=gf.OFFSET if ox is None else (float(ox), float(oy)))
     metric = ComplexMetric(spec=gc.Spec(s=float(s_), ring_m=float(ring), band_m=float(band)),
                            fs=fs, form=form, lumped=lumped is not None,
-                           relax_lumped=relax_lumped is not None, factorization=factorization)
+                           factorization=factorization)
     if metric.name != name:
         raise ValueError(f"{name!r} spells the complex metric {metric.name!r}")
     return metric

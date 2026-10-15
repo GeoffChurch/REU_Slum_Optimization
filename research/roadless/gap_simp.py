@@ -141,7 +141,7 @@ def run_one(job: tuple[str, str]) -> str | None:
         cost = pop / pop.sum()
         fs = gcmp.flow_spec(R, LEVELS)
         spec = gap_study.spec_of(gcmp.S_M)
-        m = gcl.ComplexMetric(spec=spec, fs=fs, form=form, lumped=False, relax_lumped=False,
+        m = gcl.ComplexMetric(spec=spec, fs=fs, form=form, lumped=False,
                               factorization=gap_factor.SuperLU()).clearing(
             b, demand=common.PopulationDemand())
         t_model = time.time() - t0
