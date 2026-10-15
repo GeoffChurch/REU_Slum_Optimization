@@ -287,7 +287,11 @@ items up front"), in the order proposed:
    weakness on the complex (the tension ranks the buildings sharing a zone at Spearman +0.83
    against +0.97 alone, and the complex's own polish climbs from the raster's clearings; the lumped
    tension's +0.042 on 22422's cheap preset a datum), tried with moves that clear a zone's
-   buildings together.
+   buildings together. **Decided for phase 3 (owner 2026-10-15)**: the finished studies' code (the
+   inventory's (c)) is deleted with the raster ("Delete the finished studies' code"), their numbers
+   staying in NOTES and their summaries committed; the cheap preset becomes the translucent search
+   at eps 0.05 and its plain form is deleted ("Make translucent the cheap preset and delete the
+   plain version").
    (4) **Exits: the region model** (owner: "we'd still only leak at the
    outer boundary, so all current must exit ... some of the outer boundary might not leak at all
    and might have 0 conductance (like a railroad)"; "we can adjust boundary leakage, uniform
