@@ -322,8 +322,9 @@ def roads_report() -> pd.DataFrame:
     cx = rr.cx_lens_table
     t = rr.cx_rows(ROAD_ROWS, _complex(), LINEUP)
     ras = rr._read_all(sorted(raster_dir(RASTER).glob("*__roads.parquet")))
-    old = rr.score_rows(ROAD_ROWS, LINEUP, "0.5", "area").rename(
-        columns={v: k for k, v in LENS_OF_OLD.items()})
+    old_dir = ROAD_ROWS / f"h0.5_ell{rr.ELL_M:g}_K{rr.K}_{OLD_RASTER}_area_{rr.budgets_tag()}"
+    old = rr._read_all([f for name in LINEUP for f in sorted(old_dir.glob(f"*__{name}.parquet"))]
+                       ).rename(columns={v: k for k, v in LENS_OF_OLD.items()})
     rows = []
     for budget in CROSS_BUDGETS:
         c = cx(t, budget)
