@@ -471,7 +471,10 @@ def _incidence(sets: NDArray[np.object_], n: int) -> sp.csr_matrix:
     return sp.csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(len(sets), n))
 
 
-def full_mesh(geo: gc.Geometry, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width) -> FullMesh:
+def full_mesh(geo: gc.Geometry, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width, *,
+              box: tuple[float, float, float, float]) -> FullMesh:
+    """The fixed mesh of `geo`'s footprints (a carving's atoms), its Steiner lattice laid over
+    `box` (`lattice_box`: the baseline open ground's, the buildings' own)."""
     faces, cover, zone, noded = _faces(geo, spec, form.grow)
     tris, tface = [], []
     for k, f in enumerate(faces):
@@ -504,9 +507,6 @@ def full_mesh(geo: gc.Geometry, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width) 
     # Steiner points on the baseline's lattice (the rebuild's, gap_flow.mesh at every footprint
     # standing), kept clear of every line of the noding: the open faces' by the form's clearance
     # too, the interiors' by R / 2
-    base, _band = gc._open_ground(geo, np.ones(len(geo.polys), dtype=bool), spec.band_m,
-                                  carve=None, grow=form.grow)
-    box = base.bounds
     open_f = np.array([len(cv) == 0 for cv in cover])
     region_open = shapely.union_all(faces[open_f]) if open_f.any() else shapely.Polygon()
     region_bld = shapely.union_all(faces[~open_f]) if (~open_f).any() else shapely.Polygon()
@@ -566,6 +566,17 @@ def full_mesh(geo: gc.Geometry, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width) 
                     fv=fv_, Tf=Tf, vb=vb, obstacle=obstacle, sigma=fs.sigma, unflat=conf.unflat,
                     splits=conf.splits, rounds=conf.rounds, flat=int(drop.sum()),
                     skipped=int(skipped))
+
+
+def lattice_box(geo: gc.Geometry, spec: gc.Spec, form: gf.Width) -> tuple[float, float, float,
+                                                                          float]:
+    """The box of the baseline's open ground (every footprint of `geo`, the buildings, standing,
+    grown as the form grows them): the Steiner lattice's frame, the rebuild's own. From the
+    buildings, not a carving's atoms: the atoms' union is the same ground, and GEOS's union of
+    pieces sharing their cuts can fail (38988: a TopologyException)."""
+    base, _band = gc._open_ground(geo, np.ones(len(geo.polys), dtype=bool), spec.band_m,
+                                  carve=None, grow=form.grow)
+    return base.bounds
 
 
 def _weights(xy, tri, face, cc, pa, pb, pu, pv, sigma: float
@@ -829,7 +840,7 @@ class Fixed(NamedTuple):
         t0 = time.time()
         geo = gc.geometry(block)
         atoms = geo._replace(polys=carving.polys)
-        fm = full_mesh(atoms, spec, fs, form)
+        fm = full_mesh(atoms, spec, fs, form, box=lattice_box(geo, spec, form))
         cells = full_cells(fm, lumped=False)
         # the baseline's reach: every footprint standing
         k0 = np.zeros(carving.n)
