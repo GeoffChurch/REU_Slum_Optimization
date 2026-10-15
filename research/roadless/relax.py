@@ -1,48 +1,44 @@
-"""The clearing problem as one convex program, solved by Frank-Wolfe.
+"""The clearing problem as one convex program, solved by SIMP (and Frank-Wolfe for the bound).
 
-Clear a fraction x_j in [0, 1] of each building: a cell's open fraction is ff0 + sum_j x_j
-(the share of the cell building j covers), so it is affine in x. Each step's weight is a mean
-over its tracks of the smallest sub-sample factor on each (lifted.step_widths: U's openness,
-affine in x, or lifted.Blurred's min(openness, B), B affine in the open field), each turning
-edge's its cell's factor (the open fraction, or Blurred's sum of that min over its
-sub-samples), all concave in x, and by the Dirichlet principle P(w) = max_u 2 f^T u -
-sum_e w_e (du_e)^2 is a maximum of functions affine and non-increasing in w. So P(x) is convex,
-and so is min P(x) s.t. sum_j c_j x_j <= D, 0 <= x <= 1 (c_j the population share). J_p for
-p != 1 is not convex; Frank-Wolfe is then a local method and the gap is not a bound.
+Clear a fraction x_j in [0, 1] of each building: on the gap complex (gap_clear.Relaxation) a
+building's passages conduct by k_j = eps + (1 - eps) proj(x_j)^q, each passage by the harmonic mean
+of its triangles' factors, each triangle's the least k of the footprints whose shy zone holds it
+(concave and non-decreasing), and by the Dirichlet principle P(w) = max_u 2 f^T u - sum_e w_e
+(du_e)^2 is a maximum of functions affine and non-increasing in w. So P(x) is convex at q 1, and so
+is min P(x) s.t. sum_j c_j x_j <= D, 0 <= x <= 1 (c_j the population share). J_p for p != 1 is
+not convex; Frank-Wolfe is then a local method and the gap is not a bound.
 
 Objective: J_p in the eps world (buildings as eps material, as the tension), so J_eps <= J
-for every clearing and a lower bound on J_eps bounds every real clearing. Gradient: dJ/dw_e =
--du_e dlam_e (lam the adjoint; u for p 1); where a track's min is attained by several
-sub-samples, its share is split equally among them (a supergradient of the min, so a
-subgradient of J: the gap stays a valid bound). Linear step: a fractional knapsack (the batch
-pickers' rule, best gain per unit population up to D). Step size: a parabola through J(0),
-J'(0) = -gap and J(1), checked, and shorter steps when neither it nor the full step descends
-(FW_BACKOFF). Rounding: clear buildings by decreasing x while they fit, then score exactly.
+for every clearing and a lower bound on J_eps bounds every real clearing. Gradient: by the adjoint
+(gap_clear.Model.grad; ties shared, a subgradient of J: the gap stays a valid bound). Linear step:
+a fractional knapsack (the batch pickers' rule, best gain per unit population up to D). Step size:
+a parabola through J(0), J'(0) = -gap and J(1), checked, and shorter steps when neither it nor the
+full step descends (FW_BACKOFF). Rounding: clear buildings by decreasing x while they fit, then
+score exactly.
 
     CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/relax.py one|path <ids,|all> <p> <cpu|gpu> <plan> <metric> [workers] [budget]
 
-metric: a raster conductance (`along`: lifted.conductance_of, [@<search along>]) or the gap
-complex's name (gap_clear.ComplexMetric; cpu or gpu, its factorization's), resolved here
-(metrics.metric_of) and handed down (seam.Metric). one: SIMP at one budget (default D_LENS, 0.05; plus the Frank-Wolfe relaxation
-and bound if fw > 0), rows in relax_rows/<metric>/<plan>/D<budget>/. path: nested budgets D 0.01 .. 0.15,
-rows in the greedy's format (clear.rows_dir, picker SIMP<plan>), so picker_compare reads them
-like any picker.
+metric: the gap complex's name (gap_clear.ComplexMetric; cpu or gpu, its factorization's),
+resolved here (metrics.metric_of) and handed down. one: SIMP at one budget (default D_LENS, 0.05;
+plus the Frank-Wolfe relaxation and bound if fw > 0), rows in relax_rows/<metric>/<plan>/D<budget>/.
+path: nested budgets D 0.01 .. 0.15, rows in the greedy's format (clear.rows_dir, picker
+SIMP<plan>).
 
-Both free first (B's first stage, clear.free_first): the crossings that free the homes enclosed
-at baseline, cheapest per unit of population, within the budget, held at 1 through SIMP, its
-roundings and the polish, which search with the rest of the budget; where no home is enclosed
-nothing is held and the run is as before. one's rows add free_D (the free stage's D),
-free_cleared (its buildings) and enclosed (B (i) of the answer: the population share it leaves
-enclosed, common.Scorer.enclosed_left). fw, .c, .C, .m, .g and .G are not built for held
-buildings: a block whose free stage holds any raises.
+Both free first (B's first stage, gap_clear.Model.free_first): the crossings that free the homes
+walled in at baseline, cheapest per unit of population, within the budget, held at 1 through SIMP,
+its roundings and the polish, which search with the rest of the budget; where no home is walled in
+nothing is held. one's rows add free_D (the free stage's D), free_cleared (its buildings) and
+enclosed (B (i) of the answer: the population share it leaves walled in,
+gap_clear.Model.enclosed_left). fw, .m, .g and .G are not built for held buildings: a block whose
+free stage holds any raises.
 
 plan: fw<FW iterations, 0 = start SIMP from uniform x>.q<final q>.i<OC updates per q>.t<solve
 tolerance while optimizing>, e.g. fw40.q3.i20.t1e-05 (the first 220 runs) or fw0.q5.i10.t0.001;
-the optional suffixes are Plan's (.e .b .k[s] .r[l] .p .w .c .u).
+the optional suffixes are Plan's (.e .b .k[s] .r[l] .p .w .m .g .G .u). (The raster's coarse
+plans, `.c` and `.C`, and its grids, `.h`, `.a` and `.g<d0>x<smax>...`, went with it.)
 """
 from __future__ import annotations
 
-import dataclasses
 import re
 import sys
 import time
@@ -57,158 +53,12 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
-import lifted  # noqa: E402
-import clear  # noqa: E402
 import search  # noqa: E402
 import seam  # noqa: E402
-from clear import EPS, RTOL_SCORE, Clearing, _cells_axes, rows_dir  # noqa: E402
+from clear import EPS, rows_dir  # noqa: E402
 
 D_LENS = 0.05          # Lens A's budget (owner, 2026-10-03: 0.10 saturates under sightline)
 OUT = HERE / "relax_rows"
-
-
-class Relaxation:
-    """One block's relaxation: open fractions, objective and gradient in x. Building j adds
-    x_j^q of its cells' open fraction: q 1 is the convex relaxation (convex for P under the
-    uniform conductance), q > 1 (SIMP) makes partial clearing uneconomic (its conductance falls
-    faster than its cost). Under a road-favouring along-conductance the factors respond to
-    opening too (their vjp), and nothing is convex."""
-
-    def __init__(self, c: Clearing, power: float, q: float = 1.0, rtol: float = RTOL_SCORE,
-                 eps: float = EPS, params: lifted.Params | None = None):
-        self.c, self.power, self.q, self.rtol, self.eps = c, power, q, rtol, eps
-        # the conductance optimized under: the clearing's search one (c.ps, e.g. more
-        # translucent than the metric), or `params`; exact() always scores under the metric c.p
-        self.pp = c.ps if params is None else params
-        self.beta = 0.0                        # projection sharpness (0: none); simp sets it
-        self._u = self._lam = None             # the last solves: warm starts for the next
-        g = c.sc.grid
-        self.ff0 = g.ff0.ravel()
-        self.inside = np.flatnonzero(g.inside)
-        self.J0 = c.sc.J(c.sc.u0, power)
-        xp = c.p.solver.xp                     # what home_u needs, on the device
-        self._ST = c.p.solver.sparse.csr_matrix(c.sc.pl.S.T.tocsr())     # homes x cells
-        self._share = xp.asarray(lifted.axes(c.p.K)[2] / np.pi)
-
-    def proj(self, x: np.ndarray) -> np.ndarray:
-        return project(x, self.beta)
-
-    def dproj(self, x: np.ndarray) -> np.ndarray:
-        return dproject(x, self.beta)
-
-    def open_of(self, x: np.ndarray) -> np.ndarray:
-        o = self.ff0.copy()
-        o[self.inside] += self.c.bf.T @ (self.proj(x) ** self.q)
-        return np.minimum(o, self.c.full.ravel()).reshape(self.c.full.shape)
-
-    def _solve(self, x: np.ndarray):
-        c = self.c
-        op = self.open_of(x)
-        op_eps = op + self.eps * (c.full - op)
-        sy = lifted.System(c.sc.grid, op_eps, self.pp)
-        sol = lifted.solve(c.sc.grid, op_eps, c.sc.f, self.pp, system=sy, rtol=self.rtol,
-                           host=False, x0=self._u)
-        self._u = sol.u                        # eps world: the same unknowns every time
-        return op_eps, sy, sol, self._home_u(sol, op_eps)
-
-    def _home_u(self, sol: lifted.Solution, op_eps: np.ndarray) -> np.ndarray:
-        """Scorer.home_u_of with the per-unknown potentials left on the device (48M of them on
-        a big block): each cell's potential by angular share, then S^T there."""
-        c, xp = self.c, self.c.p.solver.xp
-        free = xp.flatnonzero(xp.asarray(op_eps).ravel() > 0)
-        uk = xp.zeros((len(free), c.p.K))
-        uk[sol.unk_cell >= 0] = sol.u.reshape(-1, c.p.K)
-        ub = xp.zeros(op_eps.size)
-        ub[free] = uk @ self._share
-        return np.where(c.sc.enclosed, np.nan, c.p.solver.to_host(self._ST @ ub))
-
-    def value(self, x: np.ndarray) -> float:
-        return self.c.sc.J(self._solve(x)[3], self.power)
-
-    def score(self, s: search.SearchState, removed: np.ndarray) -> search.Score:
-        """The eps world as a search.World: J of the clearing (no P here)."""
-        return search.Score(self.value(removed.astype(float)), np.nan)
-
-    def value_sgrad(self, x: np.ndarray) -> tuple[float, np.ndarray]:
-        """J and its gradient in the projected clearing s = proj(x)."""
-        c, p = self.c, self.pp
-        xp = p.solver.xp
-        g = c.sc.grid
-        op_eps, sy, sol, home_u = self._solve(x)
-        J = c.sc.J(home_u, self.power)
-        if self.power == 1.0:
-            lam = sol.u
-        else:
-            lam = lifted.solve(g, op_eps, c.sc.adjoint_load(home_u, self.power), p, system=sy,
-                               rtol=self.rtol, host=False, x0=self._lam).u
-            self._lam = lam
-        K = p.K
-        uk, lk = _cells_axes(sy, sol.u, K), _cells_axes(sy, lam, K)
-        o = xp.asarray(op_eps).ravel()
-        cell, _nf = lifted._free_ids(o, xp)
-        pat = g.pattern(K, xp)
-        _v, _th, _m, gap = lifted.axes(K)
-        gc = xp.zeros(o.size)                           # dJ / d(cell factor) per grid cell
-        # dJ / d(each step's width share), kept per sub-sample (shared among those at each
-        # track's min) for open_grad below
-        steps = lifted.step_gradient(g, o, p)
-        Fl = p.along.layers(g, op_eps, K)
-        dF = None                                       # dJ / d(layer factor), if any vary
-        for k, frac in enumerate(lifted.step_widths(g, o, p)):
-            a, b, _line, const = pat.along[k]          # const: a fully open edge's weight
-            ca, cb = cell[a], cell[b]
-            q = (uk[ca, k] - uk[cb, k]) * (lk[ca, k] - lk[cb, k])
-            if np.isscalar(Fl[k]):
-                boost = Fl[k]
-            else:                                       # w = frac const min(F_a, F_b)
-                Fk = xp.asarray(Fl[k]).ravel()
-                fa, fb = Fk[a], Fk[b]
-                boost = xp.minimum(fa, fb)
-                if dF is None:
-                    dF = xp.zeros((K, o.size))
-                dF[k] += xp.bincount(xp.where(fa <= fb, a, b), -q * frac * const,
-                                     minlength=o.size)
-            steps.add(k, -q * const * boost)
-        free = xp.flatnonzero(o > 0)
-        area = g.cell_area(xp, o > 0)
-        for k in range(K):
-            k2 = (k + 1) % K
-            q = (uk[:, k] - uk[:, k2]) * (lk[:, k] - lk[:, k2])
-            gc[free] += -q * (area / (p.ell_m ** 2 * gap[k]))
-        # dJ / d(open): through the cell factors (OpenFraction's vjp: gc itself), through what
-        # the step widths read below the cells (the sub-samples), plus the along factors' own
-        # response to opening
-        gc = xp.asarray(p.cells.vjp(g, o.reshape(op_eps.shape), gc.reshape(op_eps.shape),
-                                    p.solver)).ravel()
-        gc += xp.asarray(steps.open_grad()).ravel()
-        if dF is not None:
-            gc += xp.asarray(p.along.vjp(g, op_eps, K, dF.reshape(K, *op_eps.shape))).ravel()
-        grad = (1.0 - self.eps) * (c.bf @ p.solver.to_host(gc)[self.inside])
-        if self.q != 1.0:
-            grad = grad * self.q * self.proj(x) ** (self.q - 1.0)
-        return J, grad
-
-    def value_grad(self, x: np.ndarray) -> tuple[float, np.ndarray]:
-        J, gs = self.value_sgrad(x)
-        return J, gs * self.dproj(x)
-
-    def exact(self, x: np.ndarray) -> float:
-        """J_p of a 0/1 clearing in the real geometry (buildings closed)."""
-        return self.exact_JP(x)[0]
-
-    def exact_JP(self, x: np.ndarray) -> tuple[float, float]:
-        """(J_p, P) of a 0/1 clearing in the real geometry (buildings closed)."""
-        op = self.open_of(x)
-        sol = lifted.solve(self.c.sc.grid, op, self.c.sc.f, self.c.p, rtol=RTOL_SCORE)
-        return self.c.sc.J(self.c.sc.home_u_of(sol, op), self.power), sol.P
-
-    def perm(self, J: float) -> float:
-        return 1.0 - (J / self.J0) ** (1.0 / self.power)
-
-    def metric_world(self, eps: float) -> Relaxation:
-        """The eps world at `eps` under the metric's own conductance (c.p, not the search's), q 1,
-        no projection: the incumbent's and the polish's scorer."""
-        return Relaxation(self.c, self.power, q=1.0, rtol=self.rtol, eps=eps, params=self.c.p)
 
 
 def project(x: np.ndarray, beta: float) -> np.ndarray:
@@ -474,20 +324,9 @@ class Plan(NamedTuple):
     greedy track won only where its raw clearing was already ahead);
     `warm`
     > 0 (path only): each budget after the first starts from the last budget's x (the free
-    buildings lifted to the uniform share) with `warm` updates per stage; `coarse` > 0 (one
-    only): every stage but the last on a grid of that spacing (h 1.0: 4x fewer unknowns), the
-    last at h 0.5 from its x (buildings, their costs and x do not depend on h), the incumbent
-    scoring at h 0.5 throughout; `coarse_all` > 0 (one only): every stage on that grid, each
-    start's incumbent scored there and only its winner at h 0.5; `starts` > 1 (one only): that
-    many SIMP runs (start_x), one incumbent over all of them (coarse_all: over their winners);
-    `update` the design update rule (`.u<name>`; OC's classic rule is not named); `mesh` the
-    metric's grid, its suffix last (lifted.MeshSpec.suffix; uniform h 0.5 not named): `.h<h>`
-    a coarser uniform one (it reads low on gated blocks -- NOTES, "Where resolution matters"),
-    `.a<d0>x<smax>` local coarsening (lifted.AdaptiveMesh: h within d0 metres of every
-    footprint, street and the block edge, cells doubling with distance up to `smax`), and
-    `.g<d0>x<smax>f<factor>p<power>o<opening>` that refined where J_power is sensitive with the
-    buildings `opening` open (common.GoalMesh), the last two for blocks too large for a uniform h 0.5 (NOTES, "Local coarsening",
-    "Goal-oriented refinement")."""
+    buildings lifted to the uniform share) with `warm` updates per stage; `starts` > 1 (one
+    only): that many SIMP runs (start_x), one incumbent over all of them; `update` the design
+    update rule (`.u<name>`; OC's classic rule is not named)."""
     fw: int
     qmax: float
     iters: int
@@ -504,14 +343,11 @@ class Plan(NamedTuple):
     polish_sets: tuple[bool, ...] = ()
     polish_pairs: bool = False
     warm: int = 0
-    coarse: float = 0.0
-    coarse_all: float = 0.0
     starts: int = 0
     seed: str = ""
     track: str = ""
     track_gate: float = -1.0
     update: Update = DEFAULT_UPDATE
-    mesh: lifted.MeshSpec = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
     polish_scoring: search.PolishScoring = search.InEps()
 
     @property
@@ -527,14 +363,11 @@ class Plan(NamedTuple):
                    f"w{self.pwidth}" + ("x2" if self.polish_pairs else "")
                    + self.polish_scoring.suffix if self.polish > 0 else "")
                 + (f".w{self.warm}" if self.warm > 0 else "")
-                + (f".c{self.coarse:g}" if self.coarse > 0 else "")
-                + (f".C{self.coarse_all:g}" if self.coarse_all > 0 else "")
                 + (f".m{self.starts}" if self.starts > 1 else "")
                 + (f".g{self.seed}" if self.seed else "")
                 + (f".G{self.track}" if self.track else "")
                 + (f"e{self.track_gate:g}" if self.track and self.track_gate >= 0 else "")
-                + (f".u{self.update.name}" if self.update != DEFAULT_UPDATE else "")
-                + self.mesh.suffix)
+                + (f".u{self.update.name}" if self.update != DEFAULT_UPDATE else ""))
 
     @property
     def stages(self) -> tuple[tuple[float, float], ...]:
@@ -560,10 +393,9 @@ def plan_of(spec: str) -> Plan:
                      r"(?:\.e(?P<e>[0-9.e-]+?))?(?:\.b(?P<b0>[0-9.]+)-(?P<bmax>[0-9.]+))?"
                      r"(?:\.k(?P<k>\d+)(?:s(?P<ks>[0-9.e-]+))?)?(?:\.r(?P<r>\d+)(?:l(?P<rl>\d+))?)?"
                      r"(?:\.(?P<pset>p|P|pP)(?P<p>\d+)w(?P<pw>\d+)(?P<px>x2)?(?P<pe>E?))?"
-                     r"(?:\.w(?P<w>\d+))?(?:\.c(?P<c>[0-9.]+))?(?:\.C(?P<C>[0-9.]+))?(?:\.m(?P<m>\d+))?"
+                     r"(?:\.w(?P<w>\d+))?(?:\.m(?P<m>\d+))?"
                      r"(?:\.g(?P<g>S[0-9.]+cat(?:w\d+)?))?(?:\.G(?P<G>S[0-9.]+cat(?:w\d+)?)(?:e(?P<Ge>[0-9.]+))?)?"
-                     r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?"
-                     r"(?:\.h(?P<h>[0-9.]+?))?(?P<mesh>\.[ag][0-9.]+x[0-9.]+?(?:f[0-9.]+p[0-9.]+o[0-9.]+)?)?",
+                     r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?",
                      spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
@@ -585,13 +417,9 @@ def plan_of(spec: str) -> Plan:
                 polish_pairs=g["px"] is not None,
                 polish_scoring=search.polish_scoring_of(g["pe"] or ""),
                 warm=0 if g["w"] is None else int(g["w"]),
-                coarse=0.0 if g["c"] is None else float(g["c"]),
-                coarse_all=0.0 if g["C"] is None else float(g["C"]),
                 starts=0 if g["m"] is None else int(g["m"]), seed=g["g"] or "", track=g["G"] or "",
                 track_gate=-1.0 if g["Ge"] is None else float(g["Ge"]),
-                update=update,
-                mesh=common.mesh_of(("0.5" if g["h"] is None else g["h"])
-                                    + ("" if g["mesh"] is None else g["mesh"][1:])))
+                update=update)
 
 
 class Incumbent:
@@ -637,7 +465,7 @@ class Incumbent:
                       f"({'top-x' if k == 0 else f'sample {k}'}, grey {grey:.3f})", flush=True)
 
     def consider(self, r: np.ndarray, label: str) -> None:
-        """A 0/1 candidate from outside this incumbent's iterates (a coarse start's winner)."""
+        """A 0/1 candidate from outside this incumbent's iterates (a greedy's clearing)."""
         key = np.packbits(r > 0).tobytes()
         if key in self._seen:
             return
@@ -732,49 +560,6 @@ def simp(rel: seam.Relaxed, x0: np.ndarray, budget: float,
     return x
 
 
-@dataclass(frozen=True, kw_only=True)
-class RasterMetric:
-    """The raster's metric (seam.Metric): `along` the conductance (lifted.conductance_of:
-    `<along>[+<cells>]+apwfs`), or <metric>@<search>: SIMP's gradient and the greedy's tension
-    under the search one's along-conductance (as the greedy's translucent search), every score
-    under the metric; `device` the solves', the sightline scans' and the catchment sweep's (cpu |
-    gpu); `mesh` the grid (a plan's suffix names it). Its name is `along` (the rows' directories
-    as before the seam)."""
-    along: str
-    device: str
-    mesh: lifted.MeshSpec
-
-    @property
-    def name(self) -> str:
-        return self.along
-
-    @property
-    def sweep(self) -> clear.Sweep:
-        return clear.sweep_of(self.device)
-
-    def clearing(self, block, *, demand: common.Demand) -> Clearing:
-        """`demand`: what each home injects (common.Demand); the area population sets the cost
-        whatever it is."""
-        scans = lifted.scans_of(self.device)
-        specs = self.along.split("@")
-        cond = lifted.conductance_of(specs[0], scans)
-        p = lifted.Params(3.0, 8, along=cond.along, cells=cond.cells,
-                          solver=lifted.solver_of(self.device))
-        return Clearing(block, self.mesh, p, population=common.POPULATIONS["area"],
-                        search=lifted.along_of(specs[1], scans) if len(specs) == 2 else None,
-                        demand=demand)
-
-    def coarse(self, h: float) -> RasterMetric:
-        return dataclasses.replace(self, mesh=lifted.UniformMesh(h, offset=lifted.OFFSET))
-
-
-def _clearing(bid: str, device: str, along: str, mesh: lifted.MeshSpec, *,
-              demand: common.Demand) -> Clearing:
-    """The raster's clearing of block `bid` (RasterMetric's)."""
-    [b] = common.build_blocks([bid])
-    return RasterMetric(along=along, device=device, mesh=mesh).clearing(b, demand=demand)
-
-
 def one(bid: str, power: float, metric: seam.Metric, plan: Plan, budget: float, *,
         demand: common.Demand) -> dict:
     """SIMP at one budget on `bid` under `metric`, J_power under `demand` (common.Demand: J_1 is
@@ -787,10 +572,9 @@ def one(bid: str, power: float, metric: seam.Metric, plan: Plan, budget: float, 
     # B's first stage: the crossings that free the enclosed homes, held at 1 through SIMP (xlo),
     # the incumbent's roundings (first) and its polish (not movable); none enclosed, none held
     held = c.free_first(budget=budget, held=np.zeros(c.n, dtype=bool))
-    if held.any() and (plan.fw > 0 or plan.coarse > 0 or plan.coarse_all > 0 or plan.starts > 1
-                       or plan.seed or plan.track):
+    if held.any() and (plan.fw > 0 or plan.starts > 1 or plan.seed or plan.track):
         raise NotImplementedError(f"{bid}: the free stage holds {int(held.sum())} buildings, and "
-                                  f"fw, .c, .C, .m, .g and .G are not built for held buildings: "
+                                  f"fw, .m, .g and .G are not built for held buildings: "
                                   f"{plan.name}")
     xlo = np.where(held, 1.0, XMIN)
     out = dict(block=bid, n=c.n, power=power, demand=demand.name, plan=plan.name,
@@ -812,10 +596,8 @@ def one(bid: str, power: float, metric: seam.Metric, plan: Plan, budget: float, 
     else:
         x = start_x(0, c.cost, budget)
     starts = max(plan.starts, 1)
-    if starts > 1 and (plan.fw > 0 or plan.coarse > 0):
-        raise ValueError(f"multi-start is built for fw0 and without .c: {plan.name}")
-    if plan.coarse_all > 0 and (plan.coarse > 0 or plan.fw > 0):
-        raise ValueError(f".C is built for fw0 and without .c: {plan.name}")
+    if starts > 1 and plan.fw > 0:
+        raise ValueError(f"multi-start is built for fw0: {plan.name}")
     sample_in = plan.stages[-plan.late:] if plan.late > 0 else plan.stages
     inc = Incumbent(rel, budget, max(plan.keep, 1), samples=plan.samples, sample_in=sample_in,
                     first=held.astype(float), score_eps=plan.kscore)
@@ -836,43 +618,14 @@ def one(bid: str, power: float, metric: seam.Metric, plan: Plan, budget: float, 
             inc.consider(r_greedy, f"the greedy {plan.seed}")
         log(f"  the greedy {spec}: {time.time() - t0:.0f}s")
     xs = x
-    if plan.coarse_all > 0:
-        rel_c = metric.coarse(plan.coarse_all).clearing(b, demand=demand).relaxation(
-            power, q=1.0, rtol=plan.rtol, eps=plan.eps)
-        log(f"  all stages at h {plan.coarse_all:g}: {rel_c.c.cells} cells, "
-            f"fine {c.cells}; {starts} start(s)")
-        for k in range(starts):
-            inc_c = Incumbent(rel_c, budget, max(plan.keep, 1), samples=plan.samples,
-                              sample_in=sample_in, score_eps=plan.kscore)
-            xk = simp(rel_c, start_x(k, c.cost, budget), budget, plan.stages, plan.iters,
-                      plan.update, log=log, xlo=xlo, watch=inc_c if plan.keep > 0 else None)
-            inc_c.offer(xk, plan.stages[-1])
-            J_before = inc.J
-            inc.consider(inc_c.r, f"start {k}'s winner at h {plan.coarse_all:g}")
-            if inc.J < J_before:
-                xs = xk                                   # the polish's undecided set from it
-            del inc_c
-        del rel_c
-        c.release()     # the coarse systems' cached blocks: 1558 ran out of 32 GB without
-
-    else:
-        for k in range(starts):
-            xk = x if k == 0 else start_x(k, c.cost, budget)
-            stages = plan.stages
-            if plan.coarse > 0:
-                rel_c = metric.coarse(plan.coarse).clearing(b, demand=demand).relaxation(
-                    power, q=1.0, rtol=plan.rtol, eps=plan.eps)
-                log(f"  coarse h {plan.coarse:g}: {rel_c.c.cells} cells, fine {c.cells}")
-                xk = simp(rel_c, xk, budget, stages[:-1], plan.iters, plan.update, log=log,
-                          xlo=xlo, watch=watch)
-                del rel_c
-                stages = stages[-1:]
-            J_before = inc.J
-            xk = simp(rel, xk, budget, stages, plan.iters, plan.update, log=log, xlo=xlo,
-                      watch=watch)
-            inc.offer(xk, plan.stages[-1])                # the last iterate's rounding
-            if k == 0 or inc.J < J_before:
-                xs = xk
+    for k in range(starts):
+        xk = x if k == 0 else start_x(k, c.cost, budget)
+        J_before = inc.J
+        xk = simp(rel, xk, budget, plan.stages, plan.iters, plan.update, log=log, xlo=xlo,
+                  watch=watch)
+        inc.offer(xk, plan.stages[-1])                # the last iterate's rounding
+        if k == 0 or inc.J < J_before:
+            xs = xk
     if plan.polish > 0:
         for everything in plan.polish_sets:
             inc.polish(xs, plan.polish, plan.pwidth, everything, plan.polish_pairs,
@@ -915,12 +668,11 @@ def path(bid: str, power: float, metric: seam.Metric, plan: Plan, *,
     ~ q x^(q-1) ~ 0 and multiplicative updates, so it never comes back -- measured: -0.076 Lens
     A against the greedy), round, score exactly. plan.warm > 0: after the first budget, the
     rest start from the last x lifted to at least that even share (so none is trapped at
-    XMIN), and each stage gets plan.warm updates. Each budget frees first (clear.free_first
+    XMIN), and each stage gets plan.warm updates. Each budget frees first (Model.free_first
     within D, from the held set): its crossings join the held set before SIMP. Rows in the
     greedy's format: `cleared` = the buildings new at this step, the free stage's among them."""
-    if (plan.coarse > 0 or plan.polish > 0 or plan.coarse_all > 0 or plan.starts > 1
-            or plan.seed or plan.track):
-        raise ValueError(f"coarse grids, polish and multi-start are not built for path: "
+    if plan.polish > 0 or plan.starts > 1 or plan.seed or plan.track:
+        raise ValueError(f"polish, multi-start and greedy seeds are not built for path: "
                          f"{plan.name}")
     [b] = common.build_blocks([bid])
     c = metric.clearing(b, demand=demand)
@@ -976,7 +728,7 @@ def _run(bid: str) -> str | None:
             pd.DataFrame([one(bid, power, metric, plan, budget, demand=demand)]).to_parquet(
                 rows_of(plan, metric.name, budget) / f"{bid}_p{power:g}.parquet")
         else:
-            out = rows_dir(f"SIMP{plan.name}", 0.5, "area", power, metric.name) / f"{bid}.parquet"
+            out = rows_dir(f"SIMP{plan.name}", power=power, metric=metric.name) / f"{bid}.parquet"
             path(bid, power, metric, plan, demand=demand).assign(device=metric.device).to_parquet(
                 out)
             print(f"{time.strftime('%H:%M:%S')} {bid} path done", flush=True)
@@ -989,7 +741,7 @@ def _run(bid: str) -> str | None:
 def _target(mode: str, bid: str, power: float, plan: Plan, along: str, budget: float) -> Path:
     if mode == "one":
         return rows_of(plan, along, budget) / f"{bid}_p{power:g}.parquet"
-    return rows_dir(f"SIMP{plan.name}", 0.5, "area", power, along) / f"{bid}.parquet"
+    return rows_dir(f"SIMP{plan.name}", power=power, metric=along) / f"{bid}.parquet"
 
 
 def main(mode: str, ids: list[str], power: float, metric: seam.Metric, plan: Plan,

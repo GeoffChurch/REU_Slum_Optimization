@@ -32,7 +32,7 @@ obtuse exit triangle) the pocket is ground itself (counted: `Cells.ground_obtuse
 beside a flat triangle (a hairline crack's, 1e-11 m) cannot be flipped and has no centre: dropped
 (`Cells.negative`).
 
-DEMAND (`Demand`), lifted.Placement's rule on the complex: each triangle's QUAD sub-points (the
+DEMAND (`Demand`), the raster's Placement rule on the complex: each triangle's QUAD sub-points (the
 centroids of its 4^k midpoint subdivision) and the open band's (its own constrained Delaunay
 triangles, u = 0) carry area / QUAD each; a sub-point within ring_m of a home's outline whose
 nearest building it is belongs to that home's ring; a home injects its population over its ring's
@@ -739,7 +739,7 @@ def quad_bary(quad: int) -> NDArray[np.float64]:
 
 @dataclass(frozen=True, eq=False)
 class PointDemand:
-    """lifted.Placement on the complex (module docstring), fixed at baseline: sub-points `xy`
+    """The raster's Placement on the complex (module docstring), fixed at baseline: sub-points `xy`
     (the open ground's triangles' and the open band's, `band` True for the latter: u = 0), `S`
     (points x homes) each home's injection share per point (a live home's column sums to 1),
     `walled` the homes walled in at baseline at the run's width, `shadowed`."""

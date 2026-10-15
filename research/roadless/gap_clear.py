@@ -51,9 +51,9 @@ the tension's) digested at import (CODE, `code_constants`), the few that cannot 
 exempt with their reasons (`_EXEMPT`). Editing a constant renames the metric, and the mesh cache's
 key carries the digest too.
 
-THE SCORER (`Model`). The demand is gap_flow's (lifted.Placement's rule on the complex), fixed at
-baseline on the triangles reaching the street then; each home's escape time the injection-weighted
-mean potential over its points. P (each home injecting its population), P_{1/2}
+THE SCORER (`Model`). The demand is gap_flow's (the raster's Placement rule on the complex), fixed
+at baseline on the triangles reaching the street then; each home's escape time the
+injection-weighted mean potential over its points. P (each home injecting its population), P_{1/2}
 (common.PriorityDemand(0.5), its weights from the baseline's escape times on this mesh) and J_2,
 over the homes with demand; the enclosed population: the homes walled in at baseline (no ring
 triangle reaching the street: Placement's test) that a clearing leaves walled in, by the flow
@@ -669,7 +669,7 @@ _NO_ROADS = Prefix(net=0, stop=0)      # a clearing's state: no road carved
 
 class Carving(NamedTuple):
     """The footprints a fixed mesh is built on, its ATOMS, and how road networks' prefixes carve
-    them (common.Carve's rule on the complex: exactly a prefix's corridor freed; NOTES, "The
+    them (the road rule, budget.road_corridor: exactly a prefix's corridor freed; NOTES, "The
     complex as the runtime: the ports and the cross-checks"). A network's scored prefixes are its
     STOPS, their corridors nested, C_1 within C_2 ... within C_K (each the union of the prefix's
     roads buffered by half their width: reblock.budget.road_corridor, in the block's local
@@ -1283,7 +1283,7 @@ class Model:
 
     def road_state(self, prefix: Prefix) -> State:
         """The state of a road network's prefix (the carving's), no building cleared: the atoms it
-        carves open (common.Carve's rule), its operator assembled and factored."""
+        carves open (the road rule: exactly its corridor), its operator assembled and factored."""
         if prefix.stop < 1:
             raise ValueError(f"{prefix}: a road prefix has a stop from 1")
         return self._state(self.sys, np.zeros(self.n_), prefix=prefix)
@@ -1405,7 +1405,7 @@ class Model:
         return float(self.cost_[left].sum())
 
     def tension(self, power: float, *, restore: bool) -> Tension:
-        """clear.Clearing.tension on the fixed mesh: the gradient of J_power at the eps world
+        """The greedy's tension on the fixed mesh: the gradient of J_power at the eps world
         (`tension_eps`: clear.EPS, or more translucent for the translucent search) of the current
         clearing, a building's gain the first-order change of moving its k from where it is to
         where the move takes it (adding: eps to 1; putting back: 1 to eps). One solve, two for

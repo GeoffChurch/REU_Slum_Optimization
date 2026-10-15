@@ -79,7 +79,7 @@ refactorization (the random clearing's) handed its values with the diagonal rais
 `roads` (phase 2b: road re-scoring on the complex): a road network's prefixes (ROAD_NETWORK's area
 prefixes, road_rescore's rows) cut into one fixed mesh (gap_clear.Carving), each of ROAD_STOPS a
 state on it, against the complex rebuilt with the prefix carved (gap_compare.ComplexModel, the
-corridor common.Carve's rule frees): L_P, L_{P_1/2} and L_J2 within ROAD_TOL, the homes reached
+corridor the road rule frees): L_P, L_{P_1/2} and L_J2 within ROAD_TOL, the homes reached
 equal home for home. Fault `one-face-closed`: at every prefix the largest atom it carves left
 standing (a road face left closed).
 `flux` (phase 2b: the corridor pictures, gap_maps): at the baseline and FLUX_RANDOM random

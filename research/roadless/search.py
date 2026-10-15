@@ -70,7 +70,7 @@ sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import clear  # noqa: E402
 import seam  # noqa: E402
-from clear import RTOL_SCORE, rows_dir, sweep_of  # noqa: E402
+from clear import RTOL_SCORE, rows_dir  # noqa: E402
 from seam import ClearingModel  # noqa: E402
 
 R = TypeVar("R")
@@ -1363,7 +1363,7 @@ def main(ids: list[str], plan: SearchPlan, power: float, metric: seam.Metric,
         return c.relaxation(pw, q=1.0, rtol=polish_greedy.RTOL,
                             eps=polish_greedy.SCORE_EPS).metric_world(polish_greedy.SCORE_EPS)
 
-    out = rows_dir(f"{plan.name}D{d_max:g}", 0.5, "area", power, metric.name)
+    out = rows_dir(f"{plan.name}D{d_max:g}", power=power, metric=metric.name)
     out.mkdir(parents=True, exist_ok=True)
     failed = []
     for b in common.build_blocks(ids):
@@ -1406,6 +1406,6 @@ if __name__ == "__main__":
                 for b, c, pm in zip(rows.block, rows.simp_cleared, rows.simp_perm, strict=True)}
 
     search.main(sys.argv[1].split(","),
-                search.plan_of(sys.argv[2], sweep=sweep_of(device), pool=relax.PAIR_POOL,
+                search.plan_of(sys.argv[2], sweep=metric.sweep, pool=relax.PAIR_POOL,
                                simp_seeds=simp_seeds),
                 power, metric, d_max)

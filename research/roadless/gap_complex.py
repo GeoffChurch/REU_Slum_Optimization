@@ -3,7 +3,7 @@ once from the outlines (NOTES, "The gap complex: passability, enclosure and flow
 raster"; BACKLOG 4, decision (3), the passable width).
 
 THE COMPLEX. The open ground is the block less its footprints and less the street band (the
-raster's ground: within `band_m` of Block.streets, lifted.Grid.of's `ground`). Its outline, every
+raster's ground: within `band_m` of Block.streets, the raster's `ground`). Its outline, every
 footprint's and the band's inner line, is densified to at most `s` between vertices
 (shapely.segmentize) and triangulated by GEOS's constrained Delaunay triangulation
 (shapely.constrained_delaunay_triangles): every vertex lies on an outline, every outline segment
@@ -26,14 +26,14 @@ clearance (2 x its circumradius if acute, else its longest edge: the Delaunay ra
 and a walled-in pocket is a BAR from its exit width to its fill, the largest fill over the
 triangles cut off together (`Bars`).
 
-HOMES (lifted.Placement's test on the complex). A home is live at w when some open ground within
+HOMES (the raster's Placement test on the complex). A home is live at w when some open ground within
 `ring_m` of its outline reaches the street at w: a triangle within ring_m of it whose exit width
 is at least w, or the open street band within ring_m of it (the raster's ground cells, open
 ground there, are its street). Distances are the polygons' own (shapely), so as in the raster a
 ring reaches through a thin wall.
 
-FREE FIRST (`free_first`, clear.free_first on the complex). At width w on the complex built on
-the footprints grown by `grow` (the study's: 0, the filtration read at w; the shy distance's
+FREE FIRST (`free_first`, the raster's free first on the complex). At width w on the complex built
+on the footprints grown by `grow` (the study's: 0, the filtration read at w; the shy distance's
 runtime: w / 2 and the filtration at 0, its own geometry, gap_clear): the region graph's nodes
 the components of the triangles joined by open passages (the street's the one holding the exits)
 and the standing buildings; a building is adjacent to every component with a triangle touching its
@@ -42,7 +42,7 @@ passages that end on it; a vertex where two footprints meet stays an obstacle wh
 stands), to the buildings whose grown footprints meet its own (within 2 grow), and to the street
 where its grown footprint reaches into the band. Each round one Dijkstra from the street, entering
 a building costing its population share, picks the crossing with the least D per unit of the
-home's population, as clear.free_first does. A pass ends when the graph frees every walled-in home
+home's population, as the raster's did. A pass ends when the graph frees every walled-in home
 or none it can afford; the complex is then rebuilt without the held buildings and the metric's own
 test (`walled`) re-run, another pass taking any home the graph freed wrongly. Clearing a building
 can open a passage no triangle of the old complex shows (two buildings close across its former
@@ -93,7 +93,7 @@ MERGE_M = 1e-7       # vertices closer than this (m) are one (`vertices`): where
 @dataclass(frozen=True, kw_only=True)
 class Spec:
     """The complex's identity: the outlines' spacing `s` (m), the demand ring `ring_m`
-    (lifted.RING_M in the metric) and the street band `band_m` (lifted.BAND_M)."""
+    (the metric's name's r) and the street band `band_m` (its b)."""
     s: float
     ring_m: float
     band_m: float
@@ -200,10 +200,10 @@ def obstacles(geo: Geometry, standing: NDArray[np.bool_], *, carve,
 def _open_ground(geo: Geometry, standing: NDArray[np.bool_], band_m: float, *, carve,
                  grow: float) -> tuple[object, object]:
     """(the open ground beyond the band, the open band) of a block with the buildings
-    `standing` less `carve` (a corridor, common.Carve's rule: exactly it freed; None: nothing),
+    `standing` less `carve` (a corridor, the road rule: exactly it freed; None: nothing),
     grown by `grow` (the shy distance's w / 2; 0: the footprints as they are): the block less
     them, split at band_m from the streets (the raster's ground: cell centres within band_m of
-    Block.streets, lifted.Grid.of; the band is not grown into: it is the street)."""
+    Block.streets, as the retired raster's ground; the band is not grown into: it is the street)."""
     _idx, polys = obstacles(geo, standing, carve=carve, grow=grow)
     fu0 = shapely.union_all(polys) if len(polys) else shapely.Polygon()
     fu = fu0.buffer(grow) if grow > 0 else fu0
@@ -706,7 +706,7 @@ class Freed(NamedTuple):
 def free_first(geo: Geometry, spec: Spec, *, w: float, grow: float, budget: float,
                cost: NDArray[np.float64], pop: NDArray[np.float64], held0: NDArray[np.bool_],
                cx0: Complex | None) -> Freed:
-    """clear.free_first on the complex grown by `grow` at width w: `held0` (a clearing, held)
+    """Free first on the complex grown by `grow` at width w: `held0` (a clearing, held)
     plus crossings freeing the homes walled in at baseline at w that it leaves walled in, the
     least D (`cost`, each building's population share) per unit of the home's population (`pop`)
     first, while the held set's D stays within `budget` (module docstring). `cx0` the baseline

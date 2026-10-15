@@ -5,7 +5,7 @@ every building, ranked by the eps-world gradient at the 0/1 clearing (the tensio
 scored in the eps world at 1e-6 as SIMP's incumbent does (or, `E`, exactly:
 search.PolishScoring), the result exactly.
 
-First it frees (B's first stage, clear.free_first): the crossings that free the homes enclosed
+First it frees (B's first stage, gap_clear.Model.free_first): the crossings that free the homes enclosed
 at baseline, cheapest per unit of population, within the budget. The greedy starts from them
 (its D counts them; its clearing is them and its picks while they fit the rest of the budget)
 and the polish never moves them. Where no home is enclosed nothing is held and the run is as

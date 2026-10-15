@@ -102,7 +102,7 @@ def searched(along: str, name: str, budget: float) -> pd.DataFrame:
     """search.py's rows, `name` = <spec>D<d_max>: the best clearing at or below the budget (a
     floating search's rows are its archive's best per level, not nested), `t` the whole run."""
     best = {}
-    for f in rows_dir(name, 0.5, "area", POWER, along).glob("*.parquet"):     # a block each
+    for f in rows_dir(name, power=POWER, metric=along).glob("*.parquet"):     # a block each
         g = pd.read_parquet(f)
         best[g.block.iloc[0]] = (g.perm[g.D <= budget + 1e-12].max(), g.t.max())
     return pd.DataFrame.from_dict(best, orient="index", columns=["perm", "t"])

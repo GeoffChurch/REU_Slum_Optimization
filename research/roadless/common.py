@@ -1,16 +1,17 @@
-"""Blocks, the lineup, and the roadless score of a road set.
+"""Blocks, the lineup, the populations and the demands.
 
-The 220 consensus recipients on real footprints (the group Steiner study's sample), the
-method-comparison lineup through the derive cache, and `Scorer`: one block's grid and demand,
-built once, scoring any road set by the free space its corridor opens.
+The 220 consensus recipients on real footprints (the group Steiner study's sample) and the 82
+large blocks, the blocks themselves (from the Cape Town source, or a bank shipped to a cluster
+node), the method-comparison lineup through the derive cache, the populations (a building's
+weight), the demands (what each home injects) and a road prefix's displacement. (`Scorer`, the
+raster's scorer of a road set, and its grids went with the raster: NOTES, "The complex as the
+runtime: the raster retired".)
 """
 from __future__ import annotations
 
 import dataclasses
-import math
 import os
 import pickle
-import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,7 +30,6 @@ if TYPE_CHECKING:
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 sys.path.insert(0, str(HERE))
-import lifted  # noqa: E402
 
 LINEUP = ["clearance", "clearance_looped", "cycle_native", "cycle_native_betweenness_contrast",
           "resistance_lp", "euclidean_grid", "greedy_arterial_access_displacement"]
@@ -160,8 +160,8 @@ class Demand(Protocol):
     """What each home injects, the escape demand the solve carries: resolved once, where a run
     is configured, and handed to the scorer, which asks nothing else of it (owner 2026-10-12, a
     priority-weighted P; NOTES, "Priority-weighted P"). The population still sets the
-    displacement (a clearing's population share, clear.Clearing.cost) and B (i) (the population
-    share a clearing leaves enclosed): only the demand is reweighted."""
+    displacement (a clearing's population share, gap_clear.Model.cost) and B (i) (the population
+    share a clearing leaves walled in): only the demand is reweighted."""
 
     @property
     def name(self) -> str: ...
@@ -169,14 +169,8 @@ class Demand(Protocol):
     def injection(self, w: NDArray[np.float64], u0: NDArray[np.float64],
                   enclosed: NDArray[np.bool_]) -> NDArray[np.float64]:
         """Per home, what it injects, from its population `w` and its escape time at baseline
-        `u0` under the population's own demand (nan where `enclosed`: an enclosed home injects
-        nothing whatever this returns, as lifted.Placement gives it no cell)."""
-        ...
-
-    def baseline(self, sc: Scorer, sol: lifted.Solution
-                 ) -> tuple[NDArray[np.float64], lifted.Solution]:
-        """(the injection per home, the baseline's solution under it), from `sol`, the
-        baseline's solution under the population's demand."""
+        `u0` under the population's own demand (nan where `enclosed`: a walled-in home injects
+        nothing whatever this returns, as the demand gives it no point)."""
         ...
 
 
@@ -191,10 +185,6 @@ class PopulationDemand:
     def injection(self, w: NDArray[np.float64], u0: NDArray[np.float64],
                   enclosed: NDArray[np.bool_]) -> NDArray[np.float64]:
         return w
-
-    def baseline(self, sc: Scorer, sol: lifted.Solution
-                 ) -> tuple[NDArray[np.float64], lifted.Solution]:
-        return sc.w, sol
 
 
 @dataclass(frozen=True)
@@ -222,12 +212,6 @@ class PriorityDemand:
         uq = np.where(live, np.nan_to_num(u0), 1.0) ** self.q
         mean = float((w[live] * uq[live]).sum() / w[live].sum())
         return np.where(live, w * uq / mean, w)
-
-    def baseline(self, sc: Scorer, sol: lifted.Solution
-                 ) -> tuple[NDArray[np.float64], lifted.Solution]:
-        inj = self.injection(sc.w, sc.home_u_of(sol, sc.free0), sc.enclosed)
-        return inj, lifted.solve(sc.grid, sc.free0, sc.pl.field(inj, sc.grid.inside.shape),
-                                 sc.p)
 
 
 def displacement(block, roads, w: np.ndarray) -> float:
@@ -277,245 +261,3 @@ def prefix_to(block, roads, target: float, w: np.ndarray):
         else:
             lo = mid + 1
     return ordered.iloc[:lo]
-
-
-@dataclass(frozen=True)
-class Obliterate:
-    """Every building the corridor touches is removed whole."""
-    name: str = "obliterate"
-
-    def freed(self, sc: Scorer, corridor) -> np.ndarray:
-        hit = sc.tree.query(corridor, predicate="intersects")
-        if len(hit) == 0:
-            return sc.grid.sub_of(corridor)
-        return sc.grid.sub_of(shapely.union_all([*sc.polys[hit], corridor]))
-
-
-@dataclass(frozen=True)
-class Carve:
-    """Exactly the corridor is freed: the geometry the displacement charge pays for."""
-    name: str = "carve"
-
-    def freed(self, sc: Scorer, corridor) -> np.ndarray:
-        return sc.grid.sub_of(corridor)
-
-
-# B's test, one definition for the scorer (Scorer) and the road methods' free-first stage
-# (free_roads.FreeEnclosed): which homes are enclosed at baseline, the open field a road set leaves,
-# and which of the enclosed homes it frees.
-
-def placement(grid: lifted.Grid | lifted.CompositeGrid, polys: NDArray[np.object_],
-              p: lifted.Params) -> lifted.Placement:
-    """The metric's demand placement on `grid` (lifted.Placement), against the open space that
-    reaches the street at baseline (lifted.placeable, the step rule's): its `enclosed` homes are
-    B's enclosed homes."""
-    return lifted.Placement.of(grid, polys, lifted.placeable(grid, grid.ff0, p),
-                               ring_m=lifted.RING_M)
-
-
-def carved(grid: lifted.Grid | lifted.CompositeGrid,
-           freed: NDArray[np.bool_]) -> NDArray[np.float64]:
-    """The open field (per cell) with the sub-samples `freed` cleared: what a rule's `freed`
-    (Carve's: exactly the corridor) leaves of the block."""
-    return (grid.isub & (~grid.bsub | freed)).mean(axis=-1)
-
-
-def reached(pl: lifted.Placement, grid: lifted.Grid | lifted.CompositeGrid,
-            free: NDArray[np.float64], p: lifted.Params) -> NDArray[np.bool_]:
-    """Per home: enclosed at baseline and freed in the field `free`, some cell within RING_M of
-    its outline open and street-connected there (lifted.Placement.reached; lifted.placeable,
-    the step rule's)."""
-    return pl.reached(lifted.placeable(grid, free, p))
-
-
-class Scorer:
-    def __init__(self, block, mesh: lifted.MeshSpec, p: lifted.Params, rule=None,
-                 population=None, *, demand: Demand):
-        population = CountPopulation() if population is None else population
-        self._on(block, mesh.build(block, p, population), p, rule, population, demand)
-
-    @classmethod
-    def on_grid(cls, block, grid, p: lifted.Params, population, *, demand: Demand) -> Scorer:
-        """A scorer on a grid already built (GoalMesh's rounds)."""
-        sc = cls.__new__(cls)
-        sc._on(block, grid, p, None, population, demand)
-        return sc
-
-    def _on(self, block, grid, p: lifted.Params, rule, population, demand: Demand) -> None:
-        rule = Carve() if rule is None else rule
-        self.block, self.grid, self.p, self.rule = block, grid, p, rule
-        self.polys = np.asarray(block.buildings.outlines)
-        self.tree = shapely.STRtree(self.polys)
-        self.free0 = self.grid.ff0
-        # demand only where the street can be reached at baseline (lifted.Placement): fixed from
-        # here on, so freeing space only ever adds conductance. The enclosed homes inject
-        # nothing and are out of J; a clearing is scored first by the population it leaves
-        # enclosed (`enclosed_left`), then by J over the rest (owner 2026-10-11, "B SGTM").
-        self.w = population.weights(self.polys)
-        self.pl = placement(self.grid, self.polys, p)
-        self.enclosed = self.pl.enclosed
-        self.enclosed0 = float(self.w[self.enclosed].sum() / self.w.sum())
-        sol = lifted.solve(self.grid, self.free0, self.pl.field(self.w, self.grid.inside.shape),
-                           p)
-        # what each home injects (Demand; the population's own, or reweighted from this
-        # baseline): `inj` per home, `f` per cell; u0 and P0 the baseline's under it
-        self.demand = demand
-        self.inj, sol = demand.baseline(self, sol)
-        self.f = self.pl.field(self.inj, self.grid.inside.shape)
-        self.P0 = sol.P
-        self.u0 = self.home_u_of(sol, self.free0)
-
-    def P_free(self, free) -> float:
-        return lifted.solve(self.grid, free, self.f, self.p).P
-
-    def home_u_of(self, sol: lifted.Solution, free) -> np.ndarray:
-        """Per building: its congested escape time u_i, the injection-weighted mean potential
-        over its cells (so sum_i inj_i u_i = P). nan for the enclosed buildings."""
-        ub = lifted.cell_mean_u(sol, free, self.p)
-        return np.where(self.enclosed, np.nan, self.pl.home_u(ub.ravel()))
-
-    def home_u(self, free) -> np.ndarray:
-        return self.home_u_of(lifted.solve(self.grid, free, self.f, self.p), free)
-
-    def J(self, u: np.ndarray, power: float) -> float:
-        """J_p = sum_i inj_i u_i^p over the buildings not enclosed, inj the demand's injection
-        (J_1 = P; under the population's demand inj = w, the population)."""
-        ok = ~self.enclosed
-        return float((self.inj[ok] * u[ok] ** power).sum())
-
-    def adjoint_load(self, u_home: np.ndarray, power: float) -> np.ndarray:
-        """The load of J_power's adjoint, dJ/du per cell (in the grid's shape): home i's
-        inj_i power u_i^(power - 1) injected as its demand is (the enclosed inject nothing)."""
-        return self.pl.field(self.inj * power * np.nan_to_num(u_home) ** (power - 1.0),
-                             self.grid.inside.shape)
-
-    def enclosed_left(self, free) -> float:
-        """The share of the population still enclosed in the field `free`: the baseline's
-        enclosed homes with no cell within RING_M of the outline open and street-connected
-        there (B (i), scored before J). With none enclosed, 0 without the reach (on a composite
-        mesh a host pass over every cell: 14 -- 20 s on the oversized blocks)."""
-        if not self.enclosed.any():
-            return 0.0
-        freed = reached(self.pl, self.grid, free, self.p)
-        return float(self.w[self.enclosed & ~freed].sum() / self.w.sum())
-
-    def perm_p(self, u: np.ndarray, power: float) -> float:
-        return 1.0 - (self.J(u, power) / self.J(self.u0, power)) ** (1.0 / power)
-
-    def free_of(self, roads) -> np.ndarray:
-        if roads is None or len(roads) == 0:
-            return self.free0
-        from reblock.budget import road_corridor
-        return carved(self.grid, self.rule.freed(self, road_corridor(roads)))
-
-    def perm(self, roads) -> float:
-        free = self.free_of(roads)
-        if free is self.free0:
-            return 0.0
-        return 1.0 - self.P_free(free) / self.P0
-
-
-GOAL_RTOL = 1e-3     # its solves: a ranking (as the tension's)
-GOAL_ALPHA = 1.0     # eta = E (s / h)^alpha: 1 and 2 within 1.4x of each other (NOTES)
-GOAL_STEP = 6        # a round splits ceil(gap / GOAL_STEP) cells (each adds 3): half the gap
-GOAL_REACH = 0.98    # done at this share of the target
-
-
-@dataclass(frozen=True)
-class GoalMesh:
-    """The distance mesh a<d0>x<smax> (lifted.AdaptiveMesh) refined where J_power is sensitive,
-    to `factor` x its cells. Each round solves the baseline with the buildings `opening` open (1:
-    as if every one were cleared, the flow any clearing could start) and its J_power adjoint,
-    scores every coarse cell eta = E (s / h)^GOAL_ALPHA (E its share of |w du dlam| over its
-    edges, s its side), splits the largest ceil(gap / GOAL_STEP) and balances (lifted.balance).
-    NOTES, "Goal-oriented refinement"."""
-    h: float
-    d0: float
-    smax: float
-    factor: float
-    power: float
-    opening: float
-    offset: tuple[float, float]
-
-    @property
-    def name(self) -> str:
-        return (f"h{self.h:g}g{self.d0:g}x{self.smax:g}f{self.factor:g}p{self.power:g}"
-                f"o{self.opening:g}")
-
-    @property
-    def suffix(self) -> str:
-        return (("" if self.h == 0.5 else f".h{self.h:g}")
-                + f".g{self.d0:g}x{self.smax:g}f{self.factor:g}p{self.power:g}o{self.opening:g}")
-
-    @property
-    def pilot(self) -> lifted.AdaptiveMesh:
-        return lifted.AdaptiveMesh(self.h, self.d0, self.smax, offset=self.offset)
-
-    def cells(self, block) -> float:
-        """Its target (it stops within GOAL_REACH of it, or at the first round past it)."""
-        return float(round(self.factor * self.pilot.cells(block)))
-
-    def pixels(self, block) -> int:
-        return self.pilot.pixels(block)
-
-    def build(self, block, p: lifted.Params, population) -> lifted.CompositeGrid:
-        lay = self.pilot.layout(block)
-        target = self.factor * lifted._cells_of(lay)
-        _, footprints, streets = lifted._geometry(block)
-        while True:
-            grid = lifted.CompositeGrid.from_layout(lay, footprints, streets, self.h,
-                                                    band_m=lifted.BAND_M)
-            coarse = grid.level > 0
-            if len(grid.level) >= GOAL_REACH * target or not coarse.any():
-                return grid
-            eta = goal_indicator(block, grid, p, population, self.power, self.opening)[coarse]
-            mask = np.zeros(len(eta), dtype=bool)
-            mask[np.argsort(-eta)[:math.ceil((target - len(grid.level)) / GOAL_STEP)]] = True
-            lay = lifted.balance(lifted.split_cells(lay, mask))
-            p.solver.release()
-
-
-def goal_indicator(block, grid, p: lifted.Params, population, power: float,
-                   opening: float) -> np.ndarray:
-    """Per cell: eta = E (s / h)^GOAL_ALPHA, E the cell's half of |w du dlam| over each of its
-    edges (u the baseline with the buildings `opening` open, lam its J_power adjoint), under
-    the population's own demand (the mesh is built before any run's demand)."""
-    sc = Scorer.on_grid(block, grid, p, population, demand=PopulationDemand())
-    xp, K = p.solver.xp, p.K
-    op = sc.free0 + opening * (grid.isub.mean(axis=-1) - sc.free0)
-    sol = lifted.solve(grid, op, sc.f, p, rtol=GOAL_RTOL, host=False)
-    host = dataclasses.replace(sol, u=p.solver.to_host(sol.u), cell=p.solver.to_host(sol.cell),
-                               unk_cell=p.solver.to_host(sol.unk_cell))
-    lam = lifted.solve(grid, op, sc.adjoint_load(sc.home_u_of(host, op), power), p,
-                       rtol=GOAL_RTOL, host=False)
-
-    def per_axis(s: lifted.Solution):
-        out = xp.zeros((len(s.unk_cell), K))
-        out[s.unk_cell >= 0] = s.u.reshape(-1, K)
-        return out
-
-    uk, lk = per_axis(sol), per_axis(lam)
-    n = uk.shape[0]
-    if n != len(grid.size):
-        raise ValueError(f"{n} free cells of {len(grid.size)}: the eps world frees every cell")
-    E = xp.zeros(n)
-    for ca, cb, ka, kb, w in lifted.edges(grid, op, p):
-        q = xp.abs(w * (uk[ca, ka] - uk[cb, kb]) * (lk[ca, ka] - lk[cb, kb]))
-        E += 0.5 * (xp.bincount(ca, q, minlength=n) + xp.bincount(cb, q, minlength=n))
-    return p.solver.to_host(E) * (grid.size / grid.h) ** GOAL_ALPHA
-
-
-def mesh_of(token: str) -> lifted.MeshSpec:
-    """A mesh named on a command line, at lifted.OFFSET: <h> (lifted.UniformMesh),
-    <h>a<d0>x<smax> (lifted.AdaptiveMesh) or <h>g<d0>x<smax>f<factor>p<power>o<opening>
-    (GoalMesh)."""
-    num = r"([0-9]+(?:\.[0-9]+)?)"
-    if m := re.fullmatch(num, token):
-        return lifted.UniformMesh(float(m[1]), offset=lifted.OFFSET)
-    if m := re.fullmatch(f"{num}a{num}x{num}", token):
-        return lifted.AdaptiveMesh(float(m[1]), float(m[2]), float(m[3]), offset=lifted.OFFSET)
-    if m := re.fullmatch(f"{num}g{num}x{num}f{num}p{num}o{num}", token):
-        return GoalMesh(float(m[1]), float(m[2]), float(m[3]), float(m[4]), float(m[5]),
-                        float(m[6]), offset=lifted.OFFSET)
-    raise ValueError(f"unknown mesh {token!r}: <h>, <h>a<d0>x<smax> or "
-                     "<h>g<d0>x<smax>f<factor>p<power>o<opening>")

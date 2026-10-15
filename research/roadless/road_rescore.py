@@ -1,71 +1,51 @@
-"""The road lineup on the large blocks, scored three ways and set against the stored clearings
-(BACKLOG 4(b), "the price of roads"): the 4-block sentinel, then the 60 that fit at h 0.5.
+"""The road lineup on the large blocks, on the gap complex, set against the presets' clearings
+(BACKLOG 4(b), "the price of roads"): the 60 large blocks.
 
 Each method's network (reblock.derivations.propose, the derive cache), cut to its canonical
 prefixes (common.prefix_to: the roads it holds first, if it marks any, then street-first) at
-BUDGETS and whole, scored
-  (a) by the shipped permeability (reblock.permeability) on COUNT-weight prefixes;
-  (b) roadless, the walking model changed only: count population, p 1, the same prefixes;
-  (c) roadless as the optimizers use it: area population, J_2, on AREA-weight prefixes;
-CARVE rule (common.Carve), every solve keeping both powers (P and J_2 come from one solve).
-Before (b) and (c), each scored prefix and clearing records `enclosed`, the population share it
-leaves enclosed (common.Scorer.enclosed_left; owner 2026-10-11, "B SGTM").
-The stored clearings (SIMP default, the cheap preset) are rescored on the same scorer: their
-stored Lens A is the check that the scorer reproduces the optimizers' own. `report` ranks (b) and
-(c) in B's order (the least population left enclosed, then Lens A over the rest) and writes its
-summary tables beside the rows (<rows>/summary_*.csv, committed).
+BUDGETS and whole, under both weightings (count and area: POPS), each prefix's displacement and
+the shipped permeability (reblock.permeability) recorded; then the area prefixes scored on the
+complex (decision (2)).
 
     S=research/roadless/road_rescore.py    # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S propose <rows> <scratch> <id> <method> <cache|fresh>
     uv run python $S propose-all <rows> <scratch> <procs> <ids,> <methods,> <timeout h> \
         <time-hits|no>
     uv run python $S prefixes <rows> <lineup,> <scratch> <procs> <ids,>
-    CUDA_PATH=/usr uv run python $S score <rows> <lineup,> <scratch> <mesh> <pops,> <scored> \
-        <ids,>                     # <scored>: the prefix rows solved, 0.02,0.05,0.1,0.15,0.2,whole
-    uv run python $S report <rows> <lineup,> <mesh> <composite mesh>
-    uv run python $S sizes <rows> <composite mesh> <procs>
-    uv run python $S project <rows> <lineup,> <mesh> <composite mesh>
     uv run python $S cx <rows> <scratch> <metric> <cpu|gpu> <id> <items,>    # on the complex
     uv run python $S cxreport <rows> <lineup,> <metric> <cpu|gpu>
 
 ON THE COMPLEX (phase 2b; NOTES, "The complex as the runtime: the ports and the cross-checks"):
-`cx` scores the area prefixes (decision (2)) on the gap complex's metric (<metric>, refused unless
-it is one: gap_clear.complex_of), each item of a block in turn: a network of <rows>' prefixes
-(cx_network: the network's fixed mesh with its prefixes' corridors cut into the footprints,
-gap_clear.Carving, built in a temporary directory; every prefix a state on it, L_P, L_{P_1/2},
-L_J2 and B (i)), or `plain` (cx_plain: the block's plain mesh, its homes' P_{1/2} weights, the
-stored clearings of cx_stored, then SIMP's default and the cheap preset under P at D 0.05, their
-polish scored as the device's). Rows under <rows>/<metric>/<device>/area_<budgets>/;
-`cxreport` reads them (B's order on L_P, L_{P_1/2} and L_J2; the price of roads under the
-complex) and writes <rows>/<metric>/summary_<device>_*.csv.
+`cx` scores the area prefixes on the gap complex's metric (<metric>, refused unless it is one:
+gap_clear.complex_of), each item of a block in turn: a network of <rows>' prefixes (cx_network: the
+network's fixed mesh with its prefixes' corridors cut into the footprints, gap_clear.Carving, built
+in a temporary directory; every prefix a state on it, L_P, L_{P_1/2}, L_J2 and B (i)), or `plain`
+(cx_plain: the block's plain mesh, its homes' P_{1/2} weights, the stored clearings of cx_stored,
+then SIMP's default and the cheap preset under P at D 0.05, their polish scored as the device's).
+Rows under <rows>/<metric>/<device>/area_<budgets>/; `cxreport` reads them (B's order on L_P,
+L_{P_1/2} and L_J2; the price of roads under the complex) and writes
+<rows>/<metric>/summary_<device>_*.csv. (Item 4's scoring on the raster, `score`, `report`, `sizes`
+and `project`, went with the raster: road_rows/summary_h0.5_*.csv its record.)
 
 <rows> is the rows root and <lineup,> the networks it scores, both required: item 4 ran with
 research/roadless/road_rows and common.LINEUP (clearance,clearance_looped,cycle_native,
 cycle_native_betweenness_contrast,resistance_lp,euclidean_grid,
-greedy_arterial_access_displacement); the transparency experiment (transparency_run.py) proposes
-its own arms and runs prefixes and score under its own root, transparency_rows. propose and
-propose-all take the method by its name in compare_config's all_methods (common.arms());
-propose() itself takes the method, resolved by its caller.
-
-The sentinel (BACKLOG, "How we run experiments"): ZAF.9.3.1_1_22422, ZAF.9.3.1_1_30848,
-ZAF.9.3.1_1_5810, ZAF.9.5.4_1_9712. Lens (b) reads P (p 1) from the count rows, (c) J_2 from
-the area rows; every row keeps both.
+greedy_arterial_access_displacement). propose and propose-all take the method by its name in
+compare_config's all_methods (common.arms()); propose() itself takes the method, resolved by its
+caller.
 
 <scratch>: networks, ordered networks, logs (bulky, not committed). propose `cache` goes through
 the derive cache (and says whether it hit); `fresh` calls the method directly, bypassing the
 cache (a refiner's base too), to time a cached proposal (propose-all queues one after every cache
 hit) and to check the cached roads against a recomputation. Rows: <rows>/proposals/
 (feasibility), <rows>/prefixes_<budgets>/ (the prefixes, their displacement under both
-weightings, and (a)), <rows>/<mesh>_ell<ell>_K<K>_<along>_<pop>_<budgets>/ ((b) for pop count,
-(c) for area, and the stored clearings rescored on that mesh). Every process single-threaded; one
-GPU process.
+weightings, and the shipped permeability). Every process single-threaded.
 """
 from __future__ import annotations
 
 import dataclasses
 import json
 import os
-import re
 import shutil
 import socket
 import subprocess
@@ -88,7 +68,6 @@ import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
 import gap_complex as gc  # noqa: E402
 import gap_factor  # noqa: E402
-import lifted  # noqa: E402
 import polish_greedy  # noqa: E402
 import relax  # noqa: E402
 import search  # noqa: E402
@@ -105,24 +84,6 @@ ROADLESS = common.REPO / "research" / "roadless"
 # ------------------------------------------------------------------ the run's parameters
 # Everything that can change a number is here or on the command line, and in the rows' paths.
 BUDGETS = (0.02, 0.05, 0.10, 0.15, 0.20)     # displacement budgets of the canonical prefixes
-ELL_M = 3.0                                  # turning length (m)
-K = 8                                        # headings
-ALONG = "uni+apwfs"                          # the conductance (lifted.conductance_of)
-DEVICE = "gpu"                               # solver and scans (lifted.solver_of / scans_of)
-SCORE_RTOL = 1e-5                            # clear.RTOL_SCORE: the stored clearings' exact score
-CLEARING_POWER = 2.0                         # the stored clearings' objective (J_2)
-# The stored clearings at D 0.05 (area population, J_2, uni), each rescored on the blocks that
-# have it (14401's SIMP default exists on 0.5a5x8 only): (rows, Lens A column, cleared
-# column, D column, the mesh they were optimized and scored on).
-STORED = {
-    "simp_default": ("relax_rows/uni/fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2/D0.05",
-                     "simp_perm", "simp_cleared", "simp_D", "0.5"),
-    "simp_default_a5x8": ("relax_rows/uni/fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2.a5x8/D0.05",
-                          "simp_perm", "simp_cleared", "simp_D", "0.5a5x8"),
-    "cheap": ("polish_rows/uni/S0.01cat.P64w8/D0.05", "perm", "cleared", "D", "0.5"),
-    "cheap_a5x8": ("polish_rows/uni/S0.01cat.P64w8.a5x8/D0.05", "perm", "cleared", "D",
-                   "0.5a5x8"),
-}
 SHORT_SLOTS = 3                              # propose-all: slots kept for the cheapest jobs
 # propose-all's ORDER only (no result depends on it): a guess at each method's cost per building
 COST_GUESS = {"cycle_native_betweenness_contrast": 3.0, "cycle_native": 2.5,
@@ -134,11 +95,6 @@ SINGLE = dict(OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1"
 
 def budgets_tag() -> str:
     return "D" + "-".join(f"{b:g}" for b in BUDGETS)
-
-
-def score_dir(rows: Path, mesh_token: str, pop: str) -> Path:
-    mesh = common.mesh_of(mesh_token)
-    return rows / f"{mesh.name}_ell{ELL_M:g}_K{K}_{ALONG}_{pop}_{budgets_tag()}"
 
 
 def prefix_dir(rows: Path) -> Path:
@@ -380,7 +336,7 @@ def propose_all(rows: Path, scratch: Path, procs: int, ids: list[str], methods: 
 
 # ------------------------------------------------------------------ prefixes (CPU)
 
-POPS = ("count", "area")         # the two weightings: (a) and (b) on count, (c) on area
+POPS = ("count", "area")         # the two weightings the prefixes are cut by
 
 
 def prefix_len(block, ordered, target: float, w: np.ndarray) -> int:
@@ -484,261 +440,6 @@ def prefixes(rows: Path, lineup: tuple[str, ...], scratch: Path, procs: int,
         failed = [f for f in pool.imap_unordered(prefixes_one, jobs) if f]
     if failed:
         raise SystemExit(f"{len(failed)} failed: {failed}")
-
-
-# ------------------------------------------------------------------ score (GPU)
-
-class GpuWatch:
-    """Peak device memory of this process (nvidia-smi's per-process figure, every `every` s, in
-    a thread) and the most cupy's pool held at the moments `note_pool` is called (after each
-    solve, in the main thread), while a block is scored."""
-
-    def __init__(self, every: float):
-        self.every = every
-        self.peak_mib = 0.0
-        self.pool_peak_gb = 0.0
-        self._stop = threading.Event()
-
-    def note_pool(self) -> None:
-        import cupy
-        self.pool_peak_gb = max(self.pool_peak_gb,
-                                cupy.get_default_memory_pool().total_bytes() / 2 ** 30)
-
-    def _sample(self) -> None:
-        pid = str(os.getpid())
-        out = subprocess.run(["nvidia-smi", "--query-compute-apps=pid,used_memory",
-                              "--format=csv,noheader,nounits"], capture_output=True,
-                             text=True).stdout
-        for line in out.splitlines():
-            parts = [x.strip() for x in line.split(",")]
-            if len(parts) == 2 and parts[0] == pid and parts[1].isdigit():
-                self.peak_mib = max(self.peak_mib, float(parts[1]))
-
-    def _run(self) -> None:
-        while not self._stop.wait(self.every):
-            self._sample()
-
-    def __enter__(self) -> GpuWatch:
-        self._th = threading.Thread(target=self._run, daemon=True)
-        self._th.start()
-        return self
-
-    def __exit__(self, *exc) -> None:
-        self._stop.set()
-        self._th.join()
-        self._sample()
-
-
-class Corridors:
-    """Carve's free field for every prefix of one ordered network on one grid, road by road: a
-    sub-sample is inside the union of the roads' buffers iff it is inside one of them, so each
-    buffer tests only the sub-samples of the cells in its bounding box, and the prefixes cost
-    about one corridor test between them where `grid.sub_of(road_corridor(prefix))` (Carve) tests
-    every sub-sample of the block once per prefix (22 -- 30 s each on 22422). The same buffers
-    as budget.road_corridor (width_m / 2); `check` compares the whole network's mask with Carve's
-    own."""
-
-    def __init__(self, grid, X: np.ndarray, Y: np.ndarray):
-        self.grid, self.X, self.Y = grid, X, Y          # X, Y: grid._sub_xy(), computed once
-        import lifted
-        self.composite = isinstance(grid, lifted.CompositeGrid)
-        if self.composite:
-            half = grid.size / 2
-            self.lo_x, self.hi_x = grid.xy[:, 0] - half, grid.xy[:, 0] + half
-            self.lo_y, self.hi_y = grid.xy[:, 1] - half, grid.xy[:, 1] + half
-        else:
-            self.xs, self.ys = grid.xy[0, :, 0], grid.xy[:, 0, 1]
-
-    def _cells(self, bounds) -> tuple:
-        """An index into the grid's cells covering every sub-sample in `bounds`."""
-        x0, y0, x1, y1 = bounds
-        if self.composite:
-            return (np.flatnonzero((self.hi_x >= x0) & (self.lo_x <= x1) & (self.hi_y >= y0)
-                                   & (self.lo_y <= y1)),)
-        h = self.grid.h
-        c0, c1 = np.searchsorted(self.xs, x0 - h), np.searchsorted(self.xs, x1 + h, side="right")
-        r0, r1 = np.searchsorted(self.ys, y0 - h), np.searchsorted(self.ys, y1 + h, side="right")
-        return (slice(r0, r1), slice(c0, c1))
-
-    def masks(self, ordered, stops: list[int]):
-        """Yield (m, free field) for each m in `stops` (ascending) after the first m roads."""
-        import shapely
-        g = self.grid
-        bufs = np.asarray(ordered.geometry.buffer(ordered["width_m"].to_numpy(dtype=float) / 2.0))
-        mask = np.zeros_like(g.isub)
-        want = sorted(set(stops))
-        i = 0
-        for m in want:
-            while i < m:
-                buf = bufs[i]
-                idx = self._cells(buf.bounds)
-                sub = g.isub[idx]
-                shapely.prepare(buf)
-                hit = np.zeros_like(sub)
-                hit[sub] = shapely.contains_xy(buf, self.X[idx][sub], self.Y[idx][sub])
-                mask[idx] |= hit
-                i += 1
-            yield m, mask, (g.isub & (~g.bsub | mask)).mean(axis=-1)
-
-
-class Scored(NamedTuple):
-    """Which of a network's prefix rows `score` solves: those at `budgets` (of BUDGETS) and, if
-    `whole`, the whole network's. Item 4 and the sentinel scored every one; a stage that reads
-    fewer lenses scores fewer (transparency_run's tuning stage: (c) at area D 0.05 and 0.10)."""
-    budgets: tuple[float, ...]
-    whole: bool
-
-    @classmethod
-    def parse(cls, arg: str) -> Scored:
-        """`<budget>,...[,whole]`, e.g. 0.02,0.05,0.1,0.15,0.2,whole: every row."""
-        words = arg.split(",")
-        budgets = tuple(float(w) for w in words if w != "whole")
-        off = [b for b in budgets if not np.isclose(b, BUDGETS).any()]
-        if off or len(set(words)) != len(words) or not words:
-            raise SystemExit(f"score rows are budgets of {BUDGETS} or `whole`, each once: {arg!r}")
-        return cls(budgets=budgets, whole="whole" in words)
-
-    def of(self, pre: pd.DataFrame) -> pd.DataFrame:
-        """The prefix rows to solve."""
-        at = pre.budget.apply(lambda b: bool(np.isclose(b, self.budgets).any()))
-        return pre[at | (pre.full.astype(bool) & self.whole)]
-
-
-def score(rows: Path, lineup: tuple[str, ...], scratch: Path, mesh_token: str, pops: list[str],
-          scored: Scored, ids: list[str]) -> None:
-    """Every network of `lineup` with prefix rows, on `mesh_token`, for each of `pops` (count:
-    (b) on the count prefixes; area: (c) on the area prefixes, and the stored clearings
-    rescored), the prefix rows `scored` names; one block at a time, one scorer per population on
-    one grid."""
-    _check_single_threaded()
-    import clear
-    import geopandas as gpd
-    import lifted
-    import relax
-
-    from reblock.budget import road_corridor
-    mesh = common.mesh_of(mesh_token)
-    if "area" not in pops:
-        raise SystemExit("score builds the area scorer (the clearings' check) on every mesh")
-    cond = lifted.conductance_of(ALONG, lifted.scans_of(DEVICE))
-    p = lifted.Params(ell_m=ELL_M, K=K, along=cond.along, cells=cond.cells,
-                      solver=lifted.solver_of(DEVICE))
-    for pop in pops:
-        score_dir(rows, mesh_token, pop).mkdir(parents=True, exist_ok=True)
-    for bid in ids:
-        todo = [name for name in lineup
-                if (prefix_dir(rows) / f"{bid}__{name}.parquet").exists()
-                and any(not (score_dir(rows, mesh_token, pop) / f"{bid}__{name}.parquet").exists()
-                        for pop in pops)]
-        clear_out = score_dir(rows, mesh_token, "area") / f"{bid}__clearings.parquet"
-        if not todo and clear_out.exists():
-            continue
-        [b] = common.build_blocks([bid])
-        print(f"{time.strftime('%H:%M:%S')} {bid} n={len(b.buildings)} on {mesh.name}: "
-              f"{len(todo)} networks", flush=True)
-        with GpuWatch(every=1.0) as gw:
-            t0 = time.perf_counter()
-            c = clear.Clearing(b, mesh, p, population=common.POPULATIONS["area"],
-                               demand=common.PopulationDemand())
-            t_area = time.perf_counter() - t0
-            scorers = {"area": c.sc}
-            if "count" in pops:
-                scorers["count"] = common.Scorer.on_grid(b, c.sc.grid, p,
-                                                         common.CountPopulation(),
-                                                         demand=common.PopulationDemand())
-            t_setup = time.perf_counter() - t0
-            print(f"  scorers in {t_setup:.0f}s (grid, area scorer and clearing {t_area:.0f}s), "
-                  f"{int(c.sc.grid.inside.sum())} cells", flush=True)
-            if not clear_out.exists():
-                rel = relax.Relaxation(c, CLEARING_POWER)
-                cl_rows = []
-                for cname, (rel_dir, perm_col, cleared_col, D_col, stored_mesh) in STORED.items():
-                    src = ROADLESS / rel_dir / f"{bid}_p{CLEARING_POWER:g}.parquet"
-                    if not src.exists():
-                        print(f"  {cname}: none stored for {bid}", flush=True)
-                        continue
-                    r = pd.read_parquet(src).iloc[0]
-                    x = np.zeros(c.n)
-                    x[np.asarray(r[cleared_col], dtype=np.int64)] = 1.0
-                    ts = time.perf_counter()
-                    J, P = rel.exact_JP(x)
-                    gw.note_pool()
-                    cl_rows.append(dict(block=bid, mesh=mesh.name, clearing=cname,
-                                     stored_mesh=common.mesh_of(stored_mesh).name,
-                                     n_cleared=int(x.sum()), D=float(c.cost @ x),
-                                     stored_D=float(r[D_col]), stored_perm=float(r[perm_col]),
-                                     enclosed=c.sc.enclosed_left(rel.open_of(x)),
-                                     perm=rel.perm(J), perm1=1.0 - P / c.sc.P0,
-                                     t=time.perf_counter() - ts))
-                    print(f"  {cname}: rescored {cl_rows[-1]['perm']:.7f}, stored "
-                          f"{cl_rows[-1]['stored_perm']:.7f} (on {cl_rows[-1]['stored_mesh']})",
-                          flush=True)
-                write_parquet(pd.DataFrame(cl_rows), clear_out)
-            X, Y = c.sc.grid._sub_xy()
-            cor = Corridors(c.sc.grid, X, Y)
-            for name in todo:
-                pre = pd.read_parquet(prefix_dir(rows) / f"{bid}__{name}.parquet")
-                ordered = gpd.read_parquet(ordered_path(scratch, bid, name))
-                need = {pop: scored.of(pre[pre["pop"] == pop]) for pop in pops}
-                stops = sorted({int(m) for pop in pops for m in need[pop]["m"]})
-                got: dict[tuple[str, int], dict] = {}
-                tn = time.perf_counter()
-                t_masks = 0.0
-                tm = time.perf_counter()
-                for m, mask, free in cor.masks(ordered, stops):
-                    t_masks += time.perf_counter() - tm
-                    if m == stops[-1]:          # the longest prefix scored (the whole network
-                        tc = time.perf_counter()  # when it is): Carve's own mask
-                        ref = c.sc.grid.sub_of(road_corridor(ordered.iloc[:m]))
-                        if not np.array_equal(ref, mask):
-                            raise AssertionError(f"{bid} {name}: road-by-road corridor differs "
-                                                 f"from Carve's on {int((ref != mask).sum())} "
-                                                 "sub-samples")
-                        t_check = time.perf_counter() - tc
-                    for pop in pops:
-                        if m not in set(need[pop]["m"].astype(int)):
-                            continue
-                        sc = scorers[pop]
-                        ts = time.perf_counter()
-                        sol = lifted.solve(sc.grid, free, sc.f, p, rtol=SCORE_RTOL)
-                        gw.note_pool()
-                        u = sc.home_u_of(sol, free)
-                        got[(pop, m)] = dict(
-                            enclosed=sc.enclosed_left(free),
-                            P1=1.0 - sol.P / sc.P0, P2=sc.perm_p(u, 2.0),
-                            u95=float(np.nanpercentile(u, 95) / np.nanpercentile(sc.u0, 95)),
-                            umax=float(np.nanmax(u) / np.nanmax(sc.u0)),
-                            umed=float(np.nanmedian(u) / np.nanmedian(sc.u0)),
-                            unknowns=sol.n_unknowns, t_solve=time.perf_counter() - ts)
-                    tm = time.perf_counter()
-                for pop in pops:
-                    net_rows = [dict(r.to_dict(), mesh=mesh.name, **got[(pop, int(r["m"]))])
-                                for _, r in need[pop].iterrows()]
-                    df = pd.DataFrame(net_rows)
-                    df["t_masks"], df["t_check"] = t_masks, t_check
-                    df["t_network"] = time.perf_counter() - tn
-                    write_parquet(df, score_dir(rows, mesh_token, pop) / f"{bid}__{name}.parquet")
-                at = {pop: need[pop][np.isclose(need[pop].budget, BUDGETS[1])] for pop in pops}
-                lensA = {pop: got[(pop, int(r.m.iloc[0]))] for pop, r in at.items() if len(r)}
-                print(f"  {name}: {len(ordered)} roads, {len(stops)} prefixes, masks "
-                      f"{t_masks:.0f}s, check {t_check:.0f}s, total "
-                      f"{time.perf_counter() - tn:.0f}s; at D {BUDGETS[1]:g} "
-                      + ", ".join(f"{pop} P1 {v['P1']:.4f} P2 {v['P2']:.4f}"
-                                  for pop, v in lensA.items()), flush=True)
-            del X, Y, cor
-        for pop in pops:
-            sc = scorers[pop]
-            write_parquet(pd.DataFrame([dict(
-                block=bid, n=len(b.buildings), mesh=mesh.name, pop=pop,
-                cells=int(c.sc.grid.inside.sum()), P0=sc.P0, J2_0=sc.J(sc.u0, 2.0),
-                enclosed0=sc.enclosed0, t_setup=t_setup, t_block=time.perf_counter() - t0,
-                networks=",".join(todo), gpu_peak_gb=gw.peak_mib / 1024,
-                pool_peak_gb=gw.pool_peak_gb, host_hwm_gb=_status_gb("VmHWM"))]),
-                score_dir(rows, mesh_token, pop) / f"{bid}__setup__{int(time.time())}.parquet")
-        print(f"{time.strftime('%H:%M:%S')} {bid} done in {time.perf_counter() - t0:.0f}s, GPU "
-              f"peak {gw.peak_mib / 1024:.1f} GB (pool {gw.pool_peak_gb:.1f} GB)", flush=True)
-        del c, scorers
-        p.solver.release()
 
 
 # ------------------------------------------------------------------ score on the complex
@@ -960,51 +661,11 @@ SHORT = {"clearance": "clear", "clearance_looped": "clear_loop", "cycle_native":
          "euclidean_grid": "grid", "greedy_arterial_access_displacement": "arterial"}
 REPORT_BUDGETS = (0.05, 0.10)     # the table's budgets (Lens A now and Lens A of the 220 study)
 PRICE_BUDGET = 0.05               # the stored clearings' budget
-# The price of roads sets each stored clearing against the roads: the one optimized on the
-# report's mesh, or on a block without one (14401) the one optimized on 0.5a5x8, rescored.
-PRICE_CLEARINGS = {"simp_default": ("simp_default", "simp_default_a5x8"),
-                   "cheap": ("cheap", "cheap_a5x8")}
-
-
-def summary_path(rows: Path, mesh_token: str, what: str) -> Path:
-    """A report's summary table (committed; the rows it reads are not)."""
-    mesh = common.mesh_of(mesh_token)
-    return rows / f"summary_{mesh.name}_ell{ELL_M:g}_K{K}_{ALONG}_{budgets_tag()}_{what}.csv"
 
 
 def _read_all(paths: list[Path]) -> pd.DataFrame:
     return (pd.concat([pd.read_parquet(f) for f in paths], ignore_index=True) if paths
             else pd.DataFrame())
-
-
-def proposals_table(rows: Path) -> pd.DataFrame:
-    """Per (block, method): the network (the cached run's) and what computing it cost (the fresh
-    run's where the cache hit)."""
-    d = _read_all(sorted((rows / "proposals").glob("*.parquet")))
-    # propose-all's row for a run it stopped carries no cache_hit; a stopped cache-mode run was a
-    # miss (a hit returns in milliseconds)
-    stopped = d.status.str.startswith("timeout")
-    d.loc[stopped & ~d.fresh.astype(bool), "cache_hit"] = False
-    d["area_km2"] = d.groupby("block").area_km2.transform("max")
-    cache = d[~d.fresh.astype(bool)].drop(columns=["fresh"])
-    fresh = d[d.fresh.astype(bool)][["block", "method", "status", "wall_s", "cpu_s",
-                                     "peak_rss_gb", "same_as_cached"]]
-    out = cache.merge(fresh, on=["block", "method"], how="left", suffixes=("", "_fresh"))
-    hit = out.cache_hit.astype(bool)
-    for col in ("status", "wall_s", "cpu_s", "peak_rss_gb"):
-        out[f"cost_{col}"] = np.where(hit, out[f"{col}_fresh"], out[col])
-    out["cost_status"] = out.cost_status.where(out.cost_status.notna(), "no fresh run yet")
-    return out
-
-
-def score_rows(rows: Path, lineup: tuple[str, ...], mesh_token: str, pop: str) -> pd.DataFrame:
-    d = score_dir(rows, mesh_token, pop)
-    return _read_all([f for name in lineup for f in sorted(d.glob(f"*__{name}.parquet"))])
-
-
-def _tau(x: np.ndarray, y: np.ndarray) -> float:
-    from scipy.stats import kendalltau
-    return float(kendalltau(x, y).statistic) if len(x) >= 3 else np.nan
 
 
 def _b_rank(g: pd.DataFrame, enc: str, val: str) -> np.ndarray:
@@ -1013,190 +674,6 @@ def _b_rank(g: pd.DataFrame, enc: str, val: str) -> np.ndarray:
     e, v = g[enc].to_numpy(), g[val].to_numpy()
     ahead = (e[None, :] < e[:, None]) | ((e[None, :] == e[:, None]) & (v[None, :] > v[:, None]))
     return 1.0 + ahead.sum(axis=1)
-
-
-def lens_table(rows: Path, lineup: tuple[str, ...], mesh_token: str,
-               budget: float) -> pd.DataFrame:
-    """Per (block, method) at `budget`: (a) and (b) on the count prefix, (c) on the area prefix,
-    each roadless lens with its B (i) (enc_b, enc_c: the population share the prefix leaves
-    enclosed), each prefix's road length and displacement, whether it reaches the budget, and
-    its rank among the methods that do ((a) by value, (b) and (c) in B's order)."""
-    keys = ["block", "method"]
-    cnt = score_rows(rows, lineup, mesh_token, "count")
-    cnt = cnt[np.isclose(cnt.budget, budget)][keys + ["n", "m", "road_m", "D_count", "D_area",
-                                                      "P_old", "P1", "P2", "enclosed"]]
-    cnt = cnt.rename(columns={"m": "m_count", "road_m": "road_m_count", "D_count": "Dc_count",
-                              "D_area": "Da_count", "P_old": "a", "P1": "b", "P2": "b_P2",
-                              "enclosed": "enc_b"})
-    area = score_rows(rows, lineup, mesh_token, "area")
-    area = area[np.isclose(area.budget, budget)][keys + ["m", "road_m", "D_count", "D_area",
-                                                         "P_old", "P1", "P2", "enclosed"]]
-    area = area.rename(columns={"m": "m_area", "road_m": "road_m_area", "D_count": "Dc_area",
-                                "D_area": "Da_area", "P_old": "a_on_area", "P1": "c_P1",
-                                "P2": "c", "enclosed": "enc_c"})
-    t = cnt.merge(area, on=keys, how="outer")
-    t["reach_count"] = t.Dc_count >= budget - 1e-9
-    t["reach_area"] = t.Da_area >= budget - 1e-9
-    t["rank_a"] = (t[t.reach_count].groupby("block").a.rank(ascending=False, method="min")
-                   .reindex(t.index))
-    for col, enc, reach in (("b", "enc_b", "reach_count"), ("c", "enc_c", "reach_area")):
-        rank = pd.Series(np.nan, index=t.index)
-        for _, g in t[t[reach]].groupby("block"):
-            rank[g.index] = _b_rank(g, enc, col)
-        t[f"rank_{col}"] = rank
-    return t
-
-
-def report(rows: Path, lineup: tuple[str, ...], mesh_token: str, composite_token: str) -> None:
-    pd.set_option("display.width", 250)
-    pd.set_option("display.max_columns", 40)
-    mesh, comp = common.mesh_of(mesh_token), common.mesh_of(composite_token)
-    # feasibility
-    pt = proposals_table(rows)
-    print("FEASIBILITY (the cost: the fresh run where the derive cache hit; single-threaded, "
-          "on a shared machine)")
-    for bid, g in pt.sort_values(["n", "method"]).groupby("block", sort=False):
-        print(f"  {bid} n={int(g.n.iloc[0])} {g.area_km2.iloc[0]:.3f} km^2")
-        for _, r in g.iterrows():
-            same = ("" if not bool(r.cache_hit) else
-                    f"  [cache hit in {r.wall_s:.2f}s; fresh roads identical: "
-                    f"{bool(r.same_as_cached_fresh == 1.0)}]")
-            net = (f"{int(r.n_roads):5d} roads {r.road_m / 1000:7.2f} km" if r.status == "ok"
-                   else "no network")
-            print(f"    {SHORT[r.method]:13s} {r.cost_status[:28]:28s} wall {r.cost_wall_s:7.0f}s  "
-                  f"CPU {r.cost_cpu_s:7.0f}s  peak RSS {r.cost_peak_rss_gb:5.2f} GB  {net}{same}")
-    # the scorer against the stored clearings
-    print(f"\nSCORER CHECK: the stored clearings rescored on {mesh.name} and {comp.name} "
-          "(J_2, area population, rtol 1e-5) against their stored Lens A")
-    cl = _read_all(sorted(score_dir(rows, mesh_token, "area").glob("*__clearings.parquet"))
-                   + sorted(score_dir(rows, composite_token, "area").glob("*__clearings.parquet")))
-    own = cl[cl.mesh == cl.stored_mesh]
-    for _, r in own.iterrows():
-        print(f"  {r.block:18s} {r.clearing:13s} on {r.mesh:9s} stored {r.stored_perm:.7f} "
-              f"rescored {r.perm:.7f}  diff {r.perm - r.stored_perm:+.1e}  D {r.D:.5f} (stored "
-              f"{r.stored_D:.5f})  enclosed left {r.enclosed:.5f}")
-    diff = (own.perm - own.stored_perm).abs()
-    moved = own[diff > 1e-6]
-    print(f"  max |diff| {diff.max():.1e} over {len(own)} rows; over 1e-6 on {len(moved)} rows "
-          f"({moved.block.nunique()} blocks: where a home the placement fix un-shadowed moves "
-          "J_2)")
-    cl.to_csv(summary_path(rows, mesh_token, "clearings"), index=False)
-    # the table
-    for budget in REPORT_BUDGETS:
-        t = lens_table(rows, lineup, mesh_token, budget)
-        t.to_csv(summary_path(rows, mesh_token, f"lens_D{budget:g}"), index=False)
-        print(f"\nAT D {budget:g} on {mesh.name}: (a) shipped permeability and (b) roadless count "
-              "p 1 on the count prefix, (c) roadless area J_2 on the area prefix; [rank of the "
-              "methods reaching the budget, (b) and (c) in B's order]; * = the whole network "
-              "falls short; on a block with enclosed homes, B (i) for (b) | (c)")
-        taus = []
-        for bid, g in t.sort_values(["n", "method"]).groupby("block", sort=False):
-            enclosed = bool((g.enc_b > 0).any() or (g.enc_c > 0).any())
-            print(f"  {bid} n={int(g.n.iloc[0])}")
-            print(f"    {'method':13s} {'(a)':>12s} {'(b)':>12s} {'(c)':>12s}   road km count | "
-                  "area   D count prefix | area prefix"
-                  + ("   B (i) (b) | (c)" if enclosed else ""))
-            for _, r in g.sort_values(["rank_c", "c"], ascending=[True, False]).iterrows():
-                def cell(v, rk, ok):
-                    return f"{v:.4f}{'*' if not ok else ''} [{'-' if np.isnan(rk) else int(rk)}]"
-                print(f"    {SHORT[r.method]:13s} {cell(r.a, r.rank_a, r.reach_count):>12s} "
-                      f"{cell(r.b, r.rank_b, r.reach_count):>12s} "
-                      f"{cell(r.c, r.rank_c, r.reach_area):>12s}   {r.road_m_count / 1000:6.2f} | "
-                      f"{r.road_m_area / 1000:6.2f}   {r.Dc_count:.4f} | {r.Da_area:.4f}"
-                      + (f"   {r.enc_b:.5f} | {r.enc_c:.5f}" if enclosed else ""))
-            both = g[g.reach_count & g.reach_area]
-            a, rb, rc = both.a.to_numpy(), both.rank_b.to_numpy(), both.rank_c.to_numpy()
-            taus.append(dict(block=bid, ab=_tau(a, -rb), ac=_tau(a, -rc), bc=_tau(rb, rc)))
-            k = taus[-1]
-            print(f"    Kendall tau over the {len(both)} methods reaching both: (a,b) "
-                  f"{k['ab']:+.3f}  (a,c) {k['ac']:+.3f}  (b,c) {k['bc']:+.3f}")
-        tau = pd.DataFrame(taus)
-        print(f"  ACROSS THE {len(tau)} BLOCKS, Kendall tau median [IQR]: " + "  ".join(
-            f"({k[0]},{k[1]}) {tau[k].median():+.2f} [{tau[k].quantile(0.25):+.2f}, "
-            f"{tau[k].quantile(0.75):+.2f}]" for k in ("ab", "ac", "bc")))
-        for col in ("a", "b", "c"):
-            lead = t[t[f"rank_{col}"] == 1].drop_duplicates("block").method.map(SHORT)
-            print(f"  leader under ({col}): "
-                  + ", ".join(f"{k} {v}" for k, v in lead.value_counts().items()))
-    # the price of roads
-    print(f"\nTHE PRICE OF ROADS at D {PRICE_BUDGET:g} under (c) on {mesh.name}, in B's order (a "
-          "lower bound: the optimizers are heuristics; the road prefix is the first reaching the "
-          "budget, the clearings stay within it). Each clearing against the best road: the share "
-          "each leaves enclosed (B (i)), then Lens A over the rest (B (ii))")
-    t = lens_table(rows, lineup, mesh_token, PRICE_BUDGET)
-    cl_m = cl[cl.mesh == mesh.name]
-    price_rows = []
-    for bid, g in t.sort_values(["n"]).groupby("block", sort=False):
-        best = g.loc[g.rank_c.idxmin()]
-        row = dict(block=bid, n=int(best.n), best=best.method, best_enc=best.enc_c, best_c=best.c,
-                   best_D=best.Da_area, best_km=best.road_m_area / 1000)
-        line = (f"  {bid:18s} best road {SHORT[best.method]:12s} {best.c:.4f} (i {best.enc_c:.5f};"
-                f" D {best.Da_area:.4f}, {best.road_m_area / 1000:.2f} km)")
-        for family, names in PRICE_CLEARINGS.items():
-            c = cl_m[cl_m.block == bid].set_index("clearing")
-            r = c.loc[[nm for nm in names if nm in c.index][0]]
-            di, dii = r.enclosed - best.enc_c, r.perm - best.c
-            row |= {f"{family}": r.name, f"{family}_enc": r.enclosed, f"{family}_c": r.perm,
-                    f"{family}_D": r.D, f"{family}_ahead": bool(di < 0 or (di == 0 and dii > 0)),
-                    f"{family}_di": di, f"{family}_dii": dii}
-            verdict = (f"minus best {dii:+.4f}" if di == 0 else
-                       f"{'ahead' if di < 0 else 'behind'} on (i) by {abs(di):.5f}")
-            line += f"; {r.name} {r.perm:.4f} (i {r.enclosed:.5f}; D {r.D:.4f}) {verdict}"
-        price_rows.append(row)
-        print(line)
-    pr = pd.DataFrame(price_rows)
-    pr.to_csv(summary_path(rows, mesh_token, "price"), index=False)
-    for family in PRICE_CLEARINGS:
-        tie = pr[pr[f"{family}_di"] == 0]
-        q = tie[f"{family}_dii"].quantile([0.1, 0.5, 0.9])
-        share = (tie.best_c / tie[f"{family}_c"]).quantile([0.1, 0.5, 0.9])
-        print(f"  {family}: ahead of the best road on {int(pr[f'{family}_ahead'].sum())} of "
-              f"{len(pr)} blocks; behind on (i) on {int((pr[f'{family}_di'] > 0).sum())}; where "
-              f"(i) ties ({len(tie)}), minus the best road {q[0.5]:+.4f} (p10 {q[0.1]:+.4f}, p90 "
-              f"{q[0.9]:+.4f}; {tie[f'{family}_dii'].min():+.4f} .. "
-              f"{tie[f'{family}_dii'].max():+.4f}), the best road's share of its Lens A "
-              f"{share[0.5]:.2f} (p10 {share[0.1]:.2f}, p90 {share[0.9]:.2f})")
-    # B (i): the enclosed homes, and what the prefixes and clearings free
-    setup = _read_all(sorted(score_dir(rows, mesh_token, "area").glob("*__setup__*.parquet")))
-    enc0 = setup.drop_duplicates("block", keep="last").set_index("block").enclosed0
-    held = enc0[enc0 > 0]
-    print(f"\nENCLOSED HOMES (area population): {len(held)} of {len(enc0)} blocks, a share of "
-          f"{held.min():.5f} -- {held.max():.5f} (median {held.median():.5f}); at D "
-          f"{PRICE_BUDGET:g}, the blocks where each frees some and where it frees all")
-    pre = t[t.block.isin(held.index) & t.reach_area]
-    for m, g in pre.groupby("method"):
-        some = int((g.enc_c < g.block.map(held)).sum())
-        print(f"  {SHORT[m]:13s} {len(g):3d} blocks: some {some}, all {int((g.enc_c == 0).sum())}")
-    for name, g in cl_m[cl_m.block.isin(held.index)].groupby("clearing"):
-        print(f"  {name:17s} {len(g):3d} blocks: some "
-              f"{int((g.enclosed < g.block.map(held)).sum())}, all {int((g.enclosed == 0).sum())}")
-    # the composite mesh
-    print(f"\nCOMPOSITE MESH: (c) on {comp.name} minus on {mesh.name}, same prefixes")
-    ca = score_rows(rows, lineup, composite_token, "area")
-    if len(ca):
-        ua = score_rows(rows, lineup, mesh_token, "area")
-        keys = ["block", "method", "pop", "budget", "full", "m"]
-        mg = ca.merge(ua, on=keys, suffixes=("_comp", "_uni"))
-        mg["dP2"], mg["dP1"] = mg.P2_comp - mg.P2_uni, mg.P1_comp - mg.P1_uni
-        for bid, g in mg.groupby("block"):
-            j = g.dP2.abs().idxmax()
-            lensA = g[np.isclose(g.budget, PRICE_BUDGET)]
-            print(f"  {bid}: {len(g)} prefixes, J_2 diff median {g.dP2.median():+.5f}, largest "
-                  f"|diff| {g.dP2.abs().max():.5f} ({SHORT[g.method[j]]} at "
-                  f"{'full' if g.full[j] else g.budget[j]}); at D {PRICE_BUDGET:g} "
-                  f"{lensA.dP2.min():+.5f} .. {lensA.dP2.max():+.5f}; P diff largest "
-                  f"{g.dP1.abs().max():.5f}")
-            o = mg[mg.block == bid]
-            rk = [_tau(o[np.isclose(o.budget, bud)].P2_comp.to_numpy(),
-                       o[np.isclose(o.budget, bud)].P2_uni.to_numpy()) for bud in BUDGETS]
-            print("    ranking of the methods, composite vs uniform, Kendall tau per budget: "
-                  + ", ".join(f"{b:g} {x:+.2f}" for b, x in zip(BUDGETS, rk, strict=True)))
-        cc = cl.pivot_table(index=["block", "clearing"], columns="mesh", values="perm")
-        if comp.name in cc and mesh.name in cc:
-            cc = cc.dropna(subset=[comp.name, mesh.name])
-            for (bid, cname), r in cc.iterrows():
-                print(f"  clearing {bid} {cname:13s}: {comp.name} {r[comp.name]:.5f} - "
-                      f"{mesh.name} {r[mesh.name]:.5f} = {r[comp.name] - r[mesh.name]:+.5f}")
 
 
 # ------------------------------------------------------------------ report on the complex
@@ -1307,196 +784,6 @@ def cxreport(rows: Path, lineup: tuple[str, ...], metric: gcl.ComplexMetric) -> 
     pl.to_csv(path("clearings"), index=False)
 
 
-# ------------------------------------------------------------------ cost projection
-
-def _fit_power(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
-    """log y = a + b log x by least squares: (a, b)."""
-    b, a = np.polyfit(np.log(x), np.log(y), 1)
-    return float(a), float(b)
-
-
-def full_run_blocks() -> pd.DataFrame:
-    """The full run's blocks: the 82 large ones and whatever else has a stored SIMP default row,
-    each with its building count, area and the mesh its SIMP default used."""
-    big = pd.read_parquet(ROADLESS / "large82_area.parquet")
-    simp = STORED["simp_default"][0]
-    rows = []
-    for d in sorted((ROADLESS / simp).parent.parent.glob(Path(simp).parent.name + "*")):
-        tok = d.name[len(Path(simp).parent.name):]
-        if tok and not re.fullmatch(r"\.a[0-9.]+x[0-9.]+", tok):    # the default plan on a
-            continue                                                 # composite only
-        for f in sorted((d / "D0.05").glob("*_p2.parquet")):
-            rows.append(dict(block=f.name.rsplit("_p", 1)[0], simp_mesh=tok or ".h0.5",
-                             n_simp=int(pd.read_parquet(f, columns=["n"]).n.iloc[0])))
-    s = pd.DataFrame(rows)
-    return s.merge(big, on="block", how="left")
-
-
-SIZES_MIN_M = 40.0      # sizes: blocks with more unknowns than this at h 0.5 (millions; and any
-                        # block outside large82) get their composite cell count, the candidates
-                        # for not fitting a 48 GB card
-_SIZE_MESH: list = []
-
-
-def _cells(bid: str) -> tuple[str, float, float]:
-    [b] = common.build_blocks([bid])
-    return bid, b.boundary.area / 1e6, float(_SIZE_MESH[0].cells(b))
-
-
-def sizes_path(rows: Path, composite_token: str) -> Path:
-    return rows / f"sizes_{common.mesh_of(composite_token).name}.parquet"
-
-
-def sizes(rows: Path, composite_token: str, procs: int) -> None:
-    """The composite mesh's cell count (and the area) of every full-run block that may not fit
-    a 48 GB card at h 0.5: the projection's input for the oversized blocks."""
-    _check_single_threaded()
-    import multiprocessing
-    blocks = full_run_blocks()
-    todo = sorted(blocks[~(blocks.M_unknowns <= SIZES_MIN_M)].block)
-    _SIZE_MESH.append(common.mesh_of(composite_token))
-    t0 = time.perf_counter()
-    with multiprocessing.get_context("fork").Pool(procs, maxtasksperchild=1) as pool:
-        got = list(pool.imap_unordered(_cells, todo))
-    df = pd.DataFrame(got, columns=["block", "area_km2", "cells_comp"])
-    df["mesh"] = _SIZE_MESH[0].name
-    df.to_parquet(sizes_path(rows, composite_token))
-    print(f"{len(df)} blocks sized in {time.perf_counter() - t0:.0f}s", flush=True)
-
-
-def per_block_scoring(rows: Path, lineup: tuple[str, ...], mesh_token: str) -> pd.DataFrame:
-    """Per block on `mesh_token`: what scoring all its networks cost on the GPU, over however
-    many passes it took: one setup (the median of the passes'), every network's own time (count
-    and area together) and the clearings', the peak memory of any pass."""
-    d = score_dir(rows, mesh_token, "area")
-    st = _read_all(sorted(d.glob("*__setup__*.parquet")))
-    per = st.groupby("block").agg(t_setup=("t_setup", "median"), passes=("t_setup", "size"),
-                                  gpu_peak_gb=("gpu_peak_gb", "max"),
-                                  pool_peak_gb=("pool_peak_gb", "max"),
-                                  host_hwm_gb=("host_hwm_gb", "max"))
-    sr = score_rows(rows, lineup, mesh_token, "area")
-    net = sr.groupby(["block", "method"]).t_network.first().groupby("block")
-    per["t_networks"], per["networks"] = net.sum(), net.size()
-    cl = _read_all(sorted(d.glob("*__clearings.parquet")))
-    per["t_clearings"] = cl.groupby("block").t.sum()
-    per["t_full"] = per.t_setup + per.t_networks + per.t_clearings
-    # all of the lineup's networks at this block's mean cost per network (blocks still missing
-    # some), one setup, the clearings
-    per["t_lineup"] = (per.t_setup + len(lineup) * per.t_networks / per.networks
-                       + per.t_clearings)
-    big = pd.read_parquet(ROADLESS / "large82_area.parquet")
-    return per.reset_index().merge(big[["block", "M_unknowns"]], on="block")
-
-
-def project(rows: Path, lineup: tuple[str, ...], mesh_token: str, composite_token: str) -> None:
-    """The full run's cost from the sentinel's: proposals (CPU-hours per method, a power law in
-    the building count fitted on the four blocks), scoring (GPU-hours, a power law in unknowns),
-    and which blocks a 48 GB card cannot hold at `mesh_token` (they take `composite_token`)."""
-    pt = proposals_table(rows)
-    blocks = full_run_blocks()
-    print(f"{len(blocks)} blocks in the full run ({int(blocks.n.notna().sum())} of the large 82; "
-          f"others: {sorted(blocks[blocks.n.isna()].block)})")
-    print("\nPROPOSALS: CPU seconds per (block, method) measured on the sentinel; the full run "
-          "EXTRAPOLATED as the median and the slowest sentinel block's time for every block (a "
-          "stopped run counts at its CPU time when stopped: a floor). The sentinel spans n 1,721 "
-          "-- 6,619 and 0.39 -- 1.02 km^2; the oversized blocks are 1.4 -- 52 km^2 with 1,000 -- "
-          "4,500 buildings, outside it.")
-    n_all = blocks.n.fillna(blocks.n_simp).to_numpy(dtype=float)
-    lo_tot = hi_tot = 0.0
-    proj_rows = []
-    for name in lineup:
-        g_all = pt[pt.method == name]
-        g = g_all[g_all.cost_status == "ok"]
-        cut = g_all[g_all.cost_status.str.startswith("timeout")]
-        meas = ", ".join([f"{int(n)}: {c:.0f}s" for n, c in zip(g.n, g.cost_cpu_s, strict=True)]
-                         + [f"{int(n)}: >{c:.0f}s ({st})" for n, c, st
-                            in zip(cut.n, cut.cost_cpu_s, cut.cost_status, strict=True)])
-        med = float(g_all.cost_cpu_s.median()) * len(n_all)
-        hi = float(g_all.cost_cpu_s.max()) * len(n_all)
-        lo_tot, hi_tot = lo_tot + med, hi_tot + hi
-        if len(g) >= 3:
-            a, bexp = _fit_power(g.n.to_numpy(float),
-                                 np.maximum(g.cost_cpu_s.to_numpy(float), 0.05))
-            fit = (f"; CPU ~ n^{bexp:.2f} on the {len(g)} completed blocks"
-                   + (f" ({np.exp(a) * (n_all ** bexp).sum() / 3600:.1f} CPU-h by that law)"
-                      if bexp > 0 else " (falls with n: no size law)"))
-        else:
-            bexp, fit = np.nan, f"; {len(g)} completed blocks: no size law"
-        floor = " (floors)" if len(cut) else ""
-        proj_rows.append(dict(method=name, exponent_n=bexp, cpu_h_median=med / 3600,
-                              cpu_h_max=hi / 3600, stopped=len(cut)))
-        print(f"  {SHORT[name]:13s} {meas}{fit}; full run {med / 3600:.1f} -- {hi / 3600:.1f} "
-              f"CPU-h{floor}")
-    print(f"  all methods: {lo_tot / 3600:.0f} -- {hi_tot / 3600:.0f} CPU-h (the arterial's a "
-          "floor), single-threaded processes, measured under a load of 40 -- 110 on 48 cores")
-    # scoring
-    print(f"\nSCORING on the GPU (lenses (b) and (c), 7 networks, the clearings), per block: "
-          f"measured on the sentinel at {common.mesh_of(mesh_token).name}")
-    st = per_block_scoring(rows, lineup, mesh_token)
-    for _, r in st.iterrows():
-        print(f"  {r.block}: {r.M_unknowns:.1f}M unknowns (cells x {K}), {r.t_full:.0f}s for "
-              f"{r.networks} networks (setup {r.t_setup:.0f}s, networks {r.t_networks:.0f}s, "
-              f"clearings {r.t_clearings:.0f}s; {r.passes} passes), GPU peak "
-              f"{r.gpu_peak_gb:.1f} GB "
-              f"(cupy pool {r.pool_peak_gb:.1f} GB), host {r.host_hwm_gb:.1f} GB")
-    rate = st.gpu_peak_gb / st.M_unknowns
-    gb_per_m = float(rate[st.M_unknowns.idxmax()])     # the largest sentinel block's rate
-    gb_per_m_max = float(rate.max())
-    sec = st.t_lineup / st.M_unknowns                   # GPU seconds per million unknowns
-    s_mid, s_lo, s_hi = float(sec.median()), float(sec.min()), float(sec.max())
-    print("  the whole lineup per block / its unknowns: "
-          + ", ".join(f"{b.split('_')[-1]} {t:.0f}s / {m:.1f}M = {x:.1f} s/M"
-                      for b, t, m, x in zip(st.block, st.t_lineup, st.M_unknowns, sec,
-                                            strict=True))
-          + f"; GPU memory per million unknowns {', '.join(f'{x:.3f}' for x in rate)} GB: sized "
-          f"at {gb_per_m:.3f} (the largest block's), {gb_per_m_max:.3f} at worst")
-    cap = 48.0
-    blocks["M"] = blocks.M_unknowns
-    blocks["gb_uniform"] = blocks.M * gb_per_m
-    risky = blocks[(blocks.M * gb_per_m < cap) & ~(blocks.M * gb_per_m_max < cap)]
-    print("  at the worst rate these would not fit either: "
-          + ", ".join(f"{r.block} ({r.M:.1f}M, ~{r.M * gb_per_m_max:.0f} GB)"
-                      for _, r in risky.iterrows()))
-    over = blocks[~(blocks.gb_uniform < cap)].copy()
-    comp_mesh = common.mesh_of(composite_token)
-    got = pd.read_parquet(sizes_path(rows, composite_token)).set_index("block")
-    missing = sorted(set(over.block) - set(got.index))
-    if missing:
-        raise SystemExit(f"run `sizes` with a lower SIZES_MIN_M: {missing} are not sized")
-    over["area_km2"] = got.area_km2.reindex(over.block).to_numpy()
-    over["M_comp"] = got.cells_comp.reindex(over.block).to_numpy() * K / 1e6
-    blocks = blocks.merge(over[["block", "M_comp"]], on="block", how="left")
-    blocks["area_km2"] = blocks.area_km2.fillna(blocks.block.map(
-        dict(zip(over.block, over.area_km2, strict=True))))
-    h = common.mesh_of(mesh_token).h                  # a block outside large82 (a region)
-    blocks["M"] = blocks.M.fillna(blocks.area_km2 * 1e6 / h ** 2 * K / 1e6)
-    blocks["gb_uniform"] = blocks.M * gb_per_m
-    fits = blocks.gb_uniform < cap
-    blocks["M_run"] = np.where(fits, blocks.M, blocks.M_comp)
-    blocks["t_pred"] = s_mid * blocks.M_run
-    print(f"  {int(fits.sum())} blocks fit {cap:g} GB at {common.mesh_of(mesh_token).name} "
-          f"(estimate <= {blocks[fits].gb_uniform.max():.1f} GB); {int((~fits).sum())} do not "
-          f"and take {comp_mesh.name} ({blocks[~fits].M_comp.min():.1f} -- "
-          f"{blocks[~fits].M_comp.max():.1f}M unknowns there, <= "
-          f"{(blocks[~fits].M_comp * gb_per_m).max():.1f} GB):")
-    for _, r in blocks[~fits].sort_values("M").iterrows():
-        print(f"    {r.block:26s} {r.area_km2:6.2f} km^2  {r.M:7.1f}M at h 0.5 "
-              f"(~{r.gb_uniform:.0f} GB), {r.M_comp:5.1f}M on the composite")
-    msum = float(blocks.M_run.sum())
-    print(f"  GPU time EXTRAPOLATED (unknowns x the median {s_mid:.1f} s/M; the composite's cells "
-          f"assumed to cost as the uniform grid's): {blocks.t_pred.sum() / 3600:.1f} GPU-h in all "
-          f"({blocks[fits].t_pred.sum() / 3600:.1f} at h 0.5 over "
-          f"{float(blocks[fits].M_run.sum()):.0f}M "
-          f"unknowns, {blocks[~fits].t_pred.sum() / 3600:.1f} on the composite over "
-          f"{float(blocks[~fits].M_run.sum()):.0f}M), {msum * s_lo / 3600:.1f} -- "
-          f"{msum * s_hi / 3600:.1f} h at the sentinel's fastest and slowest rates; the largest "
-          f"block {blocks.t_pred.max() / 3600:.2f} h")
-    out = rows / f"projection_{common.mesh_of(mesh_token).name}_{comp_mesh.name}.parquet"
-    blocks.to_parquet(out)
-    pd.DataFrame(proj_rows).to_parquet(out.with_name("projection_proposals.parquet"))
-    print(f"  rows: {out}")
-
-
 # ------------------------------------------------------------------ main
 
 def lineup_of(arg: str) -> tuple[str, ...]:
@@ -1521,9 +808,6 @@ if __name__ == "__main__":
                     float(a[6]) * 3600, a[7] == "time-hits")
     elif cmd == "prefixes":
         prefixes(Path(a[1]), lineup_of(a[2]), Path(a[3]), int(a[4]), a[5].split(","))
-    elif cmd == "score":
-        score(Path(a[1]), lineup_of(a[2]), Path(a[3]), a[4], a[5].split(","), Scored.parse(a[6]),
-              a[7].split(","))
     elif cmd == "cx":
         if len(a) != 7:
             raise SystemExit("cx <rows> <scratch> <metric> <cpu|gpu> <id> <items,>")
@@ -1538,11 +822,5 @@ if __name__ == "__main__":
             raise SystemExit("cxreport <rows> <lineup,> <metric> <cpu|gpu>")
         cxreport(Path(a[1]), lineup_of(a[2]),
                  gcl.complex_of(a[3], factorization=gap_factor.factorization_of(a[4])))
-    elif cmd == "report":
-        report(Path(a[1]), lineup_of(a[2]), a[3], a[4])
-    elif cmd == "sizes":
-        sizes(Path(a[1]), a[2], int(a[3]))
-    elif cmd == "project":
-        project(Path(a[1]), lineup_of(a[2]), a[3], a[4])
     else:
         raise SystemExit(f"unknown mode {cmd!r}")
