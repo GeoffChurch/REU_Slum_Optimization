@@ -317,10 +317,11 @@ def _q(v: pd.Series) -> str:
 
 
 def roads_report() -> pd.DataFrame:
-    """The road methods' order, the complex's against the raster's (uni+apwfs, and item 4's uni)
-    at each CROSS_BUDGET, in B's order per lens: Kendall tau per block over the methods reaching
-    the budget, and whether the leader is the same."""
-    cx = rr.cx_lens_table
+    """The road methods' order, the complex's against the raster's (uni+apwfs on the blocks it
+    scored, and item 4's uni on the 60) at each CROSS_BUDGET, in B's order per lens: Kendall tau
+    per block over the methods reaching the budget, whether the leader is the same, the lens's own
+    order alone (tau_lens), and whether B (i) ties among the methods on both models (where it
+    does not, the enclosed share orders them first)."""
     t = rr.cx_rows(ROAD_ROWS, _complex(), LINEUP)
     ras = rr._read_all(sorted(raster_dir(RASTER).glob("*__roads.parquet")))
     old_dir = ROAD_ROWS / f"h0.5_ell{rr.ELL_M:g}_K{rr.K}_{OLD_RASTER}_area_{rr.budgets_tag()}"
@@ -328,24 +329,26 @@ def roads_report() -> pd.DataFrame:
                        ).rename(columns={v: k for k, v in LENS_OF_OLD.items()})
     rows = []
     for budget in CROSS_BUDGETS:
-        c = cx(t, budget)
-        r = ras[np.isclose(ras.budget, budget)].copy()
-        o = old[np.isclose(old.budget, budget)].copy()
-        for bid, g in c[c.reach].groupby("block"):
-            gr = r[(r.block == bid) & r.method.isin(g.method)].set_index("method")
-            go = o[(o.block == bid) & o.method.isin(g.method)].set_index("method")
-            gc_ = g.set_index("method")
-            for name, other, lenses in (("raster", gr, rr.CX_LENSES),
-                                        ("uni", go, tuple(LENS_OF_OLD))):
+        c = rr.cx_lens_table(t, budget)
+        for name, frame, lenses in (("raster", ras, rr.CX_LENSES),
+                                    ("uni", old, tuple(LENS_OF_OLD))):
+            at = frame[np.isclose(frame.budget, budget)]
+            for bid, g in c[c.reach & c.block.isin(set(frame.block))].groupby("block"):
+                gc_ = g.set_index("method")
+                other = at[(at.block == bid) & at.method.isin(g.method)].set_index("method")
                 if set(other.index) != set(gc_.index):
                     raise ValueError(f"{bid} D {budget:g}: {name}'s rows hold "
                                      f"{sorted(other.index)}, the complex's {sorted(gc_.index)}")
                 other = other.loc[gc_.index]
+                ties = bool(gc_.enclosed.nunique() == 1 and other.enclosed.nunique() == 1)
                 for lens in lenses:
                     rank_o = rr._b_rank(other.reset_index(), "enclosed", lens)
                     rank_c = gc_[f"rank_{lens}"].to_numpy()
                     rows.append(dict(block=bid, budget=budget, lens=lens, against=name,
                                      methods=len(gc_), tau=_tau(-rank_c, -rank_o),
+                                     tau_lens=_tau(gc_[lens].to_numpy(dtype=float),
+                                                   other[lens].to_numpy(dtype=float)),
+                                     enclosed_ties=ties,
                                      same_leader=bool(gc_.index[np.argmin(rank_c)]
                                                       == gc_.index[np.argmin(rank_o)]),
                                      leader_cx=str(gc_.index[np.argmin(rank_c)]),
@@ -357,9 +360,15 @@ def roads_report() -> pd.DataFrame:
         for lens in rr.CX_LENSES:
             for against in ("raster", "uni"):
                 g = df[np.isclose(df.budget, budget) & (df.lens == lens) & (df.against == against)]
-                if len(g):
-                    print(f"  D {budget:g} {lens:5s} vs {against:6s}: {_q(g.tau)}; the same "
-                          f"leader on {int(g.same_leader.sum())} of {len(g)}")
+                if not len(g):
+                    continue
+                tie = g[g.enclosed_ties]
+                apart = g[~g.enclosed_ties]
+                print(f"  D {budget:g} {lens:5s} vs {against:6s} on {len(g)}: {_q(g.tau)}, the "
+                      f"same leader on {int(g.same_leader.sum())}; the lens alone "
+                      f"{_q(g.tau_lens)}; where (i) ties on both ({len(tie)}) {_q(tie.tau)}, "
+                      f"leader {int(tie.same_leader.sum())}; where it does not ({len(apart)}) "
+                      f"{_q(apart.tau)}")
     return df
 
 
