@@ -70,6 +70,7 @@ import sys
 import time
 from pathlib import Path
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 
@@ -86,13 +87,14 @@ import lifted  # noqa: E402
 import metrics  # noqa: E402
 import polish_greedy  # noqa: E402
 import relax  # noqa: E402
+import road_rescore as rr  # noqa: E402
 import search  # noqa: E402
 
 METRIC = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())
 RASTER = "uni+apwfs"
 MESH = lifted.UniformMesh(0.5, offset=lifted.OFFSET)
-PLAN = relax.plan_of("fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2")     # SIMP's default
-CHEAP = ("S0.01cat", 64, 8, False)      # the cheap preset: picker, tries, width, pairs
+PLAN = relax.plan_of(relax.SIMP_DEFAULT)
+CHEAP = polish_greedy.CHEAP
 BUDGET = relax.D_LENS                   # area D 0.05
 POWER = 1.0                             # P, the headline (owner 2026-10-12)
 POP = common.PopulationDemand()
@@ -113,10 +115,9 @@ def _peak_gb() -> float:
 
 def sources(metric_name: str) -> dict[str, Path]:
     """Per preset its rows' directory under a metric (relax.rows_of, polish_greedy.rows_of)."""
-    picker, tries, width, pairs = CHEAP
     return {"simp": relax.rows_of(PLAN, metric_name, BUDGET),
-            "cheap": polish_greedy.rows_of(picker, tries, width, pairs, search.InEps(), MESH,
-                                           metric_name, BUDGET)}
+            "cheap": polish_greedy.rows_of(CHEAP.picker, CHEAP.tries, CHEAP.width, CHEAP.pairs,
+                                           search.InEps(), MESH, metric_name, BUDGET)}
 
 
 SOURCES = {f"{who}_{preset}": (name, preset) for who, name in (("raster", RASTER),
@@ -196,9 +197,8 @@ def preset(bid: str, item: str, device: str) -> None:
         if which == "simp":
             return relax.one(bid, POWER, metric, PLAN._replace(polish_scoring=scoring), BUDGET,
                              demand=POP)
-        picker, tries, width, pairs = CHEAP
-        return polish_greedy.run(bid, POWER, metric, picker, tries, width, BUDGET, MESH, pairs,
-                                 scoring=scoring)
+        return polish_greedy.run(bid, POWER, metric, CHEAP.picker, CHEAP.tries, CHEAP.width,
+                                 BUDGET, MESH, CHEAP.pairs, scoring=scoring)
     if device == "gpu":
         with _GpuPeak() as peak:
             row = run()
@@ -452,11 +452,8 @@ ROAD_CAL = ("resistance_lp", "cycle_native")   # the networks calibrated: the li
 def roads_one(bid: str) -> str | None:
     """Phase 2b: each ROAD_CAL network's area prefixes as the 60-block run scored them on their
     carved fixed mesh (road_rescore cx_network's rows, on a core) against the complex rebuilt
-    with the prefix carved (gap_compare.ComplexModel.scored: its lenses and each home's reach);
-    rows ROWS/roads/<id>.parquet."""
-    import geopandas as gpd
-
-    import road_rescore as rr
+    with the prefix carved (gap_compare.ComplexModel.scored: its lenses, the baseline's P and the
+    state's, each home's reach); rows ROWS/roads/<id>.parquet."""
     out = ROWS / "roads" / f"{bid}.parquet"
     try:
         [b] = common.build_blocks([bid])
@@ -466,10 +463,7 @@ def roads_one(bid: str) -> str | None:
         road_rows = HERE / "road_rows"
         rows = []
         for name in ROAD_CAL:
-            fx = rr.cx_dir(road_rows, metric) / f"{bid}__{name}.parquet"
-            if not fx.exists():
-                continue
-            fixed = pd.read_parquet(fx)
+            fixed = pd.read_parquet(rr.cx_dir(road_rows, metric) / f"{bid}__{name}.parquet")
             ordered = gpd.read_parquet(rr.ordered_path(road_rows / "scratch", bid, name))
             for mk in sorted({int(v) for v in fixed.m}):
                 f = fixed[fixed.m == mk].iloc[0]

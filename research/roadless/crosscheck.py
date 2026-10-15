@@ -77,7 +77,7 @@ def clearing_runs() -> dict[str, str]:
     """The clearings both metrics score: the stored ones (road_rescore.cx_stored) and the
     complex's presets as the 60-block run made them on a core (their polish scored exactly)."""
     presets = rr.cx_presets(metrics.RUNTIME, search.Exactly())
-    return {**rr.cx_stored(metrics.RUNTIME),
+    return {**rr.cx_stored(metrics.RUNTIME)._asdict(),
             "simp_cxE": rr.store_run(presets.simp), "cheap_cxE": rr.store_run(presets.cheap)}
 
 
@@ -211,8 +211,8 @@ def dry_kinds(geo: gc.Geometry, spec: gc.Spec, standing: NDArray[np.bool_],
                bottleneck=b)
 
 
-PICTURE_ARMS = {"simp_fws": f"relax_rows/{RASTER}/{rr.CX_PLAN}/D0.05.p1",
-                "simp_cx": f"relax_rows/{metrics.RUNTIME}/{rr.CX_PLAN}/D0.05.p1"}
+STORED = rr.cx_stored(metrics.RUNTIME)
+PICTURE_ARMS = {"simp_fws": STORED.simp_fws, "simp_cx": STORED.simp_cx}
 LANE_SHARE = 0.10        # a model's main lanes: its top tenth of the open cells by flow
 DRY = 0.01               # a cell the complex holds nearly dry: under this share of its median
 
@@ -259,8 +259,9 @@ def pictures(bid: str, device: str) -> None:
         dry = open_r & (~open_c | (np.nan_to_num(s_c) < DRY * np.median(s_c[open_c])))
         k = dry_kinds(geo, metric.spec, ~x, fr, 2.0 * metric.form.grow, dry)
         tot = float(s_r[open_r].sum())
-        share = {name: float(s_r[getattr(k, name)].sum() / tot)
-                 for name in ("band", "inside", "zone", "pocket", "other")}
+        share = {name: float(s_r[cells].sum() / tot)
+                 for name, cells in (("band", k.band), ("inside", k.inside), ("zone", k.zone),
+                                     ("pocket", k.pocket), ("other", k.other))}
         bott = k.bottleneck[k.pocket]
         rows.append(dict(
             block=bid, state=key, n_cleared=int(x.sum()), cells_r=int(open_r.sum()),

@@ -31,6 +31,7 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -46,6 +47,17 @@ import seam  # noqa: E402
 
 RTOL = 1e-3          # the solves while polishing, as SIMP's base plan's (t0.001)
 SCORE_EPS = 1e-6     # candidates' eps world, as SIMP's incumbent (k1s1e-06)
+
+
+class Preset(NamedTuple):
+    """A greedy and its polish, as `main` and `rows_of` take them."""
+    picker: str
+    tries: int
+    width: int
+    pairs: bool
+
+
+CHEAP = Preset(picker="S0.01cat", tries=64, width=8, pairs=False)     # the cheap preset
 
 
 def rows_of(picker: str, tries: int, width: int, pairs: bool, scoring: search.PolishScoring,

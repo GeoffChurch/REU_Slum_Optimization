@@ -24,15 +24,15 @@ import gap_complex as gc  # noqa: E402
 import gap_factor  # noqa: E402
 import gap_maps  # noqa: E402
 import metrics  # noqa: E402
+import road_rescore  # noqa: E402
 
 BID = "ZAF.9.3.1_1_5810"
 OUT = Path(sys.argv[1])
 SP = Path(sys.argv[2])
 PAD = 120.0
 H = 0.5                  # a pixel's side (m): the page's layers, as the raster's cells were
-PLAN = "fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2"
-ARMS = {"cheap": ("cheap preset", f"polish_rows/{metrics.RUNTIME}/S0.01cat.P64w8/D0.05.p1"),
-        "default": ("SIMP", f"relax_rows/{metrics.RUNTIME}/{PLAN}/D0.05.p1")}
+STORED = road_rescore.cx_stored(metrics.RUNTIME)
+ARMS = {"cheap": ("cheap preset", STORED.cheap_cx), "default": ("SIMP", STORED.simp_cx)}
 
 [b] = common.build_blocks([BID])
 metric = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())

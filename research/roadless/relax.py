@@ -552,6 +552,9 @@ class Plan(NamedTuple):
         return tuple(out)
 
 
+SIMP_DEFAULT = "fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2"     # SIMP's default (plan_of's spec)
+
+
 def plan_of(spec: str) -> Plan:
     m = re.fullmatch(r"fw(?P<fw>\d+)\.q(?P<q>[0-9.]+)\.i(?P<i>\d+)\.t(?P<t>[0-9.e-]+?)"
                      r"(?:\.e(?P<e>[0-9.e-]+?))?(?:\.b(?P<b0>[0-9.]+)-(?P<bmax>[0-9.]+))?"
