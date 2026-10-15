@@ -266,11 +266,12 @@ items up front"), in the order proposed:
    exports; the translucent search if it is on the frontier) and the cross-checks against the
    raster, on a GPU; on a GPU the host's work is the time (the refined solves' transfers, the
    gradient, the assembly; for the cheap preset free first's passes and the catchment's sweep);
-   phase 3, the retirement; then the region test on the complex and the consolidated pass. A lead
-   before that pass: the search's weakness on the complex (the tension ranks the buildings sharing
-   a zone at Spearman +0.83 against +0.97 alone, and the complex's own polish climbs from the
-   raster's clearings; the lumped tension's +0.042 on 22422's cheap preset a datum), tried with
-   moves that clear a zone's buildings together.
+   phase 3, the retirement; then the region test on the complex, the replay test of epistemetry's
+   pruning (Experiment design, below), and the consolidated pass. A lead before that pass: the
+   search's weakness on the complex (the tension ranks the buildings sharing a zone at Spearman
+   +0.83 against +0.97 alone, and the complex's own polish climbs from the raster's clearings; the
+   lumped tension's +0.042 on 22422's cheap preset a datum), tried with moves that clear a zone's
+   buildings together.
    (4) **Exits: the region model** (owner: "we'd still only leak at the
    outer boundary, so all current must exit ... some of the outer boundary might not leak at all
    and might have 0 conductance (like a railroad)"; "we can adjust boundary leakage, uniform
@@ -500,6 +501,15 @@ Not pursued, with what would change that:
 
 ## Experiment design
 
+- **Pruning by epistemetry's decision layer** (owner 2026-10-14: "Yes"; before the consolidated
+  pass). Replay the finished comparisons (every variant x block matrix already run, with its GPU
+  times) through GeoffChurch/epistemetry's `design` (kg_star over the menu of variants,
+  greedy_batch filling the cards, ProbabilisticRegret's stop; a pinned commit in the research
+  group) against seqscreen.py and the all-blocks calls: GPU-seconds spent and wrong calls. Adopt it
+  for the consolidated pass's pruning only if it beats seqscreen; the site's numbers still come
+  from every block. The risk is its Gaussian belief: the gains per block are heavy-tailed, a t
+  pinned the mean at 0 and kernelcore's reweighting collapsed (NOTES, "Stopping by the value of
+  more blocks"), so the replay must hold the gated blocks' collapses.
 - **Adaptive block selection** (first look done, NOTES "Which blocks tell methods apart": collapses dominate; screen = gated sentinel + random sample; picking 'discriminating' blocks beyond the sentinel misleads. Remaining value: sequential sample size; wiki `pages/methods/adaptive-benchmark-items.md`).
   Fit a factor model to the method x block matrix of paired differences (axes like "opens
   gated pockets", "spreads in dense bands"); for a new variant run first the blocks with the
