@@ -61,8 +61,9 @@ blocks), chi(Y / X) = chi(Y) - chi(X) + 1. A tree of tendrils reaching in from t
 each corridor joining two points of the edge or closing a ring inside adds 1 (a grid of n blocks
 inside an exit ring has n - 1: the `loop-index` guard's cases). Holes in the network under
 HOLE_M2 (a pixel or two below T inside a lane) are filled first. T is a quantile LOOP_Q of the
-baseline's flow over the open pixels (the top tenth of its area), the same for every state of a
-configuration; reported per km^2 of the region.
+baseline's flow over the open pixels (the top tenth of its area at 0.9), the same for every state
+of a configuration; reported per km^2 of the region, for the network after a clearing and for the
+corridors it induces (the pixels whose flow rose by at least T).
 
 Typed as `search.py`'s docstring says:
 
@@ -519,9 +520,18 @@ def loop_rows() -> pd.DataFrame:
         for q in LOOP_Q:
             T = float(np.quantile(base[on], q))
             for what in _states(label):
-                L = loops(_image(label, what), inside, exits, T, FRAME_H, contract=True)
-                rows.append(dict(label=label, state=what, q=q, T=T, loops=L,
-                                 per_km2=L / km2))
+                after = _image(label, what)
+                L = loops(after, inside, exits, T, FRAME_H, contract=True)
+                # the induced corridors: where the flow rose by at least T
+                rise = (np.where(np.isfinite(after), after, 0.0)
+                        - np.where(np.isfinite(base), base, 0.0)).astype(np.float32)
+                Li = loops(rise, inside, exits, T, FRAME_H, contract=True)
+                rows.append(dict(label=label, state=what, q=q, T=T, loops=L, per_km2=L / km2,
+                                 induced=Li, induced_per_km2=Li / km2,
+                                 corridor_km2=float((inside & (np.nan_to_num(after) >= T)).sum())
+                                 * FRAME_H ** 2 / 1e6,
+                                 induced_km2=float((inside & (rise >= T)).sum())
+                                 * FRAME_H ** 2 / 1e6))
     return pd.DataFrame(rows)
 
 
