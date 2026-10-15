@@ -15,7 +15,7 @@ import pickle
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import numpy as np
 import pandas as pd
@@ -118,11 +118,21 @@ def _from_source(ids: list[str]) -> list:
     out = list(_source().restricted(plain).region().blocks) if plain else []
     faces = [r for r in named.values() if r is not None]
     if faces:
-        every = _source("data.min_buildings=1")
-        out += [regions.build(r, every.blocks_path,
-                              lambda m: list(every.restricted(m).region().blocks))
-                for r in faces]
+        out += [regions.build(r, _every().blocks_path, member_blocks) for r in faces]
     _known(ids, {b.block_id for b in out}, where="the Cape Town source")
+    return out
+
+
+def _every() -> Any:
+    """The Cape Town source at any building count (its floor dropped)."""
+    return _source("data.min_buildings=1")
+
+
+def member_blocks(ids: list[str]) -> list[Block]:
+    """kblocks from the Cape Town source at any building count: a region's members (regions.build;
+    the per-block model of a region's homes, region_leaks), each id checked (`_known`)."""
+    out = list(_every().restricted(ids).region().blocks)
+    _known(ids, {b.block_id for b in out}, where="the Cape Town source at any building count")
     return out
 
 

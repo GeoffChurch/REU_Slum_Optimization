@@ -94,7 +94,7 @@ BUDGET = relax.D_LENS                   # area D 0.05
 POWER = 1.0                             # P, the headline (owner 2026-10-12)
 POP = common.PopulationDemand()
 SPEED_REPS = 2
-GPU_SAMPLE_S = 0.5          # _GpuPeak's sampling (measurement only)
+GPU_SAMPLE_S = 0.5          # GpuPeak's sampling (measurement only)
 ROWS = HERE / "gap_rows" / "runtime"
 ITEM = re.compile(r"(simp|cheap)(E?)(@e[0-9.e-]+)?")   # a preset item: the polish's scoring, and
                                                       # the preset's search eps (the metric's
@@ -105,7 +105,7 @@ OVERSIZED_M = 49.0      # the size classes' line: a large block over this many m
                         # the retired raster at h 0.5 (common.LARGE's M_unknowns) is oversized
 
 
-def _peak_gb() -> float:
+def peak_gb() -> float:
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2 ** 20
 
 
@@ -155,7 +155,7 @@ def _gpu_gb() -> float:
     return float(total - free) / 2 ** 30
 
 
-class _GpuPeak:
+class GpuPeak:
     """The device's memory in use, its most over a run, sampled every GPU_SAMPLE_S seconds by a
     thread (the factorizations' plans live and die with their models, inside the run)."""
 
@@ -169,7 +169,7 @@ class _GpuPeak:
         while not self.done.wait(GPU_SAMPLE_S):
             self.peak = max(self.peak, _gpu_gb())
 
-    def __enter__(self) -> _GpuPeak:
+    def __enter__(self) -> GpuPeak:
         self.peak = _gpu_gb()
         self.thread.start()
         return self
@@ -187,7 +187,7 @@ def warm(bid: str) -> None:
     t0 = time.time()
     fx = METRIC.fixed(b, cache=gcl.CACHE, carving=gcl.Carving.none(gc.geometry(b)))
     print(f"{bid}: the fixed mesh, {fx.fm.nt} triangles, {time.time() - t0:.0f}s (built in "
-          f"{fx.t_build:.0f}s); peak {_peak_gb():.1f} GB", flush=True)
+          f"{fx.t_build:.0f}s); peak {peak_gb():.1f} GB", flush=True)
 
 
 def preset(bid: str, item: str, device: str) -> None:
@@ -212,16 +212,16 @@ def preset(bid: str, item: str, device: str) -> None:
         return polish_greedy.run(bid, POWER, metric, CHEAP.picker, CHEAP.tries, CHEAP.width,
                                  BUDGET, CHEAP.pairs, scoring=scoring)
     if device == "gpu":
-        with _GpuPeak() as peak:
+        with GpuPeak() as peak:
             row = run()
         gpu_gb = peak.peak
     else:
         row, gpu_gb = run(), np.nan
-    row.update(item=item, metric=metric.name, host=socket.gethostname(), peak_rss_gb=_peak_gb(),
+    row.update(item=item, metric=metric.name, host=socket.gethostname(), peak_rss_gb=peak_gb(),
                gpu_gb=gpu_gb, wall=time.time() - t0)
     out.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame([row]).to_parquet(out)
-    print(f"{bid} {item} on {device}: peak {_peak_gb():.1f} GB, {row['wall']:.0f}s", flush=True)
+    print(f"{bid} {item} on {device}: peak {peak_gb():.1f} GB, {row['wall']:.0f}s", flush=True)
 
 
 # ------------------------------------------------------------------ baseline
@@ -238,7 +238,7 @@ def baseline_one(bid: str) -> str | None:
             fx = METRIC.fixed(b, cache=Path(tmp),
                               carving=gcl.Carving.none(gc.geometry(b)))
             t_build = time.time() - t0
-            peak_build = _peak_gb()
+            peak_build = peak_gb()
         m = METRIC.model(b, fx, demand=POP)
         t_model = time.time() - t0
         cm = gcmp.ComplexModel(b, METRIC.fs, METRIC.form)
@@ -256,7 +256,7 @@ def baseline_one(bid: str) -> str | None:
                    nt=fm.nt, cells=m.c.n, unknowns0=m.cells0, cells_rebuild=cm.cells0,
                    nt_rebuild=cm.nt0, unflat=fm.unflat, splits=fm.splits, rounds=fm.rounds,
                    flat=fm.flat, skipped=fm.skipped, t_build=t_build, t_model=t_model,
-                   t_rebuild=cm.t_base, peak_build_gb=peak_build, peak_gb=_peak_gb(),
+                   t_rebuild=cm.t_base, peak_build_gb=peak_build, peak_gb=peak_gb(),
                    host=socket.gethostname())
         out.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame([row]).to_parquet(out)
@@ -347,12 +347,12 @@ def speed_one(bid: str) -> str | None:
         rows = []
         t0 = time.time()
         fx = METRIC.fixed(b, cache=gcl.CACHE, carving=gcl.Carving.none(gc.geometry(b)))
-        rows.append(dict(what="load", wall=time.time() - t0, peak_gb=_peak_gb()))
+        rows.append(dict(what="load", wall=time.time() - t0, peak_gb=peak_gb()))
         metric = metrics.metric_of(METRIC.name, device=device)
         t0 = time.time()
         m = metric.model(b, fx, demand=POP)
         rows.append(dict(what="model (baseline: the plan, 4 solves)", wall=time.time() - t0,
-                         peak_gb=_peak_gb(), unknowns=m.cells0, cells=m.c.n))
+                         peak_gb=peak_gb(), unknowns=m.cells0, cells=m.c.n))
         rng = np.random.default_rng(20261014)
         x = np.zeros(m.n, dtype=bool)
         order = rng.permutation(m.n)
@@ -371,10 +371,10 @@ def speed_one(bid: str) -> str | None:
         for rep in range(SPEED_REPS):
             for what, fn in cases:
                 r = _measure(m, what, fn)
-                rows.append(dict(r, rep=rep, peak_gb=_peak_gb()))
+                rows.append(dict(r, rep=rep, peak_gb=peak_gb()))
                 print(f"{bid} {device} {what}: {r['wall']:.2f}s (factorization "
                       f"{r['t_factorization']:.2f}s, solves {r['t_solves']:.2f}s); peak "
-                      f"{_peak_gb():.1f} GB", flush=True)
+                      f"{peak_gb():.1f} GB", flush=True)
         df = pd.DataFrame(rows).assign(block=bid, n=m.n, unknowns0=m.cells0, cells=m.c.n,
                                        device=device, host=socket.gethostname(),
                                        gpu_gb=_gpu_gb() if device == "gpu" else np.nan)

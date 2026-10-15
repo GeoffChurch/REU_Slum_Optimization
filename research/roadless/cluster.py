@@ -3,12 +3,14 @@
 `blocks` runs one task per block on a GPU: a script command with `{id}` in it, with the block
 bank shipped as an input (a node has no source data; common.build_blocks reads the bank). The
 tasks run the gap complex (gap_clear: cuDSS on the card, gap_factor.CuDSS), and `--gb`, the GPU
-memory every task needs, routes each to the smallest card that holds it. (The retired raster's
-tasks were sized from the cells of their grid, `--mesh` and `--scans`, at GB_PER_MILLION GB per
-million unknowns: NOTES, "The complex as the runtime: the raster retired".) `--unpack` ships a
-tar per block of inputs git does not carry (parquet rows, at their repo paths) and unpacks it in
-the task's checkout before the command. Results (parquet rows) come back to the same paths here,
-never overwriting a local file.
+memory every task needs, routes each to the smallest card that holds it, or with `--node` to that
+node's cards (a node's mesh cache is its own disk: a region's tasks pinned to one node build its
+mesh once, NOTES "Exits as leaks: the region model on the complex (5810@major)"). (The
+retired raster's tasks were sized from the cells of their grid, `--mesh` and `--scans`, at
+GB_PER_MILLION GB per million unknowns: NOTES, "The complex as the runtime: the raster
+retired".) `--unpack` ships a tar per block of inputs git does not carry (parquet rows, at their
+repo paths) and unpacks it in the task's checkout before the command. Results (parquet rows) come
+back to the same paths here, never overwriting a local file.
 
 `cpu` runs one task per (block, item) on the CPUs of one node and no GPU: a script command with
 `{id}` and `{item}` in it, for every block of the ids and every item of `--items`, so a block's
@@ -23,8 +25,8 @@ each task unpacks its block's tar through cluster_unpack.py, which renames every
 a block's tasks unpack one tar at once into the checkout they share.
 
     uv run python research/roadless/cluster.py setup
-    uv run python research/roadless/cluster.py submit blocks <run> --gb G [--time T] [--gpus N] \
-        [--with FILE ...] [--unpack TAR] <ids,|@file> -- <script> <args with {id}>
+    uv run python research/roadless/cluster.py submit blocks <run> --gb G [--node N] [--time T] \
+        [--gpus N] [--with FILE ...] [--unpack TAR] <ids,|@file> -- <script> <args with {id}>
     uv run python research/roadless/cluster.py submit cpu <run> --node orion|quadro2 --cpus C \
         --mem G --items <items,|@file> [--gpus N] [--time T] [--unpack TAR] <ids,|@file> \
         -- <script> <args with {id} and {item}>
@@ -116,6 +118,8 @@ class Blocks:
         parser.add_argument("--time", help="sbatch --time (default: the cluster's)")
         parser.add_argument("--gb", type=float, required=True,
                             help="the GPU memory each task needs, in GB: its card's size")
+        parser.add_argument("--node", help="the node every task runs on (--nodelist; its card "
+                                           "holds --gb): unpinned, the smallest card that does")
         parser.add_argument("--with", dest="extra", type=Path, action="append", default=[],
                             help="a file shipped beside the block bank (repeatable); a task "
                                  "reads it as $CLUSTER_SUBMIT_INPUTS/<its name>")
@@ -141,7 +145,7 @@ class Blocks:
         common.write_bank(ids, workdir / "bank.pkl")
         tasks = tuple(cs.Task(task_line(b), args.gb) for b in ids)
         return cs.RunPlan(
-            tasks=tasks, resources=cs.Resources(cpus=4, mem_gb=64, time=args.time, node=None),
+            tasks=tasks, resources=cs.Resources(cpus=4, mem_gb=64, time=args.time, node=args.node),
             inputs=(workdir / "bank.pkl", *args.extra, *unpack.values()),
             prelude=PRELUDE, describe=(f"{len(ids)} blocks: {line}",))
 

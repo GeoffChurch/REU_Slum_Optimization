@@ -12,12 +12,20 @@ Geofabrik extract (reblock.data.pools.pbf_path), polygonized inside a window aro
 that doubles until the face no longer touches it; a face the network does not close within
 MAX_WINDOW_M is an error. The buildings are the kblock source's, from every kblock whose interior
 point the face holds, at any building count (the source's own floor dropped), kept where their
-published anchor is inside the face.
+published anchor is inside the face, each with its kblock (`member`) and its row there
+(`member_row`).
+
+Its OSM features (gap_exits.Osm, attrs["osm"]: the extract's ways, railway nodes and water areas
+meeting the face, their tags read once here, `osm_of`) are what the region model's barriers and
+street boost read (gap_exits: NOTES, "Exits as leaks: the region model on the complex
+(5810@major)").
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any, cast
 
 import geopandas as gpd
 import pandas as pd
@@ -26,6 +34,7 @@ import shapely
 from shapely.geometry import LineString, Polygon
 from shapely.ops import polygonize, unary_union
 
+from gap_exits import Osm
 from reblock.buildings import ANCHOR_COL
 from reblock.contracts import Block
 from reblock.data.pools import pbf_path
@@ -33,6 +42,7 @@ from reblock.region import shared_tier
 
 FIRST_WINDOW_M = 5000.0
 MAX_WINDOW_M = 40000.0
+OSM_PAD_M = 100.0        # the OSM features are read in the face's box grown by this (m)
 
 
 @dataclass(frozen=True)
@@ -89,6 +99,48 @@ def face(seed: Polygon, network: RoadNetwork, crs, iso: str) -> Polygon:
                      f"within {MAX_WINDOW_M:g} m")
 
 
+_TAG = re.compile(r'"((?:[^"\\]|\\.)*)"=>"((?:[^"\\]|\\.)*)"')
+
+
+def _tags(other: pd.Series) -> list[dict[str, str]]:
+    """GDAL's `other_tags` (an hstore string, or None) per feature, as a dict."""
+    return [dict(_TAG.findall(t)) if isinstance(t, str) else {} for t in other]
+
+
+def _tag(tags: list[dict[str, str]], key: str) -> list[str]:
+    return [t[key] if key in t else "" for t in tags]
+
+
+def osm_of(f: Polygon, crs: Any, iso: str) -> Osm:
+    """The OSM features of the country's extract meeting the face `f` (module docstring)."""
+    bbox = tuple(gpd.GeoSeries([shapely.box(*f.buffer(OSM_PAD_M).bounds)], crs=crs)
+                 .to_crs(4326).total_bounds)
+    path = pbf_path(iso)
+
+    def read(layer: str, columns: list[str]) -> gpd.GeoDataFrame:
+        g = pyogrio.read_dataframe(path, layer=layer, bbox=bbox, columns=columns).to_crs(crs)
+        return cast(gpd.GeoDataFrame,
+                    g[shapely.intersects(g.geometry.to_numpy(), f)].reset_index(drop=True))
+
+    w = read("lines", ["highway", "railway", "waterway", "other_tags"])
+    wt = _tags(w.other_tags)
+    ways = gpd.GeoDataFrame(
+        {"highway": w.highway.fillna("").to_numpy(), "railway": w.railway.fillna("").to_numpy(),
+         "waterway": w.waterway.fillna("").to_numpy(),
+         "bridge": [b not in ("", "no") for b in _tag(wt, "bridge")],
+         "tunnel": [b not in ("", "no") for b in _tag(wt, "tunnel")]},
+        geometry=w.geometry.to_numpy(), crs=crs)
+    p = read("points", ["other_tags"])
+    nodes = gpd.GeoDataFrame({"railway": _tag(_tags(p.other_tags), "railway")},
+                             geometry=p.geometry.to_numpy(), crs=crs)
+    a = read("multipolygons", ["natural", "landuse", "other_tags"])
+    areas = gpd.GeoDataFrame(
+        {"natural": a.natural.fillna("").to_numpy(), "landuse": a.landuse.fillna("").to_numpy(),
+         "waterway": _tag(_tags(a.other_tags), "waterway")},
+        geometry=a.geometry.to_numpy(), crs=crs)
+    return Osm(ways=ways, nodes=nodes, areas=areas)
+
+
 def build(region: FaceRegion, blocks_path, members_of: Callable[[list[str]], list[Block]]
           ) -> Block:
     """The region's Block. `blocks_path`: the kblock source's blocks parquet; `members_of`: the
@@ -101,7 +153,10 @@ def build(region: FaceRegion, blocks_path, members_of: Callable[[list[str]], lis
     f = face(seed, region.network, crs, region.seed.split(".", 1)[0])
     pts = allb.geometry.representative_point()
     members = members_of(sorted(allb.block_id[shapely.contains(f, pts.to_numpy())]))
-    bld = pd.concat([m.building_geometries for m in members], ignore_index=True)
+    # each building's kblock and its row there (the per-block model's home: region_leaks)
+    bld = pd.concat([m.building_geometries.assign(member=m.block_id,
+                                                   member_row=range(len(m.building_geometries)))
+                     for m in members], ignore_index=True)
     anchors = gpd.GeoSeries(bld[ANCHOR_COL].to_numpy(), crs=crs)
     bld = gpd.GeoDataFrame(bld[shapely.contains(f, anchors.to_numpy())].reset_index(drop=True),
                            geometry="geometry", crs=crs)
@@ -112,4 +167,5 @@ def build(region: FaceRegion, blocks_path, members_of: Callable[[list[str]], lis
                  streets=gpd.GeoDataFrame(geometry=[LineString(f.exterior.coords)], crs=crs),
                  source_content_hash=None, building_geometries=bld,
                  building_tier=shared_tier(members),
-                 attrs={"members": len(members), "network": region.network.name})
+                 attrs={"members": len(members), "network": region.network.name,
+                        "osm": osm_of(f, crs, region.seed.split(".", 1)[0])})

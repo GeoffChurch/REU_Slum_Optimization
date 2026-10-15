@@ -8,17 +8,18 @@ road corridor, the atlas's layers): the same questions, asked of the metric that
 THE FLUX (`flow_of`). A state's potential per cell under an injection per home (gap_clear.Model:
 u, the escape time from the cell). Each static passage q between cells a and b conducts Tp_q (its
 weight times its factor: gap_clear.Reach.Tp) and carries F_q = Tp_q (u_a - u_b) from a to b; each
-finite street face f of a cell c carries Gf_f u_c to the street; a ground cell (an obtuse exit
-triangle's: u = 0) drains whatever reaches it. Kirchhoff's law holds at every open cell: at an
-unknown cell the passages' net outflow and its street faces' equal its injection (the operator's
-row, A u = b, refined to the backward-error floor), at a ground cell the drainage equals the
-inflow (`conservation`, the `flux` guard of gap_clear_check).
+finite street face f of a cell c carries Gf_f u_c to the street; a cell with a leak (the region
+model's, gap_exits) drains l_c u_c to ground; a ground cell (an obtuse exit triangle's: u = 0)
+drains whatever reaches it. Kirchhoff's law holds at every open cell: at an unknown cell the
+passages' net outflow, its street faces' and its leak's equal its injection (the operator's row,
+A u = b, refined to the backward-error floor), at a ground cell the drainage equals the inflow
+(`conservation`, the `flux` guard of gap_clear_check).
 
 THE CURRENT. Each cell's mean current density (people per metre per unit time), by the divergence
 theorem with each passage's normal flux constant along it: |C| j_C = sum_e F_e m_e - sum_p s_p x_p
-over its outflows (m_e a passage's or a street face's midpoint; inflows negative) and the
-injections s_p at its demand points x_p. Its magnitude is the picture's flow; the escape time of a
-cell is its potential.
++ l_C u_C x_C over its outflows (m_e a passage's or a street face's midpoint; inflows negative),
+the injections s_p at its demand points x_p and its leak's drainage at its centroid x_C. Its
+magnitude is the picture's flow; the escape time of a cell is its potential.
 
 THE PICTURE (`paint`). The triangles painted onto a pixel grid (a Frame), a pixel the mean over its
 SUB x SUB sub-samples of the triangles that hold them (NaN where none does: footprints, the band,
@@ -66,7 +67,8 @@ class CellFlow(NamedTuple):
     (FullCells.pe order) its flux `F` from cell ea to eb; per finite street face (FullCells.pf) its
     flux `Ff` to the street; per cell its injection `inj` (the right-hand side), its drainage to
     the street `drain` (its street faces', or a ground cell's inflow) and its mean current density
-    `j` (cells x 2); per triangle its flow `jt` (its cell's |j|, 0 off the state's cells)."""
+    `j` (cells x 2); per triangle its flow `jt` (its cell's |j|, 0 off the state's cells). The
+    drainage is the street's and the leaks' (gap_exits): `leak` per cell the leak's share of it."""
     u: NDArray[np.float64]
     F: NDArray[np.float64]
     Ff: NDArray[np.float64]
@@ -74,6 +76,7 @@ class CellFlow(NamedTuple):
     drain: NDArray[np.float64]
     j: NDArray[np.float64]
     jt: NDArray[np.float64]
+    leak: NDArray[np.float64]
 
 
 def _passage_flux(Tp: NDArray[np.float64], u: NDArray[np.float64], ea: NDArray[np.int64],
@@ -91,7 +94,8 @@ def flow_of(m: gcl.Model, st: gcl.State, inj: NDArray[np.float64]) -> CellFlow:
     rhs = m._rhs(st, inj)
     n = c.n
     out = (np.bincount(c.ea, weights=F, minlength=n) - np.bincount(c.eb, weights=F, minlength=n))
-    drain = np.bincount(c.fc, weights=Ff, minlength=n)
+    leak = np.where(r.unknown, st.sys.graph.leak * u, 0.0)     # to ground through the leaks
+    drain = np.bincount(c.fc, weights=Ff, minlength=n) + leak
     drain = np.where(r.ground, -out, drain)              # a ground cell drains its inflow
     # the mean current density: outflows at their midpoints, less the injections at their points
     mid = 0.5 * (fm.xy[fm.pu[c.pe]] + fm.xy[fm.pv[c.pe]])
@@ -115,9 +119,15 @@ def flow_of(m: gcl.Model, st: gcl.State, inj: NDArray[np.float64]) -> CellFlow:
         mom[:, k] -= np.bincount(pcell, weights=s_pt * pts.xy[on, k], minlength=n)
     tri_area = 0.5 * np.abs(_cross(fm.xy, fm.tri))
     area = np.bincount(c.cell, weights=tri_area, minlength=n)
+    # the leaks' drainage, at each cell's centroid
+    tcen = fm.xy[fm.tri].mean(axis=1)
+    for k in range(2):
+        cen = (np.bincount(c.cell, weights=tri_area * tcen[:, k], minlength=n)
+               / np.maximum(area, 1e-300))
+        mom[:, k] += leak * cen
     j = mom / np.maximum(area, 1e-300)[:, None]
     jt = np.where(r.live[c.cell], np.hypot(j[c.cell, 0], j[c.cell, 1]), 0.0)
-    return CellFlow(u=u, F=F, Ff=Ff, inj=rhs, drain=drain, j=j, jt=jt)
+    return CellFlow(u=u, F=F, Ff=Ff, inj=rhs, drain=drain, j=j, jt=jt, leak=leak)
 
 
 def _cross(xy: NDArray[np.float64], tri: NDArray[np.int64]) -> NDArray[np.float64]:
@@ -127,17 +137,18 @@ def _cross(xy: NDArray[np.float64], tri: NDArray[np.int64]) -> NDArray[np.float6
 
 def conservation(st: gcl.State, fl: CellFlow) -> NDArray[np.float64]:
     """Per open cell (the state's live cells) its imbalance, relative to the largest current
-    through a cell: at an unknown cell the net outflow through its passages and street faces less
-    its injection, at a ground cell its drainage less its inflow (0 by `flow_of`'s construction
-    of the drainage: the guard reads the unknown cells, Kirchhoff's law as solved)."""
+    through a cell: at an unknown cell the net outflow through its passages, street faces and leak
+    less its injection, at a ground cell its drainage less its inflow (0 by `flow_of`'s
+    construction of the drainage: the guard reads the unknown cells, Kirchhoff's law as
+    solved)."""
     c, r = st.sys.cells, st.reach
     n = c.n
     out = (np.bincount(c.ea, weights=fl.F, minlength=n)
            - np.bincount(c.eb, weights=fl.F, minlength=n)
-           + np.bincount(c.fc, weights=fl.Ff, minlength=n))
+           + np.bincount(c.fc, weights=fl.Ff, minlength=n) + fl.leak)
     through = (np.bincount(c.ea, weights=np.abs(fl.F), minlength=n)
                + np.bincount(c.eb, weights=np.abs(fl.F), minlength=n)
-               + np.bincount(c.fc, weights=np.abs(fl.Ff), minlength=n))
+               + np.bincount(c.fc, weights=np.abs(fl.Ff), minlength=n) + np.abs(fl.leak))
     scale = max(float(through.max()), 1e-300)
     bal = np.where(r.unknown, out - fl.inj, 0.0)
     return np.where(r.live, bal, 0.0) / scale

@@ -73,7 +73,7 @@ was retired: NOTES, "The complex as the runtime: the raster retired".)
 """
 from __future__ import annotations
 
-import dataclasses
+import copy
 import hashlib
 import json
 import os
@@ -94,7 +94,9 @@ from scipy.sparse.csgraph import connected_components
 import clear
 import clearings
 import common
+import digests
 import gap_complex as gc
+import gap_exits as gx
 import gap_factor
 import gap_flow as gf
 import relax
@@ -846,7 +848,7 @@ class Fixed(NamedTuple):
         kt = form.terms(atoms, fm, fs.quad).value(k0)
         fe, fb = form.fill_pairs(fm)
         kp, _binds = _passage_factors(fm, kt, k0, Fill(e=fe, b=fb))
-        live0 = Graph(fm, cells).reach(fm, kt, kp).live[cells.cell]
+        live0 = Graph(fm, cells, leak=np.zeros(cells.n)).reach(fm, kt, kp).live[cells.cell]
         _ib, band_open = gc._open_ground(geo, np.ones(len(geo.polys), dtype=bool), spec.band_m,
                                          carve=None, grow=0.0)
         ids = np.flatnonzero(live0)
@@ -1028,12 +1030,14 @@ def _values(indptr, indices, epair, W, G, unknown):
 class Graph:
     """A cell structure's fixed pattern (gap_factor.Pattern: every pair of cells a static passage
     joins, and the diagonal, at the cells' centroids), per off-diagonal entry its pair (`epair`;
-    the diagonal's -1), per static passage its pair (`pair`). A state's reach is a search through
-    the conducting pairs from the street, its operator's values one pass over the pattern
-    (`_values`): every state on the one pattern, a closed passage an explicit zero, a cell off
-    the unknowns an identity row."""
+    the diagonal's -1), per static passage its pair (`pair`), and per cell its fixed conductance
+    to ground (`leak`: the region model's leaks, gap_exits; zero for the per-block exits). A
+    state's reach is a search through the conducting pairs from the cells joined to ground (the
+    street's faces, the ground cells, the leaking cells), its operator's values one pass over the
+    pattern (`_values`): every state on the one pattern, a closed passage an explicit zero, a cell
+    off the unknowns an identity row, a leak on its cell's diagonal."""
 
-    def __init__(self, fm: FullMesh, c: FullCells):
+    def __init__(self, fm: FullMesh, c: FullCells, *, leak: NDArray[np.float64]):
         n = c.n
         self.c = c
         ea, eb = c.ea.astype(np.int64), c.eb.astype(np.int64)
@@ -1062,9 +1066,23 @@ class Graph:
         street = np.zeros(n, dtype=bool)
         street[c.fc] = True
         street[c.gcell] = True
-        self.street_all = street
-        self.live_all = _bfs(indptr, self.pattern.indices, self.epair, np.ones(self.npair),
-                             street)
+        self.street = street
+        self._grounded(leak)
+
+    def _grounded(self, leak: NDArray[np.float64]) -> None:
+        if len(leak) != self.c.n or (leak < 0).any():
+            raise ValueError("a leak is a non-negative conductance per cell")
+        self.leak = leak
+        self.seed_all = self.street | (leak > 0)
+        self.live_all = _bfs(self.pattern.indptr, self.pattern.indices, self.epair,
+                             np.ones(self.npair), self.seed_all)
+
+    def with_leak(self, leak: NDArray[np.float64]) -> Graph:
+        """This pattern with `leak` per cell (one search for the eps world's reach; the pattern,
+        and so a factorization's plan of it, unchanged)."""
+        g = copy.copy(self)
+        g._grounded(leak)
+        return g
 
     def reach(self, fm: FullMesh, kt: NDArray[np.float64], kp: NDArray[np.float64]) -> Reach:
         c = self.c
@@ -1077,28 +1095,30 @@ class Graph:
         ground[c.gcell[kf[c.pg] > 0]] = True
         G = np.bincount(c.fc, weights=Gf, minlength=c.n)
         p = self.pattern
-        seed = ground | (G > 0)
-        if (self.npair == 0 or W.min() > 0) and np.array_equal(seed, self.street_all):
-            live = self.live_all            # every pair and street face conducts
+        seed = ground | (G > 0) | (self.leak > 0)
+        if (self.npair == 0 or W.min() > 0) and np.array_equal(seed, self.seed_all):
+            live = self.live_all            # every pair, street face and leak conducts
         else:
             live = _bfs(p.indptr, p.indices, self.epair, W, seed)
         return Reach(live=live, ground=ground, unknown=live & ~ground, Tp=Tp, Gf=Gf, G=G, W=W)
 
     def values(self, r: Reach) -> NDArray[np.float64]:
+        """The state's operator on the pattern: its passages, its street faces and the leaks."""
         p = self.pattern
-        return np.asarray(_values(p.indptr, p.indices, self.epair, r.W, r.G, r.unknown))
+        return np.asarray(_values(p.indptr, p.indices, self.epair, r.W, r.G + self.leak,
+                                  r.unknown))
 
 
 class System:
     """A cell structure of the fixed mesh as each state's linear system: its cells (FullCells),
-    their Graph, the demand's points on them (`Pc`, cells x homes: per home its injection's
-    weight on each cell; transposed, `PcT`, a home's escape time from the potential per cell)
-    and the factorization's plan of the pattern (gap_factor)."""
+    their Graph (its leaks among it), the demand's points on them (`Pc`, cells x homes: per home
+    its injection's weight on each cell; transposed, `PcT`, a home's escape time from the
+    potential per cell) and the factorization's plan of the pattern (gap_factor)."""
 
-    def __init__(self, fm: FullMesh, cells: FullCells, *, dem: gf.PointDemand,
+    def __init__(self, cells: FullCells, *, graph: Graph, dem: gf.PointDemand,
                  ptri: NDArray[np.int64], factorization: gap_factor.Factorization):
         self.cells = cells
-        self.graph = Graph(fm, cells)
+        self.graph = graph
         pcell = np.where(ptri >= 0, cells.cell[np.maximum(ptri, 0)], -1)
         on = np.flatnonzero(pcell >= 0)
         M = sp.csr_matrix((np.ones(len(on)), (pcell[on], on)), shape=(cells.n, len(pcell)))
@@ -1109,6 +1129,14 @@ class System:
     @property
     def n(self) -> int:
         return self.cells.n
+
+    def with_graph(self, graph: Graph) -> System:
+        """This system on `graph` (the same pattern: its plan kept; a leak set on it)."""
+        if graph.pattern is not self.graph.pattern:
+            raise ValueError("another pattern: the plan is this pattern's")
+        out = copy.copy(self)
+        out.graph = graph
+        return out
 
 
 class State(NamedTuple):
@@ -1191,18 +1219,23 @@ class Model:
     free first and what the optimizers read. `pop` each building's population (area: the
     owner's), `demand` what each home injects in J_power (common.Demand); `factorization` the
     run's (gap_factor: its device); `lumped` every building's interior one cell; `tension_eps`
-    the eps world the tension ranks in (clear.EPS, or the translucent search's). The mesh's atoms
-    (fx.carving: the buildings, or a road network's pieces) carry the width form's factors; a
-    clearing k is per building and each atom takes its building's k, or 1 where the state's road
-    prefix (`stop`) carves it (`road_state`); the homes are the buildings."""
+    the eps world the tension ranks in (clear.EPS, or the translucent search's); `exits` the
+    region model's (gap_exits: the street boost on the mesh's weights, the leaks on the cells live
+    at baseline; the barriers are in `block` and its mesh already: ComplexMetric.fixed and
+    .model). The mesh's atoms (fx.carving: the buildings, or a road network's pieces) carry the
+    width form's factors; a clearing k is per building and each atom takes its building's k, or 1
+    where the state's road prefix (`stop`) carves it (`road_state`); the homes are the
+    buildings."""
 
     def __init__(self, block, fx: Fixed, *, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width,
                  pop: NDArray[np.float64], demand: common.Demand,
-                 factorization: gap_factor.Factorization, lumped: bool, tension_eps: float):
+                 factorization: gap_factor.Factorization, lumped: bool, tension_eps: float,
+                 exits: gx.Exits):
         self.block, self.fx, self.spec, self.fs, self.form = block, fx, spec, fs, form
         self.tension_eps = tension_eps
+        self.exits = exits
         self.geo = gc.geometry(block)
-        self.fm = fx.fm
+        self.fm = exits.boost.mesh(fx.fm, self.geo, block)
         self.n_ = len(self.geo.polys)
         self.carving = fx.carving
         if self.carving.parent.max(initial=-1) >= self.n_:
@@ -1216,8 +1249,18 @@ class Model:
         self.polys_ = np.asarray(block.buildings.outlines)
         self.tree_ = shapely.STRtree(self.polys_)
         self.timing = Timing()
-        self.sys = System(self.fm, full_cells(self.fm, lumped=lumped), dem=fx.dem, ptri=fx.ptri,
-                          factorization=factorization)
+        cells = full_cells(self.fm, lumped=lumped)
+        bare = System(cells, graph=Graph(self.fm, cells, leak=np.zeros(cells.n)), dem=fx.dem,
+                      ptri=fx.ptri, factorization=factorization)
+        # the leaks on the cells that are unknowns at baseline (every footprint standing), fixed
+        a, b, c = (self.fm.xy[self.fm.tri[:, k]] for k in range(3))
+        tri_area = 0.5 * np.abs((b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1])
+                                - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0]))
+        self.leak_site = gx.LeakSite(
+            area=np.bincount(cells.cell, weights=tri_area, minlength=cells.n),
+            live=self._factors(bare, np.zeros(self.n_), prefix=_NO_ROADS).reach.unknown,
+            inj=np.asarray(bare.Pc @ pop), sigma=fs.sigma)
+        self.sys = bare.with_graph(bare.graph.with_leak(exits.leak.per_cell(self.leak_site)))
         self.dem = fx.dem
         self.nodem = fx.dem.walled            # the homes with no demand point: out of every J
         # the baseline, every footprint standing: the walled-in homes, the escape times under the
@@ -1571,13 +1614,16 @@ class ComplexMetric:
     never read as the raster's. `search_eps`: the eps world the tension ranks in (the greedy's
     and the polish's ranking: clear.EPS, the metric's own, or a larger one, the translucent search,
     the raster's `@<search>` on the complex), its name's `@e<eps>` where it differs from clear.EPS;
-    every score is under the metric. `factorization` is the run's device (gap_factor): it moves
-    scores only at the floating-point level, so it is not in the name; the rows record it."""
+    every score is under the metric. `exits` the region model's (gap_exits: barriers, leaks and a
+    street boost; the per-block exits, the block's whole street ring, name nothing), its name's
+    `+x...` where it has any. `factorization` is the run's device (gap_factor): it moves scores
+    only at the floating-point level, so it is not in the name; the rows record it."""
     spec: gc.Spec
     fs: gf.FlowSpec
     form: gf.Width
     lumped: bool
     search_eps: float
+    exits: gx.Exits
     factorization: gap_factor.Factorization
 
     def __post_init__(self) -> None:
@@ -1587,6 +1633,7 @@ class ComplexMetric:
     def name(self) -> str:
         return (f"cx+{self.form.name}+s{self.spec.s:g}r{self.spec.ring_m:g}b{self.spec.band_m:g}"
                 f"+{self.fs.name}" + ("+lumped" if self.lumped else "") + f"+v{CODE}"
+                + self.exits.suffix
                 + ("" if self.search_eps == clear.EPS else f"@e{self.search_eps:g}"))
 
     @property
@@ -1594,16 +1641,20 @@ class ComplexMetric:
         return self.factorization.device
 
     def model(self, block, fx: Fixed, *, demand: common.Demand) -> Model:
-        """The block's model on its fixed mesh `fx` (`clearing`'s, or one meshed afresh)."""
+        """The block's model on its fixed mesh `fx` (`clearing`'s, or one meshed afresh: `fixed`,
+        of the same block), the block as the exits' barriers cut it."""
+        block = self.exits.barriers.block(block)
         return Model(block, fx, spec=self.spec, fs=self.fs, form=self.form,
                      pop=common.POPULATIONS["area"].weights(np.asarray(block.buildings.outlines)),
                      demand=demand, factorization=self.factorization, lumped=self.lumped,
-                     tension_eps=self.search_eps)
+                     tension_eps=self.search_eps, exits=self.exits)
 
     def fixed(self, block, *, cache: Path, carving: Carving) -> Fixed:
         """The block's fixed mesh on `carving`'s atoms: Carving.none, the metric's own mesh (every
-        clearing a state); a road network's (Carving.of), its prefixes states too."""
-        return Fixed.of(block, self.spec, self.fs, self.form, cache=cache, carving=carving)
+        clearing a state); a road network's (Carving.of), its prefixes states too. The block as
+        the exits' barriers cut it (its polygon less them: the mesh's identity carries them)."""
+        return Fixed.of(self.exits.barriers.block(block), self.spec, self.fs, self.form,
+                        cache=cache, carving=carving)
 
     def clearing(self, block, *, demand: common.Demand) -> Model:
         return self.model(block, self.fixed(block, cache=CACHE,
@@ -1633,7 +1684,7 @@ _NUM = r"([0-9]+(?:\.[0-9]+)?(?:e-?[0-9]+)?)"
 _NAME = re.compile(rf"cx\+(close|shy|ramp){_NUM}(?:s{_NUM})?\+s{_NUM}r{_NUM}b{_NUM}"
                    rf"\+R{_NUM}(?:g([0-9]+)x{_NUM})?q([0-9]+)(?:k{_NUM})?"
                    rf"(?:o(-?{_NUM[1:-1]}),(-?{_NUM[1:-1]}))?(\+lumped)?"
-                   rf"\+v([0-9a-f]+)(?:@e{_NUM})?")
+                   rf"\+v([0-9a-f]+){gx.SUFFIX_RE}(?:@e{_NUM})?")
 
 
 def complex_of(name: str, *, factorization: gap_factor.Factorization) -> ComplexMetric:
@@ -1643,9 +1694,10 @@ def complex_of(name: str, *, factorization: gap_factor.Factorization) -> Complex
     if m is None:
         raise ValueError(f"unknown complex metric {name!r}: cx+<form><w>+s<s>r<ring>b<band>+"
                          "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped]+v<code>"
+                         "[+x[B<line>c<cross>][U<lam>|H<lam>][S<boost>]v<exits code>]"
                          "[@e<search eps>]")
     (kind, w, ramp_s, s_, ring, band, R, levels, grade, quad, sigma, ox, oy,
-     lumped, code, search) = m.groups()
+     lumped, code, *exits, search) = m.groups()
     if code != CODE:
         raise ValueError(f"{name!r}: code {code}, but this code's constants digest to {CODE} "
                          "(its rows are another code's)")
@@ -1663,7 +1715,7 @@ def complex_of(name: str, *, factorization: gap_factor.Factorization) -> Complex
     metric = ComplexMetric(spec=gc.Spec(s=float(s_), ring_m=float(ring), band_m=float(band)),
                            fs=fs, form=form, lumped=lumped is not None,
                            search_eps=clear.EPS if search is None else float(search),
-                           factorization=factorization)
+                           exits=gx.exits_of(tuple(exits)), factorization=factorization)
     if metric.name != name:
         raise ValueError(f"{name!r} spells the complex metric {metric.name!r}")
     return metric
@@ -1697,29 +1749,16 @@ def _identity_modules() -> tuple[Any, ...]:
 
 def code_constants() -> dict[str, str]:
     """Every constant of the complex's code (module comment above) by `<module>.<NAME>`, as its
-    repr: a number, a string, a tuple, an array or a frozen dataclass; any other kind refused (a
-    new constant's kind decided here, not passed over)."""
-    out = {}
-    for mod in _identity_modules():
-        short = mod.__name__.rsplit(".", 1)[-1]
-        for name, value in vars(mod).items():
-            key = f"{short}.{name}"
-            if name.startswith("_") or not name.isupper() or key in _EXEMPT:
-                continue
-            if not (isinstance(value, (bool, int, float, str, tuple, np.ndarray))
-                    or (dataclasses.is_dataclass(value) and not isinstance(value, type))):
-                raise TypeError(f"{key}: a constant of kind {type(value).__name__}: in the "
-                                "code's digest or exempt (gap_clear._EXEMPT), decided there")
-            out[key] = repr(value)
-    for key, read in _EXTERNAL.items():
-        out[key] = repr(read())
-    return out
+    repr (digests.constants_of: a kind it does not know refused, decided here or in _EXEMPT). The
+    exits' code (gap_exits: the region model's leaks, barriers and boost) is not in this walk: its
+    own digest names the metrics that use it (gap_exits.EXITS_CODE), so the per-block metric's name
+    does not move with it."""
+    return digests.constants_of(_identity_modules(), exempt=_EXEMPT, external=_EXTERNAL)
 
 
 def code_digest() -> str:
     """The code's constants (code_constants) digested: 8 hex digits."""
-    blob = json.dumps(code_constants(), sort_keys=True).encode()
-    return hashlib.sha256(blob).hexdigest()[:8]
+    return digests.digest_of(code_constants())
 
 
 CODE = code_digest()

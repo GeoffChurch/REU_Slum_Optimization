@@ -17,7 +17,14 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S roads <ids,> [fault]       # fault: one-face-closed
     uv run python $S flux <ids,> [fault]        # fault: flip-one
     uv run python $S device-roads <ids,> [fault]   # fault: perturb (on a GPU)
-    uv run python $S both-ways <guards,> <ids,>    # each guard, then under each of its faults
+    uv run python $S leak-assembly <ids,> [fault]  # faults: drop-one, not-live
+    uv run python $S enclosure <ids,> [fault]      # fault: every-cell
+    uv run python $S leak-gradient <ids,> [fault]  # fault: adjoint-unleaked
+    uv run python $S leak-scale - [fault]          # fault: per-cell
+    uv run python $S barriers - [fault]            # faults: not-inserted, gap-closed
+    uv run python $S exits-identity - [fault]      # faults: in-code, suffix-dropped
+    uv run python $S loop-index - [fault]          # fault: uncontracted
+    uv run python $S both-ways <guards,> <ids,|->  # each guard, then under each of its faults
 
 `baseline`: the fixed mesh (the runtime's metric, METRIC) against the complex rebuilt
 (gap_compare.ComplexModel, gap_flow's mesh under the shy distance at 0.5): P0, P_{1/2},0 and
@@ -92,6 +99,40 @@ injection in all. Fault `flip-one`: the largest passage flux's sign flipped.
 SuperLU at the `roads` guard's prefixes: each prefix's P, P_{1/2} and J_2 and every home's escape
 time, within DEVICE_TOL. Run on a GPU node. Fault `perturb`: the first prefix's refactorization
 (each plan's second, after the baseline's) as in `device`.
+
+The region model's exits (gap_exits; NOTES, "Exits as leaks: the region model on the complex
+(5810@major)"), each leak family at LEAK_LAM on the runtime's metric:
+`leak-assembly`: with leaks, at the baseline, a random 0/1 clearing, the most populous building
+cleared alone, a fractional state and the eps world, the operator on the fixed pattern against
+`_operator`'s assembly afresh plus a leak computed independently from its definition (each cell's
+triangles' area, the cells live at baseline found by a search of their own, the injection per cell
+from the demand's points): equal to PATTERN_TOL on the unknowns, the structure the pattern's, and P
+against a direct solve to PATTERN_P_TOL. Faults: `drop-one` (the largest leak dropped),
+`not-live` (a leak on the largest cell not live at baseline).
+`enclosure`: under each leak family the homes walled in at baseline are exactly those walled in
+without leaks (on blocks with walled-in homes). Fault `every-cell`: the leak on every cell.
+`leak-gradient`: the `gradient` guard's states and powers on the runtime's form under each leak
+family. Fault `adjoint-unleaked`: J_2's adjoint solved on the system without its leaks.
+`leak-scale`: on SCALE_BLOCK (open ground SCALE_L wide, its edge the street, one small home at its
+centre: the mesh graded from R near the outlines to R 2^levels in the open), the uniform leak at
+SCALE_LAM: the home's potential over SCALE_R against the screened Laplacian's point source, Q K0(r /
+lam) / (2 pi sigma), its shape (the ratio's spread over the distance bins) and its level within
+SCALE_TOL. Fault `per-cell`: the same conductance on every cell (the leak's mean), not one per area.
+`barriers`: on BARRIER_BLOCK (a street on its south edge only, a railway across it with a crossing
+node's path and a footbridge, a water channel north of the railway parting the north in two), every
+open triangle inside a barrier lies in a crossing's gap, no home is walled in, and each crossing
+removed walls in the homes it alone served, exactly (the path the north-west's, the footbridge the
+north-east's). Faults: `not-inserted` (the barriers not cut), `gap-closed` (the crossings' gaps not
+cut).
+`exits-identity`: the per-block metric's name is PER_BLOCK and its code digests 28 constants to the
+same digest; every configuration of region_leaks (and the leak families with the boost) under each
+preset's search spells a name that parses back to it, and no two share a name. Faults: `in-code`
+(the exits' module in the code's walk), `suffix-dropped` (the leak's part left out of the suffix).
+`loop-index` (region_leaks.loops on cases with a known answer): blocks whose open ground is only
+streets 6 m wide, painted from the flow at FRAME_H, every open pixel with flow in the network: a
+grid of 3 x 3 blocks inside an exit ring (8 loops with the exits one node), a ladder of 5 bars off
+a street on one side with a back lane (5), the same bars reaching the far wall, a comb of dead ends
+(0). Fault `uncontracted`: the exits not contracted (the grid's own cycle rank, 9).
 """
 from __future__ import annotations
 
@@ -120,10 +161,12 @@ import gap_clear as gcl  # noqa: E402
 import gap_factor  # noqa: E402
 import gap_compare as gcmp  # noqa: E402
 import gap_complex as gc  # noqa: E402
+import gap_exits as gx  # noqa: E402
 import gap_flow as gf  # noqa: E402
 import gap_maps  # noqa: E402
 import metrics  # noqa: E402
 import pweight  # noqa: E402
+import region_leaks  # noqa: E402
 import road_rescore as rr  # noqa: E402
 import search  # noqa: E402
 
@@ -168,6 +211,16 @@ FLUX_RANDOM = 2
 FLUX_TOL = 1e-9          # a cell's imbalance, of the largest current through a cell (the solves
                          # refined to the backward-error floor: 2e-11 -- 5e-11 on 19570
                          # and 20269)
+LEAK_LAM = 50.0          # the leak guards' lam (m): a small block's scale (19570 is 215 m long)
+PER_BLOCK = "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a"   # the per-block metric's name: every
+                                                          # stored per-block row's, unchanged
+PER_BLOCK_CONSTANTS = 28
+SCALE_L = 800.0          # leak-scale: the open square's side (m)
+SCALE_LAM = 60.0         # ... the uniform leak's lam (the square's half-side over 6.7 lam: its
+                         # Dirichlet edge moves the potential within SCALE_R by under 1e-4)
+SCALE_R = (10.0, 200.0)  # ... the distances read (m): beyond the home's ring, short of the edge
+SCALE_BINS = 12
+SCALE_TOL = 0.03         # ... the ratio's spread over the bins, and its level against the formula
 
 
 @contextmanager
@@ -178,6 +231,16 @@ def _patched(owner: object, name: str, value: object) -> Iterator[None]:
         yield
     finally:
         setattr(owner, name, old)
+
+
+@contextmanager
+def _patched_item(owner: list[bool], i: int, value: bool) -> Iterator[None]:
+    old = owner[i]
+    owner[i] = value
+    try:
+        yield
+    finally:
+        owner[i] = old
 
 
 def _model(b, metric: gcl.ComplexMetric = METRIC) -> gcl.Model:
@@ -463,7 +526,7 @@ def identity(_ids: list[str]) -> list[str]:
         try:
             colliding = Colliding(spec=METRIC.spec, fs=METRIC.fs, form=METRIC.form,
                                   lumped=False, search_eps=METRIC.search_eps,
-                                  factorization=METRIC.factorization)
+                                  exits=METRIC.exits, factorization=METRIC.factorization)
         except ValueError:
             refused += 1
             continue
@@ -865,16 +928,20 @@ def _one_face_closed(self: gcl.Carving, prefix: gcl.Prefix) -> np.ndarray:
 # ------------------------------------------------------------------ the pictures' fluxes
 
 def flux(ids: list[str]) -> list[str]:
+    """The `flux` guard (module docstring), and the same at a random clearing under the uniform
+    leak (its drainage the street's and the leaks')."""
     bad = []
     for bid in ids:
         [b] = common.build_blocks([bid])
         m = _model(b)
+        ml = _model(b, _leaky(gx.UniformLeak(lam=LEAK_LAM)))
         rng = np.random.default_rng(SEED + 6)
-        states = {"baseline": np.zeros(m.n)}
+        states = {"baseline": (m, np.zeros(m.n))}
         for k in range(FLUX_RANDOM):
-            states[f"random{k}"] = _random(m, rng).astype(float)
+            states[f"random{k}"] = (m, _random(m, rng).astype(float))
+        states["leaky random"] = (ml, _random(ml, rng).astype(float))
         parts = []
-        for name, k_ in states.items():
+        for name, (m, k_) in states.items():
             st = m.state(k_)
             fl = gap_maps.flow_of(m, st, m.pop)
             bal = gap_maps.conservation(st, fl)
@@ -902,13 +969,422 @@ def _flip_one() -> contextlib.AbstractContextManager[None]:
     return _patched(gap_maps, "_passage_flux", flipped)
 
 
+# ------------------------------------------------------------------ the exits: leaks
+
+LEAKS = (gx.UniformLeak(lam=LEAK_LAM), gx.HomeLeak(lam=LEAK_LAM))
+
+
+def _leaky(leak: gx.NoLeak | gx.UniformLeak | gx.HomeLeak) -> gcl.ComplexMetric:
+    """The runtime's metric with `leak` (no barriers, no boost: a kblock has no OSM features)."""
+    return dataclasses.replace(METRIC, exits=gx.Exits(barriers=gx.NoBarriers(), leak=leak,
+                                                      boost=gx.NoBoost()))
+
+
+def _tri_area(fm: gcl.FullMesh) -> np.ndarray:
+    """Per triangle its area (m^2)."""
+    a, b, c = (fm.xy[fm.tri[:, k]] for k in range(3))
+    return np.asarray(0.5 * np.abs((b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1])
+                                   - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0])))
+
+
+def _leak_oracle(m: gcl.Model, leak: gx.UniformLeak | gx.HomeLeak) -> np.ndarray:
+    """The leak per cell from its definition, independently of gap_exits and the model's Graph:
+    each cell's triangles' area, the cells live at baseline by a search of their own (scipy's
+    components over the passages conducting at baseline and a street node joined to the cells
+    with a conducting street face or a ground cell), the injection per cell from the demand's
+    points."""
+    from scipy.sparse.csgraph import connected_components
+    fm, c = m.fm, m.c
+    area = np.bincount(c.cell, weights=_tri_area(fm), minlength=c.n)
+    r0 = m.factors(np.zeros(m.n)).reach
+    on = r0.Tp > 0
+    street = c.n
+    ground = np.unique(c.gcell[m.factors(np.zeros(m.n)).kt[fm.fa[c.pg]] > 0])
+    touch = np.concatenate([c.fc[r0.Gf > 0], ground])
+    rows = np.concatenate([c.ea[on], touch])
+    cols = np.concatenate([c.eb[on], np.full(len(touch), street)])
+    _k, lab = connected_components(sp.csr_matrix((np.ones(len(rows)), (rows, cols)),
+                                                 shape=(c.n + 1, c.n + 1)), directed=False)
+    is_ground = np.zeros(c.n, dtype=bool)
+    is_ground[ground] = True
+    live = (lab[:c.n] == lab[street]) & ~is_ground
+    sigma = m.fs.sigma
+    if isinstance(leak, gx.UniformLeak):
+        return np.where(live, sigma * area / leak.lam ** 2, 0.0)
+    pts = np.flatnonzero(m.fx.ptri >= 0)
+    inj = np.bincount(c.cell[m.fx.ptri[pts]], weights=np.asarray(m.dem.S @ m.pop)[pts],
+                      minlength=c.n)
+    inj = np.where(live, inj, 0.0)
+    return sigma * area[live].sum() / leak.lam ** 2 * inj / inj.sum()
+
+
+def leak_assembly(ids: list[str]) -> list[str]:
+    from scipy.sparse.linalg import spsolve
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        for leak in LEAKS:
+            m = _model(b, _leaky(leak))
+            oracle = _leak_oracle(m, leak)
+            rng = np.random.default_rng(SEED + 7)
+            one = np.zeros(m.n)
+            one[_largest(m, 1)] = 1.0
+            states = {"baseline": np.zeros(m.n), "random": _random(m, rng).astype(float),
+                      "the most populous cleared": one,
+                      "fractional": rng.uniform(0.0, 1.0, m.n), "eps": np.full(m.n, GRAD_EPS)}
+            parts = []
+            for name, k_ in states.items():
+                st = m.state(k_)
+                A = st.A
+                assert A is not None
+                p = st.sys.graph.pattern
+                same_structure = (np.array_equal(A.indptr, p.indptr)
+                                  and np.array_equal(A.indices, p.indices))
+                ref, cells = _operator(st)
+                ref = (ref + sp.diags(oracle[cells])).tocsr()
+                sub = A[cells][:, cells]
+                err = float(abs(sub - ref).max() / abs(ref).max()) if ref.nnz else 0.0
+                rhs = m._rhs(st, m.pop)
+                P_fixed = float(rhs @ m.solve(st, m.pop))
+                P_ref = float(rhs[cells] @ spsolve(ref.tocsc(), rhs[cells]))
+                dP = abs(P_fixed / P_ref - 1.0)
+                ok = same_structure and err <= PATTERN_TOL and dP <= PATTERN_P_TOL
+                parts.append(f"{name}: operator {err:.1e}, P {dP:.1e}, the pattern's "
+                             f"{same_structure}" + ("" if ok else " FAILS"))
+                if not ok:
+                    bad.append(f"{bid} {leak.name} {name}")
+            print(f"{bid} {leak.name} (leak {float(oracle.sum()):.4g} on "
+                  f"{int((oracle > 0).sum())} cells): " + "; ".join(parts), flush=True)
+    return bad
+
+
+_UNIFORM_PER_CELL = gx.UniformLeak.per_cell
+_HOME_PER_CELL = gx.HomeLeak.per_cell
+
+
+@contextmanager
+def _leak_fault(change: Callable[[np.ndarray, gx.LeakSite], np.ndarray]) -> Iterator[None]:
+    """Both leak families' per_cell with `change` applied to their answer."""
+    with contextlib.ExitStack() as stack:
+        for cls, orig in ((gx.UniformLeak, _UNIFORM_PER_CELL), (gx.HomeLeak, _HOME_PER_CELL)):
+            def per_cell(self: object, site: gx.LeakSite,
+                         orig: Callable[..., np.ndarray] = orig) -> np.ndarray:
+                return change(orig(self, site), site)
+            stack.enter_context(_patched(cls, "per_cell", per_cell))
+        yield
+
+
+def _drop_one(leak: np.ndarray, site: gx.LeakSite) -> np.ndarray:
+    """The largest leak dropped (fault `drop-one`)."""
+    out = leak.copy()
+    out[int(np.argmax(out))] = 0.0
+    return out
+
+
+def _not_live(leak: np.ndarray, site: gx.LeakSite) -> np.ndarray:
+    """A leak on the largest cell not live at baseline (fault `not-live`)."""
+    out = leak.copy()
+    j = int(np.argmax(np.where(site.live, -np.inf, site.area)))
+    out[j] = float(leak.max())
+    return out
+
+
+def _every_cell(leak: np.ndarray, site: gx.LeakSite) -> np.ndarray:
+    """The leak on every cell, live at baseline or not (fault `every-cell`)."""
+    return site.sigma * site.area / LEAK_LAM ** 2
+
+
+def enclosure(ids: list[str]) -> list[str]:
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = METRIC.fixed(b, cache=Path(tmp), carving=gcl.Carving.none(gc.geometry(b)))
+        plain = METRIC.model(b, fx, demand=POP)
+        parts = [f"{int(plain.walled0.sum())} walled in without leaks"]
+        for leak in LEAKS:
+            m = _leaky(leak).model(b, fx, demand=POP)
+            d = np.flatnonzero(m.walled0 ^ plain.walled0)
+            parts.append(f"{leak.name}: {int(m.walled0.sum())} walled in, {len(d)} apart")
+            if len(d):
+                bad.append(f"{bid} {leak.name} {d[:5].tolist()}")
+        print(f"{bid}: " + "; ".join(parts) + (" -> FAILS" if any(bid in x for x in bad)
+                                                 else " -> ok"), flush=True)
+    return bad
+
+
+def leak_gradient(ids: list[str]) -> list[str]:
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        for leak in LEAKS:
+            m = _model(b, _leaky(leak))
+            rng = np.random.default_rng(SEED)
+            starts = {"random": (rng.uniform(0.1, 0.4, m.n),
+                                 rng.choice(m.n, GRAD_BUILDINGS, replace=False)),
+                      "start": (np.full(m.n, BUDGET), _paired(m.terms, m.n))}
+            for where, (x0, pick) in starts.items():
+                for power in (1.0, 2.0):
+                    for q in GRAD_Q:
+                        rel = m.relaxation(power, q=q, eps=GRAD_EPS)
+                        _J, g = rel.value_grad(x0)
+                        err_j = []
+                        for j in pick:
+                            best = np.inf
+                            for h in GRAD_STEPS:
+                                e = np.zeros(m.n)
+                                e[j] = h
+                                fd = (rel.value(x0 + e) - rel.value(x0 - e)) / (2 * h)
+                                best = min(best, abs(fd - g[j]))
+                            err_j.append(best)
+                        err = float(np.max(err_j) / np.abs(g[pick]).max())
+                        ok = err <= GRAD_TOL
+                        print(f"{bid} {leak.name} {where} J_{power:g} q {q:g}: gradient against "
+                              f"central differences {err:.1e} of the largest -> "
+                              f"{'ok' if ok else 'FAILS'}", flush=True)
+                        if not ok:
+                            bad.append(f"{bid} {leak.name} {where} p{power:g} q{q:g}")
+    return bad
+
+
+def _sgrad_unleaked(self: gcl.Relaxation, x: np.ndarray) -> tuple[float, np.ndarray]:
+    """gap_clear.Relaxation.value_sgrad with J_p's adjoint (p != 1) solved on the system without
+    its leaks (fault `adjoint-unleaked`)."""
+    m = self.m
+    st = m.state(self.k_of(x))
+    J, u, uh = self._J(st)
+    p = self.power
+    if p == 1.0:
+        lam = u
+    else:
+        bare = m.sys.with_graph(m.sys.graph.with_leak(np.zeros(m.sys.n)))
+        st2 = m._state(bare, self.k_of(x), prefix=gcl._NO_ROADS)
+        lam = m.solve(st2, np.where(m.nodem, 0.0, m.inj * p * np.nan_to_num(uh) ** (p - 1.0)))
+    g = m.grad(st, u, lam) * (1.0 - self.eps)
+    if self.q != 1.0:
+        g = g * self.q * np.maximum(self.proj(x), 1e-300) ** (self.q - 1.0)
+    return J, g
+
+
+# ------------------------------------------------------------------ synthetic blocks
+# (region_leaks.synthetic_block: in 19570's frame, local metres)
+
+def _square(x: float, y: float, side: float) -> BaseGeometry:
+    return shapely.box(x, y, x + side, y + side)
+
+
+def leak_scale(_ids: list[str]) -> list[str]:
+    from scipy.special import k0
+    L = SCALE_L
+    c = L / 2.0
+    b = region_leaks.synthetic_block("synthetic-open", shapely.box(0.0, 0.0, L, L),
+                   shapely.LineString(shapely.box(0.0, 0.0, L, L).exterior.coords),
+                   [_square(c - 1.0, c - 1.0, 2.0)], None)
+    m = _model(b, _leaky(gx.UniformLeak(lam=SCALE_LAM)))
+    st = m.state(np.zeros(m.n))
+    u = m.solve(st, m.pop)
+    fm, cl = m.fm, m.c
+    area_t = _tri_area(fm)
+    cen_t = fm.xy[fm.tri].mean(axis=1)
+    area = np.bincount(cl.cell, weights=area_t, minlength=cl.n)
+    cen = np.column_stack([np.bincount(cl.cell, weights=area_t * cen_t[:, k], minlength=cl.n)
+                           for k in range(2)]) / np.maximum(area, 1e-300)[:, None]
+    src = np.array(m.geo.polys[0].centroid.coords[0])
+    r = np.hypot(*(cen - src).T)
+    on = st.reach.unknown & (r >= SCALE_R[0]) & (r <= SCALE_R[1])
+    edges = np.geomspace(SCALE_R[0], SCALE_R[1], SCALE_BINS + 1)
+    which = np.digitize(r[on], edges) - 1
+    ratio = u[on] / k0(r[on] / SCALE_LAM)
+    per_bin = np.array([np.median(ratio[which == k]) for k in range(SCALE_BINS)])
+    Q = float(m._rhs(st, m.pop).sum())
+    expect = Q / (2.0 * np.pi * m.fs.sigma)
+    spread = float(per_bin.max() / per_bin.min() - 1.0)
+    level = float(np.median(per_bin) / expect - 1.0)
+    sizes = area[on]
+    ok = spread <= SCALE_TOL and abs(level) <= SCALE_TOL
+    print(f"leak-scale: open ground {L:g} m, lam {SCALE_LAM:g} m, {int(on.sum())} cells at "
+          f"{SCALE_R[0]:g} -- {SCALE_R[1]:g} m (areas {sizes.min():.2g} -- {sizes.max():.2g} m^2); "
+          f"u / K0(r / lam) per bin {np.round(per_bin / expect, 4).tolist()} of Q / (2 pi sigma) "
+          f"= {expect:.4g}: spread {spread:.1e}, level {level:+.1e} -> "
+          f"{'ok' if ok else 'FAILS'}", flush=True)
+    return [] if ok else [f"spread {spread:.1e}, level {level:+.1e}"]
+
+
+def _per_cell(leak: np.ndarray, site: gx.LeakSite) -> np.ndarray:
+    """The same conductance on every live cell, the leak's mean (fault `per-cell`)."""
+    return np.where(site.live, float(leak[site.live].mean()), 0.0)
+
+
+# the barriers guard's block (local metres): a street on the south edge only, a railway across
+# at y 40 (BARRIERS' strip), a crossing node's path at x 30 and a footbridge at x 90, a water
+# channel x 58 -- 62 from the railway to the north edge; homes south, north-west and north-east
+_BAR_HOMES = {"south": [(10.0, 10.0), (50.0, 10.0), (100.0, 10.0), (70.0, 25.0)],
+              "north-west": [(10.0, 60.0), (40.0, 55.0)],
+              "north-east": [(75.0, 60.0), (100.0, 55.0)]}
+
+
+def _barrier_block(*, node: bool, bridge: bool) -> Block:
+    """The barriers guard's block with its crossing node (`node`) and its footbridge (`bridge`) or
+    without them (the path and the footway without their crossing tags)."""
+    ways = gpd.GeoDataFrame(
+        {"highway": ["", "footway", "footway"], "railway": ["rail", "", ""],
+         "waterway": ["", "", ""], "bridge": [False, False, bridge],
+         "tunnel": [False, False, False]},
+        geometry=[shapely.LineString([(-10, 40), (130, 40)]),
+                  shapely.LineString([(30, 20), (30, 60)]),
+                  shapely.LineString([(90, 30), (90, 50)])])
+    nodes = gpd.GeoDataFrame({"railway": ["crossing"] if node else []},
+                             geometry=[shapely.Point(30, 40)] if node else [])
+    areas = gpd.GeoDataFrame({"natural": ["water"], "landuse": [""], "waterway": [""]},
+                             geometry=[shapely.box(58, 43, 62, 81)])
+    homes = [_square(x, y, 4.0) for group in _BAR_HOMES.values() for x, y in group]
+    return region_leaks.synthetic_block("synthetic-barriers", shapely.box(0, 0, 120, 80),
+                      shapely.LineString([(0, 0), (120, 0)]), homes,
+                      gx.Osm(ways=ways, nodes=nodes, areas=areas))
+
+
+def barriers(_ids: list[str]) -> list[str]:
+    metric = dataclasses.replace(METRIC, exits=gx.Exits(barriers=region_leaks.BARRIERS,
+                                                        leak=gx.NoLeak(), boost=gx.NoBoost()))
+    groups = np.repeat(list(_BAR_HOMES), [len(v) for v in _BAR_HOMES.values()])
+    bad = []
+    parts = []
+    for node, bridge, expect in ((True, True, ()), (False, True, ("north-west",)),
+                                 (True, False, ("north-east",)),
+                                 (False, False, ("north-west", "north-east"))):
+        b = _barrier_block(node=node, bridge=bridge)
+        bp = region_leaks.BARRIERS.parts(b)
+        m = _model(b, metric)
+        walled = sorted({str(g) for g in groups[m.walled0]})
+        want = sorted(set(expect))
+        ok = walled == want
+        if node and bridge:
+            # every open triangle inside a barrier (the strips and areas before the gaps) lies in a
+            # crossing's gap
+            geo = m.geo
+            whole = geo.local(shapely.union(bp.strips, bp.areas))
+            gaps = geo.local(bp.gaps).buffer(1e-6)
+            cen = m.fm.xy[m.fm.tri].mean(axis=1)
+            pts = shapely.points(cen[:, 0], cen[:, 1])
+            open_ = m.fm.open_tri
+            inside = open_ & shapely.contains(whole, pts)
+            stray = int((inside & ~shapely.contains(gaps, pts)).sum())
+            ok = ok and stray == 0 and int(inside.sum()) > 0
+            parts.append(f"both crossings: {int(inside.sum())} open triangles inside a barrier, "
+                         f"{stray} outside the gaps")
+        parts.append(f"{'path' if node else 'no path'}, {'bridge' if bridge else 'no bridge'}: "
+                     f"walled in {walled or 'none'} (expected {want or 'none'})"
+                     + ("" if ok else " FAILS"))
+        if not ok:
+            bad.append(f"node {node} bridge {bridge}")
+    print("barriers: " + "; ".join(parts), flush=True)
+    return bad
+
+
+_BARRIER_PARTS = gx.OsmBarriers.parts
+
+
+def _gap_closed(self: gx.OsmBarriers, block: Block) -> gx.BarrierParts:
+    """OsmBarriers.parts with the crossings' gaps not cut (fault `gap-closed`)."""
+    p = _BARRIER_PARTS(self, block)
+    return p._replace(barrier=shapely.union(p.strips, p.areas))
+
+
+# ------------------------------------------------------------------ the exits' identity
+
+def exits_identity(_ids: list[str]) -> list[str]:
+    bad = []
+    digest = gcl.code_digest()
+    n_const = len(gcl.code_constants())
+    if NAME != PER_BLOCK or f"+v{digest}" not in PER_BLOCK or n_const != PER_BLOCK_CONSTANTS:
+        bad.append(f"the per-block metric is {NAME} with {n_const} constants digesting to "
+                   f"{digest}, not {PER_BLOCK} with {PER_BLOCK_CONSTANTS}")
+    configs = dict(region_leaks.CONFIGS)
+    for leak in (gx.HomeLeak(lam=500.0), gx.UniformLeak(lam=250.0)):
+        configs[f"S3{leak.name}"] = gx.Exits(barriers=region_leaks.BARRIERS, leak=leak,
+                                            boost=region_leaks.BOOST)
+    configs["U500 alone"] = gx.Exits(barriers=gx.NoBarriers(), leak=gx.UniformLeak(lam=500.0),
+                                     boost=gx.NoBoost())
+    names: dict[str, str] = {}
+    for label, exits in configs.items():
+        for preset in region_leaks.PRESETS:
+            metric = region_leaks.CHEAP.on(dataclasses.replace(METRIC, exits=exits)) \
+                if preset == "cheap" else dataclasses.replace(METRIC, exits=exits)
+            name = metric.name
+            try:
+                back = gcl.complex_of(name, factorization=gap_factor.SuperLU())
+                same = back.exits == exits and back.search_eps == metric.search_eps
+            except ValueError as e:
+                same = False
+                print(f"{label} {preset}: {e}", flush=True)
+            if not same:
+                bad.append(f"{label} {preset}: {name} does not parse back")
+            if name in names:
+                bad.append(f"{label} {preset} and {names[name]} share {name}")
+            names[name] = f"{label} {preset}"
+    print(f"exits-identity: the per-block metric {NAME} ({n_const} constants, digest {digest}); "
+          f"{len(names)} names of {2 * len(configs)} configurations x presets, e.g. "
+          f"{metric.name} -> {'ok' if not bad else 'FAILS: ' + '; '.join(bad[:4])}", flush=True)
+    return bad
+
+
+# ------------------------------------------------------------------ the loop index
+
+def _index_block(kind: str) -> tuple[Block, int]:
+    """The loop-index guard's block of `kind` and its known loop count (module docstring)."""
+    if kind == "grid":
+        homes = [shapely.box(6 + 26 * i, 6 + 26 * j, 26 + 26 * i, 26 + 26 * j)
+                 for i in range(3) for j in range(3)]
+        box = shapely.box(0, 0, 84, 84)
+        return region_leaks.synthetic_block("synthetic-grid", box,
+                                            shapely.LineString(box.exterior.coords), homes,
+                                            None), 8
+    top = 56.0 if kind == "ladder" else 62.0
+    homes = [shapely.box(6 + 16 * k, 6, 16 + 16 * k, top) for k in range(5)]
+    return region_leaks.synthetic_block(f"synthetic-{kind}", shapely.box(0, 0, 84, 62),
+                                        shapely.LineString([(0, 0), (84, 0)]), homes,
+                                        None), (5 if kind == "ladder" else 0)
+
+
+def loop_index(_ids: list[str]) -> list[str]:
+    bad = []
+    parts = []
+    for kind in ("grid", "ladder", "comb"):
+        b, want = _index_block(kind)
+        m = _model(b)
+        pt = region_leaks.painted_of(m)
+        img, _fl, _st = region_leaks._paint_state(m, np.zeros(m.n), pt)
+        got = region_leaks.loops(img, pt.inside, pt.exits, float(np.finfo(np.float32).tiny),
+                                 region_leaks.FRAME_H, contract=_CONTRACT[0])
+        parts.append(f"{kind} {got} (known {want})")
+        if got != want:
+            bad.append(f"{kind} {got} != {want}")
+    print("loop-index: " + ", ".join(parts) + f" -> {'ok' if not bad else 'FAILS'}", flush=True)
+    return bad
+
+
+_CONTRACT = [True]       # the guard's `contract` (fault `uncontracted`: False)
+
+
+_IDENTITY_MODULES = gcl._identity_modules
+_SUFFIX = gx.Exits.suffix
+
+
+def _suffix_without_leak(self: gx.Exits) -> str:
+    """Exits.suffix with the leak's part left out (fault `suffix-dropped`)."""
+    parts = self.barriers.name + self.boost.name
+    return f"+x{parts}v{gx.EXITS_CODE}" if parts else ""
+
+
 # ------------------------------------------------------------------ the run
 
 GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "baseline": baseline, "weights": weights, "reach": reach, "gradient": gradient,
     "free": free, "identity": identity, "convex": convex, "pattern": pattern,
     "constants": constants, "device": device, "roads": roads, "flux": flux,
-    "device-roads": device_roads}
+    "device-roads": device_roads, "leak-assembly": leak_assembly, "enclosure": enclosure,
+    "leak-gradient": leak_gradient, "leak-scale": leak_scale, "barriers": barriers,
+    "exits-identity": exits_identity, "loop-index": loop_index}
 
 
 def _fault_exits():
@@ -931,6 +1407,20 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "device-roads": {"perturb": _perturb_one},
     "roads": {"one-face-closed": lambda: _patched(gcl.Carving, "carved", _one_face_closed)},
     "flux": {"flip-one": _flip_one},
+    "leak-assembly": {"drop-one": lambda: _leak_fault(_drop_one),
+                      "not-live": lambda: _leak_fault(_not_live)},
+    "enclosure": {"every-cell": lambda: _leak_fault(_every_cell)},
+    "leak-gradient": {"adjoint-unleaked": lambda: _patched(gcl.Relaxation, "value_sgrad",
+                                                           _sgrad_unleaked)},
+    "leak-scale": {"per-cell": lambda: _leak_fault(_per_cell)},
+    "barriers": {"not-inserted": lambda: _patched(gx.OsmBarriers, "block",
+                                                  lambda self, block: block),
+                 "gap-closed": lambda: _patched(gx.OsmBarriers, "parts", _gap_closed)},
+    "exits-identity": {"in-code": lambda: _patched(gcl, "_identity_modules",
+                                                   lambda: (*_IDENTITY_MODULES(), gx)),
+                       "suffix-dropped": lambda: _patched(gx.Exits, "suffix",
+                                                          property(_suffix_without_leak))},
+    "loop-index": {"uncontracted": lambda: _patched_item(_CONTRACT, 0, False)},
 }
 
 
@@ -968,7 +1458,7 @@ def both_ways(guards: list[str], ids: list[str]) -> None:
 if __name__ == "__main__":
     a = sys.argv[1:]
     if len(a) == 3 and a[0] == "both-ways" and set(a[1].split(",")) <= set(GUARDS):
-        both_ways(a[1].split(","), common.ids_of(a[2]))
+        both_ways(a[1].split(","), [] if a[2] == "-" else common.ids_of(a[2]))
         raise SystemExit(0)
     if len(a) not in (2, 3) or a[0] not in GUARDS:
         raise SystemExit(__doc__)
