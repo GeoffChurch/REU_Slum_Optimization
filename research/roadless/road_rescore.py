@@ -449,16 +449,18 @@ def prefixes(rows: Path, lineup: tuple[str, ...], scratch: Path, procs: int,
 # clearings and runs the two presets, under P.
 
 CX_POWER = 1.0                  # the presets' objective on the complex: P (decision (1)); the
-                                # presets relax.SIMP_DEFAULT and polish_greedy.CHEAP, each polish
-                                # scored as the device's (`cx` main): E on a core, the eps world
-                                # on a GPU (phase 2a: the same clearings)
+                                # presets relax.SIMP_DEFAULT and polish_greedy.CHEAP (the
+                                # translucent search since phase 3: its rows under the metric's
+                                # @e0.05, its clearing `cheap_cx<E>@e0.05`), each polish scored as
+                                # the device's (`cx` main): E on a core, the eps world on a GPU
+                                # (phase 2a: the same clearings)
 CX_POP = "area"                 # the prefixes cut by area population (decision (2))
 
 
 class Stored(NamedTuple):
     """The stored clearings scored on the complex beside the roads (clearings.Store's run ids):
-    SIMP's default and the cheap preset at area D 0.05 as a complex metric optimized them (P:
-    phase 1's acceptance, the 13). A row's `clearing` is its field's name. (The raster's own
+    SIMP's default and the cheap preset (its plain form, the metric's own tension) at area D 0.05
+    as a complex metric optimized them (P: phase 1's acceptance, the 13: records). A row's `clearing` is its field's name. (The raster's own
     clearings, item 4's and phase 1's, were scored here too until its retirement: the 60's rows
     hold them, the cross-checks' record.)"""
     simp_cx: str
@@ -481,13 +483,14 @@ class Presets(NamedTuple):
     cheap: Path
 
 
-def cx_presets(metric: str, scoring: search.PolishScoring) -> Presets:
-    """The presets' rows under the complex `metric`, their polish scored by `scoring`."""
+def cx_presets(metric: gcl.ComplexMetric, scoring: search.PolishScoring) -> Presets:
+    """The presets' rows under the complex `metric`, their polish scored by `scoring`: SIMP's
+    default under it, the cheap preset under its search of it (polish_greedy.CHEAP.on)."""
     plan = relax.plan_of(relax.SIMP_DEFAULT)._replace(polish_scoring=scoring)
     c = polish_greedy.CHEAP
-    return Presets(simp=relax.rows_of(plan, metric, PRICE_BUDGET),
+    return Presets(simp=relax.rows_of(plan, metric.name, PRICE_BUDGET),
                    cheap=polish_greedy.rows_of(c.picker, c.tries, c.width, c.pairs, scoring,
-                                               metric, PRICE_BUDGET))
+                                               c.on(metric).name, PRICE_BUDGET))
 
 
 def store_run(rows_dir: Path) -> str:
@@ -611,7 +614,7 @@ def cx_plain(rows: Path, metric: gcl.ComplexMetric, b: Block, *,
     # the presets under P on the complex (B's optimizer: free first, then the search)
     plan = relax.plan_of(relax.SIMP_DEFAULT)._replace(polish_scoring=scoring)
     c = polish_greedy.CHEAP
-    dirs = cx_presets(metric.name, scoring)
+    dirs = cx_presets(metric, scoring)
     simp_rows = dirs.simp / f"{bid}_p{CX_POWER:g}.parquet"
     ts = time.perf_counter()
     if not simp_rows.exists():
@@ -622,14 +625,15 @@ def cx_plain(rows: Path, metric: gcl.ComplexMetric, b: Block, *,
     cheap_rows = dirs.cheap / f"{bid}_p{CX_POWER:g}.parquet"
     ts = time.perf_counter()
     if not cheap_rows.exists():
-        polish_greedy.main(bid, CX_POWER, metric, c.picker, c.tries, c.width, PRICE_BUDGET,
-                           c.pairs, scoring=scoring)
+        polish_greedy.main(bid, CX_POWER, c.on(metric), c.picker, c.tries, c.width,
+                           PRICE_BUDGET, c.pairs, scoring=scoring)
     t_cheap = time.perf_counter() - ts
     m = metric.clearing(b, demand=pop)
+    cheap_search = c.on(metric).name.removeprefix(metric.name)       # the cheap preset's @e<eps>
     for key, f, ids_col, perm_col in ((f"simp_cx{scoring.suffix}", simp_rows, "simp_cleared",
                                        "simp_perm"),
-                                      (f"cheap_cx{scoring.suffix}", cheap_rows, "cleared",
-                                       "perm")):
+                                      (f"cheap_cx{scoring.suffix}{cheap_search}", cheap_rows,
+                                       "cleared", "perm")):
         r = pd.read_parquet(f).iloc[0]
         score(key, store_run(f.parent), np.asarray(r[ids_col], dtype=np.int64),
               float(r[perm_col]))
@@ -734,8 +738,7 @@ def cxreport(rows: Path, lineup: tuple[str, ...], metric: gcl.ComplexMetric) -> 
     # the price of roads
     at = cx_lens_table(t, PRICE_BUDGET)
     prow = []
-    clear = pl[pl.clearing.str.startswith(("simp_cx", "cheap_cx"))
-               & pl.clearing.str.endswith("E")]
+    clear = pl[pl.clearing.str.fullmatch(r"(simp|cheap)_cxE(@e[0-9.e-]+)?")]
     for bid, g in at[at.reach].groupby("block"):
         c = clear[clear.block == bid].set_index("clearing")
         for lens in CX_LENSES:

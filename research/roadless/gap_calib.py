@@ -9,7 +9,7 @@ its numbers are in NOTES and gap_rows/summary_runtime_acceptance.csv.
 
     S=research/roadless/gap_calib.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S warm <id>                      # the block's fixed mesh into gap_clear.CACHE
-    uv run python $S preset <id> <simp|cheap>[E][@e<eps>] <cpu|gpu>  # a preset on the complex
+    uv run python $S preset <id> <simp[E]|cheap[E]@e0.05> <cpu|gpu>  # a preset on the complex
     uv run python $S presets <id> <items,> <cpu|gpu>   # several, one after another (one GPU run)
     uv run python $S baseline <ids,|@file> <procs>  # the fixed mesh's baseline against the rebuild
     uv run python $S clearings <ids,|@file> <procs> # every clearing on the fixed mesh and rebuilt
@@ -18,10 +18,13 @@ its numbers are in NOTES and gap_rows/summary_runtime_acceptance.csv.
     uv run python $S roads <ids,|@file> <procs>     # carved meshes' prefixes against the rebuild
     uv run python $S report                         # gap_rows/summary_runtime_*.csv
 
-`preset`: the cheap preset (polish_greedy, S0.01cat P64w8) or SIMP's default (relax.one, PLAN)
-at area D BUDGET, power 1 (P), free first, on the complex, on the device's factorization; `E` the
-polish's candidates scored exactly (search.Exactly); `@e<eps>` the translucent search (phase 2b:
-the tension ranking in the eps world at <eps>, gap_clear.ComplexMetric.search_eps). Rows
+`preset`: the cheap preset (polish_greedy.CHEAP: S0.01cat P64w8 ranking in the eps world at its
+search eps, 0.05, the translucent search: item `cheap@e0.05`) or SIMP's default (relax.one, PLAN,
+the metric's own tension: item `simp`) at area D BUDGET, power 1 (P), free first, on the complex,
+on the device's factorization; `E` the polish's candidates scored exactly (search.Exactly). An
+item names its rows, so it spells its preset's search: a bare `cheap` (the plain form, before
+phase 3: its rows under preset/<device>/cheap[E]/ stay as records) and an `@e` on `simp` are
+refused. Rows
 ROWS/preset/<device>/<item>/<id>.parquet (the run's row, its item, metric, host, peak memory and
 wall time; on a GPU the device's memory in use, its most over the run, `gpu_gb`): the
 acceptance's own, so that a run on one device never overwrites another's or the stored rows
@@ -93,8 +96,8 @@ SPEED_REPS = 2
 GPU_SAMPLE_S = 0.5          # _GpuPeak's sampling (measurement only)
 ROWS = HERE / "gap_rows" / "runtime"
 ITEM = re.compile(r"(simp|cheap)(E?)(@e[0-9.e-]+)?")   # a preset item: the polish's scoring, and
-                                                      # the translucent search's eps (the
-                                                      # metric's `@e<eps>`: phase 2b)
+                                                      # the preset's search eps (the metric's
+                                                      # `@e<eps>`), as its rows' name spells it
 
 
 OVERSIZED_M = 49.0      # the size classes' line: a large block over this many million unknowns on
@@ -117,7 +120,9 @@ def size_of(bid: str) -> str:
 # ------------------------------------------------------------------ the clearings
 
 def sources(metric_name: str) -> dict[str, Path]:
-    """Per preset its rows' directory under a metric (relax.rows_of, polish_greedy.rows_of)."""
+    """Per preset its phase-1 rows' directory under a metric (relax.rows_of, polish_greedy.rows_of):
+    SIMP's default, and the cheap preset's plain form (the metric's own tension; records since the
+    cheap preset became the translucent search)."""
     return {"simp": relax.rows_of(PLAN, metric_name, BUDGET),
             "cheap": polish_greedy.rows_of(CHEAP.picker, CHEAP.tries, CHEAP.width, CHEAP.pairs,
                                            search.InEps(), metric_name, BUDGET)}
@@ -189,7 +194,11 @@ def preset(bid: str, item: str, device: str) -> None:
     if m is None:
         raise SystemExit(f"unknown preset item {item!r}: <simp|cheap>[E][@e<eps>]")
     which, exact, search_eps = m.groups()
-    metric = metrics.metric_of(METRIC.name + (search_eps or ""), device=device)
+    base = metrics.metric_of(METRIC.name, device=device)
+    metric = CHEAP.on(base) if which == "cheap" else base       # SIMP's default: the metric's own
+    if (search_eps or "") != metric.name.removeprefix(base.name):
+        raise SystemExit(f"{item!r}: the {which} preset's item is {which}{exact}"
+                         f"{metric.name.removeprefix(base.name)}")
     scoring = search.polish_scoring_of(exact)
     out = ROWS / "preset" / device / item / f"{bid}.parquet"
     t0 = time.time()

@@ -473,7 +473,8 @@ def identity(_ids: list[str]) -> list[str]:
                 bad.append(f"{where} would write under the raster's {raster!r}: {path}")
     # the ported scripts' rows under the runtime's metric: its name, never a raster's
     for where, path in _ported_paths(METRIC).items():
-        if METRIC.name not in path.parts or set(path.parts) & set(names):
+        if (not any(p.split("@")[0] == METRIC.name for p in path.parts)
+                or set(path.parts) & set(names)):
             bad.append(f"{where} writes under {path}")
     # reading: a stored run under a raster name is a record, never read as the complex's
     # (clearings_check.metric_of_run refuses it, clearings_export.this_code passes it over); the
@@ -503,7 +504,7 @@ def identity(_ids: list[str]) -> list[str]:
 
 def _ported_paths(metric: gcl.ComplexMetric) -> dict[str, Path]:
     """Where each script ported in phase 2b writes its rows under `metric`."""
-    presets = rr.cx_presets(metric.name, search.Exactly())
+    presets = rr.cx_presets(metric, search.Exactly())
     return {"road_rescore cx": rr.cx_dir(ROAD_ROWS, metric), "SIMP's default": presets.simp,
             "the cheap preset": presets.cheap, "pweight": pweight.rows_of(metric.name)}
 

@@ -25,6 +25,7 @@ gap_clear.Model.enclosed_left), `device` the run's (gap_clear.ComplexMetric.devi
 """
 from __future__ import annotations
 
+import dataclasses
 import sys
 import time
 from pathlib import Path
@@ -47,14 +48,26 @@ SCORE_EPS = 1e-6     # candidates' eps world, as SIMP's incumbent (k1s1e-06)
 
 
 class Preset(NamedTuple):
-    """A greedy and its polish, as `main` and `rows_of` take them."""
+    """A greedy and its polish, as `main` and `rows_of` take them, and the eps world their tension
+    ranks in (`search_eps`: gap_clear.ComplexMetric.search_eps, the metric's `@e<eps>`; the scores
+    are the metric's whatever it is)."""
     picker: str
     tries: int
     width: int
     pairs: bool
+    search_eps: float
+
+    def on(self, metric: gap_clear.ComplexMetric) -> gap_clear.ComplexMetric:
+        """`metric` with this preset's search: the metric its runs are made, and named, under."""
+        return dataclasses.replace(metric, search_eps=self.search_eps)
 
 
-CHEAP = Preset(picker="S0.01cat", tries=64, width=8, pairs=False)     # the cheap preset
+# The cheap preset (owner 2026-10-15: "Make translucent the cheap preset and delete the plain
+# version"): the translucent search at eps 0.05, on the frontier at the plain form's cost (phase 2b:
+# +0.0099 [+0.0046, +0.0192] over it on the 13, ahead on 11, 1.03x its time; NOTES, "The complex
+# as the runtime: the ports and the cross-checks"). The plain form's rows stay under their names
+# (polish_rows/<metric>/S0.01cat.P64w8[E]/: records).
+CHEAP = Preset(picker="S0.01cat", tries=64, width=8, pairs=False, search_eps=0.05)
 
 
 def rows_of(picker: str, tries: int, width: int, pairs: bool, scoring: search.PolishScoring,
