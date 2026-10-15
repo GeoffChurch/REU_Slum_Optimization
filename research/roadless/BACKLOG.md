@@ -402,6 +402,12 @@ can be done after we've done the entire website/README/examples revamp"):
 - **In that pass, prune the dominated variants**: the speed-quality review's 17 (2026-10-12),
   dominance re-checked under P first, each to the wiki's dead-end record; the add/remove
   search's next rows go with them.
+- **Before that pass, the refined solve's false stall**: ZAF.9.1.4_1_7283 (22 homes, under the
+  source's floor, so never run before the region test) raises "refinement stalled at a backward
+  error of 1.0" though its solution is a direct spsolve's: the componentwise backward error of
+  rows whose terms all vanish beside the street (NOTES, "Exits as leaks: the region model on the
+  complex (5810@major)", its last list). Any block with such rows would raise in the pass. Fix
+  the stopping test, with a guard on 7283 and a fault.
 - **The stored clearings made durable**: each clearing's core (preset, block, cleared building
   ids, D, Lens A, enclosed share) committed; rows no longer overwritten in place. Done 2026-10-13
   (NOTES, "The stored clearings, committed"): `research/roadless/clearings/`, 151 runs on 303
