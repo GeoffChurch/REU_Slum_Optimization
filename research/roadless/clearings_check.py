@@ -21,15 +21,18 @@ cluster saw, and those are the buildings of today. Reports the span of dates eac
 seen over, and every disagreement.
 
 `rescore`: on each block, each run's committed clearing read through the reader (the fingerprint
-checked), scored again by today's scorer on the CPU (clear.Clearing under the run's own settings:
-its along-conductance, every cell by its open fraction, mesh, population and power, B's
-placement, the population's demand) and set beside the row's own D, Lens A (`perm`) and enclosed
-share. `run@step` names a nested run's row: a number, `last` or `mid` (a single-budget run is
-step 1, written `run` alone). A row made before lifted.Placement (metric preB) scores today
-without the homes the nearest-building rule had given a neighbour; where the block has none, it
-must match, and where it has, it moves. Every committed row (preB and B) was scored under the step
-rule before the face aperture (2026-10-13), so its Lens A moves too: a DIFFERS here measures the
-rule's change, not a fault, until the store holds rows scored under the aperture.
+checked), scored again on the CPU under the run's own metric, resolved from its name
+(`metric_of_run`, metrics.metric_of: the gap complex's model for a complex name, keyed by it;
+the raster's for a conductance, on the run's grid) through the seam (seam.ClearingModel: the
+exact J_power and its baseline, B (i)), with the run's power and demand (`demand_of`: the
+population's or priority-weighted P), and set beside the row's own D, Lens A (`perm`) and
+enclosed share. `run@step` names a nested run's row: a number, `last` or `mid` (a single-budget
+run is step 1, written `run` alone). A complex run must match: its name carries every constant
+that can move a score. A raster run named by a bare along-conductance was made under the step
+rule before the face aperture (2026-10-13) and is scored under that along's `+apwfs` form, the
+rule now, so a DIFFERS there measures the rule's change, not a fault; a row made before
+lifted.Placement (metric preB) also scored without the homes the nearest-building rule had given
+a neighbour.
 """
 from __future__ import annotations
 
@@ -115,24 +118,6 @@ def check_banks(store: Store) -> None:
         + span[len(span) // 2:len(span) // 2 + 2] + span[-2:]))
 
 
-def shadowed(sc: Any) -> int:
-    """How many homes lifted.Placement shadowed on this block: live homes none of whose
-    injection cells has them for the nearest building (the nearest-building rule had given those
-    cells to a neighbour, so a scorer from before the Placement gave them no demand)."""
-    import shapely
-    s = sc.pl.S.tocsc()
-    xy = sc.grid.xy.reshape(-1, 2)
-    tree = shapely.STRtree(sc.polys)
-    count = 0
-    for j in np.flatnonzero(~sc.enclosed):
-        cells = s.indices[s.indptr[j]:s.indptr[j + 1]]
-        owner = np.full(len(cells), -1)
-        hit = tree.query_nearest(shapely.points(xy[cells, 0], xy[cells, 1]), all_matches=False)
-        owner[hit[0]] = hit[1]
-        count += int(not (owner == j).any())
-    return count
-
-
 def step_of(info: RunInfo, store: Store, run: str, block: str, token: str) -> int:
     t = store.table(run)
     steps = sorted(int(s) for s in t.loc[t["block"] == block, "step"])
@@ -145,15 +130,38 @@ def step_of(info: RunInfo, store: Store, run: str, block: str, token: str) -> in
     return int(token)
 
 
-def rescore(store: Store, block_ids: Sequence[str], specs: Sequence[str]) -> None:
-    import clear
+def demand_of(name: str) -> Any:
+    """A run's demand by its name (RunInfo.demand): `w` the population's own
+    (common.PopulationDemand), `pq<q>` priority-weighted P (common.PriorityDemand(q))."""
+    import common
+    if name == "w":
+        return common.PopulationDemand()
+    if name.startswith("pq"):
+        return common.PriorityDemand(float(name[2:]))
+    raise ValueError(f"unknown demand {name!r}: w or pq<q>")
+
+
+def metric_of_run(info: RunInfo) -> Any:
+    """The run's metric on the CPU (seam.Metric, metrics.metric_of): the gap complex's by its
+    name (no grid: the run's mesh is ''), or the raster's conductance on the run's grid; a bare
+    along-conductance (the step rule before the face aperture) as its `+apwfs` form."""
     import common
     import lifted
+    import metrics
+    if info.along.startswith(metrics.COMPLEX):
+        return metrics.metric_of(info.along, device="cpu",
+                                 mesh=lifted.UniformMesh(0.5, offset=lifted.OFFSET))
+    name = (info.along if info.along.endswith(f"+{lifted.APERTURE}")
+            else f"{info.along}+{lifted.APERTURE}")
+    return metrics.metric_of(name, device="cpu", mesh=common.mesh_of(info.mesh.removeprefix("h")))
+
+
+def rescore(store: Store, block_ids: Sequence[str], specs: Sequence[str]) -> None:
+    import common
 
     runs = store.runs()
     for block in common.build_blocks(list(block_ids)):
-        scorers: dict[tuple[str, str, str, str], Any] = {}
-        shadow: dict[tuple[str, str, str, str], int] = {}
+        models: dict[tuple[str, str, str, str], Any] = {}
         for spec in specs:
             run, _, token = spec.partition("@")
             info = runs[run]
@@ -161,41 +169,33 @@ def rescore(store: Store, block_ids: Sequence[str], specs: Sequence[str]) -> Non
             if not (t["block"] == block.block_id).any():
                 print(f"{block.block_id} {spec}: not in the run")
                 continue
-            if info.power is None or not info.along or not info.mesh:
+            if info.power is None or not info.along:
                 raise ValueError(f"{run} does not record its metric settings: cannot rescore it")
-            if info.demand != "w":
-                raise ValueError(f"{run}: demand {info.demand}; rescore is the population's")
             step = step_of(info, store, run, block.block_id, token or "1")
             ids = store.cleared(run, block, step=step)                # the fingerprint is checked
             row = t.loc[(t["block"] == block.block_id) & (t["step"] == step)].iloc[0]
-            key = (info.along, info.search_along, info.mesh, info.population)
-            if key not in scorers:
-                scans = lifted.scans_of("cpu")
-                p = lifted.Params(3.0, 8, along=lifted.along_of(info.along, scans),
-                                  cells=lifted.OpenFraction(), solver=lifted.solver_of("cpu"))
-                search = lifted.along_of(info.search_along, scans) if info.search_along else None
-                scorers[key] = clear.Clearing(
-                    block, common.mesh_of(info.mesh.removeprefix("h")), p,
-                    population=common.POPULATIONS[info.population], search=search,
-                    demand=common.PopulationDemand())
-            c = scorers[key]
+            metric = metric_of_run(info)
+            key = (metric.name, info.mesh, info.population, info.demand)
+            if info.population != "area":
+                raise ValueError(f"{run}: population {info.population}; the models' cost is the "
+                                 "area population's")
+            if key not in models:
+                models[key] = metric.clearing(block, demand=demand_of(info.demand))
+            c = models[key]
             removed = np.zeros(c.n, dtype=bool)
             removed[ids] = True
-            J, _P = clear.exact(c, removed, info.power)
-            perm = 1.0 - (J / c.sc.J(c.sc.u0, info.power)) ** (1.0 / info.power)
-            enclosed = c.sc.enclosed_left(c.open_(removed))
+            J, _P = c.exact(removed, info.power)
+            J0, _P0 = c.baseline(info.power)
+            perm = 1.0 - (J / J0) ** (1.0 / info.power)
+            enclosed = c.enclosed_left(removed)
             stored_enc = None if np.isnan(row.get("enclosed", np.nan)) else float(row["enclosed"])
             diff = perm - float(row["perm"])
-            if key not in shadow:
-                shadow[key] = shadowed(c.sc)
-            print(f"{block.block_id} n={c.n} enclosed-at-baseline={int(c.sc.enclosed.sum())} "
-                  f"shadowed={shadow[key]}  "
-                  f"{spec}  [{info.metric}]  D {float(c.cost[removed].sum()):.6f} "
-                  f"(stored {float(row['D']):.6f})  Lens A {perm:.9f} (stored "
-                  f"{float(row['perm']):.9f}, diff {diff:+.2e}, "
+            print(f"{block.block_id} n={c.n} {spec}  [{info.metric}] under {metric.name}  D "
+                  f"{float(c.cost[removed].sum()):.6f} (stored {float(row['D']):.6f})  Lens A "
+                  f"{perm:.9f} (stored {float(row['perm']):.9f}, diff {diff:+.2e}, "
                   f"{'MATCH' if abs(diff) <= MATCH else 'DIFFERS'})  enclosed {enclosed:.6f}"
                   + ("" if stored_enc is None else f" (stored {stored_enc:.6f})"), flush=True)
-        del scorers
+        del models
 
 
 def main(argv: Sequence[str]) -> None:

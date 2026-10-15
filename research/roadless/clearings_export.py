@@ -68,6 +68,9 @@ import pyarrow.parquet as pq
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import clearings  # noqa: E402
+import gap_clear  # noqa: E402
+import gap_factor  # noqa: E402
+import metrics  # noqa: E402
 from clearings import BlockPrint, RunInfo, Store  # noqa: E402
 
 # lifted.Placement (7913fe4, 2026-10-11 16:21:16 -0400): the scorer from which a home with no ring
@@ -77,8 +80,12 @@ B_EPOCH = dt.datetime(2026, 10, 11, 16, 21, 16, tzinfo=dt.timezone(dt.timedelta(
 D_TOL = 1e-9        # a row's D against the one recomputed from its positions (sums in another order)
 
 NUM = r"[0-9]+(?:\.[0-9]+)?"
-ALONG = rf"(?:uni|sl{NUM}|ss{NUM}k{NUM}(?:n{NUM}r{NUM})?)"
-ALONGS = rf"{ALONG}(?:@{ALONG})?"
+# A run's metric, as its rows' directory names it: a raster conductance (lifted.conductance_of,
+# `<along>[+<cells>]+apwfs`; a bare along-conductance, lifted.along_of, the step rule's before the
+# face aperture, 2026-10-13), with the search's after `@` where it differed; or the gap complex's
+# (gap_clear.complex_of: `cx+...`, its code's digest in it, read only if it is this code's)
+ALONG = rf"(?:uni|sl{NUM}|ss{NUM}k{NUM}(?:n{NUM}r{NUM})?t?)(?:\+[bd]{NUM})?(?:\+apwfs)?"
+ALONGS = rf"(?:{ALONG}(?:@{ALONG})?|cx\+[^/@]+(?:@e{NUM})?)"
 MESH_TAIL = re.compile(rf"^(?P<base>.*?)(?:\.h(?P<h>{NUM}))?"
                        rf"(?P<local>\.[ag]{NUM}x{NUM}(?:f{NUM}p{NUM}o{NUM})?)?$")
 
@@ -94,6 +101,20 @@ EXCLUDED: Mapping[str, str] = {
     "rows_h0.5_ell3_K8_area_p1only": "the 220-block study's road-network scores, no clearing",
     "pweight_rows/fw": "Frank-Wolfe bounds (numbers; the design x is not stored), no clearing",
     "pweight_rows/score": "the clearings scored under every objective: scores only",
+    "aperture_rows": "the grid fix's study (NOTES, 'The grid fix: steps that conduct by their "
+                     "open width'): scores under the step rules it compared, and SIMP's clearing "
+                     "under Fws on one block (simp/Fws), a study's record (summary_*.csv)",
+    "width_rows": "the effective-width study (NOTES, 'Uniform conductance with an effective "
+                  "width'): scores, and SIMP's clearings under B_r and D_s on the sentinel "
+                  "(simp/<variant>), a study's record (summary_*.csv)",
+    "cross_rows": "the cross-checks of the complex against the raster (crosscheck.py, phase 2b): "
+                  "the raster's scores of the road prefixes and stored clearings, no clearing",
+    "gap_rows": "the gap complex's study and the runtime's calibration (NOTES, 'The gap complex' "
+                "and 'The complex as the runtime'): scores; simp/ the width forms' SIMP clearings "
+                "on the rebuilt complex (a study's record); runtime/preset/ the acceptance's "
+                "per-device copies of the complex presets' rows (the same clearings as "
+                "relax_rows/<metric> and polish_rows/<metric>, exported) and the dominated "
+                "+relaxlumped's (deleted; its numbers in NOTES)",
 }
 # Top-level parquets that copy rows of a run, checked equal to them at export.
 COPIES: Mapping[str, str] = {
@@ -207,7 +228,9 @@ SIMP = Slot(
     check=("block", "n", "power", "plan", "along", "demand", "objective", "item", "budget"),
     drop={"simp_x": "SIMP's final design, a float a building: not the clearing, and half the "
                     "rows' bytes", "x": "the Frank-Wolfe iterate, a float a building",
-          "host": "the machine", "peak_rss_gb": "the machine"},
+          "host": "the machine", "peak_rss_gb": "the machine",
+          "device": "the solves' device (seam.Metric.device): scores alike to the floating "
+                    "point, not the run's identity"},
     sibling=("iters", "relaxed_perm", "bound_perm", "rounded_perm", "rounded_D", "frac_share",
              "frac_cost", "cleared"))
 FW = Slot(
@@ -246,8 +269,19 @@ def simp_reader(slot: Slot, meta: Settings) -> Callable[[Path], list[Row]]:
 
 
 def split_along(token: str) -> tuple[str, str]:
+    """(the run's metric, the search's where it differed: a raster's `@<along>`, the complex's
+    `@e<eps>`, the translucent search's eps world). A complex metric's name is checked whole
+    (gap_clear.complex_of: refused unless it spells a metric of this code's constants), so no other
+    code's rows are read as this code's."""
+    if token.startswith(metrics.COMPLEX):
+        gap_clear.complex_of(token, factorization=gap_factor.SuperLU())
     metric, _, search = token.partition("@")
     return metric, search
+
+
+def mesh_of_run(spec: str, along: str) -> str:
+    """The grid a run optimized and scored on (mesh_name), none for the complex's ('')."""
+    return "" if along.startswith(metrics.COMPLEX) else mesh_name(spec)
 
 
 @dataclass(frozen=True)
@@ -270,7 +304,7 @@ class SimpFamily:
             for power, files in by_power.items():
                 base = Settings(run=f"{rel}.p{power}", family="simp", mode="whole", spec=m["plan"],
                                 power=float(power), demand="w", population="area", along=along,
-                                search_along=search, mesh=mesh_name(m["plan"]),
+                                search_along=search, mesh=mesh_of_run(m["plan"], along),
                                 budget=float(m["budget"]), source=rel, note="")
                 out.append(Source(settings=base, files=tuple(files),
                                   block_ids=tuple(block_of(f) for f in files),
@@ -294,7 +328,7 @@ POLISH = Slot(
             "t_greedy": "t_greedy", "free_D": "free_D", "free_cleared": "free_cleared",
             "enclosed": "enclosed"},
     check=("block", "n", "picker", "mesh"),
-    drop={})
+    drop={"device": SIMP.drop["device"]})
 
 
 @dataclass(frozen=True)
@@ -319,8 +353,8 @@ class PolishFamily:
                 meta = Settings(run=f"{rel}.p{power}", family="polish", mode="whole",
                                 spec=m["spec"], power=float(power), demand="w",
                                 population="area", along=along, search_along=search,
-                                mesh=mesh_name(m["spec"]), budget=float(m["budget"]), source=rel,
-                                note="")
+                                mesh=mesh_of_run(m["spec"], along), budget=float(m["budget"]),
+                                source=rel, note="")
                 out.append(Source(settings=meta, files=tuple(files),
                                   block_ids=tuple(block_of(f) for f in files),
                                   read=self._reader(meta, m["picker"])))
@@ -334,7 +368,9 @@ class PolishFamily:
             [r] = (row for _, row in df.iterrows())
             same("block", r["block"], block_of(f), f)
             same("picker", r["picker"], picker, f)
-            same("mesh", r["mesh"], meta.mesh, f)
+            # the row's own `mesh` is the grid its spec names (the complex's: a placeholder it
+            # ignores, h 0.5 unnamed)
+            same("mesh", r["mesh"], mesh_name(meta.spec), f)
             row = commit(r, POLISH)
             row.update(block=r["block"], step=1, n=int(r["n"]))
             return [row]
@@ -524,7 +560,10 @@ class ShippedFamily:
     each large block's stored clearings, 2026-10-11 16:23) whose bytes differ from the local
     file's, or whose local file is gone, taken from the earliest run that shipped those bytes and
     extracted under `scratch`. The families above read them from there, unchanged; a source's run
-    is theirs plus @<cluster run>. Rows identical to the local ones are the local ones."""
+    is theirs plus @<cluster run>. Rows identical to the local ones are the local ones. Rows under
+    a gap complex metric that is not this code's (`foreign`: phase 1's runs shipped to the raster's
+    re-scoring, rcx-score*, before their migration to the digested name) are no rows of this code:
+    the migration (gap_calib rescore) carried them, and they are counted, not read."""
     cluster_runs: Path
     scratch: Path
 
@@ -533,12 +572,16 @@ class ShippedFamily:
                       key=lambda p: (p.stat().st_mtime_ns, p.parts[-4], p.name))
         taken: set[tuple[str, str]] = set()
         shipped: dict[str, int] = defaultdict(int)
+        foreign: dict[str, int] = defaultdict(int)
         for tar in tars:
             cluster_run = tar.parts[-4]
             with tarfile.open(tar) as tf:
                 for m in tf.getmembers():
                     hit = STORE_MEMBER.fullmatch(m.name) if m.isfile() else None
                     if hit is None:
+                        continue
+                    if _foreign(hit["path"]):
+                        foreign[cluster_run] += 1
                         continue
                     fh = tf.extractfile(m)
                     if fh is None:
@@ -556,6 +599,9 @@ class ShippedFamily:
                     dest.write_bytes(data)
                     os.utime(dest, (m.mtime, m.mtime))
                     shipped[cluster_run] += 1
+        if foreign:
+            print(f"shipped rows under another code's complex metric, not read: "
+                  f"{sum(foreign.values())} in {', '.join(sorted(foreign))}", flush=True)
         out: list[Source] = []
         for cluster_run in sorted(shipped):
             sub = self.scratch / cluster_run
@@ -570,6 +616,19 @@ class ShippedFamily:
                              "blocks' input tars), which differ from the local rows now: "
                              "overwritten in place since")))
         return out
+
+
+def _foreign(path: str) -> bool:
+    """A rows path under a gap complex metric whose name is not this code's (gap_clear.complex_of
+    refuses it: another digest, or phase 1's undigested name)."""
+    parts = path.split("/")
+    if len(parts) < 2 or not parts[1].startswith(metrics.COMPLEX):
+        return False
+    try:
+        gap_clear.complex_of(parts[1], factorization=gap_factor.SuperLU())
+    except ValueError:
+        return True
+    return False
 
 
 FAMILIES: tuple[Family, ...] = (SimpFamily(), PolishFamily(), GreedyFamily(), PweightFamily())

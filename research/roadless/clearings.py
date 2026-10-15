@@ -262,9 +262,13 @@ class RunInfo:
     power: float | None       # p of J_p
     demand: str               # w (each home injects its population) | pq<q> (PriorityDemand)
     population: str           # area | count: what D and the displacement count
-    along: str                # the metric's along-conductance (lifted.along_of): uni | ss... | sl...
+    along: str                # the run's metric, its rows' directory: a raster conductance
+                              # (lifted.conductance_of, uni+apwfs ...; a bare along-conductance,
+                              # uni | ss... | sl..., the step rule's before 2026-10-13) or the gap
+                              # complex's name (gap_clear.complex_of: cx+..., its code's digest)
     search_along: str         # the conductance the search ranked under, when it differed ("")
-    mesh: str                 # lifted.MeshSpec.name the run optimized and scored on
+    mesh: str                 # lifted.MeshSpec.name the run optimized and scored on ("": the
+                              # complex's, which has no grid)
     budget: float | None      # the D the run was asked for (a path's rows run to its d_max)
     source: str               # where it came from, under research/roadless
     source_files: int
