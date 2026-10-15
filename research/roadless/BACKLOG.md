@@ -261,16 +261,32 @@ items up front"), in the order proposed:
    33 s. The polish scored exactly (`E`) gives the same clearings at 0.81 and 0.56 of the time on a
    core and 1.05 and 1.04 on a GPU, so each device keeps its own (`E` on a core, the eps world's on
    a GPU); the eps world's interiors lumped (`+relaxlumped`) was dominated (Lens A lower, slower on
-   both devices) and deleted. **Next**: phase 2b, the remaining ports (road re-scoring, which needs
-   roads carved into the fixed mesh; pweight; the atlas and corridor pictures; clearings_check; the
-   exports; the translucent search if it is on the frontier) and the cross-checks against the
-   raster, on a GPU; on a GPU the host's work is the time (the refined solves' transfers, the
-   gradient, the assembly; for the cheap preset free first's passes and the catchment's sweep);
-   phase 3, the retirement; then the region test on the complex, the replay test of epistemetry's
-   pruning (Experiment design, below), and the consolidated pass. A lead before that pass: the
-   search's weakness on the complex (the tension ranks the buildings sharing a zone at Spearman
-   +0.83 against +0.97 alone, and the complex's own polish climbs from the raster's clearings; the
-   lumped tension's +0.042 on 22422's cheap preset a datum), tried with moves that clear a zone's
+   both devices) and deleted. **Phase 2b: done** (NOTES, "The complex as the runtime: the ports and
+   the cross-checks"): what the raster still did alone ported to the complex. Roads are cut into
+   the fixed mesh as atoms (gap_clear.Carving; a prefix a state, the shy distance exact on the
+   atoms; against the rebuild L_P within 6.2e-4 on four of six blocks, the other two carrying phase
+   1's necks, the enclosed homes equal at all 68 prefixes). The road lineup on the 60 is re-scored
+   on the complex (resistance_lp still leads the medians, L_P 0.194 at D 0.05, and SIMP's default
+   is ahead of the best road on all 60, by +0.123 where B (i) ties). pweight, the corridor pictures
+   (gap_maps: the flow from the passages' fluxes, Kirchhoff's law guarded) and the block atlas,
+   clearings_check and the store (every run keyed by its metric's name), and free first for the
+   road methods are on the complex. The translucent search (the tension at eps 0.05) is on the
+   frontier at the cheap preset's cost (+0.010 [+0.005, +0.019] over it, 11 of 13; SIMP's default
+   still ahead), so it stays selectable and whether the cheap preset adopts it is the owner's call.
+   Cross-checks against the raster: the road order is the raster's at Kendall tau +0.83 (+1.00 on
+   the 26 blocks where B (i) ties among the methods; elsewhere enclosure decides, the shy distance
+   walling in 174 homes behind gaps under 0.5 m that the raster's cells pass: the metric's choice);
+   P_{1/2}'s weights rank alike (Spearman +0.99); the corridors agree (the raster's main lanes open
+   on the complex but for 0.1 -- 1.0% of their cells, its flow where the complex holds dry 0.7 --
+   2.6%: the closed gaps, the zones, its own lattice); each metric ranks its own optimizer's
+   clearings first, as in phase 1. **Next**: phase 3, the retirement (that section's list: the
+   shared parts of clear and relax moved out, common's raster names, the (b) modules and the mixed
+   modules' raster parts deleted, each retired variant to the wiki's dead-end record with its
+   numbers); then the region test on the complex, the replay test of epistemetry's pruning
+   (Experiment design, below), and the consolidated pass. A lead before that pass: the search's
+   weakness on the complex (the tension ranks the buildings sharing a zone at Spearman +0.83
+   against +0.97 alone, and the complex's own polish climbs from the raster's clearings; the lumped
+   tension's +0.042 on 22422's cheap preset a datum), tried with moves that clear a zone's
    buildings together.
    (4) **Exits: the region model** (owner: "we'd still only leak at the
    outer boundary, so all current must exit ... some of the outer boundary might not leak at all

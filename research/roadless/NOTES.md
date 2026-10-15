@@ -5244,6 +5244,456 @@ a block (8 min on 5810, 17 -- 29 min on the region: a CPU node could build them 
 the cache could be shared without the home's quota). The search's weakness on the complex stays a
 lead (22422's cheap preset under the lumped tension, +0.042, is a datum for it).
 
+### The complex as the runtime: the ports and the cross-checks (owner 2026-10-14: "we can keep the raster for the cross-checks and then retire it")
+
+BACKLOG 4, decision (3): the runtime's phase 2b (the brief:
+.superpowers/sdd/2026-10-14-complex-ports): everything the raster still did alone ported to the
+complex, and the cross-checks against the raster that phase 3, the retirement, records. The metric
+is unchanged, `cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a` (metrics.RUNTIME, its name now written
+once): no constant moved, and the plain fixed mesh's scores are bit for bit phase 2a's (19570's
+baseline, a random clearing's lenses and exact J_2, SIMP's value and gradient at q 3 for J_1 and
+J_2, both tensions; a mesh built afresh equals its cache array for array). Code: gap_clear.py
+(Carving and Prefix: roads cut into the fixed mesh; ComplexMetric.search_eps: the translucent
+search; lattice_box), road_rescore.py (`cx`, `cxreport`), gap_maps.py (the pictures, new),
+pweight.py and pweight_check.py, clearings_export.py, clearings_check.py and clearings.py,
+free_roads.py and transparency_check.py's free-stage oracle, atlas/block5810/ (export, prior,
+buildings, style, style_rel), gap_calib.py (the translucent search's preset items, `roads`),
+crosscheck.py (the raster's side of the cross-checks, new: phase 3 deletes it), gap_clear_check.py
+(roads, flux, device-roads, the identity's ported scripts), gap_complex.Geometry (local, utm),
+relax.SIMP_DEFAULT and polish_greedy.CHEAP (the presets, each defined once).
+
+**The inventory** (brief item 1). Every tracked module under research/roadless/ that, at the
+phase's start (1edb6619), imported lifted, width or the raster's clear or relax, or used common's
+raster names (Scorer, Carve, Obliterate, placement, carved, reached, mesh_of, GoalMesh): an AST
+scan of the imports, those inside functions included, 70 modules (and gap_complex, which names them
+in text only). Each is (a) needed by the project, ported here or on the complex already and
+reaching the raster only through a mixed module's shared part, (b) the raster's own, retired in
+phase 3, or (c) a finished study's record, kept or retired in phase 3 with its numbers.
+
+(a), 21. Ported in this phase: road_rescore (`cx`, `cxreport`; its raster `score` and the rest b),
+pweight and pweight_check, clearings_check (with clearings and clearings_export, which the scan
+does not list: the store keyed by the metric's name), atlas/block5810/export and prior (with
+buildings, style and style_rel), free_roads (with transparency_check's free-stage oracle and
+transparency_run's FREE), gap_calib (the translucent search's items and `roads`; its `rasterscore`
+b). On the complex already, reaching the raster through a shared part: gap_clear (clear.EPS, which
+the code's digest reads, and CpuSweep; relax.project and dproject; check_disjoint's parse of the
+raster's names, lifted.conductance_of and along_of), gap_compare (ComplexModel, the guards'
+rebuild; its raster comparisons, RasterIso, `iso`, `lanes`, `gates`, are c), gap_study (spec_of,
+which reads lifted.RING_M and BAND_M; the rest c), gap_check (spec_of, the same), gap_flow_check
+(the walled channel's geometry from width: L_C, WALL_M, ANGLES), seam (clear.Sweep's type), metrics
+(the RasterMetric branch), relax (simp, Plan, plan_of, one, frank_wolfe, knapsack, project,
+rows_of: the optimizers), search, polish_greedy (a lifted.MeshSpec the complex ignores), cluster
+(common.mesh_of for `--mesh`'s sizing), clear (EPS, RTOL_SCORE, Catchment, CpuSweep, Sweep,
+GramSource, rows_dir, cleared_through, sweep_of) and common (the blocks, LINEUP, arms, the
+populations, Demand, PopulationDemand's and PriorityDemand's `injection`, displacement,
+canonical_order, prefix_to). New: gap_maps (a), crosscheck (b).
+
+(b), 29, each with what it measured and where the numbers are. lifted (the lifted operator: the
+heading lift and its turning cost, Uniform, Sightline, SoftSightline, TurnBoosted; the cells'
+conductances OpenFraction, B_r and D_s; the face aperture Fws; Placement; the uniform, adaptive,
+goal and composite grids; the AMG solvers on both devices: NOTES from "The model" to "The grid
+fix"); width and width_check (B_r and D_s and their guards: no new corridors at r up to 1.5 m, U's
+order kept, tau 1.00; width_rows/summary_*.csv; "Uniform conductance with an effective width");
+aperture_check (the face aperture's guards: the levels' lattice drift 0.23 -> 0.027, the angle
+error at 1 m 1.66 -> 1.21; aperture_rows/summary_*.csv; "The grid fix"); checks, angle_h, angle_q
+(the lift's channel: P against angle, h and ell; "Results so far"); sightline_angle,
+sightline_checks, line_scale, transparency (the sightline conductance: its angle error, 5.32 at 1 m
+against U's 1.66, its width response, its length scale r0, and the translucent search's depth under
+it; "Road-favouring conductances", "Length response and its scale", "Translucent search", "The
+sightline metric's angle error"); conductance_map, current_map, opened_map, render_clear,
+render_alongs, render_simp and atlas/block5810/export_ss (the raster's pictures, the PNGs not
+committed: "Road-favouring conductances", "GPU-resident rounds", "Visualization: block 5810";
+gap_maps replaces them); composite_proto (the composite mesh's prototype: "Local coarsening: the
+prototype"); offset_check, resolution_check, rescore_grid (the lattice's offsets, its resolution
+and the coarse grids: res_rows/; "The metric's resolution floor", "Where resolution matters", "What
+a coarser grid does to Lens A", "Speed"); gramprobe, memprobe_greedy, profile_round, releaseprobe,
+solver_bench, timing, conv (the raster's GPU, AMG and convergence probes: conv/ and conv2/;
+"Results so far", "Greedy speed", "Translucent greedy on 30796"); and the mixed modules' raster
+parts: clear's Clearing, Tension, free_first, RegionGraph, greedy_block, run, loo, exact and
+GpuSweep; relax's Relaxation, RasterMetric, _clearing and the coarse plans `.c` and `.C`; common's
+Scorer, Obliterate, Carve's raster rule, placement, carved, reached, GoalMesh, goal_indicator,
+mesh_of and the Demands' `baseline`; road_rescore's `score`, Corridors, GpuWatch, `report`, `sizes`
+and `project` (road_rows/summary_h0.5_*.csv the record); metrics' RasterMetric branch; cluster's
+`--mesh`, `--scans`, GB_PER_MILLION, HELD_PER_MILLION, RASTER_BYTES and `_gb`; gap_calib's
+`rasterscore`; clearings_check.metric_of_run's raster branch.
+
+(c), 20. study (the 220's lineup under the lifted metric, rows_h0.5_ell3_K8*/: "Study: the lineup
+on the 220"), tail and tails (the escape-time tails: tails_M4_area_p*.parquet), rescore (the
+greedy's discretization: rescore.parquet), compare_clear, area_match, along_lineup (the first
+clearings against roads: "Road-free clearing", "Road-favouring conductances"), picker_compare and
+simp_compare (paired comparisons of stored rows: "Scaling", "Lens A at D 0.05"), mono_cross
+(monotonicity over nested road sets), transparency_run and transparency_check (BACKLOG 5's
+experiment and its guards: transparency_rows/summary_*.csv, "Transparency for the road methods";
+their free stage now the complex's), gap_simp (the complex's study: gap_rows/summary_simp*.csv),
+fft_homog's extract, extract2, extract_gated, lifted_ref, region_extract and region_score_gpu (the
+FFT homogenization study's raster fabric and fine reference: fft_homog/*.csv, report.md; "FFT
+homogenization", "... on 5810@major"), atlas/region5810/export (the region page on the composite
+raster: re-exported on the complex with the region test).
+
+**Roads on the fixed mesh** (gap_clear.Carving, Prefix; brief item 2). A road prefix frees exactly
+its corridor (common.Carve's rule: every road buffered by half its width,
+reblock.budget.road_corridor), so the footprints it touches stand less the corridor, and under the
+shy distance the zero zone is the w / 2 offset of what stands. A network's scored prefixes are its
+stops (the area prefixes at D 0.02 -- 0.20 and the whole network: road_rescore's prefix rows),
+their corridors nested. Every footprint the last corridor touches is cut into atoms, the piece
+within each stop's corridor less the earlier one's (carved from that stop on) and the piece outside
+every corridor (never carved), and the fixed mesh is built on the atoms in place of the buildings
+(full_mesh unchanged: the atoms' outlines and their w / 2 offsets noded together). A state at stop
+k stands every building's atoms less those carved by k: the footprint less C_k, which is what the
+rebuild stands (gap_complex.obstacles), and since a zone is the union of its standing atoms' zones
+(dilation distributes over union) the shy distance's factor is exact on the atoms. The homes stay
+the buildings (the demand, the rings, the population, B (i) and free first's complex are built on
+them), a clearing's k is per building and an atom takes its building's k or 1 where the prefix
+carves it (Carving.atom_k; the gradient sums the atoms to their buildings, the carved held at 1).
+With no network every building is one atom and the plain mesh is phase 2a's bit for bit (above).
+Each corridor is unioned afresh, as the rebuild and the raster carve it, so two stops' corridors
+part by slivers: their nesting is held to the linework's snap along the shorter one's outline
+(18895's clearance_looped: 3.4e-6 m^2), and a carved mesh's Steiner lattice is laid over the
+buildings' baseline open ground (gap_clear.lattice_box: the same ground; GEOS's union of the atoms,
+pieces sharing their cuts, threw a TopologyException on 38988's cycle_native_betweenness_contrast
+network). A carved mesh is cached under its corridors' digest beside the block's identity;
+road_rescore builds each in a temporary directory, since it serves one network.
+
+One mesh a network or one a block. Both are the same Carving (several networks' corridors cut
+together, each atom carved per network): on 20269 one network's mesh builds in 57 s (2.04M
+triangles) and all six networks' in 152 s (4.60M), every state then 1.3 -- 3.4 s on a core against
+0.8 -- 1.7 s, and the lenses agree within 6.5e-5. The run used one mesh a network (the brief's
+suggestion: a block's networks spread over the nodes' cores); both are one code path.
+
+**Calibration by equality** (gap_clear_check roads; gap_calib roads, gap_rows/runtime/roads/).
+Every prefix of two networks (resistance_lp, the lineup's leader, and cycle_native) on six of the
+60 (6312, 17608, 18895, 18910, 18985, 20080: 68 prefixes, D 0.02 to the whole network), as the
+60-block run scored it on its carved mesh, against the complex rebuilt with the prefix carved
+(gap_compare.ComplexModel, the guards' rebuild: gap_flow's mesh with the corridor cut from the
+footprints). The homes walled in are the rebuild's at every prefix. On four of the six L_P is
+within 6.2e-4 (median 2.6e-4; L_{P_1/2} within 6.6e-4, L_J2 6.4e-4) and the state's P within 1.1e-3
+of the rebuild's, the difference growing with the carving (18895's resistance_lp: P 2.5e-4 low at
+38 roads, 1.1e-3 at 1,057; L_P 1.2e-4 high, then 6.2e-4), the carved mesh reading a little faster
+out: the fixed mesh triangulates the same ground differently, its faces sharing the atoms' cuts, as
+at phase 1's clearings, and far below the scheme's own error. The other two carry phase 1's necks.
+On 6312 every network's baseline P0 reads 3.3e-3 below the rebuild's (the homes most apart 4% fast,
+as on 30848), and once a prefix's roads open that ground (resistance_lp from 166 roads, D 0.05;
+cycle_native from 35, D 0.10) the states agree within 1.1e-3, so the lens carries the baseline's
+difference: L_P up to 2.3e-3 below the rebuild's, L_{P_1/2} 1.2e-2, L_J2 7.8e-3. On 18985 the
+baseline reads 1.0 -- 1.7e-3 high (not traced) and L_P within 1.1e-3. At area D 0.05, the lineup's
+budget, L_P is within 2.2e-4 on the four and 2.3e-3 on 6312. The `roads` guard holds a prefix to
+phase 1's tolerance for a clearing (2e-3, every lens): resistance_lp at stops 1, 3 and 5 on 20269
+(36, 201 and 751 roads: L_P +2.9e-5, +2.3e-4, +4.2e-4) and 18895 (38, 260, 1,057: +1.2e-4, +3.2e-4,
++5.8e-4), the homes walled in equal.
+
+**The lineup on the complex** (road_rescore `cx` and `cxreport`;
+road_rows/<metric>/summary_cpu_area_<budgets>_{lens_D0.05,lens_D0.1,price,clearings}.csv,
+committed). The six networks of item 4's lineup on the 60 large blocks (the sentinel's four, 22422,
+30848, 5810 and 9712, among them), every area prefix a state on the network's carved mesh, scored
+under P, P_{1/2} and J_2 with B (i) as item 4's were (the same prefixes, the same networks, the
+same order), on the cluster's CPU nodes and here: resistance_lp leads the medians at both budgets
+under all three lenses (L_P 0.194 at D 0.05, 0.273 at D 0.10), then cycle_native (0.163, 0.250) and
+cycle_native_betweenness_contrast (0.162, 0.246), clearance_looped (0.140, 0.212), euclidean_grid
+(0.124, 0.216) and clearance (0.116, 0.196); in B's order it leads on 30 of the 60 at D 0.05 under
+L_P (28 and 29 under L_{P_1/2} and L_J2) and on 27 at D 0.10, clearance_looped and cycle_native on
+9 each. Item 4's raster read the same medians within 0.007 (resistance_lp 0.194, clearance 0.116;
+clearance_looped 0.147, cycle_native 0.169), but led with resistance_lp on 46: the order's
+cross-check, below, finds why. A network's mesh: a median 2.5M triangles (1.3 -- 9.1M), built in
+207 s (84 -- 772 s), then its model in 14 s and each prefix's state in 5.4 s (at most 20), on one
+core and at most 13.1 GB (5810's).
+
+**The price of roads on the complex**: SIMP's default and the cheap preset under P at area D 0.05
+(B's optimizer: free first, then the search; the polish scored exactly on a core), each against the
+best road prefix in B's order at the same D: SIMP's default is ahead of the best road on all 60
+under every lens. On the 29 where B (i) ties it leads by a median +0.123 of L_P (+0.047 -- +0.217;
+L_{P_1/2} +0.124, L_J2 +0.123), the best road reaching a median 0.49 of SIMP's L_P (p10 0.42, p90
+0.65); on the other 31 it leads on B (i): the complex walls homes in on 39 of the 60 at baseline
+(234 homes, a median 0.1% of a block's population), free first frees every one on all 39, and each
+network's D 0.05 prefix frees them all on 1 -- 4 of the 39. The cheap preset is ahead on all 60
+too, by +0.109 where (i) ties. On the raster (item 4) SIMP's default led on all 60 by +0.152 where
+(i) tied, on 55: the price of roads stands, a little lower in L_P on the complex, and the complex's
+enclosure decides more blocks.
+
+**pweight on the complex** (pweight.py, pweight_check.py; brief item 3). P_{1/2}'s weights were
+already the complex's own (gap_clear.Model: common.PriorityDemand(0.5) on the baseline's escape
+times under the population's demand, Model.inj_q); what the raster still did alone was the study's
+machinery. Its SIMP runs and bounds now run on the runtime's metric (relax.one and
+relax.frank_wolfe through the seam, the metric pweight.METRIC, rows pweight_rows/<metric>/), and
+its scoring of every clearing under every objective is the complex's model (one state a clearing,
+one solve a demand; the depth of the cleared buildings from the catchment's shares of the complex's
+tension). The study's own rows (pweight_rows/<simp|fw|score>/ under uni, and
+pweight_rows/uni+apwfs/) stay its record. The guards, ported (each passes and fails under its
+fault, 19570 and 20269): `identity` (q 0 is P bit for bit: injection, P0, escape times, a random
+clearing's P and J_2; fault `no-population`: P0 22,410 against 22,287); `total` (the injection's
+total and the demand points' the population's at q 1/2, 1 and 2, within 2.2e-16; on the complex the
+right-hand side drops the points escaping at once in the band, so the points are the field's
+analogue; fault `brief`: 8 -- 94% off at q 1/2 and 2); `displacement` (cost, population and B (i)
+independent of the demand, bit for bit; fault `cost-from-demand`); `gradient` (P_q's and P's
+relaxation gradient against the closest of the central differences at steps 1e-3, 1e-4 and 1e-5:
+within 2.7e-6 of the largest, against a tolerance of 1e-4, gap_clear_check's; the raster's guard
+took one step, 1e-4, with solves to 1e-9, and on the complex P is a direct solve whose roundoff on
+20269's P of 9e4 reached 1.2e-4 of the gradient at a step of 1e-5; fault `J-population`: 0.22 --
+0.37 on P_q, P's own rows untouched); and the brief's new `weights`: every home's weight against a
+direct computation from the baseline's escape times, solved afresh (the baseline's operator
+assembled from the passages, phase 1's oracle, and a direct solve), within 1.2e-11 (305 and 1,045
+homes); fault `swap-time` (the most populous home's weight from the least populous one's time):
+0.41 and 0.65 off.
+
+**The corridor pictures and the atlas** (gap_maps.py, atlas/block5810/; brief item 4). The flow
+under U on the complex, drawn from the triangles' fluxes: each static passage carries F = T kp (u_a
+- u_b), each street face G u, a ground cell drains its inflow, and each cell's mean current density
+is its boundary fluxes' first moment over its area (the divergence theorem with the normal flux
+constant along each passage, less the injections at their demand points); the triangles are painted
+onto pixels as the mean of their sub-samples (4 x 4 a pixel), so a lane narrower than a pixel keeps
+its share. Kirchhoff's law holds at every open cell (the `flux` guard: 2.3e-11 -- 5.0e-11 of the
+largest current through a cell on 19570 and 20269 at the baseline and two random clearings, the
+drainage equal to the injection within 1.8e-11; fault `flip-one`, the largest passage flux's sign
+flipped: 1.0). gap_maps `map` draws, for each arm (a stored run, or a network's area prefix on its
+carved mesh), the flow before and after on the atlas's range (the before map's median to its 99.5th
+percentile, log), its change (the corridors opened, the flow drawn away) and the change in the
+escape time from each place, so it answers current_map's, opened_map's and render_clear's questions
+on the metric that scores; conductance_map's road-favouring fields (sightline, width) and the
+sightline arm are the raster's. The block atlas's export, prior and buildings run on the complex
+(the complex's own presets on 5810, their store runs; the no-buildings prior every footprint
+cleared on the fixed mesh), the page's layers unchanged in kind (one pixel per 0.5 m, the crossing
+current |j| h): on 5810, SIMP's default 292 buildings at L_P 0.256 and the cheap preset 238 at
+0.238, 135 in both; the median open pixel's escape time 12% (SIMP's default) and 10% (the cheap
+preset) lower. The layers were drawn and looked at (flow before, the change after SIMP's default:
+the lanes toward the eastern street and the cleared buildings), not published: the site is not this
+phase's.
+
+**The stored clearings, keyed by their metric** (clearings_export.py, clearings_check.py,
+clearings.py; brief item 5). The store holds a run under its rows' directory, which names its
+metric: the export now reads the raster's conductances by name (uni+apwfs; a bare
+along-conductance, the step rule's before 2026-10-13) and the complex's (gap_clear.complex_of:
+refused unless this code's; the translucent search's `@e<eps>` its search part), a complex run's
+grid none; rows a cluster run shipped under another code's complex name (phase 1's runs shipped to
+the raster's re-scoring, rcx-score*, 46 rows) are counted and not read, the migration having
+carried them; the study stores since 2026-10-13 (aperture_rows, width_rows, gap_rows) and
+cross_rows are excluded with their reasons. The export added SIMP's default and the cheap preset
+under P on the 13, under uni+apwfs and under the complex, and the complex's two presets as the road
+lineup's run made them on a core, their polish scored exactly (relax_rows/<metric>/<SIMP's
+plan>E/D0.05.p1 and polish_rows/<metric>/S0.01cat.P64w8E/D0.05.p1, 61 blocks: the 60 and 19570):
+157 runs, 61,525 rows on 303 blocks. clearings_check `rescore` scores through the seam: a run under
+its own metric (`own`, metrics.metric_of from its name: the complex's model for a complex run, the
+raster's for a conductance, a bare along as its +apwfs form; its demand from the run's, so the
+priority-weighted runs too), or every run under a named metric, keyed by that name (the complex's
+reading of the raster's runs). The complex's SIMP default on 20269 re-scores within 2.2e-12; the
+raster's J_2 default there reads 0.4152 on the complex's L_J2 against its own 0.3924.
+
+**Scripts that write rows without naming their metric** (brief item 6; 966bb8b0's note). The ported
+ones are keyed by it: road_rescore `cx` (road_rows/<metric>/<device>/...), pweight
+(pweight_rows/<metric>/), the presets' rows (relax_rows/<metric>/, polish_rows/<metric>/), the
+atlas's info.json (`metric`); the identity guard holds them to it. Nothing will run the rest again,
+each a finished study's record (c): study.py (the 220's lineup under the lifted metric,
+rows_h0.5_ell3_K8*/, which it resumes into: on the complex the lineup is road_rescore `cx`'s,
+keyed), rescore.py (the greedy's discretization, rescore.parquet), tails.py (the escape-time
+tails), the FFT exports (fft_homog/*.csv: FFT homogenization on the raster's fabric),
+atlas/region5810's export (the region page on the composite raster: re-exported, on the complex,
+with the region test). road_rescore's raster `score` keys its rows by its conductance (b).
+
+**The translucent search** (brief item 7). Its standing: measured only under the sightline metric,
+where the greedy's tension ranked under a more translucent conductance (ss100k0.5) beat the plain
+greedy (+0.014 [+0.002, +0.022] at D 0.05 on the 45 held out, at the same cost) and stayed below
+SIMP + incumbent (+0.005 to SIMP), with a gate tail (NOTES, "Translucent search", "Sightline on the
+held-out blocks at D 0.05"); whether it carried to the uniform metric was untried ("uni has no
+kappa to soften"), and nothing in BACKLOG settled it. So it was ported: the complex's analogue is
+the tension in an eps world with a larger eps (gap_clear.ComplexMetric.search_eps, the metric's
+name's `@e<eps>`, the raster's `@<search>` on the complex: the greedy's and the polish's ranking in
+that world, every score under the metric; Model.tension_eps). A pilot on a core (20269, 18895,
+23597, 22422; the cheap preset's greedy and polish, gap_calib's items `cheapE@e<eps>`): eps 0.05
+ahead of the plain greedy (eps clear.EPS, 0.01) on all four, 0.2 and 0.5 behind on all four
+(everything reads open). Then the 13 on a GPU at eps 0.02, 0.05 and 0.1 (gap_calib presets
+`cheap@e<eps>`, run cx-tl; gap_rows/runtime/preset/gpu/; P, area D 0.05, free first), paired with
+phase 2a's GPU rows of the plain cheap preset and SIMP's default, Bayesian bootstrap over the 13:
+
+    eps  greedy vs plain greedy        polished vs cheap preset      polished vs SIMP's default
+    0.02 +0.0028 [-0.0033, +0.0071]  9 +0.0030 [-0.0015, +0.0066] 11 -0.0128 [-0.0194, -0.0067]  1
+    0.05 +0.0121 [+0.0045, +0.0260] 11 +0.0099 [+0.0046, +0.0192] 11 -0.0058 [-0.0089, -0.0018]  2
+    0.1  +0.0030 [-0.0099, +0.0190]  7 +0.0061 [-0.0033, +0.0159]  9 -0.0097 [-0.0145, -0.0058]  0
+
+(mean [95% interval], blocks ahead of 13). At eps 0.05 the translucent greedy's medians are +0.006
+over the plain one, its worst -0.006 (46841) and its best +0.077 (22422: 0.187 against 0.109, the
+gate the plain greedy misses and SIMP finds); polished it reaches SIMP's default on 30848 (0.610
+against 0.598) and 22422 (0.188 against 0.187). Its time is the cheap preset's (a median 1.03x,
+0.65 -- 1.85x on cards Slurm routed; the greedy's own 1.02x), SIMP's default 1.22x it on the GPU.
+No run leaves a home walled in. **Verdict: on the frontier** at the cheap preset's cost, and the
+plain greedy is not dominated by the rule's letter (it ties on time and wins 2 of 13), so both stay
+selectable; making eps 0.05 the cheap preset's search is the owner's call. SIMP's default stays
+ahead of it. eps 0.02 and 0.1 are within noise of the plain search and behind 0.05 (too little
+translucency, then too much).
+
+**The road methods' free-first stage on the complex** (free_roads.FreeEnclosed; BACKLOG 5's TODO
+for the consolidated pass). The stage frees the homes enclosed at baseline with roads on the
+method's own graph; its enclosure, its targets and its test were the raster's (lifted.Placement,
+the cells near a home, the scorer's reach). Now: the homes the metric walls in (the complex grown
+as the width form grows the footprints, read at its filtration width: free first's test), the
+targets the ground within ring_m of the home's outline and the sealed pockets of the complex its
+ring touches, the test the complex rebuilt with the held roads' corridor carved; `metric` (the
+complex's name) in place of the raster's `mesh`, in its identity. transparency_check's free-stage
+oracle is the flow model's reach on the fixed mesh with the roads carved
+(gap_clear.Model.road_factors on a Carving of the held roads), independent of the stage's own test;
+transparency_run's FREE is the complex's stage. The guard (`free-roads`, 20269 and 18895, one
+walled-in home each on the complex): every plan's roads the same on the four method graphs, each
+held road frees its home by the oracle, nothing left enclosed, the true displacement the plan's (D
+0.0004 and 0.0017 by area); fault `one-short` (every held road one segment short): the stage
+raises, its road not freeing its home.
+
+**Choices the brief left open** (each taken as the raster tool behaves, so the cross-checks compare
+like with like). The carving is common.Carve's (every road buffered by half its width, the corridor
+unioned afresh at each prefix) and B (i) the enclosed population share, as item 4 scored them. The
+free stage's targets are the ground within ring_m of a walled-in home's outline and the sealed
+pockets its ring touches, the complex's analogue of Placement's ring of free cells within 1 m. The
+atlas's no-buildings prior clears every footprint on the fixed mesh, as the raster's carved every
+one. The pictures paint the complex's current density onto the raster's own cells (the mean over 4
+x 4 sub-samples a cell, so a lane narrower than a cell keeps its share) and compare on them, the
+raster's flow its cells' summed heading fluxes as current_map drew it. The road lineup ran on
+cores, not GPUs: the carved meshes' builds are 83% of a task (GEOS and the triangulation, host work
+a card cannot speed; a median 207 s, 772 s at most on 9.1M triangles), so on cards the 360 tasks
+would have held about 30 GPU-h, past the phase's 15; the device changes a score at the
+floating-point level only, checked on carved meshes by the `device-roads` guard (below). The
+presets' polish on a core scores exactly (`E`), as phase 2a chose for that device (the same
+clearings as the eps world's).
+
+**The cross-checks against the raster** (crosscheck.py;
+cross_rows/summary_{roads,clearings,weights,pictures}.csv, committed). The raster is uni+apwfs at h
+0.5 (ell 3 m, K 8, the area population, B's placement), its metric as phase 1's acceptance scored
+it, and item 4's uni (the step rule before the face aperture) beside it where its rows stand. On
+the 60 it scored what the complex scored (runs cx-raster-p, cx-raster and cx-raster2 on the
+cluster's cards): each network's area prefixes at D 0.05 and 0.10, the stored clearings and the
+complex's presets, every home's P_{1/2} weight and escape time at baseline. On four blocks its flow
+stood against the complex's. Each difference is read as the raster's error (its lattice, its lift,
+its leaks: the gap complex's study measured each) or the metric's choice (the shy distance at w 0.5
+m: a gap narrower than w closed, a zone of w / 2 along every wall that conducts nothing), with the
+evidence for which.
+
+- The road methods' order. On the 60 at D 0.05 the complex orders the six networks as the raster
+  does at a Kendall tau median of +0.83 under L_P (quartiles +0.33, +1.00; +0.83 under L_{P_1/2},
+  +0.87 under L_J2), the same leader on 38 (40, 39); against item 4's uni +0.73, the same leader on
+  34. The lens alone orders them alike (+0.87 [+0.78, +1.00]); the order parts where B (i) does. On
+  the 26 blocks where the methods' enclosed shares tie on both models the order is the raster's
+  (tau +1.00, the same leader on 25); on the 34 where they do not it is +0.60 [+0.20, +0.70]. That
+  is enclosure: the complex walls homes in on 39 of the 60 at baseline, the raster on 23 (item 4's
+  uni on 12), and each of the 174 homes walled in on one model only (37 blocks) is walled in on the
+  complex, behind a gap narrower than w that the raster's cells pass. So resistance_lp, which leads
+  on 40 on the raster (46 under item 4's uni), leads on 30 on the complex: in B's order a network
+  whose D 0.05 prefix frees more of those homes leads, whatever its lens. Verdict: the metric's
+  choice (the shy distance at 0.5 m walls in homes behind gaps a body does not pass, and B (i)
+  ranks freeing them first), not the raster's error; at D 0.10 the same (L_P +0.77, +1.00 where (i)
+  ties, +0.47 where not).
+- The stored clearings on both metrics. The stored clearings on the 60 (SIMP's default and the
+  cheap preset as the raster's uni made them under J_2, on 59, and as uni+apwfs and the complex
+  made them under P, on the 13) and the complex's presets as the lineup's run made them, each
+  scored on both. Each metric ranks its own optimizer's clearings first, as phase 1 found on the
+  13: on the raster the complex's SIMP is behind the raster's own (uni+apwfs) on all 13 (where (i)
+  ties, a median -0.010 of L_P; -0.53 on 22422, the gate) and its cheap preset ahead on 2; on the
+  complex the complex's SIMP leads the raster's on 9 of 13 (5 of them on B (i), the raster's
+  clearing leaving homes walled in on the complex; +0.0004 where (i) ties) and its cheap preset on
+  12. Against the raster's J_2 clearings (uni, 59 blocks; their objective J_2, the presets' P) the
+  complex's presets lead on the complex on 58 under L_P and 43 -- 46 under L_J2, and on the raster
+  on 31 -- 32 under L_P (a median -0.001 where (i) ties) and 12 -- 13 under L_J2. The clearings'
+  order, metric against metric, is a Kendall tau median +0.38 on L_P (+0.08 on L_{P_1/2}, +0.33 on
+  L_J2). Levels over the 60 agree within 0.015 at the median (the complex's SIMP 0.358 on the
+  complex and 0.361 on the raster, the raster's J_2 SIMP 0.355 and 0.370); on the 13 the raster's P
+  clearings read 0.10 lower on the complex (0.275 against 0.378), the gates they open through lanes
+  under 0.5 m (phase 1's 22422 and 23597). The raster's clearings leave homes walled in on the
+  complex on 25 -- 29 of 59 (uni) and 5 of 13 (uni+apwfs); the complex's leave one walled in on the
+  raster on one block (24240, 0.015% of its population; not traced). Verdict: the levels agree;
+  each metric's search fits the metric it scores, so the clearings' order parts by optimizer, and
+  the enclosure gap and the gates are the metric's choice (w 0.5).
+- P_{1/2}'s weights. Every home's P_{1/2} weight at baseline on the 60: Spearman per block a median
+  +0.99 [+0.97, +1.00] (at least +0.945, 41515) over the homes with demand on both (a weight is the
+  home's escape time to the q, so the escape times rank alike); the complex's weight over the
+  raster's at the median home 1.007 (p05 -- p95 0.89 -- 1.06, medians over the blocks); the 174
+  homes walled in on the complex only carry no weight there; three homes weigh 0 on one model only
+  (their demand escaping at once in the street band). Verdict: the weights agree; where they part
+  it is enclosure, the metric's choice.
+- The corridor pictures. On 20269, 22422, 23597 (on a core) and 5810 (on a card), the raster's flow
+  and the complex's on the raster's cells, at the baseline and after SIMP's default as each metric
+  made it (summary_pictures.csv). Where the flow goes agrees: Spearman 0.90 -- 0.995 over the cells
+  both hold open (5810 0.95, 20269 0.90 -- 0.94), and the raster's main lanes (its top tenth of the
+  cells) lie on ground the complex keeps open but for 0.1 -- 1.0% of their cells; the two models'
+  main lanes share 55 -- 81% of their cells (75 -- 91% of the complex's lie in the raster's), the
+  top tenth's edge falling differently along wide lanes, where the raster's lattice loses 0.14 --
+  0.29 m of a lane at each wall (phase 1's corridor). The raster's flow on cells the complex holds
+  dry or nearly so (under 1% of its median) is 0.7 -- 2.6% of it, of four kinds: on cells whose
+  centres lie inside a standing footprint, 0.2 -- 1.5% (the raster's mixed cells, a cell's open
+  share conducting at its centre: the raster's lattice, not a difference in where people walk;
+  inferred from the kind, the cells not traced one by one); in the shy distance's zone, within w /
+  2 of a wall, 0.07 -- 0.8% (the metric's choice); in pockets behind a gap narrower than w, 0 --
+  0.4%, their bottlenecks a median 0.30 -- 0.44 m (the metric's choice); and in the street band,
+  where the complex's demand escapes at once, 0.14 -- 0.43% (the two models' exits). 22422 is the
+  brief's case: at the baseline, and after the complex's SIMP, which leaves the gate shut, the
+  raster's busiest cell anywhere lies on ground the complex holds dry behind a bottleneck of 0.2 --
+  0.5 m (the pockets' there a median 0.38 m: phase 1's 14 m lane, 0.25 -- 0.4 m wide, through which
+  three homes hold 63% of the raster's P), so the raster's P reads 2.6x the complex's (219k against
+  86k); after the raster's SIMP opens the gate that lane carries 0.02% of the flow. On 23597 such
+  pockets hold 0.08% of the raster's flow at the baseline (bottlenecks a median 0.30 m), on 20269
+  0.04%, on 5810 0.02%. Verdict: the corridors agree; where the raster's flow runs where the
+  complex's does not, it is the shy distance closing gaps under 0.5 m and the zone along each wall
+  (the metric's choice, the owner's at w 0.5), or the raster's lattice at footprint edges (its
+  error), and no lane of the raster's main flow is lost otherwise.
+
+**The guards** (each passes on the code as it is and fails under its fault; run both ways at
+a1a0d47b, after the last change to any code a guard reads, gap_calib's report and crosscheck's road
+order changing after it: on a core here, the device guards on the cluster's cards). New in this
+phase: gap_clear_check `roads` (above; fault `one-face-closed`, the largest atom each prefix carves
+left standing: L_P 5.2 -- 6.3e-3 low at the first prefix), `flux` (the pictures' fluxes conserve
+current: every open cell within 5.0e-11 of the largest current through a cell, the drainage the
+injection within 1.8e-11; fault `flip-one`, the largest passage flux's sign flipped: 1.0),
+`device-roads` (cuDSS against SuperLU on a carved mesh at the `roads` prefixes, 20269 and 18895:
+within 8.9e-11; fault `perturb`, the first prefix's refactorization's diagonal raised by 1e-6: 0.43
+-- 0.88), and `identity` extended (the ported scripts write under the runtime's name and never a
+raster's: road_rescore `cx`, the presets' rows, pweight; a stored run under a raster name reads as
+the raster's metric, under the complex's as the complex's; fault `collide`,
+gap_clear.check_disjoint disabled: a complex metric named as a raster conductance is accepted and
+road_rescore would write into the raster's directory); pweight_check's five on the complex (above,
+`weights` new; fault `swap-time`); transparency_check's `free-roads` on the complex (above; fault
+`one-short`). Phase 1's and 2a's, re-run: gap_clear_check baseline (faults interior, exits),
+weights (no-conform), reach (threshold), gradient (tie), free (drop-crossing), convex (multiply),
+pattern (drop-identity), constants (omit), device (perturb; on cards); gap_check conform
+(unconstrained), delaunay (flip, geos), apertures (corners), filtration (narrowest), free
+(no-rebuild); gap_flow_check angle, shift, channel, field (centroids each), law (no-grow), closed
+(no-clearance). On the core all 28 pass and each fails under each of its 30 faults; on the cards
+`device` passes on 19570 and 5810 within 8.0e-11 and fails under `perturb` (0.68 -- 0.99 off),
+`device-roads` as above (a third block named for `device`, 7851, was misspelt in the submit and did
+not run).
+
+**Compute.** GPU: 5.9 GPU-h of the phase's 15: the translucent search 1.75, the raster's side of
+the cross-checks 3.24 over the 60, the device guards 0.80, the pictures on 5810 0.11. The raster
+run's cost was first projected from the pilot's two blocks at 44 -- 90 GPU-h (6310 in 138 s, 30848
+in 2,090 s: a power law through what proved an outlier), so the 24 largest blocks were held back;
+the other 34 took 25 -- 745 s each (0.87 GPU-h), a refit on them put the 24 at about 1 GPU-h (5 if
+several ran like 30848), and they ran in 1.74. CPU: 64 CPU-h on quadro2 (the 360 road networks 30,
+the presets on the 60 33, the pilot 1), 8 of them lost when the cluster home's shared quota filled
+(04:08 -- 04:19 UTC on 2026-10-15, every running task killed; the failed runs re-made at new
+commits, here and on quadro2), and about 20 here (the guards twice, the calibration, the pictures
+on three blocks, 13 blocks' presets and 5810's networks while the cluster was held; inferred from
+the timed runs).
+
+**Phase 3's list** (from the inventory). First the moves, so that the deletions break nothing the
+project keeps: (1) clear's shared part (EPS, which the code's digest reads; RTOL_SCORE; Catchment,
+CpuSweep, Sweep and GramSource; rows_dir, cleared_through, sweep_of less GpuSweep) and relax's SIMP
+(Plan, plan_of, simp, the steppers, frank_wolfe, knapsack, project and dproject, round_by_x,
+cut_to_budget, one, rows_of, D_LENS) into modules of their own, or kept with the raster parts
+deleted around them; (2) common's raster names deleted and the Demands' `baseline` methods with
+them (the complex calls `injection` only); (3) gap_clear.check_disjoint's parse of the raster's
+names (lifted.conductance_of and along_of) replaced by a fixed grammar of them
+(clearings_export.ALONG's), since the raster's rows stay on disk and a complex name must never read
+as one; (4) the complex's Spec read where it is named (gap_study.spec_of and gap_check read
+lifted.RING_M and BAND_M; the runtime parses ring and band from the metric's name), the walled
+channel's geometry for gap_flow_check (width.walled_channel, L_C, WALL_M, ANGLES) moved beside it,
+polish_greedy's and road_rescore's `mesh` argument (a lifted.UniformMesh the complex ignores)
+dropped from the complex's path, metrics' RasterMetric branch and seam's raster mentions, cluster's
+raster sizing (`--mesh`, `--scans`, GB_PER_MILLION and its kin), clearings_check.metric_of_run's
+raster branch (the raster's rows then stand as records, not rescorable). Then the deletions: the
+(b) modules and the mixed modules' raster parts as listed above, with gap_calib's `rasterscore` and
+crosscheck.py after their numbers are in NOTES. The (c) modules' fate is the owner's (kept as
+records, or deleted with their numbers in NOTES and their summaries committed). For the wiki's
+dead-end record, each retired variant with its numbers: the lifted metric (the heading lift and
+turning length: its boundary layer loses 0.3 -- 1.1 m of a lane at each wall, the gap complex's
+study), the raster's lattice (0.14 -- 0.29 m of a lane at each wall; its isotropic model),
+Sightline, SoftSightline and TurnBoosted (angle error 5.32 at 1 m; parked 2026-10-13), B_r and D_s
+(no new corridors at r up to 1.5 m, U's order kept, tau 1.00), A, Aw and Aws (deleted with Fws's
+adoption), the composite and goal meshes (local coarsening, the o1 goal mesh), the raster's speed
+(phase 2a: the complex's presets at 0.38 and 0.93 of its GPU time), the cross-checks above, and
++relaxlumped (phase 2a).
+
 ### Pruning by epistemetry: a replay against seqscreen (owner 2026-10-14: "Yes"; BACKLOG, "Pruning by epistemetry's decision layer")
 
 Does GeoffChurch/epistemetry's decision layer decide which variants to keep better than
