@@ -293,11 +293,182 @@ def pictures(bid: str, device: str) -> None:
                      out / f"{bid}.parquet")
 
 
+# ------------------------------------------------------------------ the report
+
+OLD_RASTER = "uni"       # item 4's rows (the step rule before the face aperture): the order's
+                         # third reading, road_rows/h0.5_ell3_K8_uni_area_<budgets>/
+LENS_OF_OLD = {"L_P": "P1", "L_J2": "P2"}    # item 4's columns for the same lenses (area rows)
+
+
+def _complex() -> gcl.ComplexMetric:
+    """The runtime's metric as the 60-block run scored it (on a core)."""
+    return gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.factorization_of("cpu"))
+
+
+def _tau(a: NDArray[np.float64], b: NDArray[np.float64]) -> float:
+    from scipy.stats import kendalltau
+    return float(kendalltau(a, b).statistic) if len(a) >= 3 else np.nan
+
+
+def _q(v: pd.Series) -> str:
+    return (f"median {v.median():+.2f} [{v.quantile(0.25):+.2f}, {v.quantile(0.75):+.2f}] "
+            f"over {v.notna().sum()}")
+
+
+def roads_report() -> pd.DataFrame:
+    """The road methods' order, the complex's against the raster's (uni+apwfs, and item 4's uni)
+    at each CROSS_BUDGET, in B's order per lens: Kendall tau per block over the methods reaching
+    the budget, and whether the leader is the same."""
+    cx = rr.cx_lens_table
+    t = rr.cx_rows(ROAD_ROWS, _complex(), LINEUP)
+    ras = rr._read_all(sorted(raster_dir(RASTER).glob("*__roads.parquet")))
+    old = rr.score_rows(ROAD_ROWS, LINEUP, "0.5", "area").rename(
+        columns={v: k for k, v in LENS_OF_OLD.items()})
+    rows = []
+    for budget in CROSS_BUDGETS:
+        c = cx(t, budget)
+        r = ras[np.isclose(ras.budget, budget)].copy()
+        o = old[np.isclose(old.budget, budget)].copy()
+        for bid, g in c[c.reach].groupby("block"):
+            gr = r[(r.block == bid) & r.method.isin(g.method)].set_index("method")
+            go = o[(o.block == bid) & o.method.isin(g.method)].set_index("method")
+            gc_ = g.set_index("method")
+            for lens in rr.CX_LENSES:
+                for name, other in (("raster", gr), ("uni", go)):
+                    if lens not in other.columns or len(other) != len(gc_):
+                        continue
+                    other = other.loc[gc_.index]
+                    rank_o = rr._b_rank(other.reset_index(), "enclosed", lens)
+                    rank_c = gc_[f"rank_{lens}"].to_numpy()
+                    rows.append(dict(block=bid, budget=budget, lens=lens, against=name,
+                                     methods=len(gc_), tau=_tau(-rank_c, -rank_o),
+                                     same_leader=bool(gc_.index[np.argmin(rank_c)]
+                                                      == gc_.index[np.argmin(rank_o)]),
+                                     leader_cx=str(gc_.index[np.argmin(rank_c)]),
+                                     leader_other=str(gc_.index[np.argmin(rank_o)])))
+    df = pd.DataFrame(rows)
+    print("THE ROAD METHODS' ORDER, the complex against the raster, Kendall tau per block in B's "
+          "order")
+    for budget in CROSS_BUDGETS:
+        for lens in rr.CX_LENSES:
+            for against in ("raster", "uni"):
+                g = df[np.isclose(df.budget, budget) & (df.lens == lens) & (df.against == against)]
+                if len(g):
+                    print(f"  D {budget:g} {lens:5s} vs {against:6s}: {_q(g.tau)}; the same "
+                          f"leader on {int(g.same_leader.sum())} of {len(g)}")
+    return df
+
+
+def clearings_report() -> pd.DataFrame:
+    """The stored clearings and the complex's presets on both metrics: per block and lens, each
+    clearing's B (i) and lens on each, the clearings' order in B's order on each metric (Kendall
+    tau between them), and each pair's lead (the complex's SIMP and cheap preset against the
+    raster's of the same preset)."""
+    every = rr.cx_plain_rows(ROAD_ROWS, _complex())
+    pl = every[every.clearing != "baseline"]
+    ras = rr._read_all(sorted(raster_dir(RASTER).glob("*__clearings.parquet")))
+    m: pd.DataFrame = pl.merge(ras, on=["block", "clearing"], suffixes=("_cx", "_r"))
+    rows = []
+    for bid in m.block.unique():
+        g = m[m.block == bid]
+        for lens in rr.CX_LENSES:
+            rc = rr._b_rank(g.rename(columns={"enclosed_cx": "e", f"{lens}_cx": "v"}), "e", "v")
+            rk = rr._b_rank(g.rename(columns={"enclosed_r": "e", f"{lens}_r": "v"}), "e", "v")
+            rows.append(dict(block=bid, lens=lens, clearings=len(g), tau=_tau(-rc, -rk)))
+    tau = pd.DataFrame(rows)
+    print("\nTHE STORED CLEARINGS ON BOTH METRICS")
+    for lens in rr.CX_LENSES:
+        g = tau[tau.lens == lens]
+        print(f"  {lens}: the clearings' order, complex against raster, Kendall tau {_q(g.tau)}")
+    lev = m.groupby("clearing")[[f"{ln}_{x}" for ln in rr.CX_LENSES for x in ("cx", "r")]].median()
+    print("  medians over the blocks each clearing has:")
+    print(lev.round(4).to_string())
+    enc = m.groupby("clearing").agg(blocks=("block", "size"),
+                                    walled_cx=("enclosed_cx", lambda v: int((v > 0).sum())),
+                                    walled_r=("enclosed_r", lambda v: int((v > 0).sum())))
+    print("  blocks where each leaves people walled in, on the complex | the raster:")
+    print(enc.to_string())
+    pairs = (("simp_cxE", "simp_fws"), ("cheap_cxE", "cheap_fws"), ("simp_cxE", "simp_uni"),
+             ("cheap_cxE", "cheap_uni"))
+    for a_, b_ in pairs:
+        for x in ("cx", "r"):
+            for lens in rr.CX_LENSES:
+                wa = m[m.clearing == a_].set_index("block")
+                wb = m[m.clearing == b_].set_index("block")
+                both = wa.index.intersection(wb.index)
+                if not len(both):
+                    continue
+                ea, eb = wa.loc[both, f"enclosed_{x}"], wb.loc[both, f"enclosed_{x}"]
+                va, vb = wa.loc[both, f"{lens}_{x}"], wb.loc[both, f"{lens}_{x}"]
+                ahead = (ea < eb) | ((ea == eb) & (va > vb))
+                tie = ea == eb
+                d = (va - vb)[tie]
+                print(f"  {a_} against {b_} on the {'complex' if x == 'cx' else 'raster'}, "
+                      f"{lens}: ahead on {int(ahead.sum())} of {len(both)}; where (i) ties "
+                      f"({int(tie.sum())}) {d.median():+.4f} median ({d.min():+.4f} .. "
+                      f"{d.max():+.4f})")
+    return m
+
+
+def weights_report() -> pd.DataFrame:
+    """P_{1/2}'s weights per home, the complex's against the raster's: Spearman per block over
+    the homes with demand on both, and the escape times' too."""
+    from scipy.stats import spearmanr
+    d = rr.cx_dir(ROAD_ROWS, _complex())
+    rows = []
+    for f in sorted(raster_dir(RASTER).glob("*__homes.parquet")):
+        bid = f.name.split("__")[0]
+        g = d / f"{bid}__homes.parquet"
+        if not g.exists():
+            continue
+        hr, hc = pd.read_parquet(f), pd.read_parquet(g)
+        ok = (~hr.enclosed.to_numpy()) & (~hc.nodem.to_numpy())
+        rows.append(dict(block=bid, homes=int(ok.sum()),
+                         walled_apart=int((hr.enclosed.to_numpy() != hc.nodem.to_numpy()).sum()),
+                         rho_a=float(spearmanr(hr.a_q[ok], hc.a_q[ok]).statistic),
+                         rho_u0=float(spearmanr(hr.u0[ok], hc.u0[ok]).statistic),
+                         a_ratio_med=float(np.median(hc.a_q[ok] / hr.a_q[ok])),
+                         a_ratio_p05=float(np.quantile(hc.a_q[ok] / hr.a_q[ok], 0.05)),
+                         a_ratio_p95=float(np.quantile(hc.a_q[ok] / hr.a_q[ok], 0.95))))
+    df = pd.DataFrame(rows)
+    print("\nP_{1/2}'S WEIGHTS, the complex's against the raster's, Spearman per block: "
+          f"{_q(df.rho_a)} (the escape times {_q(df.rho_u0)}); the complex's weight over the "
+          f"raster's at the median home {df.a_ratio_med.median():.3f}, p05 -- p95 "
+          f"{df.a_ratio_p05.median():.3f} -- {df.a_ratio_p95.median():.3f}; homes walled in on "
+          f"one model only: {int(df.walled_apart.sum())} on {int((df.walled_apart > 0).sum())} "
+          "blocks")
+    return df
+
+
+def pictures_report() -> pd.DataFrame:
+    df = rr._read_all(sorted((ROWS / "pictures").glob("*.parquet")))
+    if not len(df):
+        return df
+    pd.set_option("display.width", 250)
+    print("\nTHE CORRIDOR PICTURES, the raster's flow against the complex's on the raster's cells")
+    cols = ["block", "state", "rho", "lanes_jaccard", "lanes_c_in_r", "lanes_r_dry", "flow_r_dry",
+            "flow_r_dry_band", "flow_r_dry_inside", "flow_r_dry_zone", "flow_r_dry_pocket",
+            "flow_r_dry_other", "pocket_bottleneck_q50"]
+    print(df[cols].round(4).to_string(index=False))
+    return df
+
+
+def report() -> None:
+    """Every cross-check's summary (ROWS/summary_*.csv, committed)."""
+    for name, fn in (("roads", roads_report), ("clearings", clearings_report),
+                     ("weights", weights_report), ("pictures", pictures_report)):
+        df = fn()
+        if len(df):
+            df.to_csv(ROWS / f"summary_{name}.csv", index=False)
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
     if a[:1] == ["raster"] and len(a) == 3:
         raster(a[1], a[2])
     elif a[:1] == ["pictures"] and len(a) == 3:
         pictures(a[1], a[2])
+    elif a == ["report"]:
+        report()
     else:
         raise SystemExit(__doc__)

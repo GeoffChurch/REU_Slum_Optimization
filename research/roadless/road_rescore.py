@@ -26,6 +26,7 @@ summary tables beside the rows (<rows>/summary_*.csv, committed).
     uv run python $S sizes <rows> <composite mesh> <procs>
     uv run python $S project <rows> <lineup,> <mesh> <composite mesh>
     uv run python $S cx <rows> <scratch> <metric> <cpu|gpu> <id> <items,>    # on the complex
+    uv run python $S cxreport <rows> <lineup,> <metric> <cpu|gpu>
 
 ON THE COMPLEX (phase 2b; NOTES, "The complex as the runtime: the ports and the cross-checks"):
 `cx` scores the area prefixes (decision (2)) on the gap complex's metric (<metric>, refused unless
@@ -34,7 +35,9 @@ it is one: gap_clear.complex_of), each item of a block in turn: a network of <ro
 gap_clear.Carving, built in a temporary directory; every prefix a state on it, L_P, L_{P_1/2},
 L_J2 and B (i)), or `plain` (cx_plain: the block's plain mesh, its homes' P_{1/2} weights, the
 stored clearings of cx_stored, then SIMP's default and the cheap preset under P at D 0.05, their
-polish scored as the device's). Rows under <rows>/<metric>/<device>/area_<budgets>/.
+polish scored as the device's). Rows under <rows>/<metric>/<device>/area_<budgets>/;
+`cxreport` reads them (B's order on L_P, L_{P_1/2} and L_J2; the price of roads under the
+complex) and writes <rows>/<metric>/summary_<device>_*.csv.
 
 <rows> is the rows root and <lineup,> the networks it scores, both required: item 4 ran with
 research/roadless/road_rows and common.LINEUP (clearance,clearance_looped,cycle_native,
@@ -1197,6 +1200,114 @@ def report(rows: Path, lineup: tuple[str, ...], mesh_token: str, composite_token
                       f"{mesh.name} {r[mesh.name]:.5f} = {r[comp.name] - r[mesh.name]:+.5f}")
 
 
+# ------------------------------------------------------------------ report on the complex
+
+CX_LENSES = ("L_P", "L_Pq", "L_J2")      # P the headline, P_{1/2} the equity view, J_2 the old (c)
+
+
+def cx_rows(rows: Path, metric: gcl.ComplexMetric, lineup: tuple[str, ...]) -> pd.DataFrame:
+    """The networks' prefix rows on the complex (cx_network), every block's."""
+    d = cx_dir(rows, metric)
+    return _read_all([f for name in lineup for f in sorted(d.glob(f"*__{name}.parquet"))])
+
+
+def cx_plain_rows(rows: Path, metric: gcl.ComplexMetric) -> pd.DataFrame:
+    """The plain meshes' rows (cx_plain: the baseline, the stored clearings, the presets)."""
+    return _read_all(sorted(cx_dir(rows, metric).glob("*__plain.parquet")))
+
+
+def cx_lens_table(t: pd.DataFrame, budget: float) -> pd.DataFrame:
+    """Per (block, method) at `budget` (the area prefix reaching it): each lens with its rank among
+    the methods reaching the budget in B's order (the population left walled in first)."""
+    at = t[np.isclose(t.budget, budget)].copy()
+    at["reach"] = at.D_area >= budget - 1e-9
+    for lens in CX_LENSES:
+        rank = pd.Series(np.nan, index=at.index)
+        for _, g in at[at.reach].groupby("block"):
+            rank[g.index] = _b_rank(g, "enclosed", lens)
+        at[f"rank_{lens}"] = rank
+    return at
+
+
+def cxreport(rows: Path, lineup: tuple[str, ...], metric: gcl.ComplexMetric) -> None:
+    """The road lineup on the complex (module docstring): per budget of REPORT_BUDGETS the lens
+    table and the leaders under each lens in B's order; the price of roads at PRICE_BUDGET (each
+    preset's clearing on the complex against the best road prefix in B's order, by lens); the
+    homes the metric walls in and what the prefixes and clearings free. Summaries
+    <rows>/<metric>/summary_<device>_*.csv (committed)."""
+    pd.set_option("display.width", 250)
+    t = cx_rows(rows, metric, lineup)
+    pl = cx_plain_rows(rows, metric)
+    out = rows / metric.name
+
+    def path(what: str) -> Path:
+        return out / f"summary_{metric.device}_{CX_POP}_{budgets_tag()}_{what}.csv"
+    print(f"{t.block.nunique()} blocks with networks on {metric.name} ({metric.device}), "
+          f"{pl.block.nunique()} with the plain mesh's rows")
+    for budget in REPORT_BUDGETS:
+        at = cx_lens_table(t, budget)
+        at.to_csv(path(f"lens_D{budget:g}"), index=False)
+        print(f"\nAT AREA D {budget:g}: methods reaching it per block "
+              f"{at.groupby('block').reach.sum().median():.0f} (median); the medians of each lens")
+        print(at[at.reach].groupby("method")[list(CX_LENSES)].median().round(4)
+              .rename(index=SHORT).to_string())
+        for lens in CX_LENSES:
+            lead = at[at[f"rank_{lens}"] == 1].drop_duplicates("block").method.map(SHORT)
+            print(f"  leader under {lens} in B's order: "
+                  + ", ".join(f"{k} {v}" for k, v in lead.value_counts().items()))
+    # the price of roads
+    at = cx_lens_table(t, PRICE_BUDGET)
+    prow = []
+    clear = pl[pl.clearing.str.startswith(("simp_cx", "cheap_cx"))
+               & pl.clearing.str.endswith("E")]
+    for bid, g in at[at.reach].groupby("block"):
+        c = clear[clear.block == bid].set_index("clearing")
+        for lens in CX_LENSES:
+            best = g.loc[g[f"rank_{lens}"].idxmin()]
+            r = dict(block=bid, lens=lens, best=best.method, best_enc=float(best.enclosed),
+                     best_val=float(best[lens]), best_D=float(best.D_area),
+                     best_km=float(best.road_m) / 1000)
+            for key, cr in c.iterrows():
+                fam = key.split("_")[0]
+                di, dii = float(cr.enclosed) - r["best_enc"], float(cr[lens]) - r["best_val"]
+                r |= {f"{fam}_val": float(cr[lens]), f"{fam}_enc": float(cr.enclosed),
+                      f"{fam}_D": float(cr.D), f"{fam}_di": di, f"{fam}_dii": dii,
+                      f"{fam}_ahead": bool(di < 0 or (di == 0 and dii > 0))}
+            prow.append(r)
+    pr = pd.DataFrame(prow)
+    pr.to_csv(path("price"), index=False)
+    print(f"\nTHE PRICE OF ROADS at area D {PRICE_BUDGET:g} on the complex, in B's order (a lower "
+          "bound: the optimizers are heuristics)")
+    for lens in CX_LENSES:
+        q = pr[(pr.lens == lens) & pr.simp_val.notna()]
+        for fam in ("simp", "cheap"):
+            tie = q[q[f"{fam}_di"] == 0]
+            share = (tie.best_val / tie[f"{fam}_val"])
+            print(f"  {lens} {fam}: ahead of the best road on {int(q[f'{fam}_ahead'].sum())} of "
+                  f"{len(q)}; behind on (i) on {int((q[f'{fam}_di'] > 0).sum())}; where (i) ties "
+                  f"({len(tie)}), minus the best road median {tie[f'{fam}_dii'].median():+.4f} "
+                  f"(p10 {tie[f'{fam}_dii'].quantile(0.1):+.4f}, p90 "
+                  f"{tie[f'{fam}_dii'].quantile(0.9):+.4f}; {tie[f'{fam}_dii'].min():+.4f} .. "
+                  f"{tie[f'{fam}_dii'].max():+.4f}), the best road's share {share.median():.2f} "
+                  f"(p10 {share.quantile(0.1):.2f}, p90 {share.quantile(0.9):.2f})")
+    # the walled-in homes
+    base = pl[pl.clearing == "baseline"].set_index("block")
+    held = base[base.enclosed0 > 0]
+    print(f"\nWALLED IN AT BASELINE on the complex: {len(held)} of {len(base)} blocks "
+          f"({int(held.n_enclosed0.sum())} homes, a share {held.enclosed0.min():.5f} -- "
+          f"{held.enclosed0.max():.5f}, median {held.enclosed0.median():.5f})")
+    pre = at[at.block.isin(held.index) & at.reach]
+    for mth, g in pre.groupby("method"):
+        some = int((g.enclosed < g.block.map(held.enclosed0)).sum())
+        print(f"  {SHORT[mth]:13s} {len(g):3d} blocks at D {PRICE_BUDGET:g}: frees some on "
+              f"{some}, all on {int((g.enclosed == 0).sum())}")
+    for key, g in pl[pl.block.isin(held.index) & (pl.clearing != "baseline")].groupby("clearing"):
+        print(f"  {key:10s} {len(g):3d} blocks: frees some on "
+              f"{int((g.enclosed < g.block.map(held.enclosed0)).sum())}, all on "
+              f"{int((g.enclosed == 0).sum())}")
+    pl.to_csv(path("clearings"), index=False)
+
+
 # ------------------------------------------------------------------ cost projection
 
 def _fit_power(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
@@ -1423,6 +1534,11 @@ if __name__ == "__main__":
         cx(Path(a[1]), Path(a[2]),
            gcl.complex_of(a[3], factorization=gap_factor.factorization_of(a[4])), a[5],
            a[6].split(","), scoring=search.polish_scoring_of(polish))
+    elif cmd == "cxreport":
+        if len(a) != 5:
+            raise SystemExit("cxreport <rows> <lineup,> <metric> <cpu|gpu>")
+        cxreport(Path(a[1]), lineup_of(a[2]),
+                 gcl.complex_of(a[3], factorization=gap_factor.factorization_of(a[4])))
     elif cmd == "report":
         report(Path(a[1]), lineup_of(a[2]), a[3], a[4])
     elif cmd == "sizes":
