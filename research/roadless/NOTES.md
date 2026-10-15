@@ -5012,3 +5012,234 @@ CPU-h (the 26 runs' own time 12.7, the rest a pilot and failed starts), the timi
 raster's clearings re-scored on a core 16.4; on the GPUs the raster's presets 1.4 GPU-h and the
 pilot 0.21; here (single-threaded, at most 8 processes) the baseline and clearings' calibration 2.6
 CPU-h and the guards and diagnoses about 4 [inferred], besides the development.
+
+### The complex as the runtime: its speed and a GPU path (owner 2026-10-14: "Yes, add a GPU path")
+
+BACKLOG 4, decision (3): the runtime's phase 2a (the brief:
+.superpowers/sdd/2026-10-14-complex-speed): the complex's factorization a Strategy with a GPU path,
+assembly on one fixed pattern, the host's own work cut, two result-changing options measured, and a
+run identity that carries the code's constants. The metric is now
+`cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a` (phase 1's, its rows migrated). Code: gap_factor.py
+(the Strategy), gap_clear.py (the fixed pattern, the identity, free first's cached complex),
+search.py (the polish's scoring), gap_clear_check.py (the pattern, constants and device guards),
+gap_calib.py (presets per device, speed, rescore;
+gap_rows/summary_runtime_{presets,speed,rescore}.csv, committed; the rows are not), cluster.py
+(`--complex`). The device moves scores at the floating-point level only, so it is not in the
+metric's name; every run's rows record it.
+
+**The factorization, a Strategy** (gap_factor.Factorization). What the model needs from a
+factorization is three calls: a plan per sparsity pattern (`plan(Pattern)`), a refactorization with
+new values on it (`Planned.factor(data, unknown)`) and solves (`Factor.solve`, each refined to the
+backward-error floor by the one `Refined`, moved here from gap_flow with the dissection). SuperLU
+on a core: the plan is phase 1's geometric nested-dissection order of the whole pattern and the
+pattern permuted into it; a factorization restricts the values to the state's unknowns, which keeps
+the order restricted to them, drops the explicit zeros (`_restrict`) and factors that, pivoting on
+the diagonal, as phase 1 did. cuDSS on a GPU (nvmath-python's DirectSolver, SPD, the operands on
+the host): the plan is cuDSS's reordering and symbolic factorization of the whole pattern, made at
+the first factorization; every later state resets the operands and refactors on it, every cell a
+row. A plan holds one factorization at a time, and a factor solved after a later one on its plan
+raises. The device is chosen once where a run is configured (metrics.metric_of from the scripts'
+`cpu|gpu` argument: gap_factor.factorization_of) and handed down in the metric; relax.one's,
+polish_greedy's and search's rows have a `device` column (seam.Metric.device).
+
+**The dependency.** `nvmath-python[cu12]==1.0.0` and `nvidia-cudss-cu12==0.8.0.10` in the `gpu`
+group, pinned as cupy is (linux only); uv.lock adds with them cuda-bindings 12.9.9, cuda-core
+1.2.1, cutensor-cu12 2.8.1 and nvidia-cuda-nvcc-cu12, -cufile-cu12 and -nvfatbin-cu12, and moves
+nothing else; cupy stays (the raster's GPU path). It loads in the project's own environment with no
+workaround: cuda.pathfinder finds libcudss in the venv's site-packages, here and on the cluster
+after `cluster.py setup` (on ai06's H100 and ai04's Quadro RTX 8000). The pilot's preloading of
+every CUDA wheel and its ephemeral `uv run --with` environment answered the overlay's problems, not
+the libraries'; gap_cudss.py is deleted. nvmath ships no types: a mypy override, as numba's.
+cluster.py's `blocks` kind takes `--complex` (no raster grid: the card sized by `--gb` alone).
+
+**The fixed pattern** (gap_clear.Graph, System). Each cell structure of the fixed mesh has one
+pattern: every pair of cells a static passage joins (the pair's conductance `W` the sum of its
+passages') and the diagonal. A state's reach is a search from the street through the pairs that
+conduct (`_bfs`; in the eps world, where every pair and street face conducts, the street's
+component of the whole pattern, found once); its values are one pass over the pattern (`_values`):
+an unknown row its conductances, a closed passage an explicit zero, a cell off the unknowns (walled
+in, or ground) an identity row. Right-hand sides, potentials and the adjoint are per cell (0 off
+the unknowns), the demand's products two fixed sparse matrices (cells x homes and its transpose).
+One plan then serves a block's every state: exact scores, tensions, SIMP's iterations and the
+polish. Not one sparse product as the brief suggested but one pass of a numba kernel over the fixed
+CSR: the masking by the unknowns fuses into it, where a product would want two gathers of the
+pattern's size after it. Scores equal phase 1's: on 20269 phase 1's code and this one at the same
+states (the baseline's lenses and escape times, a random clearing's lenses and exact J_1 and J_2,
+SIMP's value and gradient at x = D and at a random x for J_1 and J_2, the tension adding and
+putting back, the catchment's gram, the polish's eps-world value) agree within 6.4e-11 of the
+largest magnitude (P0 1.7e-12, the gradients 4.5e-12 -- 1.5e-11, the tensions 3.4 -- 6.2e-11);
+every stored run re-scores within 7.1e-12 (the migration, below); and the `pattern` guard.
+
+**The host's work.** Besides the pattern: the conductances and their pairs' sums in one pass
+(`_conduct`), each passage's harmonic mean and the adjoint's back-propagation through the passages
+in numba (`_harmonic`, `_grad_tri`), the refinement's residual and backward error in one pass over
+the matrix (gap_factor._residual, where two products and |A| were), and free first's baseline
+complex cached with the fixed mesh (Fixed.cx0; its triangles' geometries made again at load; the
+cache's format in its key, a storage detail, not in the name): one build of the grown complex less
+a run, the same held set (20269 23 -> 12 s, 23597 29 -> 16 s, 33717 42 -> 5 s, here). The breakdown
+(gap_calib speed; summary_runtime_speed.csv; each twice, the mean; phase 1's timing's states: a
+random clearing at D 0.05, its exact score, a SIMP iteration in the eps world at 1e-4 and q 3, the
+tension), phase 1 on one core of ai01, this phase on one core of ai05 (quadro2, beside the
+acceptance's 32 tasks) and on one GPU, seconds:
+
+    block       state            phase 1 core      core now         GPU now
+                                 all  fac  rest    all  fac  rest   all   fac  solves  rest
+    19570       exact score      0.27 0.16 0.11    0.27 0.20 0.07   0.04  0.01  0.01   0.02  (H100)
+    19570       SIMP iteration   1.52 1.22 0.30    1.86 1.65 0.21   0.20  0.01  0.01   0.18
+    5810        exact score      21.7 13.8  7.9    18.7 14.5  4.2   1.86  0.10  0.84   0.93  (H100)
+    5810        SIMP iteration   68.0 55.4 12.6    65.0 59.1  5.9   1.61  0.10  0.48   1.04
+    5810        tension          67.0 55.2 11.8    65.1 59.2  6.0   1.53  0.10  0.38   1.05
+    32841       exact score      13.1  7.7  5.4    10.9  8.1  2.7   0.85  0.05  0.30   0.50  (H100)
+    32841       SIMP iteration   31.2 23.3  7.9    27.8 24.5  3.3   0.74  0.05  0.15   0.54
+    7851        exact score       9.1  5.6  3.5     7.3  5.9  1.4   0.71  0.09  0.22   0.39  (Quadro)
+    7851        SIMP iteration   19.4 15.2  4.2    17.7 15.9  1.9   0.81  0.09  0.12   0.61
+    5810@major  baseline score   32.9 19.9 13.0    40.8 32.5  8.4   3.68  0.24  1.80   1.64  (H100)
+
+(On a core `rest` is everything but the factorization, the solves among it; on a GPU the solves are
+apart: the reach, the assembly, the factors and the gradient are `rest`.) On a core the host's own
+work is cut 1.5 -- 2.5x (5810: 7.9 -> 4.2 s of an exact score, 12.6 -> 5.9 s of a SIMP iteration;
+here, on a faster core, the work beside SuperLU's own 3.6 -> 1.3 and 6.1 -> 1.9 s), and the
+factorization is what it was: a core's time falls 4 -- 20% on the blocks (the region's rose: ai05's
+factorizations ran 4 -- 63% slower than ai01's, beside 32 other tasks). On a GPU the factorization
+is 0.05 -- 0.24 s and the host's work is now the time: a SIMP iteration on 5810 takes 1.6 s against
+68 s (42x), an exact score 1.9 against 21.7 s (12x), the region's baseline score 3.7 against 33 s
+(9x). The cuDSS plan (the reordering on the host) is part of the model's setup: 55 s on 5810 with
+its four baseline solves, 121 s on the region. What is left on a GPU, in order: the solves (each
+refined on the host: the residual's pass and a copy of the right-hand side and solution each way,
+0.3 -- 0.8 s on 5810), the gradient (0.4 s), the assembly (0.3 s), the reach (0.15 s in the eps
+world, 0.3 s at a 0/1 state), the factors (0.15 s).
+
+**The polish scored exactly (`E`).** A polish's scoring is a Strategy (search.PolishScoring) named
+by its spec's suffix: `InEps` (no suffix: today's, its candidates scored in the eps world it ranks
+them in) or `Exactly` (`E`: scored exactly, ranked alike), for relax's plans (`...p256w8x2E`),
+polish_greedy (`S0.01cat.P64w8E`) and the swings. Measured on the 13 (both presets at D 0.05, free
+first, P, area population, on a core and on a GPU): every clearing the same as today's (SIMP's and
+the cheap preset's, on all 13 on either device), so the same scores; on a core SIMP's time a median
+0.81 of today's (0.66 -- 0.91) and the cheap preset's 0.56 (0.43 -- 0.73) (an exact score factors
+the open ground's unknowns, the eps world every cell); on a GPU 1.05 (1.02 -- 1.23, the 9 blocks
+whose two runs had the same card) and 1.04 (0.94 -- 1.29, all 13 on one card each) of today's (on
+one pattern every state factors every cell, and a 0/1 state's reach needs the search the eps
+world's skips). Each is best on one device, so both stay: on a core the presets' `E` forms, on a
+GPU today's.
+
+**The eps world's interiors lumped (`+relaxlumped`): measured, dominated, deleted.** The brief's
+second option, fewer unknowns in the eps world's interiors and zone strips (58% of 5810's cells:
+interiors 2.30M, strips 1.62M, open ground 2.86M of 6.77M). A coarser lattice inside the footprints
+could take at most the interiors' vertices off the outlines, 0.48M of their 1.61M on 5810 (the rest
+the outlines' densification at s): at most 14% of the cells, and a new metric [inferred: not
+built]. Built instead as one cell per building's interior in the eps world only (SIMP's, the
+tension's and the eps-world polish's; the exact scores on the meshed interiors, so the same
+metric), the metric's name `+relaxlumped`: 34% fewer cells in the eps world. On the 13 against its
+counterpart without it (`L` against today's polish, `EL` against `E`; on a core SIMP's on 11, its
+5810 and 30848 runs stopped once the acceptance's own had ended, 5810's after 2.4 h): Lens A lower
+by a mean of 0.023 and 0.017 (SIMP, on a core) and 0.024 and 0.019 (on a GPU), worse on every block
+measured, and 0.011 and 0.010 for the cheap preset, worse on 11 of 13 (its two gains: 22422 +0.042,
+33717 +0.006); slower on a core (a median 1.84 and 1.76x for SIMP, 1.64 and 1.07x for the cheap
+preset; 5810's SIMP iteration 110 s against 65: a building's interior is one node joined to every
+cell on its outline, which fills the factor [inferred]) and on a GPU (1.21 and 1.41x, 1.11 and
+1.17x, though an iteration on 5810 takes 1.36 s against 1.62), its host memory no less (a median
+3.3 GB against 3.3 on a core) and a second cell structure and plan held beside the exact one. A
+cleared building lumped to one node is a shortcut across its footprint, so the relaxation prices
+interiors wrongly. It is beaten on every axis and deleted (its rows kept; these are the numbers for
+the wiki's dead-end record). Its two gains are on 22422 (the gated block) and 33717 (where the
+complex's own SIMP and cheap preset end behind the raster's clearing: the search's weakness): data
+for that lead, not a variant.
+
+**The run's identity** (gap_clear.CODE, code_constants). Every public module-level constant (an
+UPPER_CASE name) of gap_clear, gap_complex, gap_flow and gap_factor, and clear.EPS (the tension's
+eps world), is digested at import (sha256 of their reprs, 8 hex digits), and the digest ends every
+complex metric's name. The constants are found by walking the modules, not listed, so a new one is
+digested without anyone adding it; a constant of a kind the walk does not know raises at import,
+and those that cannot change a result are exempt with their reasons (_EXEMPT: the cache's and this
+file's paths, conformity's cap, which raises rather than change a mesh, the ring query's chunk, the
+cuDSS logger's level, typing's flag). 28 are digested: MESH_REV, the 0.1 mm snap and the band's
+tolerance, the unflat passes and P_{1/2}'s q (gap_clear); TOL, free first's step, the dust,
+Delaunay, grow, snap and merge tolerances (gap_complex); the merge, T_MIN and flat tolerances, the
+Steiner clearance and insertion passes, sigma, the lattice's offset, the tie tolerance, the empty
+fill and the ramp's Gauss rule (gap_flow); the refinement's three and the dissection's leaf
+(gap_factor); clear.EPS. CROSS_MIN did not survive phase 1 (conformity replaced its clip).
+complex_of refuses a name whose digest is not this code's, so a row of other constants cannot be
+read as this code's, and the mesh cache's key carries the digest. The migration: relax_rows/ and
+polish_rows/<phase 1's name> renamed to the new name and each SIMP row's `along` rewritten; every
+stored run of the complex's presets on the 13 (all 26, not a sample) re-scored under the new name
+reproduces its Lens A within 7.1e-12 (gap_calib rescore; summary_runtime_rescore.csv). No code
+reads the old name.
+
+**The guards** (each passes on the final code and fails under its fault, both ways after the last
+change).
+- `device` (on a GPU node): cuDSS against SuperLU on one fixed mesh at the same states (the
+  baseline's lenses and escape times, a random clearing's lenses and exact J_2, SIMP's value and
+  gradient at x = D and at a random x for J_1 and J_2, the tension adding and putting back, the
+  polish's eps-world value), within 1e-8 of each one's largest magnitude: 19570 within 5.0e-11,
+  5810 7.9e-11 (the large), 7851 3.8e-11 (the oversized), all on ai06's H100. Fault `perturb` (the
+  random clearing's refactorization handed its values with the diagonal raised by 1e-6, a leak to
+  ground at every cell): that state's lenses 0.86 and its escape times 0.68 off, every other state
+  within 5.2e-11.
+- `pattern`: the operator on the fixed pattern against the operator assembled afresh over the
+  unknowns from the passages (phase 1's assembly, kept in the guard as its oracle) at the baseline
+  (253,031 of 19570's 327,921 cells and 932,252 of 20269's 1,423,143 off the unknowns: interiors,
+  strips, walled-in ground), a random 0/1 clearing, a fractional state, the eps world (27 and 6
+  off) and free first's state: equal on the unknowns to 1.2e-16 of the largest entry, every row off
+  them an identity row, the structure the pattern's, P from the model's refined solve within
+  1.5e-11 of a direct solve of the fresh operator. Fault `drop-identity` (one row off the unknowns
+  given a diagonal 0): its identity rows fail at all five states (on a core the scores would not
+  see it, SuperLU restricting the system to the unknowns; on a GPU it is a singular row: the guard
+  reads the matrix).
+- `constants`: each of the 28 constants changed alone changes the digest, and the metric's name
+  carries the digest. Fault `omit` (the digest computed without MESH_REV): MESH_REV changed and the
+  digest did not.
+- Phase 1's (gap_clear_check baseline, weights, reach, gradient, free, identity, convex; gap_check
+  conform, delaunay, apertures, filtration, free; gap_flow_check angle, shift, channel, field, law,
+  closed): each passes and fails under each of its faults, with phase 1's numbers (baseline: 19570
+  -5.4e-5, +1.3e-5, -7.4e-5; 20269 -1.6e-4, -2.1e-4, -3.5e-4; convex 6.7 -- 7.8e-16; the faults'
+  failures as before).
+
+**The acceptance run** (gap_calib preset; summary_runtime_presets.csv). The cheap preset
+(S0.01cat.P64w8) and SIMP's default at D 0.05, free first, optimizing P, area population, on the
+13, on a GPU (ai06's H100 and ai04's Quadro RTX 8000, routed by Slurm) and on one core of ai05
+(quadro2), today's variants and `E`:
+- Scores: every run of today's two presets and of their `E` forms, on either device, ends at phase
+  1's clearing (13 of 13 each) with Lens A within 7.9e-12 of phase 1's row; no run leaves a home
+  walled in.
+- Time, the optimizer's own (`t`, the model built), a median over the 13: SIMP 58 s on the GPU (27
+  -- 330 s) against phase 1's 1,841 s on a core (29x, 17 -- 49x) and the raster's 173 s on a GPU
+  (0.38 of it, 0.13 -- 1.9x: faster on 10 of 13, slower on 20269, 30848 and 5810); the cheap preset
+  39 s (12 -- 321 s) against 699 s (9.7x, 5 -- 46x) and the raster's 79 s (0.93 of it, 0.27 --
+  5.1x, faster on 7 of 13: its greedy's rounds are few, and on the large blocks free first's region
+  graph and the catchment's sweep, on the host, are most of it: 5810 295 s against the raster's
+  79). On a core SIMP takes 0.97 (0.92 -- 1.07) of phase 1's time and the cheap preset 0.92 (0.80
+  -- 1.19), their `E` forms 0.81 and 0.56 of that. Wall time, the model's setup with it (the mesh
+  loaded or built on the node, the cuDSS plan, the baseline): a median 239 s for SIMP and 111 s for
+  the cheap preset on the GPU where the mesh was built in the task, 83 s and 67 s where the node
+  held it.
+- Memory: on a core 1.9 -- 10.7 GB for either preset (phase 1's SIMP 2.2 -- 12.5); on a GPU node
+  the host's 1.9 -- 11 GB for a task's first preset (up to 21 GB where the task built its mesh too,
+  or still held an earlier preset's model), the device's 0.8 -- 4.6 GB (the cheap preset's, sampled
+  over the run: the plan and factors of the whole pattern; 30848's 4.6 GB, 5810's 4.0).
+
+**The region** (5810@major, its baseline on a GPU; gap_calib speed): the fixed mesh built in 1,034
+s at 22.3 GB on ai06's host (phase 1 1,133 s on ai01), the model (the cuDSS plan and four solves)
+in 121 s, a baseline score in 3.7 s (the factorization 0.2 s, the solves 1.8) against phase 1's 33
+s on a core and 40.8 s on ai05's now, on 6.5 GB of the card: 15.4M cells, 6.06M unknowns at
+baseline.
+
+**Compute.** GPUs 6.1 GPU-h (the acceptance 4.8: SIMP's 1.2 and the other items' 3.7, every `L`
+item among them; the speed runs and the region 0.6; the guards and the pilots 0.7), at most 4 cards
+at once, one process each; CPUs on quadro2 54.9 CPU-h (the acceptance's 104 tasks 52.0, the
+cancelled ones' partial runs among them; the speed runs 1.2; the meshes warmed on the node 1.8);
+here, single-threaded, at most 8 processes: the guards twice, the calibration of the pattern
+against phase 1's code, the rescore, besides the development.
+
+**Phase 2b needs**: the remaining ports (road re-scoring, which needs roads carved into the fixed
+mesh; pweight; the atlas and corridor pictures; clearings_check; the exports; the translucent
+search if it is on the frontier) and the cross-checks against the raster, now cheaper than the
+raster on a GPU (its presets at 0.38 -- 0.93 of the raster's time, median); on a GPU the presets'
+`InEps` polish, on a core their `E` forms (the same clearings). On a GPU the host's work is the
+time: the refined solves' transfers and residuals (moving the refinement onto the device, cupy
+holding the pattern), the gradient, the assembly and the reach are each 0.15 -- 0.8 s on 5810, and
+for the cheap preset free first's region graph and passes (a build of the grown complex a pass
+where homes are walled in) and the catchment's sweep (numba, one core: GpuSweep exists for the
+raster) dominate the large blocks. A mesh is built on each node's disk the first time a node meets
+a block (8 min on 5810, 17 -- 29 min on the region: a CPU node could build them for a GPU run if
+the cache could be shared without the home's quota). The search's weakness on the complex stays a
+lead (22422's cheap preset under the lumped tension, +0.042, is a datum for it).

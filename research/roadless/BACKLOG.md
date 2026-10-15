@@ -248,17 +248,29 @@ items up front"), in the order proposed:
    nvmath-python in the `gpu` group, the factorization a Strategy chosen where a run is configured,
    SuperLU on a core and cuDSS on a GPU), and the raster kept for the cross-checks, then retired
    ("we can keep the raster for the cross-checks and then retire it"), its speed and each retired
-   variant to the wiki's dead-end record with their numbers. **Next**: phase 2a, the speed (the GPU
-   path; assembly on one fixed pattern; the polish's moves scored exactly rather than in the eps
-   world, over half of SIMP's time on 5810; the eps world's interiors; the host's reach and
-   gradient) and the run's identity (the code's constants in the metric's name, the stored rows
-   migrated); phase 2b, the remaining ports (road re-scoring, pweight, the atlas and corridor
-   pictures, clearings_check, the exports, the translucent search if it is on the frontier) and the
-   cross-checks against the raster; phase 3, the retirement; then the region test on the complex
-   and the consolidated pass. A lead before that pass: the search's weakness on the complex (the
-   tension ranks the buildings sharing a zone at Spearman +0.83 against +0.97 alone, and the
-   complex's own polish climbs from the raster's clearings), tried with moves that clear a zone's
-   buildings together.
+   variant to the wiki's dead-end record with their numbers. **Phase 2a: done** (NOTES, "The
+   complex as the runtime: its speed and a GPU path"): the factorization a Strategy (gap_factor:
+   SuperLU on a core, cuDSS on a GPU through nvmath-python 1.0.0 and cuDSS 0.8 in the `gpu` group,
+   loading in the project's own environment here and on the cluster), every state assembled on one
+   fixed pattern (scores equal phase 1's within 6.4e-11), the host's own work cut 1.5 -- 2.5x, free
+   first's baseline complex cached with the mesh, and the metric's name carrying a digest of the
+   code's constants (`cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a`; the stored rows migrated, every
+   one re-scoring within 7.1e-12). On a GPU the two presets end at phase 1's clearings 29x (SIMP)
+   and 9.7x (the cheap preset) faster than on a core, a median 0.38 and 0.93 of the raster's GPU
+   time; a SIMP iteration on 5810 takes 1.6 s against 68, the region's baseline score 3.7 s against
+   33 s. The polish scored exactly (`E`) gives the same clearings at 0.81 and 0.56 of the time on a
+   core and 1.05 and 1.04 on a GPU, so each device keeps its own (`E` on a core, the eps world's on
+   a GPU); the eps world's interiors lumped (`+relaxlumped`) was dominated (Lens A lower, slower on
+   both devices) and deleted. **Next**: phase 2b, the remaining ports (road re-scoring, which needs
+   roads carved into the fixed mesh; pweight; the atlas and corridor pictures; clearings_check; the
+   exports; the translucent search if it is on the frontier) and the cross-checks against the
+   raster, on a GPU; on a GPU the host's work is the time (the refined solves' transfers, the
+   gradient, the assembly; for the cheap preset free first's passes and the catchment's sweep);
+   phase 3, the retirement; then the region test on the complex and the consolidated pass. A lead
+   before that pass: the search's weakness on the complex (the tension ranks the buildings sharing
+   a zone at Spearman +0.83 against +0.97 alone, and the complex's own polish climbs from the
+   raster's clearings; the lumped tension's +0.042 on 22422's cheap preset a datum), tried with
+   moves that clear a zone's buildings together.
    (4) **Exits: the region model** (owner: "we'd still only leak at the
    outer boundary, so all current must exit ... some of the outer boundary might not leak at all
    and might have 0 conductance (like a railroad)"; "we can adjust boundary leakage, uniform
