@@ -5243,3 +5243,203 @@ raster) dominate the large blocks. A mesh is built on each node's disk the first
 a block (8 min on 5810, 17 -- 29 min on the region: a CPU node could build them for a GPU run if
 the cache could be shared without the home's quota). The search's weakness on the complex stays a
 lead (22422's cheap preset under the lumped tension, +0.042, is a datum for it).
+
+### Pruning by epistemetry: a replay against seqscreen (owner 2026-10-14: "Yes"; BACKLOG, "Pruning by epistemetry's decision layer")
+
+Does GeoffChurch/epistemetry's decision layer decide which variants to keep better than
+seqscreen.py, on comparisons already run on every block? epireplay.py replays both through
+epistemetry's own `replay` (an ephemeral `uv run --with` overlay: reblock does not depend on it),
+every policy on the same 100 orders of each design (seqscreen's 20 first, then 80 more from its
+generator), all judged against the same truth: the call on all of the design's blocks.
+
+**The rule, fixed before any run** (12a46054, the brief): adopt epistemetry for the consolidated
+pass's pruning only if (1) its median realized loss is below seqscreen's at every rate tested and
+(2) it makes no more wrong calls in all; a many-arm screen counts against the pairwise screens it
+replaces. **Amended** (the coordinator, 2026-10-15; committed in 674a599e before any
+adopt/keep/ask run): the pin moves from fc921f1 to c1784af, whose `AdoptKeepAsk(low, high)` is
+seqscreen's own call over the bracket (per draw adopt if g > r c at both ends, keep if below at
+both, else ask; the decision each arm's likeliest call). It is the primary comparison, scored with
+`AsksApart` (an ask is never wrong; a definite call is wrong where it differs from the whole
+design's call, an ask included), run with the veto nowhere (seqscreen's patched off inside the
+process, no file edited; the truth without it) and everywhere (seqscreen's own, a wrapper around
+epistemetry's policy, the truth "keep" on a collapse). Asks go to the owner, so (3) epistemetry
+must also make no more asks in all. The fixed-rate runs already made at fc921f1 are reported
+under the original rule. The statistic: per rate, the sum over the designs of each one's median
+over orders; wrong calls and asks summed over designs and orders. The realized loss at rate r: a
+call resolved at r (an ask answered at r from the screen's own means, which is seqscreen's
+question) that differs from all the blocks' call at r costs |mu - r x extra|, plus r / FUTURE x
+the GPU-seconds spent.
+
+**Designs**, rebuilt through seqscreen's reader (units blocks, an arm a variant's Lens A gain over
+its base, a unit's cost its variants' GPU-seconds; one kind of card a design):
+- the six held-out screens seqscreen was built on (cluster V100 / RTX 8000): `.p64w8`, `.p256w8x2`
+  (x2), `.r2l2.p64w8` (both) and `.r2` against base; x2 and both against `.p64w8`;
+- the other pairs the readers hold on one card, the 46 on the local RTX 6000 Ada:
+  `.pP256w8.gS0.01cat` (pPg) and `.p256w8x2.GS0.01cat` (GS) against `.p256w8`; the cheap preset's
+  pairs polish (S0.01cat.P256w8x2) and `.p256w8` against the cheap preset; S0.005cat and the cheap
+  preset against the greedy S0.01cat;
+- one collapse, for the veto: `.p64w8.C1.m4` against `.p64w8` on its 12 tuning blocks (30848
+  -0.255; fewer blocks than the floor, so only the veto can save anything);
+- many-arm: r2, p64, x2 and both against base; x2 and both against p64; pPg and GS against
+  `.p256w8`; the pairs polish and `.p256w8` against the cheap preset; S0.005cat and the cheap
+  preset against S0.01cat.
+
+The default's and the cheap preset's rows of 10 held-out blocks are free-first runs under B (the
+overwrite of 2026-10-11, "The stored clearings, committed"; their rows carry `enclosed`), so every
+design with either runs on the other 36. That moves the x2 screens from "Stopping by the value of
+more blocks": read whole today, x2 against p64 is -0.00052 at +8.0 s a block (seqscreen: keep);
+on the 36 it is +0.00016 at +11.4 s, the old near-tie (an ask). seqscreen's own output for the
+four screens without dropped blocks is NOTES' table of 2026-10-09 to the digit.
+
+**Choices the brief left open**, each to keep the two sides on one footing:
+- tau and the cost model's ratio re-estimated from the blocks seen, as seqscreen re-estimates
+  them, so epistemetry's policy is rebuilt each step; its floor (15) held in reblock's wrapper too,
+  since no target exists before a block is seen;
+- epistemetry's targets have 0-1 risks (the probability of another call), so ValueOfInformation's
+  price is seqscreen's (rate / FUTURE; for adopt/keep/ask the bracket's mean rate, the rate
+  seqscreen prices its stop at) over the Lens A a wrong call costs at the means so far, the mean
+  over arms of |mu - tau|; no Monte Carlo margin (seqscreen has none);
+- every horizon to the last block offered (seqscreen's stop weighs every k); outer draws 4000
+  (seqscreen's paths), inner 200;
+- the veto wrapper runs the policy's batches a block at a time, so it sees every block as
+  seqscreen's does; no veto in the many-arm screens (a collapse would drop one arm, which the layer
+  cannot do), and none of them has a block below -0.1. With and without the veto every run is
+  identical, both policies, on all 12 collapse-free designs (checked job by job).
+
+**The primary comparison, adopt/keep/ask over the bracket** (100 orders a design; blocks run and
+cost as a share of all the blocks' are medians; wrong calls and asks are of 100):
+
+    design          all     seqscreen                    adopt/keep/ask
+                    blocks  blocks  cost  wrong  asks    blocks (max)  cost  wrong  asks
+    p64/base        adopt   15      0.33  0      0       15 (15)       0.33  0      0
+    x2/base         adopt   15      0.41  0      0       15 (15)       0.41  0      0
+    both/base       adopt   15      0.34  0      0       15 (46)       0.35  0      0
+    both/p64        keep    15      0.34  0      0       15 (46)       0.34  0      5
+    r2/base         ask     20      0.43  2      98      15 (46)       0.36  2      98
+    x2/p64          ask     15      0.44  35     65      15 (36)       0.46  18     82
+    pPg/p256        keep    15      0.34  0      30      15 (46)       0.35  0      31
+    GS/p256         ask     15.5    0.36  28     72      21.5 (46)     0.46  16     84
+    cheapx2/cheap   adopt   15      0.43  1      15      15 (36)       0.46  0      12
+    p256/cheap      adopt   15      0.42  0      0       15 (15)       0.42  0      0
+    g005/g01        adopt   15      0.34  0      0       15 (15)       0.34  0      0
+    cheap/g01       adopt   15      0.43  0      0       15 (36)       0.53  0      0
+    C1m4/p64        keep    12      1.00  0      0       12 (12)       1.00  0      0
+      with the veto         5       0.48                 5             0.48
+
+    the rule         realized loss (1e-6) at 2e-6, 6.2e-6, 1.9e-5   wrong  asks  cost
+    no veto  seqscreen        57.3   178.2   538.9                   66     280   0.431
+             adopt/keep/ask   66.9   193.0   554.3                   36     312   0.447
+    veto     seqscreen        53.5   166.3   502.0                   66     280   0.391
+             adopt/keep/ask   63.0   181.0   517.4                   36     312   0.407
+    many-arm seqscreen x arms 132.8  174.3   521.3                   67     279   0.424
+             adopt/keep/ask   116.6  359.5   1007.3                  26     309   0.821
+
+**Decision: keep seqscreen.** In both veto settings adopt/keep/ask's median loss is above
+seqscreen's at all three rates and it asks more (312 against 280), though it makes fewer wrong
+calls (36 against 66). The many-arm screen makes far fewer wrong calls (26 against 67) but asks
+more (309 against 279) and costs more at the two upper rates: it runs every arm on all 36 blocks
+in most orders of 4/base, 2/p64 and 2/cheap (cost 1.00, median), against 0.42 -- 0.46 for the
+pairwise screens it would replace; it wins only at the bracket's bottom (116.6 against 132.8).
+
+Where they differ:
+- **Wrong calls for asks.** All but one of seqscreen's 66 wrong calls are definite calls on
+  designs whose whole call is an ask (x2/p64 35, GS/p256 28, r2/base 2; the other a keep on
+  cheapx2/cheap): adopt/keep/ask asks there instead (82 against 65 on x2/p64, 84 against 72 on
+  GS/p256), about one more ask for each wrong call it saves (32 for 30). Under the amended rule
+  both count, and the trade is a wash.
+- **Whole horizons.** KG* picks the horizon with the best value per cost, and the policy runs all
+  of it before deciding again: value of information is not concave, so that is often the rest of
+  the design. adopt/keep/ask runs to the last block in some orders of 8 of the 12 designs larger
+  than the floor, where seqscreen's longest run is 40 of 46. Its loss is at or above seqscreen's
+  on every design but r2/base, where it settles the ask at the floor (15 blocks against 20).
+- **The call at a stop.** epistemetry decides by the likeliest call over the draws, seqscreen by
+  the posterior mean; at all 6400 of epistemetry's stops here (arms x orders x settings, the
+  many-arm screens and the diagnostic below included) the two agree. The differences are in the
+  stopping, not in the call.
+
+A diagnostic after the results, not a candidate (`Stepped`, df863119): the same policy asked again
+after every block, its stop still weighing every horizon. It closes most of the gap: with the
+veto its loss is 56.3, 171.0 and 495.2 against seqscreen's 53.5, 166.3 and 502.0, below at the
+bracket's top only, with 37 wrong calls and 318 asks (66 and 280). What remains is GS/p256 (17
+blocks against 15.5; 7.3 against 5.1 at the bottom rate), pPg/p256 at the bottom rate and the
+asks.
+
+**The fixed-rate comparison under the original rule** (fc921f1; seqscreen judged at each rate by
+its call there, an ask answered from its means; epistemetry run at each rate with tau = rate x
+the extra seconds: three-way at tau, the brief's, functional d / tau with margin 1 and the price
+as above at that rate; and seqscreen's own linear loss written as an epistemetry DrawTarget,
+`Regret`, priced at rate / FUTURE, reported beside it):
+
+    pairwise                 loss (1e-6) at 2e-6, 6.2e-6, 1.9e-5   wrong (3 rates)  cost
+    seqscreen                53.5    166.3   502.0                  179              0.391
+    three-way + veto         65.9    227.5   504.5                  173              0.398
+    linear + veto            58.2    165.1   488.4                  149              0.390
+    many-arm
+    seqscreen x arms         132.8   174.3   521.3                  177              0.424
+    three-way                79.8    334.8   684.1                  60               0.519
+    linear                   71.6    182.2   471.1                  133              0.420
+
+Keep seqscreen here too: three-way loses at every rate (it runs to the last block in 10% of its
+runs, seqscreen never), with 173 wrong calls against 179. The linear loss comes closest: below
+seqscreen at the two upper rates with 30 fewer wrong calls, above it at the bottom (58.2 against
+53.5), so it fails (1). Its target is BestArm against a constant arm at tau, in the layer's terms.
+seqscreen's losses here equal its veto-setting ones above, to the digit: the same stops, judged
+the same way.
+
+**What would have to change for epistemetry to win** (the first measured, the second in part,
+the others inferred):
+1. Re-decide after every block (or after a card's batch) while weighing every horizon for the
+   stop, instead of committing to the horizon KG* picks: the stepped diagnostic above, which still
+   falls short at two rates and on asks.
+2. A linear-loss target over the bracket (seqscreen's loss: the opportunity loss of adopt against
+   keep, averaged over the rate), priced in the owner's units, instead of a 0-1 risk priced
+   through a plug-in conversion; at fixed rates the linear arm is the closest result.
+3. The asks: under AsksApart and the amended rule a policy that asks instead of calling a near-tie
+   trades one count for the other; to win on both it must stop where the call is clear or spend
+   enough to settle it, which is a question of the target's loss on an ask (an ask costs the
+   owner's attention, which no target here prices).
+4. Many-arm: one screen pays every arm on every block it runs, so it needs a per-arm drop (an arm
+   whose call is settled, or that collapses, stops costing) to beat the pairwise screens on cost.
+
+**Guards** (each with its fault; `guards none|floor|ignored|shuffled`):
+- wrapper: seqscreen as a Policy reproduces seqscreen's own replay order by order (stop and call,
+  all 100 orders of all 13 pairwise designs, in both comparisons) and seqscreen.main's printed
+  summary on the 8 designs without dropped blocks: 2,608 of 2,608. Fault (the wrapper's floor
+  14): 725 of 2,608 (all of C1m4's, which stops at its collapse first), FAIL.
+- degenerate: on p64 against base with p64's gains replaced by the base's (p64's time kept),
+  every epistemetry policy (adopt/keep/ask and the 12 fixed-rate ones, with and without the
+  veto) stops at the floor with "keep" in all 100 orders. Fault (the floor ignored, 1): every run
+  stops at 1 block, FAIL.
+- same orders: every policy on an order was handed that order, in both runs and on both/p64's
+  every policy. Fault (adopt/keep/ask without the veto handed a reshuffled order 3): that one run
+  flagged, FAIL.
+
+**Feedback for epistemetry** (relayed to its author):
+- `Policy.next` gets the upcoming units' indices but not the seen ones', and `calls` neither, so
+  a policy that reads per-unit side data (the base's time on the blocks seen, for tau) keeps the
+  order itself and must guess that a `calls` before any order is the whole design in index order.
+- `CostModel.predict(seen_costs, upcoming)` cannot express seqscreen's model (the base's time on a
+  block x the ratio over the blocks seen) without the seen indices; the policy is rebuilt each
+  step to close over them.
+- KG* commits to the whole horizon it picks: offer every horizon to the stop but step a unit (or a
+  card's batch) at a time, the batch size apart from the horizon menu.
+- The targets' risks are 0-1, so ValueOfInformation's price has no meaning in the owner's units
+  (Lens A per GPU-second over FUTURE); a linear-loss threshold target (min(E(tau - x)+,
+  E(x - tau)+), BestArm against a constant arm) and its bracket form would take the rate as given.
+- ThreeWay's margin is fixed and symmetric about 0, so a data-dependent, one-sided tau needs
+  functionals scaled by 1 / tau (impossible at tau <= 0); AdoptKeepAsk's extra-cost functionals
+  fix this.
+- One price, not a bracket: seqscreen averages the value and the price over the owner's unknown
+  rate; ValueOfInformation could take the rate as a distribution.
+- No veto, and no per-arm drop in a many-arm screen (a unit's cost covers every arm), which is
+  what makes one screen dearer than the pairwise ones.
+- FinitePopulation's population is the design's units, exact once all are seen: right for the
+  replay's truth, not for a call that governs FUTURE block runs.
+- `replay` spawns its own stream per order and does not pass the order's number, so a policy with
+  its own per-order seed needs a replay call per order; a shared truth across policies has to be
+  asserted by the caller (each policy's whole-design calls must agree).
+
+Compute: here, single-threaded, at most 8 processes: the fixed-rate run 1.4 h on 8 workers, the
+bracket run 1.1 h on 7, the stepped diagnostic 3.0 h on 4, the four guard runs 1.75 -- 1.85 h
+each. Rows (git-ignored, regenerable): epireplay.parquet, epireplay_bracket.parquet and its
+jobs' epireplay_bracket_jobs/.

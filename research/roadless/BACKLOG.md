@@ -501,15 +501,17 @@ Not pursued, with what would change that:
 
 ## Experiment design
 
-- **Pruning by epistemetry's decision layer** (owner 2026-10-14: "Yes"; before the consolidated
-  pass). Replay the finished comparisons (every variant x block matrix already run, with its GPU
-  times) through GeoffChurch/epistemetry's `design` (kg_star over the menu of variants,
-  greedy_batch filling the cards, ProbabilisticRegret's stop; a pinned commit in the research
-  group) against seqscreen.py and the all-blocks calls: GPU-seconds spent and wrong calls. Adopt it
-  for the consolidated pass's pruning only if it beats seqscreen; the site's numbers still come
-  from every block. The risk is its Gaussian belief: the gains per block are heavy-tailed, a t
-  pinned the mean at 0 and kernelcore's reweighting collapsed (NOTES, "Stopping by the value of
-  more blocks"), so the replay must hold the gated blocks' collapses.
+- **Pruning by epistemetry's decision layer** (owner 2026-10-14: "Yes"; replayed 2026-10-15,
+  NOTES "Pruning by epistemetry: a replay against seqscreen"): **seqscreen stays** for the
+  consolidated pass. epireplay.py ran epistemetry's ValueOfMoreUnits on the finite-population
+  bootstrap (c1784af, an overlay, no dependency) against seqscreen.py on 13 pairwise and 5
+  many-arm finished designs, 100 orders each. Under the amended rule (loss below at every rate, no
+  more wrong calls, no more asks) its adopt/keep/ask over the bracket fails in both veto settings:
+  loss above at all three rates, 312 asks against 280, though 36 wrong calls against 66; the
+  many-arm screen runs every arm to the end; the original rule's fixed-rate three-way fails too.
+  Would come back with: re-deciding after every block (a diagnostic closes most of the gap), a
+  linear-loss target over the bracket, a per-arm drop for many-arm screens (feedback sent to its
+  author).
 - **Adaptive block selection** (first look done, NOTES "Which blocks tell methods apart": collapses dominate; screen = gated sentinel + random sample; picking 'discriminating' blocks beyond the sentinel misleads. Remaining value: sequential sample size; wiki `pages/methods/adaptive-benchmark-items.md`).
   Fit a factor model to the method x block matrix of paired differences (axes like "opens
   gated pockets", "spreads in dense bands"); for a new variant run first the blocks with the
