@@ -621,6 +621,14 @@ def report() -> None:
                 phase1_t=float(rf.ref_t.iloc[0]) if len(rf) else np.nan))
         pd.DataFrame(rows).sort_values(["item", "device", "block"]).to_csv(
             out / "summary_runtime_presets.csv", index=False, float_format="%.10g")
+    roads = _read("roads")
+    if len(roads):
+        roads.assign(dL_P=roads.L_P - roads.L_P_rebuild, dL_Pq=roads.L_Pq - roads.L_Pq_rebuild,
+                     dL_J2=roads.L_J2 - roads.L_J2_rebuild, dP0=roads.P0 / roads.P0_rebuild - 1,
+                     dP=roads.P / roads.P_rebuild - 1,
+                     enclosed_alike=roads.n_enclosed == roads.n_enclosed_rebuild).sort_values(
+            ["block", "method", "m"]).to_csv(out / "summary_runtime_roads.csv", index=False,
+                                             float_format="%.8g")
 
 
 # ------------------------------------------------------------------ the run
