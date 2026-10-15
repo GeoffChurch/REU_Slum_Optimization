@@ -416,7 +416,10 @@ def clearings_report() -> pd.DataFrame:
 
 def weights_report() -> pd.DataFrame:
     """P_{1/2}'s weights per home, the complex's against the raster's: Spearman per block over
-    the homes with demand on both, and the escape times' too."""
+    the homes with demand on both (a weight is its home's baseline escape time to the q, so the
+    escape times' order is the same), and the ratio of the two weights over the homes whose
+    weight is positive on both (a home whose demand escapes at once, in the street band, weighs
+    0)."""
     from scipy.stats import spearmanr
     d = rr.cx_dir(ROAD_ROWS, _complex())
     rows = []
@@ -424,20 +427,23 @@ def weights_report() -> pd.DataFrame:
         bid = f.name.split("__")[0]
         hr, hc = pd.read_parquet(f), pd.read_parquet(d / f"{bid}__homes.parquet")
         ok = (~hr.enclosed.to_numpy()) & (~hc.nodem.to_numpy())
+        ar, ac = hr.a_q.to_numpy(), hc.a_q.to_numpy()
+        pos = ok & (ar > 0) & (ac > 0)
+        ratio = ac[pos] / ar[pos]
         rows.append(dict(block=bid, homes=int(ok.sum()),
                          walled_apart=int((hr.enclosed.to_numpy() != hc.nodem.to_numpy()).sum()),
-                         rho_a=float(spearmanr(hr.a_q[ok], hc.a_q[ok]).statistic),
-                         rho_u0=float(spearmanr(hr.u0[ok], hc.u0[ok]).statistic),
-                         a_ratio_med=float(np.median(hc.a_q[ok] / hr.a_q[ok])),
-                         a_ratio_p05=float(np.quantile(hc.a_q[ok] / hr.a_q[ok], 0.05)),
-                         a_ratio_p95=float(np.quantile(hc.a_q[ok] / hr.a_q[ok], 0.95))))
+                         zero_apart=int((ok & ((ar > 0) != (ac > 0))).sum()),
+                         rho_a=float(spearmanr(ar[ok], ac[ok]).statistic),
+                         a_ratio_med=float(np.median(ratio)),
+                         a_ratio_p05=float(np.quantile(ratio, 0.05)),
+                         a_ratio_p95=float(np.quantile(ratio, 0.95))))
     df = pd.DataFrame(rows)
     print("\nP_{1/2}'S WEIGHTS, the complex's against the raster's, Spearman per block: "
-          f"{_q(df.rho_a)} (the escape times {_q(df.rho_u0)}); the complex's weight over the "
-          f"raster's at the median home {df.a_ratio_med.median():.3f}, p05 -- p95 "
-          f"{df.a_ratio_p05.median():.3f} -- {df.a_ratio_p95.median():.3f}; homes walled in on "
-          f"one model only: {int(df.walled_apart.sum())} on {int((df.walled_apart > 0).sum())} "
-          "blocks")
+          f"{_q(df.rho_a)}; the complex's weight over the raster's at the median home "
+          f"{df.a_ratio_med.median():.3f}, p05 -- p95 {df.a_ratio_p05.median():.3f} -- "
+          f"{df.a_ratio_p95.median():.3f} (medians over the blocks); homes walled in on one model "
+          f"only: {int(df.walled_apart.sum())} on {int((df.walled_apart > 0).sum())} blocks; "
+          f"weighing 0 on one only: {int(df.zero_apart.sum())}")
     return df
 
 

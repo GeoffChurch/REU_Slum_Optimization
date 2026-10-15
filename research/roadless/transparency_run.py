@@ -84,7 +84,6 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import free_roads as fr  # noqa: E402
-import lifted  # noqa: E402
 import metrics  # noqa: E402
 import road_rescore as rr  # noqa: E402
 import simp_compare  # noqa: E402
@@ -623,14 +622,6 @@ class FreeEveryArm:
 
     def record(self) -> dict[str, object]:
         return dict(free_first=f"FreeEnclosed{self.free.tag}", free_budget=self.free.budget)
-
-
-def _uniform(token: str) -> lifted.UniformMesh:
-    """The mesh `token` names (common.mesh_of), which must be the uniform raster."""
-    mesh = common.mesh_of(token)
-    if not isinstance(mesh, lifted.UniformMesh):
-        raise TypeError(f"{token}: the free-first stage runs on the uniform raster, not {mesh!r}")
-    return mesh
 
 
 FREE = fr.FreeEnclosed(budget=LENS_D, metric=metrics.RUNTIME, population=common.AreaPopulation(),
