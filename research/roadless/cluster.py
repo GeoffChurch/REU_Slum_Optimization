@@ -8,7 +8,8 @@ node's cards (a node's mesh cache is its own disk: a region's tasks pinned to on
 mesh once, NOTES "Exits as leaks: the region model on the complex (5810@major)"). (The
 retired raster's tasks were sized from the cells of their grid, `--mesh` and `--scans`, at
 GB_PER_MILLION GB per million unknowns: NOTES, "The complex as the runtime: the raster
-retired".) `--unpack` ships a tar per block of inputs git does not carry (parquet rows, at their
+retired".) With `--items`, one task per (block, item), the item in the command's `{item}` (a
+region's configurations and presets: region_leaks). `--unpack` ships a tar per block of inputs git does not carry (parquet rows, at their
 repo paths) and unpacks it in the task's checkout before the command. Results (parquet rows) come
 back to the same paths here, never overwriting a local file.
 
@@ -26,7 +27,8 @@ a block's tasks unpack one tar at once into the checkout they share.
 
     uv run python research/roadless/cluster.py setup
     uv run python research/roadless/cluster.py submit blocks <run> --gb G [--node N] [--time T] \
-        [--gpus N] [--with FILE ...] [--unpack TAR] <ids,|@file> -- <script> <args with {id}>
+        [--gpus N] [--items <items,|@file>] [--with FILE ...] [--unpack TAR] <ids,|@file> \
+        -- <script> <args with {id} [and {item}]>
     uv run python research/roadless/cluster.py submit cpu <run> --node orion|quadro2 --cpus C \
         --mem G --items <items,|@file> [--gpus N] [--time T] [--unpack TAR] <ids,|@file> \
         -- <script> <args with {id} and {item}>
@@ -120,6 +122,8 @@ class Blocks:
                             help="the GPU memory each task needs, in GB: its card's size")
         parser.add_argument("--node", help="the node every task runs on (--nodelist; its card "
                                            "holds --gb): unpinned, the smallest card that does")
+        parser.add_argument("--items", help="items, comma-separated, or @file: one task per "
+                                            "(block, item), the item in the command's {item}")
         parser.add_argument("--with", dest="extra", type=Path, action="append", default=[],
                             help="a file shipped beside the block bank (repeatable); a task "
                                  "reads it as $CLUSTER_SUBMIT_INPUTS/<its name>")
@@ -130,20 +134,25 @@ class Blocks:
     def plan(self, args: argparse.Namespace, workdir: Path) -> cs.RunPlan:
         import common   # geopandas and the block sources: only a submit needs them
 
-        line = _command(args, "{id}")
+        items = [] if args.items is None else _listed(args.items)
+        line = _command(args, "{id}", *(["{item}"] if items else []))
         ids = _listed(args.ids)
         if args.gb <= 0:
             raise SystemExit(f"--gb {args.gb}: a task's GPU memory is positive")
+        if len(set(items)) != len(items) or not all(items):
+            raise SystemExit(f"--items: empty or repeated entries in {items}")
         unpack = _unpacks(args.unpack, ids)
 
-        def task_line(b: str) -> str:
-            run = f"python -u {line.replace('{id}', b)}"
+        def task_line(b: str, item: str) -> str:
+            run = f"python -u {line.replace('{id}', b).replace('{item}', item)}"
             if args.unpack is None:
                 return run
             return f'tar -xf "$CLUSTER_SUBMIT_INPUTS/{unpack[b].name}" && {run}'
 
         common.write_bank(ids, workdir / "bank.pkl")
-        tasks = tuple(cs.Task(task_line(b), args.gb) for b in ids)
+        # without items the command has no {item}: one task a block, its line as it is
+        tasks = tuple(cs.Task(task_line(b, item), args.gb) for b in ids
+                      for item in (items or ["{item}"]))
         return cs.RunPlan(
             tasks=tasks, resources=cs.Resources(cpus=4, mem_gb=64, time=args.time, node=args.node),
             inputs=(workdir / "bank.pkl", *args.extra, *unpack.values()),

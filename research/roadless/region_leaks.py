@@ -453,7 +453,7 @@ def loops(flow: NDArray[np.float32], inside: NDArray[np.bool_], exits: NDArray[n
     pixels inside the region whose flow is at least `threshold`, and the exits; holes under
     HOLE_M2 filled. `contract` False: the network's own cycle rank (the `loop-index` guard's
     fault)."""
-    Y = (inside & np.nan_to_num(flow, nan=-np.inf) >= threshold) | exits
+    Y = (inside & (np.nan_to_num(flow, nan=-np.inf) >= threshold)) | exits
     holes, n = ndimage.label(inside & ~Y, structure=np.ones((3, 3), dtype=bool))
     small = np.flatnonzero(np.bincount(holes.ravel(), minlength=n + 1)[1:] * h * h < HOLE_M2) + 1
     Y |= np.isin(holes, small)
