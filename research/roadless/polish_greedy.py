@@ -28,7 +28,7 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -39,9 +39,10 @@ import clear  # noqa: E402
 import common  # noqa: E402
 import search  # noqa: E402
 import relax  # noqa: E402
-import seam  # noqa: E402
 
-RTOL = 1e-3          # the solves while polishing, as SIMP's base plan's (t0.001)
+if TYPE_CHECKING:
+    import gap_clear
+
 SCORE_EPS = 1e-6     # candidates' eps world, as SIMP's incumbent (k1s1e-06)
 
 
@@ -63,7 +64,7 @@ def rows_of(picker: str, tries: int, width: int, pairs: bool, scoring: search.Po
             / f"D{budget:g}")
 
 
-def main(bid: str, power: float, metric: seam.Metric, picker_spec: str, tries: int, width: int,
+def main(bid: str, power: float, metric: gap_clear.ComplexMetric, picker_spec: str, tries: int, width: int,
          budget: float, pairs: bool, *, scoring: search.PolishScoring) -> None:
     """`metric` the run's (metrics.metric_of); its row (`run`'s) in rows_of."""
     out = (rows_of(picker_spec, tries, width, pairs, scoring, metric.name, budget)
@@ -73,12 +74,12 @@ def main(bid: str, power: float, metric: seam.Metric, picker_spec: str, tries: i
     pd.DataFrame([row]).to_parquet(out)
 
 
-def run(bid: str, power: float, metric: seam.Metric, picker_spec: str, tries: int, width: int,
+def run(bid: str, power: float, metric: gap_clear.ComplexMetric, picker_spec: str, tries: int, width: int,
         budget: float, pairs: bool, *, scoring: search.PolishScoring) -> dict[str, object]:
     """The greedy and its polish on `bid` (module docstring): the run's row."""
     [b] = common.build_blocks([bid])
     c = metric.clearing(b, demand=common.PopulationDemand())
-    rnd = search.greedy_round(picker_spec, metric.sweep)
+    rnd = search.greedy_round(picker_spec)
     t0 = time.time()
     # B's first stage: the crossings that free the enclosed homes, the greedy's start (its D
     # counts them) and not movable in the polish; none enclosed, none held
@@ -93,7 +94,7 @@ def run(bid: str, power: float, metric: seam.Metric, picker_spec: str, tries: in
     r = ((relax.cut_to_budget(s.order, c.cost, budget - float(c.cost[held].sum())) > 0)
          | held).astype(float)
     c.removed[:] = r > 0
-    rel = c.relaxation(power, q=1.0, rtol=RTOL, eps=clear.EPS)
+    rel = c.relaxation(power, q=1.0, eps=clear.EPS)
     scorer = rel.metric_world(SCORE_EPS)
     greedy_perm = rel.perm(rel.exact(r))
     # the polish's own count: the greedy's scorings are not its tries

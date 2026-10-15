@@ -33,8 +33,8 @@ and checked against SIMP's own score of it, so a swing from it finishes SIMP's a
     CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/search.py <ids,> <spec> <p> \
         <cpu|gpu> <metric> <d_max>
 
-metric: a raster conductance (lifted.conductance_of) or the complex's name (gap_clear.ComplexMetric;
-cpu or gpu, its factorization's): metrics.metric_of, resolved here and handed down (seam.Metric).
+metric: the complex's name (gap_clear.ComplexMetric; cpu or gpu, its factorization's):
+metrics.metric_of, resolved here and handed down.
 
 spec: GP<grow>x<greedy picker>r<restore share per round>[m<shortlist>], e.g.
 GP3xS0.01catr0.005m8; FL<same>c<cap on the conditional adds' scorings>, e.g.
@@ -60,7 +60,7 @@ import time
 from pathlib import Path
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, NamedTuple, Protocol, TypeVar
 
 import numpy as np
 import pandas as pd
@@ -69,9 +69,10 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import clear  # noqa: E402
-import seam  # noqa: E402
-from clear import RTOL_SCORE, rows_dir  # noqa: E402
-from seam import ClearingModel  # noqa: E402
+from clear import rows_dir  # noqa: E402
+
+if TYPE_CHECKING:
+    import gap_clear    # gap_clear imports this module at run time
 
 R = TypeVar("R")
 R_co = TypeVar("R_co", covariant=True)             # a Ranker only returns it
@@ -93,8 +94,7 @@ class World(Protocol):
 
 
 class _Exact:
-    """The exact world: real geometry, the metric itself (seam.ClearingModel.exact: the raster's
-    clear.exact, looked up at call time so memprobe_greedy's instrumentation applies)."""
+    """The exact world: the metric itself (gap_clear.Model.exact)."""
 
     def score(self, s: SearchState, removed: np.ndarray) -> Score:
         return Score(*s.c.exact(removed, s.power))
@@ -104,7 +104,7 @@ EXACT = _Exact()
 
 
 class Valuer(Protocol):
-    """An eps world's J of a design x (relax.Relaxation)."""
+    """An eps world's J of a design x (gap_clear.Relaxation)."""
 
     def value(self, x: np.ndarray) -> float: ...
 
@@ -163,7 +163,7 @@ class SearchState:
     current state's in `world` (UNSCORED, None: not scored); `order` every building cleared, in
     pick order (relax.cut_to_budget's); `scorings` the candidate scorings spent (the caps);
     `movable` the buildings a move may touch."""
-    c: ClearingModel
+    c: gap_clear.Model
     power: float
     score: Score
     world: World | None
@@ -172,7 +172,7 @@ class SearchState:
     movable: np.ndarray
 
     @classmethod
-    def start(cls, c: ClearingModel, *, power: float, score: Score, world: World | None
+    def start(cls, c: gap_clear.Model, *, power: float, score: Score, world: World | None
               ) -> SearchState:
         """From c's current clearing, nothing spent, every building movable."""
         return cls(c, power, score, world, [], 0, np.ones(c.n, dtype=bool))
@@ -528,7 +528,7 @@ class IfBetter:
 
 
 class Gains(NamedTuple):
-    t: seam.Tension             # the round's tension (Catchment sweeps its flow)
+    t: gap_clear.Tension        # the round's tension (Catchment sweeps its flow)
     T: np.ndarray               # t.g / cost: gain per unit of population (removed: -inf)
 
 
@@ -596,7 +596,7 @@ class Diverse:
     batches with clear._spread (the k-th started from the shortlist's k-th best), distinct
     (Spread's)."""
     delta: float
-    source: clear.GramSource
+    source: clear.Catchment
     reach: float
     width: int
 
@@ -626,7 +626,7 @@ class Diverse:
 SPREAD_REACH = 3.0      # Diverse's shortlist, in population steps (the measured default)
 
 
-def greedy_round(spec: str, sweep: clear.Sweep) -> Round[Gains]:
+def greedy_round(spec: str) -> Round[Gains]:
     """`M4`: the top 4 scored exactly, the best gain per unit of population; `B0.01g3`: a batch
     spaced 3 m apart to the next 0.01 of population; `S0.01cat`: a catchment-diverse batch to
     the next 0.01, `S0.01catw4` the best of 4 such batches. (Impact, Sketch and the no-spacing
@@ -643,7 +643,7 @@ def greedy_round(spec: str, sweep: clear.Sweep) -> Round[Gains]:
                      build=Spaced(delta=delta, gap=gap), evaluate=All(EXACT), accept=Only())
     if m := re.fullmatch(r"S([0-9.]+)cat(?:w(\d+))?", spec):
         delta, width = float(m[1]), 1 if m[2] is None else int(m[2])
-        source = clear.Catchment(sweep)
+        source = clear.Catchment()
         return Round(name=f"S{delta:g}{source.name}" + (f"w{width}" if width > 1 else ""),
                      rank=AddTension(), refine=None,
                      build=Diverse(delta=delta, source=source, reach=SPREAD_REACH, width=width),
@@ -660,7 +660,7 @@ class GreedyRows:
     """The greedy's rows (clear.greedy_block's format): every state scored exactly; per step D,
     perm (J_power), perm1 (P) and the step's buildings in pick order, after a step-0 row."""
 
-    def __init__(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
+    def __init__(self, *, block_id: str, c: gap_clear.Model, power: float, J0: float, P0: float,
                  t0: float):
         self.block_id, self.n, self.power, self.J0, self.P0, self.t0 = (
             block_id, c.n, power, J0, P0, t0)
@@ -713,7 +713,7 @@ def _pairs(g: np.ndarray, ins: np.ndarray, outs: np.ndarray, cost: np.ndarray, l
 
 
 class Graded(World, Protocol):
-    """An eps world with its gradient (relax.Relaxation)."""
+    """An eps world with its gradient (gap_clear.Relaxation)."""
 
     def value_sgrad(self, x: np.ndarray) -> tuple[float, np.ndarray]: ...
 
@@ -932,7 +932,7 @@ class PruneRows:
     exactly; written in increasing D in the greedy's format, `cleared` in index order (the
     states are nested), `t` the time when written."""
 
-    def __init__(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
+    def __init__(self, *, block_id: str, c: gap_clear.Model, power: float, J0: float, P0: float,
                  d_max: float, t0: float):
         self.block_id, self.n, self.power, self.J0, self.P0, self.d_max, self.t0 = (
             block_id, c.n, power, J0, P0, d_max, t0)
@@ -993,7 +993,7 @@ class GrowPrune:
         return Seq((With(Silent(), greedy(self.add, self.grow * d_max)),
                     Grown(block_id=block_id, t0=t0)))
 
-    def build(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
+    def build(self, *, block_id: str, c: gap_clear.Model, power: float, J0: float, P0: float,
               d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built:
         rec = PruneRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max, t0=t0)
         restore = restore_round(step=self.restore, shortlist=self.shortlist, screen=screen)
@@ -1075,7 +1075,7 @@ class FloatRows:
     `cleared` deltas and cleared_through does not read them), after a D 0 row, `t` the time when
     written. Every exact state at or below d_max is offered to the archive."""
 
-    def __init__(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
+    def __init__(self, *, block_id: str, c: gap_clear.Model, power: float, J0: float, P0: float,
                  d_max: float, archive: Archive, t0: float):
         self.block_id, self.n, self.power, self.J0, self.P0, self.d_max, self.t0 = (
             block_id, c.n, power, J0, P0, d_max, t0)
@@ -1117,7 +1117,7 @@ class FloatPrune:
     def screen_eps(self) -> float:
         return self.base.screen_eps
 
-    def build(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
+    def build(self, *, block_id: str, c: gap_clear.Model, power: float, J0: float, P0: float,
               d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built:
         g = self.base
         archive = Archive(step=g.restore)
@@ -1186,7 +1186,7 @@ class Swings:
                 + f".P{self.tries}w{self.width}" + ("x2" if self.pairs else "")
                 + self.scoring.suffix)
 
-    def build(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
+    def build(self, *, block_id: str, c: gap_clear.Model, power: float, J0: float, P0: float,
               d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built:
         archive = Archive(step=self.restore)
         rec = FloatRows(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max,
@@ -1278,7 +1278,7 @@ class Seeded:
     def screen_eps(self) -> float:
         return self.plan.screen_eps
 
-    def build(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
+    def build(self, *, block_id: str, c: gap_clear.Model, power: float, J0: float, P0: float,
               d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built:
         inner = self.plan.build(block_id=block_id, c=c, power=power, J0=J0, P0=P0, d_max=d_max,
                                 t0=t0, screen=screen, polish_world=polish_world)
@@ -1299,25 +1299,25 @@ class SearchPlan(Protocol):
     @property
     def screen_eps(self) -> float: ...
 
-    def build(self, *, block_id: str, c: ClearingModel, power: float, J0: float, P0: float,
+    def build(self, *, block_id: str, c: gap_clear.Model, power: float, J0: float, P0: float,
               d_max: float, t0: float, screen: Valuer, polish_world: Graded) -> Built: ...
 
 
-def plan_of(spec: str, *, sweep: clear.Sweep, pool: int,
+def plan_of(spec: str, *, pool: int,
             simp_seeds: Callable[[str], Mapping[str, Seed]]) -> SearchPlan:
-    """The preset `spec` names, its greedy round built on `sweep`, a polish's pairs among `pool`,
+    """The preset `spec` names, a polish's pairs among `pool`,
     a SIMP plan's clearings (SIMP<plan>+...) from `simp_seeds`."""
     if m := re.fullmatch(r"SIMP([^+]+)\+(.+)", spec):
         return Seeded(source=f"SIMP{m.group(1)}", seeds=simp_seeds(m.group(1)),
-                      plan=_unseeded(m.group(2), sweep=sweep, pool=pool))
-    return _unseeded(spec, sweep=sweep, pool=pool)
+                      plan=_unseeded(m.group(2), pool=pool))
+    return _unseeded(spec, pool=pool)
 
 
-def _unseeded(spec: str, *, sweep: clear.Sweep, pool: int) -> SearchPlan:
+def _unseeded(spec: str, *, pool: int) -> SearchPlan:
     if m := re.fullmatch(r"SW([0-9.]+(?:-[0-9.]+)*)x(\S+?)r([0-9.]+)(?:m(\d+))?\.P(\d+)w(\d+)(x2)?"
                          r"(E?)", spec):
         return Swings(grows=tuple(float(g) for g in m.group(1).split("-")),
-                      add=greedy_round(m.group(2), sweep), restore=float(m.group(3)),
+                      add=greedy_round(m.group(2)), restore=float(m.group(3)),
                       shortlist=0 if m.group(4) is None else int(m.group(4)),
                       screen_eps=EPS_SCREEN, tries=int(m.group(5)), width=int(m.group(6)),
                       pairs=m.group(7) is not None, pool=pool,
@@ -1326,7 +1326,7 @@ def _unseeded(spec: str, *, sweep: clear.Sweep, pool: int) -> SearchPlan:
         kind, cap = m.group(1), m.group(6)
         if (kind == "FL") != (cap is not None):
             raise ValueError(f"unknown search {spec!r}")
-        grow = GrowPrune(grow=float(m.group(2)), add=greedy_round(m.group(3), sweep),
+        grow = GrowPrune(grow=float(m.group(2)), add=greedy_round(m.group(3)),
                          restore=float(m.group(4)),
                          shortlist=0 if m.group(5) is None else int(m.group(5)),
                          screen_eps=EPS_SCREEN)
@@ -1334,9 +1334,9 @@ def _unseeded(spec: str, *, sweep: clear.Sweep, pool: int) -> SearchPlan:
     raise ValueError(f"unknown search {spec!r}")
 
 
-def prune_block(b: Any, plan: SearchPlan, *, metric: seam.Metric,
-                screen_of: Callable[[ClearingModel, float], Valuer],
-                polish_of: Callable[[ClearingModel, float], Graded], power: float,
+def prune_block(b: Any, plan: SearchPlan, *, metric: gap_clear.ComplexMetric,
+                screen_of: Callable[[gap_clear.Model, float], Valuer],
+                polish_of: Callable[[gap_clear.Model, float], Graded], power: float,
                 d_max: float) -> pd.DataFrame:
     c = metric.clearing(b, demand=common.PopulationDemand())
     J0, P0 = c.baseline(power)
@@ -1351,16 +1351,16 @@ def prune_block(b: Any, plan: SearchPlan, *, metric: seam.Metric,
     return rows
 
 
-def main(ids: list[str], plan: SearchPlan, power: float, metric: seam.Metric,
+def main(ids: list[str], plan: SearchPlan, power: float, metric: gap_clear.ComplexMetric,
          d_max: float) -> None:
     import polish_greedy  # the cheap preset's polish world
 
-    def screen_of(c: ClearingModel, pw: float) -> Valuer:
-        return c.relaxation(pw, q=1.0, rtol=RTOL_SCORE, eps=plan.screen_eps)
+    def screen_of(c: gap_clear.Model, pw: float) -> Valuer:
+        return c.relaxation(pw, q=1.0, eps=plan.screen_eps)
 
-    def polish_of(c: ClearingModel, pw: float) -> Graded:
+    def polish_of(c: gap_clear.Model, pw: float) -> Graded:
         """The cheap preset's polish world (the swings' last stage), under the metric itself."""
-        return c.relaxation(pw, q=1.0, rtol=polish_greedy.RTOL,
+        return c.relaxation(pw, q=1.0,
                             eps=polish_greedy.SCORE_EPS).metric_world(polish_greedy.SCORE_EPS)
 
     out = rows_dir(f"{plan.name}D{d_max:g}", power=power, metric=metric.name)
@@ -1406,6 +1406,6 @@ if __name__ == "__main__":
                 for b, c, pm in zip(rows.block, rows.simp_cleared, rows.simp_perm, strict=True)}
 
     search.main(sys.argv[1].split(","),
-                search.plan_of(sys.argv[2], sweep=metric.sweep, pool=relax.PAIR_POOL,
+                search.plan_of(sys.argv[2], pool=relax.PAIR_POOL,
                                simp_seeds=simp_seeds),
                 power, metric, d_max)

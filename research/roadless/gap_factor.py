@@ -25,7 +25,7 @@ is then a refactorization with new values on it (the operands on the host, nvmat
 every row factored, a row off the unknowns an identity row.
 
 The device changes scores only at the floating-point level: it is not in the metric's name, and
-each run's rows record it (seam.Metric.device).
+each run's rows record it (gap_clear.ComplexMetric.device).
 
 Typed as `search.py`'s docstring says:
 

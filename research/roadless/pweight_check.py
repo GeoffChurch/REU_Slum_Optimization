@@ -161,7 +161,7 @@ def gradient(ids: list[str]) -> list[str]:
             x0 = rng.uniform(0.1, 0.4, m.n)
             pick = rng.choice(m.n, GRAD_BUILDINGS, replace=False)
             for sq in GRAD_SIMP_Q:
-                rel = m.relaxation(o.power, q=sq, rtol=0.0, eps=GRAD_EPS)
+                rel = m.relaxation(o.power, q=sq, eps=GRAD_EPS)
                 _, g = rel.value_grad(x0)
                 errs = []
                 for j in pick:

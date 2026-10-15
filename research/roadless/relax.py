@@ -45,7 +45,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NamedTuple, Protocol
+from typing import TYPE_CHECKING, NamedTuple, Protocol
 
 import numpy as np
 import pandas as pd
@@ -54,8 +54,10 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import search  # noqa: E402
-import seam  # noqa: E402
 from clear import EPS, rows_dir  # noqa: E402
+
+if TYPE_CHECKING:
+    import gap_clear    # gap_clear imports this module at run time
 
 D_LENS = 0.05          # Lens A's budget (owner, 2026-10-03: 0.10 saturates under sightline)
 OUT = HERE / "relax_rows"
@@ -65,7 +67,7 @@ def project(x: np.ndarray, beta: float) -> np.ndarray:
     """The clearing a design x stands for: x itself, or with beta > 0 a smooth step at ETA, H(x)
     = (tanh(beta ETA) + tanh(beta (x - ETA))) / (tanh(beta ETA) + tanh(beta (1 - ETA))), so a
     mostly-closed building conducts ~nothing (no grey leaks) and 0, 1 stay 0, 1. Conductance
-    share H(x)^q, cost c . H(x). Every relaxation's (seam.Relaxed.proj)."""
+    share H(x)^q, cost c . H(x). Every relaxation's (gap_clear.Relaxation.proj)."""
     if beta == 0.0:
         return x
     return ((np.tanh(beta * ETA) + np.tanh(beta * (x - ETA)))
@@ -170,7 +172,7 @@ FW_BACKOFF = 4.0
 FW_STEP_FLOOR = 1e-3
 
 
-def frank_wolfe(rel: seam.Relaxed, budget: float, iters: int, log=print) -> dict:
+def frank_wolfe(rel: gap_clear.Relaxation, budget: float, iters: int, log=print) -> dict:
     cost = rel.c.cost
     x = np.zeros(len(cost))
     J, grad = rel.value_grad(x)
@@ -300,7 +302,8 @@ DEFAULT_UPDATE = OC()
 class Plan(NamedTuple):
     """How a block is solved: `fw` Frank-Wolfe iterations from x = 0 (0: start SIMP from the
     uniform x = D, no bound), SIMP continuation q = 1.5, 2, ... `qmax` with up to `iters`
-    optimality-criteria updates each, solves to `rtol` while optimizing (scores are exact),
+    optimality-criteria updates each, `rtol` the raster's solve tolerance while optimizing (the
+    complex solves directly: it moves nothing there, and stays in the name the rows carry),
     closed buildings conducting `eps` while optimizing (named only when not the tension's),
     and projected (Relaxation.proj) with beta from `b0` doubling each stage up to `bmax`,
     extra stages at qmax until it gets there (b0 0: no projection, not named); `keep` > 0:
@@ -428,7 +431,7 @@ class Incumbent:
     the rounding of update 3 scores 0.810 and the last 0.012, the gate and its neighbours, being
     substitutes, flipping between x 0.3 and 0.5 until the continuation drops them (NOTES)."""
 
-    def __init__(self, rel: seam.Relaxed, budget: float, every: int, *, samples: int,
+    def __init__(self, rel: gap_clear.Relaxation, budget: float, every: int, *, samples: int,
                  sample_in: tuple[tuple[float, float], ...],
                  first: np.ndarray | None = None, score_eps: float = 0.0):
         self.rel, self.budget, self.every, self.first = rel, budget, every, first
@@ -514,7 +517,7 @@ class Incumbent:
             f"{moves} moves kept, {used} scorings, J {J0:.6g} -> {self.J:.6g}")
 
 
-def simp(rel: seam.Relaxed, x0: np.ndarray, budget: float,
+def simp(rel: gap_clear.Relaxation, x0: np.ndarray, budget: float,
          stages: tuple[tuple[float, float], ...], iters: int, update: Update, log=print,
          xlo: np.ndarray | None = None, watch=None) -> np.ndarray:
     """SIMP continuation from x0: for (q, beta) in stages, up to `iters` updates by `update`
@@ -560,13 +563,13 @@ def simp(rel: seam.Relaxed, x0: np.ndarray, budget: float,
     return x
 
 
-def one(bid: str, power: float, metric: seam.Metric, plan: Plan, budget: float, *,
+def one(bid: str, power: float, metric: gap_clear.ComplexMetric, plan: Plan, budget: float, *,
         demand: common.Demand) -> dict:
     """SIMP at one budget on `bid` under `metric`, J_power under `demand` (common.Demand: J_1 is
     P_q under a common.PriorityDemand), the cost the area population's."""
     [b] = common.build_blocks([bid])
     c = metric.clearing(b, demand=demand)
-    rel = c.relaxation(power, q=1.0, rtol=plan.rtol, eps=plan.eps)
+    rel = c.relaxation(power, q=1.0, eps=plan.eps)
     log = lambda s: print(f"{bid} {s}", flush=True)  # noqa: E731
     t0 = time.time()
     # B's first stage: the crossings that free the enclosed homes, held at 1 through SIMP (xlo),
@@ -608,7 +611,7 @@ def one(bid: str, power: float, metric: seam.Metric, plan: Plan, budget: float, 
     r_greedy = None
     if plan.seed or plan.track:
         spec = plan.seed or plan.track
-        rnd = search.greedy_round(spec, metric.sweep)
+        rnd = search.greedy_round(spec)
         s = search.SearchState.start(c, power=power, score=search.Score(*c.baseline(power)),
                                      world=search.EXACT)
         search.greedy(rnd, budget)(s, search.Silent())
@@ -660,7 +663,7 @@ def one(bid: str, power: float, metric: seam.Metric, plan: Plan, budget: float, 
 PATH_DS = tuple(round(0.01 * k, 2) for k in range(1, 16))
 
 
-def path(bid: str, power: float, metric: seam.Metric, plan: Plan, *,
+def path(bid: str, power: float, metric: gap_clear.ComplexMetric, plan: Plan, *,
          demand: common.Demand) -> pd.DataFrame:
     """Nested SIMP: for D in PATH_DS, everything cleared so far held at 1, the rest reset to an
     even share of the remaining budget and the full q continuation rerun (warm-starting the
@@ -676,7 +679,7 @@ def path(bid: str, power: float, metric: seam.Metric, plan: Plan, *,
                          f"{plan.name}")
     [b] = common.build_blocks([bid])
     c = metric.clearing(b, demand=demand)
-    rel = c.relaxation(power, q=1.0, rtol=plan.rtol, eps=plan.eps)
+    rel = c.relaxation(power, q=1.0, eps=plan.eps)
     J0, P0 = rel.J0, c.baseline(power)[1]
     rows = [dict(block=bid, n=c.n, step=0, D=0.0, perm=0.0, perm1=0.0, cleared=[], P0=P0,
                  t=0.0)]
@@ -744,7 +747,7 @@ def _target(mode: str, bid: str, power: float, plan: Plan, along: str, budget: f
     return rows_dir(f"SIMP{plan.name}", power=power, metric=along) / f"{bid}.parquet"
 
 
-def main(mode: str, ids: list[str], power: float, metric: seam.Metric, plan: Plan,
+def main(mode: str, ids: list[str], power: float, metric: gap_clear.ComplexMetric, plan: Plan,
          workers: int, budget: float) -> None:
     if mode not in ("one", "path"):
         raise ValueError(f"unknown mode {mode!r}")

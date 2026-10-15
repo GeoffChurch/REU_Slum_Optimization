@@ -66,9 +66,10 @@ geometry exactly, where the unrown filtration at w lets a gap a few millimetres 
 its apertures' error), its walled-in homes and the homes it frees checked home for home against
 the flow model's reach.
 
-THE SEAM. `Model` is a seam.ClearingModel, `Relaxation` a seam.Relaxed, `Tension` a
-seam.Tension, `ComplexMetric` a seam.Metric: what search.py, relax.py and polish_greedy.py run
-on.
+THE OPTIMIZERS run on these types themselves: `Model` (search.py's state, relax.py's and
+polish_greedy.py's model), its eps world `Relaxation`, its `Tension` and `ComplexMetric`, the run's
+metric. (They were the seam's Protocols while the raster stood beside them, seam.py; folded when it
+was retired: NOTES, "The complex as the runtime: the raster retired".)
 """
 from __future__ import annotations
 
@@ -99,7 +100,6 @@ import gap_flow as gf
 import relax
 import search
 from gap_complex import legalize
-from seam import Flow
 
 HERE = Path(__file__).resolve().parent
 # the fixed meshes, by identity (`Fixed.of`; git-ignored): $GAP_CACHE where a machine sets it
@@ -1167,7 +1167,7 @@ class Timing:
         self.n[key] += 1
 
 
-# ------------------------------------------------------------------ the scorer and the seam
+# ------------------------------------------------------------------ the scorer, the optimizers
 
 class Lenses(NamedTuple):
     """A 0/1 clearing's scores (module docstring): P (each home injecting its population),
@@ -1188,7 +1188,7 @@ PQ = common.PriorityDemand(0.5)         # the equity view (owner 2026-10-13)
 
 class Model:
     """One block's clearing model on its fixed mesh (module docstring): the baseline, the scorer,
-    free first and the seam's ClearingModel. `pop` each building's population (area: the
+    free first and what the optimizers read. `pop` each building's population (area: the
     owner's), `demand` what each home injects in J_power (common.Demand); `factorization` the
     run's (gap_factor: its device); `lumped` every building's interior one cell; `tension_eps`
     the eps world the tension ranks in (clear.EPS, or the translucent search's). The mesh's atoms
@@ -1367,7 +1367,7 @@ class Model:
     def k_of(removed: NDArray[np.bool_]) -> NDArray[np.float64]:
         return removed.astype(np.float64)
 
-    # -- seam.ClearingModel
+    # -- what the optimizers read
 
     @property
     def n(self) -> int:
@@ -1388,9 +1388,6 @@ class Model:
     @property
     def cells(self) -> int:
         return self.cells0
-
-    def release(self) -> None:
-        """Nothing: the plans live as long as the model (a cuDSS plan's device memory with it)."""
 
     def baseline(self, power: float) -> tuple[float, float]:
         return self.J(self.u0, self.inj, power), self.P0
@@ -1444,12 +1441,13 @@ class Model:
               f"({fr.passes} passes), {int(left.sum())} left walled in", flush=True)
         return np.asarray(fr.held)
 
-    def relaxation(self, power: float, *, q: float, rtol: float, eps: float) -> Relaxation:
-        return Relaxation(self, power, q=q, rtol=rtol, eps=eps)
+    def relaxation(self, power: float, *, q: float, eps: float) -> Relaxation:
+        return Relaxation(self, power, q=q, eps=eps)
 
 
 class Tension:
-    """A seam.Tension of the fixed mesh (Model.tension)."""
+    """The greedy's tension on the fixed mesh (Model.tension): per building its first-order gain
+    `g`, each home's weight in J_power, and the catchment's view of its state (`flow`)."""
 
     def __init__(self, *, model: Model, st: State, u: NDArray[np.float64],
                  home_u: NDArray[np.float64], g_: NDArray[np.float64]):
@@ -1462,7 +1460,7 @@ class Tension:
     def weight(self, power: float) -> NDArray[np.float64]:
         return np.asarray(self.m.inj * np.nan_to_num(self.home_u) ** power)
 
-    def flow(self, cand: list[int]) -> Flow:
+    def flow(self, cand: list[int]) -> clear.Flow:
         """The tension's system, its nodes the cells (a cell off the unknowns an identity row at
         potential 0: no flow); a candidate's members the unknowns of the triangles its clearing
         re-weights (its terms: its zone under the shy distance)."""
@@ -1481,20 +1479,20 @@ class Tension:
             nodes = nodes[unk[nodes]]
             rows.append(nodes)
             cols.append(np.full(len(nodes), col, dtype=np.int64))
-        return Flow(xp=np, A=A, u=self.u, rowsum=np.asarray(A @ np.ones(A.shape[0])), load=load,
-                    rows=np.concatenate(rows) if rows else np.zeros(0, dtype=np.int64),
-                    cols=np.concatenate(cols) if cols else np.zeros(0, dtype=np.int64),
-                    to_host=np.asarray)
+        return clear.Flow(A=A, u=self.u, rowsum=np.asarray(A @ np.ones(A.shape[0])), load=load,
+                          rows=np.concatenate(rows) if rows else np.zeros(0, dtype=np.int64),
+                          cols=np.concatenate(cols) if cols else np.zeros(0, dtype=np.int64))
 
 
 class Relaxation:
-    """A seam.Relaxed of the fixed mesh: J_power in the eps world, k_b =
-    eps + (1 - eps) proj(x_b)^q (relax.project), its gradient in the projected clearing by the
-    adjoint. `rtol` is the raster's iterative tolerance, kept for the seam: every solve here is
-    direct, refined to the floating-point floor (gap_factor.Refined)."""
+    """The model's eps world, as relax.simp, relax.Incumbent and search's worlds read it: J_power,
+    k_b = eps + (1 - eps) proj(x_b)^q (relax.project; q and beta set by simp's continuation), its
+    gradient in the projected clearing by the adjoint. Every solve is direct, refined to the
+    floating-point floor (gap_factor.Refined): no tolerance (the raster's iterative one went with
+    it)."""
 
-    def __init__(self, model: Model, power: float, *, q: float, rtol: float, eps: float):
-        self.m, self.power_, self.q, self.rtol, self.eps = model, power, q, rtol, eps
+    def __init__(self, model: Model, power: float, *, q: float, eps: float):
+        self.m, self.power_, self.q, self.eps = model, power, q, eps
         self.beta = 0.0
         self.J0_ = model.baseline(power)[0]
 
@@ -1557,14 +1555,16 @@ class Relaxation:
         return search.Score(self.value(removed.astype(float)), np.nan)
 
     def metric_world(self, eps: float) -> Relaxation:
-        return Relaxation(self.m, self.power_, q=1.0, rtol=self.rtol, eps=eps)
+        """The same model's eps world at `eps` under the metric itself (q 1, no projection): the
+        incumbent's and the polish's scorer."""
+        return Relaxation(self.m, self.power_, q=1.0, eps=eps)
 
 
 # ------------------------------------------------------------------ the run's metric
 
 @dataclass(frozen=True, kw_only=True)
 class ComplexMetric:
-    """The metric on the complex (seam.Metric): its identity the complex's Spec (s, ring, band),
+    """The metric on the complex: its identity the complex's Spec (s, ring, band),
     the FlowSpec (R, its grading, sigma, the demand's quadrature, the lattice offset), the width
     form, `lumped` (one node per building: the study's alternative) and the code's constants
     (CODE), every one in its name, which no raster conductance's can be (`check_disjoint`): its rows
@@ -1593,11 +1593,6 @@ class ComplexMetric:
     def device(self) -> str:
         return self.factorization.device
 
-    @property
-    def sweep(self) -> clear.Sweep:
-        """The catchment's sweep: on the host, as every solve's right-hand side and potential."""
-        return clear.CpuSweep()
-
     def model(self, block, fx: Fixed, *, demand: common.Demand) -> Model:
         """The block's model on its fixed mesh `fx` (`clearing`'s, or one meshed afresh)."""
         return Model(block, fx, spec=self.spec, fs=self.fs, form=self.form,
@@ -1614,9 +1609,6 @@ class ComplexMetric:
         return self.model(block, self.fixed(block, cache=CACHE,
                                             carving=Carving.none(gc.geometry(block))),
                           demand=demand)
-
-    def coarse(self, h: float) -> ComplexMetric:
-        raise ValueError(f"a coarse grid (h {h:g}) is the raster's: the complex has none")
 
 
 # The retired raster's metric names, a fixed grammar (its rows stay on disk as records under them):

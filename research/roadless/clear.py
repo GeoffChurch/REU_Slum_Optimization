@@ -1,8 +1,8 @@
 """The optimizers' shared parts (phase 3, NOTES "The complex as the runtime: the raster retired"):
-the tension's eps world (EPS, the gap complex's Model.tension ranks in it), the exact scores'
-tolerance (RTOL_SCORE), the catchment's view of a round (Catchment: how alike the candidates'
-effects are, for search.Diverse's batches), the batch rule (`_spread`), the next population step
-(`_next_target`) and the rows directory of the greedy's format (`rows_dir`).
+the tension's eps world (EPS, the gap complex's Model.tension ranks in it), the catchment's view
+of a round (Catchment, over a tension's Flow: how alike the candidates' effects are, for
+search.Diverse's batches), the batch rule (`_spread`), the next population step (`_next_target`)
+and the rows directory of the greedy's format (`rows_dir`).
 
 This module was the raster's greedy (clear.Clearing: the open-fraction tension, free first on its
 region graph, the greedy's runs over the 220); that went with the raster. The tension and free
@@ -11,57 +11,45 @@ search.py's.
 """
 from __future__ import annotations
 
-import sys
-from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
+import scipy.sparse as sp
 from numba import njit
-
-HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(HERE))
-from seam import Flow  # noqa: E402
+from numpy.typing import NDArray
 
 if TYPE_CHECKING:
-    from seam import ClearingModel
-    from seam import Tension as TensionLike
+    import gap_clear
 
+HERE = Path(__file__).resolve().parent
 EPS = 0.01
-RTOL_SCORE = 1e-5       # P is quadratic in u: this gives it to ~1e-10
+CATCH_COLUMNS = 16      # the sweep's candidates a pass: memory only (the same shares in any chunks)
 
 
-def _next_target(c: ClearingModel, delta: float) -> tuple[float, float]:
+class Flow(NamedTuple):
+    """The catchment's view of a tension's state (gap_clear.Tension.flow): its operator over its
+    nodes (the cells), their potential, each node's conductance to ground (A's row sums), each
+    home's injection on each node, and a set of candidates' member nodes (`rows`, each with its
+    candidate, a column of the candidates: `cols`)."""
+    A: sp.csr_matrix
+    u: NDArray[np.float64]
+    rowsum: NDArray[np.float64]
+    load: sp.csr_matrix
+    rows: NDArray[np.int64]
+    cols: NDArray[np.int64]
+
+
+def _next_target(c: gap_clear.Model, delta: float) -> tuple[float, float]:
     """(D now, the next multiple of delta above it)."""
     D = float(c.cost[c.removed].sum())
     return D, (np.floor(D / delta + 1e-9) + 1) * delta
 
 
-class GramSource(Protocol):
-    """How alike the candidates' effects are: a PSD matrix over `cand` whose normalised entries
-    are the correlations rho_ij that `search.Diverse` builds its batch from (a seam.Tension's:
-    the raster's or the complex's)."""
-    @property
-    def name(self) -> str: ...
-
-    def gram(self, t: TensionLike, cand: list[int], power: float) -> np.ndarray: ...
-
-
-class Sweep(Protocol):
-    """Where Catchment's downhill sweep runs. prepare(A, u, rowsum) -> run(rows, cols, C): the
-    (n x C) device array out[x, c] = share of node x's outflow that passes through column c's
-    member nodes (the (rows, cols) pairs) on the way to ground. Flow only runs downhill, so out
-    at x needs out at x's lower neighbours first. columns(n): columns per run on n nodes, so
-    that the (n x C) result fits in memory."""
-
-    def columns(self, n: int) -> int: ...
-
-    def prepare(self, A, u, rowsum) -> Callable: ...
-
-
 @njit(cache=True)
-def _catch(indptr, indices, data, u, rowsum, order, inA, out):
+def _catch(indptr: NDArray[np.int32], indices: NDArray[np.int32], data: NDArray[np.float64],
+           u: NDArray[np.float64], rowsum: NDArray[np.float64], order: NDArray[np.int64],
+           inA: NDArray[np.bool_], out: NDArray[np.float64]) -> None:
     """out[x, c] = share of node x's outflow that passes through candidate c's nodes (inA) on the
     way to ground, sweeping nodes by increasing potential (flow only runs downhill)."""
     C = inA.shape[1]
@@ -83,59 +71,40 @@ def _catch(indptr, indices, data, u, rowsum, order, inA, out):
                 out[x, c] = acc[c] / Q
 
 
-@dataclass(frozen=True)
-class CpuSweep:
-    """numba, one core: every node in order of increasing potential."""
-    chunk: int = 16
-
-    def columns(self, n: int) -> int:
-        return self.chunk
-
-    def prepare(self, A, u, rowsum):
-        order = np.argsort(u, kind="stable")
-
-        def run(rows, cols, C):
-            inA = np.zeros((len(u), C), dtype=np.bool_)
-            inA[rows, cols] = True
-            out = np.zeros((len(u), C))
-            _catch(A.indptr, A.indices, A.data, u, rowsum, order, inA, out)
-            return out
-        return run
-
-
-@dataclass(frozen=True)
 class Catchment:
-    """No solves: trace the round's flow downhill and give each candidate the share of each
-    home's flow that passes through its cells. H_ij = sum_h c_h v_i(h) v_j(h), with c_h the
-    home's weight in J_power (inj_h u_h^power, inj the demand's injection). The sweep runs where
-    `sweep` says."""
-    sweep: Sweep
+    """How alike the candidates' effects are (search.Diverse's batch): no solves, the round's flow
+    traced downhill, each candidate given the share of each home's flow that passes through its
+    nodes. H_ij = sum_h c_h v_i(h) v_j(h), with c_h the home's weight in J_power (inj_h
+    u_h^power, inj the demand's injection): a PSD matrix whose normalised entries are the
+    correlations rho_ij. The sweep (`_catch`) runs on the host, one core, every node in order of
+    increasing potential, CATCH_COLUMNS candidates a pass."""
 
     @property
     def name(self) -> str:
         return "cat"
 
-    def gram(self, t: TensionLike, cand: list[int], power: float) -> np.ndarray:
+    def gram(self, t: gap_clear.Tension, cand: list[int], power: float) -> NDArray[np.float64]:
         f = t.flow(cand)
         V = self.shares(f, len(cand))
         wt = t.weight(power)
-        return f.to_host((V * wt[:, None]).T @ V)
+        return np.asarray((V * wt[:, None]).T @ V)
 
-    def shares(self, f: Flow, ncand: int) -> Any:
-        """v_j(h) on the device, (homes x candidates): the share of home h's injected flow in
-        the tension's state (`f`, its Flow with the candidates' members) that passes through
-        candidate j's nodes on its way to ground (0 for a home none of whose injection is on a
-        node)."""
-        xp = f.xp
-        inj = f.load @ xp.ones(f.load.shape[1])
-        run = self.sweep.prepare(f.A, f.u, f.rowsum)
-        V = xp.zeros((f.load.shape[0], ncand))
-        step = self.sweep.columns(len(f.u))
-        for s0 in range(0, ncand, step):
-            C = min(step, ncand - s0)
+    def shares(self, f: Flow, ncand: int) -> NDArray[np.float64]:
+        """v_j(h), (homes x candidates): the share of home h's injected flow in the tension's
+        state (`f`, its Flow with the candidates' members) that passes through candidate j's nodes
+        on its way to ground (0 for a home none of whose injection is on a node)."""
+        inj = f.load @ np.ones(f.load.shape[1])
+        order = np.argsort(f.u, kind="stable")
+        V = np.zeros((f.load.shape[0], ncand))
+        for s0 in range(0, ncand, CATCH_COLUMNS):
+            C = min(CATCH_COLUMNS, ncand - s0)
             sel = (f.cols >= s0) & (f.cols < s0 + C)
-            V[:, s0:s0 + C] = f.load @ run(f.rows[sel], f.cols[sel] - s0, C)
-        return xp.where(inj[:, None] > 0, V / xp.where(inj > 0, inj, 1.0)[:, None], 0.0)
+            inA = np.zeros((len(f.u), C), dtype=np.bool_)
+            inA[f.rows[sel], f.cols[sel] - s0] = True
+            out = np.zeros((len(f.u), C))
+            _catch(f.A.indptr, f.A.indices, f.A.data, f.u, f.rowsum, order, inA, out)
+            V[:, s0:s0 + C] = f.load @ out
+        return np.where(inj[:, None] > 0, V / np.where(inj > 0, inj, 1.0)[:, None], 0.0)
 
 
 def _spread(gain: np.ndarray, cost: np.ndarray, H: np.ndarray, need: float,

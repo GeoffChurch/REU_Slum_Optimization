@@ -347,7 +347,7 @@ def speed_one(bid: str) -> str | None:
         order = rng.permutation(m.n)
         x[order[np.cumsum(m.cost[order]) <= BUDGET]] = True
         x_frac = np.full(m.n, BUDGET)
-        rel = m.relaxation(POWER, q=PLAN.qmax, rtol=PLAN.rtol, eps=PLAN.eps)
+        rel = m.relaxation(POWER, q=PLAN.qmax, eps=PLAN.eps)
 
         def tension() -> None:
             m.removed[:] = x

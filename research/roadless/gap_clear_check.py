@@ -345,7 +345,7 @@ def gradient(ids: list[str]) -> list[str]:
             for where, (x0, pick) in starts.items():
                 for power in (1.0, 2.0):
                     for q in GRAD_Q:
-                        rel = m.relaxation(power, q=q, rtol=0.0, eps=GRAD_EPS)
+                        rel = m.relaxation(power, q=q, eps=GRAD_EPS)
                         _J, g = rel.value_grad(x0)
                         err_j = []
                         for j in pick:
@@ -516,7 +516,7 @@ def convex(ids: list[str]) -> list[str]:
         [b] = common.build_blocks([bid])
         for token in GRAD_FORMS:
             m = _model(b, _form_metric(token))
-            rel = m.relaxation(1.0, q=1.0, rtol=0.0, eps=GRAD_EPS)
+            rel = m.relaxation(1.0, q=1.0, eps=GRAD_EPS)
             rng = np.random.default_rng(SEED + 2)
             worst_k, worst_P = -np.inf, np.inf
             for _ in range(CONVEX_LINES):
@@ -720,7 +720,7 @@ def device(ids: list[str]) -> list[str]:
             r["random homes"] = L.u
             r["random J_2"] = np.array(m.exact(x, 2.0))
             for power in (1.0, 2.0):
-                rel = m.relaxation(power, q=3.0, rtol=0.0, eps=GRAD_EPS)
+                rel = m.relaxation(power, q=3.0, eps=GRAD_EPS)
                 for where, xf in (("start", np.full(m.n, BUDGET)),
                                   ("random x", np.random.default_rng(SEED + 5).uniform(
                                       0.1, 0.4, m.n))):
@@ -732,7 +732,7 @@ def device(ids: list[str]) -> list[str]:
                 r[f"tension {'restore' if restore else 'add'}"] = np.where(np.isfinite(g), g,
                                                                            0.0)
             m.removed[:] = False
-            r["polish eps world"] = np.array([m.relaxation(1.0, q=1.0, rtol=0.0, eps=1e-6)
+            r["polish eps world"] = np.array([m.relaxation(1.0, q=1.0, eps=1e-6)
                                               .value(x.astype(float))])
             out[dev] = r
         bad += _devices_apart(bid, out)

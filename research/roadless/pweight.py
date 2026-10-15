@@ -58,8 +58,6 @@ PLAN = relax.plan_of("fw0.q3.i10.t0.001.e0.0001.k1s1e-06")    # SIMP base: the p
 BUDGET = relax.D_LENS          # area D 0.05 (one SIMP run is one budget: D 0.10 would be a second)
 METRIC = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())  # the CPU's
 FW_ITERS = 40                  # the bound's Frank-Wolfe iterations (as relax220_p1's fw40)
-FW_RTOL = 0.0                  # the relaxation's iterative tolerance: none (the complex's solves
-                               # are direct, refined to the floating-point floor)
 def rows_of(metric: str) -> Path:
     """Every row and summary of the study under `metric`, by its name."""
     return HERE / "pweight_rows" / metric
@@ -115,19 +113,19 @@ def score_path(bid: str) -> Path:
 def bound(bid: str, obj: Objective) -> dict[str, object]:
     """The relaxation's Frank-Wolfe bound on `obj` (convex) at BUDGET: from x = 0, nothing held,
     in SIMP base's eps world (J_eps <= J for every 0/1 clearing, so its lower bound covers every
-    real clearing within the budget, free first or not), FW_ITERS iterations at FW_RTOL."""
+    real clearing within the budget, free first or not), FW_ITERS iterations."""
     if not obj.convex:
         raise SystemExit(f"{obj.name}: J_{obj.power:g} is not convex, its gap bounds nothing")
     [b] = common.build_blocks([bid])
     c = METRIC.clearing(b, demand=obj.demand)
-    rel = c.relaxation(obj.power, q=1.0, rtol=FW_RTOL, eps=PLAN.eps)
+    rel = c.relaxation(obj.power, q=1.0, eps=PLAN.eps)
     t0 = time.time()
     fw = relax.frank_wolfe(rel, BUDGET, FW_ITERS,
                            log=lambda s: print(f"{bid} {obj.name} {s}", flush=True))
     last = fw["hist"][-1]
     x = fw["x"]
     return dict(block=bid, n=c.n, power=obj.power, demand=obj.demand.name, eps=PLAN.eps,
-                fw_iters=FW_ITERS, fw_rtol=FW_RTOL, iters=len(fw["hist"]),
+                fw_iters=FW_ITERS, iters=len(fw["hist"]),
                 relaxed_perm=rel.perm(fw["J"]), bound_perm=rel.perm(fw["lb"]),
                 last_gap=float(last["gap"] / last["J"]), J0=rel.J0,
                 frac_share=float(np.mean((x > 1e-6) & (x < 1 - 1e-6))),
@@ -188,7 +186,7 @@ def score_block(bid: str) -> None:
     cleared = {name: np.zeros(m.n, dtype=bool) for name in rows}
     for name, r in rows.items():
         cleared[name][np.asarray(r.simp_cleared, dtype=np.int64)] = True
-    catch = clear.Catchment(clear.CpuSweep())
+    catch = clear.Catchment()
     out = []
     for name, r in rows.items():
         x = cleared[name]
