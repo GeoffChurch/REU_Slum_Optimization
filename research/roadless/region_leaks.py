@@ -278,7 +278,10 @@ def homes_of(b: Block) -> Homes:
 def _member_one(bid: str) -> str | None:
     out = ROWS / "members" / f"{bid}.parquet"
     try:
-        [b] = common.member_blocks([bid])
+        got = common.member_blocks([bid])
+        if [g.block_id for g in got] != [bid]:
+            raise ValueError(f"the source yields {[g.block_id for g in got]} for {bid}")
+        [b] = got
         m = metrics.metric_of(metrics.RUNTIME, device="cpu").clearing(b, demand=POP)
         area = np.asarray(shapely.area(np.asarray(b.buildings.outlines)), dtype=np.float64)
         pd.DataFrame({"member": bid, "member_row": np.arange(m.n), "u0": m.u_pop0,

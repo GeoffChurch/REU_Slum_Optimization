@@ -129,11 +129,11 @@ def _every() -> Any:
 
 
 def member_blocks(ids: list[str]) -> list[Block]:
-    """kblocks from the Cape Town source at any building count: a region's members (regions.build;
-    the per-block model of a region's homes, region_leaks), each id checked (`_known`)."""
-    out = list(_every().restricted(ids).region().blocks)
-    _known(ids, {b.block_id for b in out}, where="the Cape Town source at any building count")
-    return out
+    """The kblocks of `ids` the Cape Town source holds at any building count: a region's members
+    (regions.build, from every kblock whose interior point its face holds: one with no building
+    yields none; the per-block model of a region's homes, region_leaks, which checks it got every
+    member it asked for)."""
+    return list(_every().restricted(ids).region().blocks)
 
 
 def write_bank(ids: list[str], path: Path) -> dict:
