@@ -95,7 +95,10 @@ walled in at baseline), each draw its home's trips per unit of its injection; th
 the pooled distribution's (TRIP_BIN_M bins, linear within a bin). lam is found by bisection in
 log lam over whole metres, after a bracketing search (secant steps in log-log), the same draws
 at every step, until the median is within TRIP_TOL of T; the draws' uncertainty on the median is
-a bootstrap over the draws (TRIP_BOOT resamples). Checked where the answer is known (gap_clear_check
+a bootstrap over the draws (TRIP_BOOT resamples). The median rises with lam toward a limit as the
+leak vanishes (read at LIMIT_LAM_M: the trips then end where the no-leak potential times the
+leak's shape puts them, nearly all the current leaving by the boundary): a T past it is refused
+(Unreachable), its steps recorded. Checked where the answer is known (gap_clear_check
 `trip-calibration`): on open ground at s 0 the median is the screened point source's, 1.257 lam.
 
 Typed as `search.py`'s docstring says:
@@ -223,6 +226,8 @@ TRIP_BOOT = 2000        # ... the bootstrap's resamples of the draws
 TRIP_BOOT_SEED = 20261017
 SECANT_MAX = 4.0        # ... a bracketing step changes lam by at most this factor
 LAM_RES_M = 1.0         # ... lam calibrated to whole metres (its name: InternalLeak.name)
+LIMIT_LAM_M = 1e6       # ... the median's limit as the leak vanishes, read at this lam (m: the
+                        # leak 1e-6 of lam 1000 m's)
 FRAME_H = 1.0           # the painted flow's pixel (m)
 PRIOR_H = 2.0           # the prior's and the maps' pixel (m: FRAME_H's 2 x 2, on the same edges)
 FRAME_PAD = 2.0         # the frames' margin about the region (m: a multiple of both pixels)
@@ -671,16 +676,35 @@ def trip_step(m: gcl.Model, *, s: float, lam: float, sample: TripSample, site: T
                     inside=float(pooled.sum() / sample.w.sum()), t=time.time() - t0), rows
 
 
+class Unreachable(Exception):
+    """No lam gives the target median trip: the median at `limit_lam` (the leak vanishing), its
+    least upper bound, is below it. `steps` the calibration's (the limit's), `rows` the limit's
+    sample rows."""
+
+    def __init__(self, steps: list[TripStep], rows: NDArray[np.float64]):
+        super().__init__(f"the median trip rises to {steps[-1].median:.1f} m as lam grows")
+        self.steps = steps
+        self.rows = rows
+
+
 def calibrate_lam(m: gcl.Model, *, s: float, target: float, tol: float, lam0: float,
-                  resolution: float, sample: TripSample, site: TripSite, procs: int
-                  ) -> tuple[list[TripStep], NDArray[np.float64]]:
+                  resolution: float, limit_lam: float, sample: TripSample, site: TripSite,
+                  procs: int) -> tuple[list[TripStep], NDArray[np.float64]]:
     """The lam (a multiple of `resolution`, m) at which the sample's median trip is within `tol`
-    (relative) of `target`, at the building share s: a bracketing search from lam0 by secant
-    steps in log-log, then bisection in log lam (module docstring). Every step, and the rows at
-    the last (the lam chosen). The median falls as the leak grows: it rises with lam."""
+    (relative) of `target`, at the building share s: first the median's limit as the leak
+    vanishes (at `limit_lam`: the trips then end where the no-leak potential times the leak's
+    shape puts them, the boundary taking nearly all the current), Unreachable if the target is
+    past it; then a bracketing search from lam0 by secant steps in log-log and bisection in log
+    lam (module docstring). Every step, and the rows at the last (the lam chosen). The median
+    falls as the leak grows: it rises with lam, toward the limit."""
     def snap(x: float) -> float:
         return float(max(round(x / resolution), 1) * resolution)
-    steps: list[TripStep] = []
+    limit, limit_rows = trip_step(m, s=s, lam=limit_lam, sample=sample, site=site, procs=procs)
+    steps: list[TripStep] = [limit]
+    print(f"  the limit (lam {limit_lam:g}): median {limit.median:.1f} m, inside "
+          f"{limit.inside:.2e} ({limit.t:.0f}s)", flush=True)
+    if limit.median < target * (1.0 - tol):
+        raise Unreachable(steps, limit_rows)
     lo: TripStep | None = None
     hi: TripStep | None = None
     lam = snap(lam0)
@@ -705,7 +729,7 @@ def calibrate_lam(m: gcl.Model, *, s: float, target: float, tol: float, lam0: fl
         # not yet bracketed: a secant step in log-log toward the target (slope 1 at first), at
         # most a factor SECANT_MAX
         slope = 1.0
-        if len(steps) > 1:
+        if len(steps) > 2:      # two steps past the limit's
             a, b = steps[-2], steps[-1]
             slope = float(np.log(b.median / a.median) / np.log(b.lam / a.lam))
         ratio = (target / step.median) ** (1.0 / slope) if slope > 0.0 else SECANT_MAX
@@ -747,19 +771,30 @@ def calibrate(s: float, target: float, boost: gx.NoBoost | gx.StreetBoost, procs
     sample = trip_sample(m, n=TRIP_N, seed=TRIP_SEED)
     print(f"calibrate s {s:g}, T {target:g}{boost.name}: the model in {time.time() - t0:.0f}s; "
           f"{len(sample.homes)} homes of {TRIP_N} draws, {site.nbins} bins", flush=True)
-    steps, rows = calibrate_lam(m, s=s, target=target, tol=TRIP_TOL, lam0=lam0,
-                                resolution=LAM_RES_M, sample=sample, site=site, procs=procs)
-    boot = trip_boot(rows, sample, n=TRIP_BOOT, seed=TRIP_BOOT_SEED)
     out = calib_path(s, target, boost)
     out.parent.mkdir(parents=True, exist_ok=True)
-    df = pd.DataFrame([st._asdict() for st in steps])
-    df = df.assign(s=s, target=target, boost=boost.name, tol=TRIP_TOL, n_draws=TRIP_N,
-                   n_homes=len(sample.homes), seed=TRIP_SEED, chosen=df.index == len(df) - 1,
-                   boot_sd=float(boot.std(ddof=1)), boot_lo=float(np.quantile(boot, 0.025)),
-                   boot_hi=float(np.quantile(boot, 0.975)), peak_gb=gap_calib.peak_gb())
-    df.to_parquet(out)
-    pd.DataFrame({"median": boot}).to_parquet(out.with_name(out.stem + "_boot.parquet"))
-    print(df.to_string(), flush=True)
+
+    def record(steps: list[TripStep], rows: NDArray[np.float64], *, reached: bool) -> None:
+        """The steps' rows, the bootstrap's at the last (the lam chosen, or the limit)."""
+        boot = trip_boot(rows, sample, n=TRIP_BOOT, seed=TRIP_BOOT_SEED)
+        df = pd.DataFrame([st._asdict() for st in steps])
+        df = df.assign(s=s, target=target, boost=boost.name, tol=TRIP_TOL, n_draws=TRIP_N,
+                       n_homes=len(sample.homes), seed=TRIP_SEED, limit_lam=LIMIT_LAM_M,
+                       limit=df.index == 0, chosen=reached & (df.index == len(df) - 1),
+                       boot_sd=float(boot.std(ddof=1)), boot_lo=float(np.quantile(boot, 0.025)),
+                       boot_hi=float(np.quantile(boot, 0.975)), peak_gb=gap_calib.peak_gb())
+        df.to_parquet(out)
+        pd.DataFrame({"median": boot}).to_parquet(out.with_name(out.stem + "_boot.parquet"))
+        print(df.to_string(), flush=True)
+    try:
+        steps, rows = calibrate_lam(m, s=s, target=target, tol=TRIP_TOL, lam0=lam0,
+                                    resolution=LAM_RES_M, limit_lam=LIMIT_LAM_M, sample=sample,
+                                    site=site, procs=procs)
+    except Unreachable as e:
+        record(e.steps, e.rows, reached=False)
+        raise SystemExit(f"s {s:g}{boost.name}: no lam gives a median internal trip of "
+                         f"{target:g} m ({e})") from e
+    record(steps, rows, reached=True)
 
 
 def score(label: str) -> None:
@@ -991,27 +1026,26 @@ def barrier_rows(b: Block) -> pd.DataFrame:
 
 
 def calib_rows() -> pd.DataFrame:
-    """Every calibration's steps (ROWS/calib/), each lam chosen checked against CALIBRATED (the
-    configurations' lam): they must agree."""
-    steps = []
+    """Every calibration's steps (ROWS/calib/T<T>s<s><boost>.parquet, labelled by its file), the
+    refused ones' (their limit only) among them; each lam in CALIBRATED (the configurations')
+    must be its calibration's chosen lam."""
+    paths = sorted(p for p in (ROWS / "calib").glob("T*.parquet")
+                   if not p.stem.endswith("_boot"))
+    df = pd.concat([pd.read_parquet(p).assign(label=p.stem) for p in paths], ignore_index=True)
     for (s, factor), lam in CALIBRATED.items():
         boost: gx.NoBoost | gx.StreetBoost = (gx.NoBoost() if factor == 1.0
                                                else gx.StreetBoost(factor=factor))
-        df = pd.read_parquet(calib_path(s, TRIP_M, boost))
-        chosen = float(df.loc[df["chosen"], "lam"].iloc[0])
-        if chosen != lam:
-            raise ValueError(f"s {s:g}{boost.name}: CALIBRATED's lam {lam:g}, the calibration's "
-                             f"{chosen:g}")
-        steps.append(df.assign(label=label_of(_bar(gx.InternalLeak(s=s, lam=lam), boost),
-                                              TRIP_M)))
-    return pd.concat(steps, ignore_index=True)
+        label = calib_path(s, TRIP_M, boost).stem
+        chosen = df.loc[(df["label"] == label) & df["chosen"], "lam"].to_list()
+        if chosen != [lam]:
+            raise ValueError(f"{label}: CALIBRATED's lam {lam:g}, its calibration's {chosen}")
+    return df
 
 
 def report() -> None:
     [b] = common.build_blocks([REGION])
     barrier_rows(b).to_csv(ROWS / "summary_barriers.csv", index=False)
-    if CALIBRATED:
-        calib_rows().to_csv(ROWS / "summary_calib.csv", index=False)
+    calib_rows().to_csv(ROWS / "summary_calib.csv", index=False)
     homes = homes_of(b, formal_grid(b))
     geo = gc.geometry(b)
     polys = geo.polys

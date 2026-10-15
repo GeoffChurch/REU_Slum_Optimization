@@ -152,12 +152,12 @@ a street on one side with a back lane (5), the same bars reaching the far wall, 
 `trip-calibration` (region_leaks' trips and calibration, on open ground at s 0): on SCALE_BLOCK,
 region_leaks.calibrate_lam to a median trip of TRIP_T (to TRIP_GUARD_TOL, lam to TRIP_GUARD_RES)
 gives a lam whose screened point source's median, 1.2572 lam, is within region_leaks.TRIP_TOL of
-TRIP_T; and on TRIP_BLOCK (the same ground, a second home TRIP_EDGE_M from the street edge, the
-boundary taking a third of its current) the pooled median trip at TRIP_LAM within TRIP_TOL of the
-method of images' (each home's point source less its first images in the square's four edges,
-integrated on a polar grid, the trips inside the square only). Faults: `boundary-trips` (the
-street faces' drainage counted as trips), `wrong-home` (each home's trips measured from the next
-home's injection).
+TRIP_T, and it refuses a target past the median's limit as the leak vanishes; on TRIP_BLOCK (the
+same ground, a second home TRIP_EDGE_M from the street edge, the boundary taking 44% of its
+current) the pooled median trip at TRIP_LAM is within TRIP_TOL of the method of images' (each
+home's point source less its first images in the square's four edges, integrated on a polar grid,
+the trips inside the square only). Faults: `boundary-trips` (the street faces' drainage counted
+as trips), `wrong-home` (each home's trips measured from the next home's injection).
 """
 from __future__ import annotations
 
@@ -1515,15 +1515,27 @@ def trip_calibration(_ids: list[str]) -> list[str]:
     site = region_leaks.trip_site(m)
     steps, _rows = region_leaks.calibrate_lam(
         m, s=0.0, target=TRIP_T, tol=TRIP_GUARD_TOL, lam0=leak0.lam * 0.8,
-        resolution=TRIP_GUARD_RES, sample=region_leaks.every_home(m), site=site, procs=1)
+        resolution=TRIP_GUARD_RES, limit_lam=region_leaks.LIMIT_LAM_M,
+        sample=region_leaks.every_home(m), site=site, procs=1)
     lam = steps[-1].lam
     analytic = K0_MEDIAN * lam / TRIP_T - 1.0
     ok = abs(analytic) <= region_leaks.TRIP_TOL
-    print(f"trip-calibration: one home, T {TRIP_T:g} m: lam {lam:g} m in {len(steps)} steps "
+    print(f"trip-calibration: one home, T {TRIP_T:g} m: lam {lam:g} m in {len(steps) - 1} steps "
+          f"(the limit {steps[0].median:.1f} m) "
           f"(the median {steps[-1].median:.3f} m, {steps[-1].inside:.4f} of the current inside); "
           f"{K0_MEDIAN:.4f} lam is T {analytic:+.1e} -> {'ok' if ok else 'FAILS'}", flush=True)
     if not ok:
         bad.append(f"one home: 1.257 lam is T {analytic:+.1e}")
+    # a target past the limit (the leak vanishing) is refused
+    past = 1.5 * steps[0].median
+    try:
+        region_leaks.calibrate_lam(
+            m, s=0.0, target=past, tol=TRIP_GUARD_TOL, lam0=leak0.lam,
+            resolution=TRIP_GUARD_RES, limit_lam=region_leaks.LIMIT_LAM_M,
+            sample=region_leaks.every_home(m), site=site, procs=1)
+        bad.append(f"one home: T {past:.1f} m, past the limit, was calibrated")
+    except region_leaks.Unreachable as e:
+        print(f"trip-calibration: one home, T {past:.1f} m: refused ({e})", flush=True)
     # two homes, one near the street edge: the pooled trips against the method of images
     c = SCALE_L / 2.0
     b = _open_block("synthetic-open-two", [_square(c - 1.0, c - 1.0, 2.0),
