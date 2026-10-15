@@ -15,6 +15,7 @@ uni+apwfs at h 0.5 (RASTER).
     uv run python $S rasterscore <id> <cpu|gpu>     # every clearing on the raster (cluster GPU)
     uv run python $S speed <ids,|@file> <procs> <cpu|gpu>  # the breakdowns on a device
     uv run python $S rescore <ids,|@file> <procs>   # the stored runs re-scored under their name
+    uv run python $S roads <ids,|@file> <procs>     # carved meshes' prefixes against the rebuild
     uv run python $S report                         # gap_rows/summary_runtime_*.csv
 
 `preset`: the cheap preset (polish_greedy, S0.01cat P64w8) or SIMP's default (relax.one, PLAN)
@@ -51,6 +52,11 @@ summary_runtime_timing.csv.)
 `rescore`: the stored runs of the complex's presets (SOURCES' cx_*), each clearing re-scored
 under the metric's name (its rows' directories migrated to it), against the score its row holds;
 rows ROWS/rescore/<id>.parquet.
+
+`roads` (phase 2b): ROAD_CAL's networks' area prefixes as road_rescore's 60-block run scored them
+on their carved fixed meshes (its rows, on a core) against the complex rebuilt with each prefix
+carved (gap_compare.ComplexModel.scored): the lenses, the homes walled in; rows
+ROWS/roads/<id>.parquet.
 """
 from __future__ import annotations
 
@@ -437,6 +443,55 @@ def rescore_one(bid: str) -> str | None:
         return f"{bid}: {e!r}"
 
 
+# ------------------------------------------------------------------ roads
+
+ROAD_CAL = ("resistance_lp", "cycle_native")   # the networks calibrated: the lineup's leaders
+
+
+def roads_one(bid: str) -> str | None:
+    """Phase 2b: each ROAD_CAL network's area prefixes as the 60-block run scored them on their
+    carved fixed mesh (road_rescore cx_network's rows, on a core) against the complex rebuilt
+    with the prefix carved (gap_compare.ComplexModel.scored: its lenses and each home's reach);
+    rows ROWS/roads/<id>.parquet."""
+    import geopandas as gpd
+
+    import road_rescore as rr
+    out = ROWS / "roads" / f"{bid}.parquet"
+    try:
+        [b] = common.build_blocks([bid])
+        geo = gc.geometry(b)
+        metric = gcl.complex_of(METRIC.name, factorization=gap_factor.factorization_of("cpu"))
+        cm = gcmp.ComplexModel(b, METRIC.fs, METRIC.form)
+        road_rows = HERE / "road_rows"
+        rows = []
+        for name in ROAD_CAL:
+            fx = rr.cx_dir(road_rows, metric) / f"{bid}__{name}.parquet"
+            if not fx.exists():
+                continue
+            fixed = pd.read_parquet(fx)
+            ordered = gpd.read_parquet(rr.ordered_path(road_rows / "scratch", bid, name))
+            for mk in sorted({int(v) for v in fixed.m}):
+                f = fixed[fixed.m == mk].iloc[0]
+                r, _u, live = cm.scored(np.ones(len(geo.polys), dtype=bool),
+                                        geo.local(rr.corridor_of(ordered, mk)))
+                rows.append(dict(block=bid, method=name, m=mk, D_area=float(f.D_area),
+                                 L_P=float(f.L_P), L_Pq=float(f.L_Pq), L_J2=float(f.L_J2),
+                                 n_enclosed=int(f.n_enclosed), L_P_rebuild=r["L_P"],
+                                 L_Pq_rebuild=r["L_Pq0.5"], L_J2_rebuild=r["L_J2"],
+                                 n_enclosed_rebuild=r["n_enclosed"],
+                                 walled_rebuild=int((~live).sum()), t_rebuild=r["t"]))
+                print(f"{bid} {name} {mk} roads: L_P {f.L_P:.5f} / rebuilt {r['L_P']:.5f} "
+                      f"({f.L_P - r['L_P']:+.1e}), enclosed {int(f.n_enclosed)} / "
+                      f"{r['n_enclosed']} ({r['t']:.0f}s)", flush=True)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_parquet(out)
+        return None
+    except Exception as e:      # noqa: BLE001
+        import traceback
+        traceback.print_exc()
+        return f"{bid}: {e!r}"
+
+
 # ------------------------------------------------------------------ the summaries
 
 LENSES = ("L_P", "L_Pq", "L_J2")
@@ -599,8 +654,9 @@ def main(argv: list[str]) -> None:
     elif cmd == "speed":
         _SPEED_DEVICE.append(argv[3])
         failed = _pool(speed_one, gap_study.ids_of(argv[1]), int(argv[2]))
-    elif cmd in ("baseline", "clearings", "rescore"):
-        fn = {"baseline": baseline_one, "clearings": clearings_one, "rescore": rescore_one}[cmd]
+    elif cmd in ("baseline", "clearings", "rescore", "roads"):
+        fn = {"baseline": baseline_one, "clearings": clearings_one, "rescore": rescore_one,
+              "roads": roads_one}[cmd]
         failed = _pool(fn, gap_study.ids_of(argv[1]), int(argv[2]))
     elif cmd == "report":
         report()
