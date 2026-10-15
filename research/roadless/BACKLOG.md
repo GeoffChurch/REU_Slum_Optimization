@@ -580,8 +580,12 @@ Not pursued, with what would change that:
   linear-loss target over the bracket, a per-arm drop for many-arm screens (feedback sent to its
   author).
   Requested 2026-10-15 (owner: "Send the request to discuss each one with me"): the stepped
-  re-decision and the per-arm drop, each to be discussed with the owner before it is built; if
-  both land, the replay runs again under the same rule before the consolidated pass.
+  re-decision and the per-arm drop, each to be discussed with the owner before it is built.
+  Approved by the owner and being built (2026-10-15): ValueOfMoreUnits' required `step` (every
+  horizon valued, min(step, the best) committed; `Stepped` goes) and per-arm screens (each arm
+  on while its own KG* value beats its cost, the veto a hard drop, costs per (block, arm): the
+  arm's GPU-seconds, the base's 0 here as in the replay). When it lands, the replay runs again
+  under the same rule before the consolidated pass.
 - **Adaptive block selection** (first look done, NOTES "Which blocks tell methods apart": collapses dominate; screen = gated sentinel + random sample; picking 'discriminating' blocks beyond the sentinel misleads. Remaining value: sequential sample size; wiki `pages/methods/adaptive-benchmark-items.md`).
   Fit a factor model to the method x block matrix of paired differences (axes like "opens
   gated pockets", "spreads in dense bands"); for a new variant run first the blocks with the
