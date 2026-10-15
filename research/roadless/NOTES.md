@@ -6101,3 +6101,422 @@ Compute: here, single-threaded, at most 8 processes: the fixed-rate run 1.4 h on
 bracket run 1.1 h on 7, the stepped diagnostic 3.0 h on 4, the four guard runs 1.75 -- 1.85 h
 each. Rows (git-ignored): epireplay.parquet, epireplay_bracket.parquet and its jobs'
 epireplay_bracket_jobs/; epireplay.py, deleted in phase 3, regenerates them from 0c2e588e^.
+
+### Exits as leaks: the region model on the complex (5810@major)
+
+BACKLOG 4, decision (4) (the brief: .superpowers/sdd/2026-10-13-region-leaks; the owner
+2026-10-12 -- 13: "we'd still only leak at the outer boundary, so all current must exit ... some of
+the outer boundary might not leak at all and might have 0 conductance (like a railroad)"; "we can
+adjust boundary leakage, uniform leakage, and also building-boundary leakage"). The region model's
+exits compiled into conductances on the region's fixed mesh, and tested on 5810@major to give the
+owner the evidence to choose them. Code: gap_exits.py (the three Strategies, their name and
+digest), gap_clear.py (the leak on the fixed pattern: Graph's seeds and diagonal, Model.leak_site,
+ComplexMetric.exits and the name's grammar), gap_maps.py (the leaks' drainage), regions.py (the
+region's OSM features; each building's member kblock), digests.py (a code's digest: CODE's and the
+exits'), common.member_blocks, region_leaks.py (the study), gap_clear_check.py (seven new guards),
+cluster.py (`blocks` takes `--node` and `--items`). Rows: region_rows/ (the runs, baselines, images
+and maps git-ignored; summary_*.csv committed).
+
+**The model** (gap_exits). Three Strategies a metric holds (ComplexMetric.exits), each resolved
+once from the metric's name (gap_clear.complex_of, metrics.metric_of) and asked nothing downstream.
+- Leaks (`Leak`): a conductance to ground per cell, on the diagonal of every unknown row
+  (gap_clear.Graph.values: the street's G plus the leak) and among the reach's seeds (a leaking
+  cell is grounded: Graph.reach), on the cells that are unknowns at baseline (live and not ground
+  with every footprint standing: Model.leak_site) and nowhere else, the same at every state. So the
+  sparsity pattern, the plan and the factorization are the per-block metric's (the leak changes
+  values on the diagonal only), P stays convex in the clearing, the reach is the street's (a leak
+  lies only where the street already reaches), B's enclosed homes stay enclosed, and a cleared
+  building's interior and zone conduct but do not leak. The gradient is the adjoint's unchanged (a
+  leak does not move with the clearing; its solve is the state's own system).
+- Uniform (`UniformLeak(lam)`, `U<lam>`): l_c = sigma |c| / lam^2, |c| the cell's area (m^2) and
+  sigma the sheet conductance (pi / 2, the FlowSpec's: a passage conducts sigma |e| / d_e). Cell by
+  cell this is the screened Laplacian -div(sigma grad u) + (sigma / lam^2) u = f, whose point
+  source in open ground decays as Q K0(r / lam) / (2 pi sigma). For a walker (u the escape time,
+  the leak a constant rate of arriving anywhere), a trip's straight-line length r has the density
+  (r / lam^2) K0(r / lam): median 1.26 lam, mean (pi / 2) lam, root mean square 2 lam, 10th -- 90th
+  percentile 0.34 -- 3.21 lam; lam 250, 500 and 1,000 m are median trips of 314 m, 629 m and 1.26
+  km.
+- Building-boundary (`HomeLeak(lam)`, `H<lam>`): destinations at buildings by area population, l_c
+  = kappa x the cell's population injection at baseline (System.Pc @ pop: the demand points of
+  gap_flow.demand_on, weighted as the injection is), kappa making the total the uniform family's at
+  the same lam, sigma sum |c| / lam^2 over the cells live at baseline. A home's own cells are not
+  excluded, short trips not special-cased (owner 2026-10-13).
+- Barriers (`OsmBarriers(line_m, cross_m)`, `B<line>c<cross>`): the region's railways (railway
+  rail, light_rail, narrow_gauge) and water (waterway river, canal, stream, drain, ditch, not in a
+  tunnel or culvert, as strips `line_m` wide about their lines, flat-ended; natural=water, landuse
+  reservoir or basin and waterway riverbank areas as they are) cut out of the region's polygon:
+  obstacles never cleared, holding no demand, and the region's edge no exit where one lies on it
+  (no face of the mesh lies on the street line within it). Open only at crossings: a way of the
+  walking network (any highway) on a bridge or in a tunnel over a barrier, or through a railway
+  crossing node (railway crossing or level_crossing: the way's piece within `line_m` of the node),
+  each a gap `cross_m` wide about the way's line. The mesh is built on the cut polygon
+  (ComplexMetric.fixed and .model cut the block), so the mesh's cache key (the block's boundary)
+  and the run's name both carry the barriers.
+- Street boost (`StreetBoost(factor)`, `S<factor>`), a check only: sigma x factor on the triangles
+  whose centroid lies within 3 m of an OSM way (half a 6 m residential street), a passage by the
+  harmonic mean of its two triangles' factors, a street face by its triangle's.
+- The boundary family has no free parameter here: the region's ring is the street (Dirichlet:
+  today's street faces) where it is a road, none where a barrier lies on it.
+
+**The leak's scale, checked** (the `leak-scale` guard): open ground 800 m square, its edge the
+street, one 2 m home at its centre, the uniform leak at lam 60 m, on the runtime's graded mesh
+(cells of 2.5 -- 30 m^2 between 10 and 200 m out): the home's potential over K0(r / lam) is flat
+within 2.6% over twelve distance bins and its level 0.2% from Q / (2 pi sigma), the formula's, the
+source's own current Q. With the same total leak on every cell alike (the fault `per-cell`: a leak
+per cell, not per area) the ratio drifts 4.3x over the bins and its level is 34% off.
+
+**The barriers on 5810@major** (regions.osm_of: the Geofabrik extract's ways, nodes and areas
+meeting the face, their tags read once where the region is built;
+region_rows/summary_barriers.csv). The railway (two tracks, railway=rail, 3.7 -- 7.7 m apart, a
+median 4.25: an 8 m strip each merges them into one corridor about 12 m wide) runs 5.84 km through
+the face from its west edge to its east edge, south of the N1's vacant land and north of 5810; the
+water is 18 ponds and reservoirs (natural=water, 0.20 km^2 in the face), 1.26 km of seasonal
+streams (their 104 m of culverts open) and 0.38 km of ditches. Strips 0.088 km^2 and areas 0.201
+km^2 in the face: 0.289 km^2 cut, the region 6.45 km^2 of 6.74, 5 footprints touching a barrier.
+Without crossings the railway parts the face in two (3.71 and 2.74 km^2). The crossings: the
+region's one crossing of the railway inside it, an unpaved path over both tracks (two
+railway=crossing nodes, the path's 16 m about each) at 5810's north-east corner; and three bridges
+at its ends, the boundary roads' own (the R304 and the M167) and a sidewalk on one, at the region's
+edge: crossing there is reaching the street. No highway crosses a stream inside the face (they pass
+in culverts). The crossing's width, 3 m: a footway's (the path is unpaved; a level crossing's road
+would be 6 m), the gap 484 m^2 in all.
+
+**The name.** The per-block metric (no barriers, no leak, no boost: the block's whole street ring
+the exit) has no suffix, so its name and digest are as before,
+`cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a` with its 28 constants, and every stored per-block row
+keeps its name; its scores are bit for bit the previous code's (19570's baseline lenses and escape
+times, a random clearing's lenses and escape times, SIMP's value and gradient, the tension). A
+configuration with leaks, barriers or a boost names its parts in a suffix before the search's
+`@e<eps>`, `+x[B<line>c<cross>][U<lam>|H<lam>][S<factor>]v<exits code>`, the exits code (a03a092b)
+the digest of gap_exits' own 8 constants (its tag sets, the crossing node's tolerance, the boost's
+3 m), walked as gap_clear walks its own (digests.constants_of) and not in CODE's walk: editing the
+leak code renames only the leaky metrics. complex_of parses a name back (gap_exits.exits_of) and
+refuses another exits code's. The reference is `...+v34d40e8a+xB8c3va03a092b`, U500's
+`...+xB8c3U500va03a092b`, the cheap preset's runs `...@e0.05`; the boundary-only configuration
+without barriers is the per-block metric's own name, on the region's block.
+
+**The runs.** Ten configurations: `edge` (the boundary only, no barriers: the raster run's setting,
+and the per-block metric's own name on the region's block), `bar` (the boundary with the barriers:
+the reference), `U250`, `U500`, `U1000` (bar with the uniform leak at lam 250, 500, 1,000 m),
+`H250`, `H500`, `H1000` (bar with the building-boundary leak), `S3` and `S3U500` (the street boost
+3x at bar and at U500, a check). Each run with the cheap preset (`@e0.05`) and SIMP's default at
+area D 0.05, free first, optimizing P under the area population (region_leaks `run`, on the
+cluster's V100s of tesla2, one card each, at most four at once: runs rl-pilot, rl-runs, rl-runs2).
+The pilot (the cheap preset under `bar`) took 1.01 GPU-h, 25 minutes of it the node building the
+barrier mesh (16.8M triangles; 16 minutes here); a run once the node holds the mesh takes
+0.44 -- 0.71 GPU-h (SIMP 1,358 -- 2,106 s of optimizing, the cheap preset 1,559 -- 1,838 s, free
+first about 12 minutes of host work in each). From that timing the 20 runs, with the no-buildings
+priors the maps need (below) and the device guards, would pass the 12 GPU-h, so, as ruled, **the
+street boost's two configurations were cut** (their four runs and two priors, about 2.1 GPU-h); the
+250 m lambda of both families fit and ran. 16 runs, 8 priors and the device guards took 10.0 GPU-h:
+the 1.96 left would hold one of the two boost configurations (about 1.05 GPU-h each), not both. In
+every run free first frees the 36 homes walled in at baseline (the barriers wall none in) with the
+same 29 buildings, D 0.0013, and no run leaves a home walled in. Host memory peaks at 22 -- 53 GB,
+the card at 8.8 -- 9.6 GB of 32. The clearings were scored here on cores (`score`: P, P_{1/2} and
+J_2, each lens against its configuration's own baseline, so P_{1/2}'s weights are each
+configuration's own baseline escape times) and agree with the runs' own L_P (on the cards) within
+4e-11. The no-buildings prior (every footprint cleared: every cell an unknown, 16M on the region)
+does not factor on a core (SuperLU's 32-bit indices: SUPERLU_MALLOC fails), so it ran on a card too
+(`run ... prior`, 4 minutes each, painted at 2 m).
+
+**The baselines** (region_rows/summary_baseline.csv, summary_escape.csv; P_0 in the area
+population's units; the leaks' share of the current drained at baseline, the rest leaving by the
+boundary; the median escape time of all homes, and of the formal and deep homes of question 2):
+
+    config   P_0        P_1/2,0    J_2,0      leaks drain   median escape time: all (formal, deep)
+    edge     9.44e+06   1.71e+07   1.08e+10   0             808 (1,307, 366)
+    bar      1.76e+07   3.53e+07   3.96e+10   0             1,557 (2,252, 842)
+    U250     4.33e+06   7.77e+06   2.22e+09   0.63          394 (577, 227)
+    U500     9.68e+06   1.88e+07   1.17e+10   0.37          869 (1,264, 483)
+    U1000    1.45e+07   2.89e+07   2.69e+10   0.14          1,294 (1,873, 704)
+    H250     8.15e+05   9.80e+05   6.01e+07   0.76          81 (84, 76)
+    H500     2.60e+06   3.74e+06   6.90e+08   0.61          268 (300, 210)
+    H1000    6.84e+06   1.17e+07   5.39e+09   0.40          667 (841, 432)
+    S3       1.28e+07   2.40e+07   1.99e+10   0             1,185 (1,594, 674)
+    S3U500   8.01e+06   1.49e+07   7.77e+09   0.32          746 (1,028, 428)
+
+The barriers alone nearly double P_0 (+86%) and raise J_2 3.7x: the railway closes the north, the
+vacant land to the N1 that 5810's west part drained into, but for the one path. The uniform leak at
+1,000 m drains 14% of the current and P_0 is 17% below bar's; at 250 m 63% and P_0 is a quarter of
+it. The building-boundary leak at the same total drains more (40 -- 76%), its destinations where
+the homes are.
+
+**Self-absorption** (region_rows/summary_absorb.csv; 300 homes with demand drawn at random, each
+one's unit injection solved alone at baseline): `own building` the share of a home's current that
+leaks into its own building's destination (the self-trips), `own cells` all the leak on the cells
+its injection lands on, `anywhere` all it leaks rather than leaving by the boundary; the median,
+the population-weighted mean, the 90th percentile and the largest over the 300:
+
+    config   own building: median, pop-weighted, p90, max   own cells (median)   anywhere (median)
+    H250     0.0087, 0.091, 0.029, 0.21                     0.0097               0.95
+    H500     0.0026, 0.029, 0.0097, 0.067                   0.0029               0.78
+    H1000    0.00073, 0.0081, 0.0027, 0.018                 0.00083              0.49
+    U250     --                                             0.00046              0.73
+    U500     --                                             0.00014              0.41
+    U1000    --                                             0.00004              0.16
+
+For the typical home it is small at every lam (0.9% at 250 m), but the population-weighted mean is
+not at 250 m (9%): a building's own destination is in proportion to its area, so the largest
+buildings absorb up to 21% of their own current. It falls about as 1 / lam^2 and is small at 1,000
+m (0.8% population-weighted, 1.8% at most). The uniform leak's absorption on a home's own cells is
+a few in 10,000 at every lam.
+
+**The lenses** (region_rows/summary_lenses.csv; Lens A of each configuration's own model: L_P the
+optimized one; t the optimizer's time from the model built, free first in it; wall the task's, the
+first task on the node building its mesh too):
+
+    config   preset  L_P     L_P1/2  L_J2    cleared   t (s)   wall (s)
+    edge     simp    0.2825  0.3088  0.2973   720      1,474   3,380 (the mesh built)
+    edge     cheap   0.2643  0.2829  0.2737   523      1,618   1,839
+    bar      simp    0.3105  0.3177  0.3120   753      1,358   1,583
+    bar      cheap   0.2891  0.2935  0.2887   537      1,648   3,641 (the pilot: the mesh built)
+    U250     simp    0.1427  0.1416  0.1338   656      1,624   1,845
+    U250     cheap   0.1352  0.1342  0.1272   588      1,689   1,912
+    U500     simp    0.2207  0.2242  0.2177   730      1,463   1,691
+    U500     cheap   0.2052  0.2041  0.1987   541      1,625   1,843
+    U1000    simp    0.2787  0.2843  0.2782   739      1,364   1,586
+    U1000    cheap   0.2590  0.2623  0.2573   537      1,838   2,064
+    H250     simp    0.0441  0.0370  0.0333   748      1,379   1,597
+    H250     cheap   0.0426  0.0363  0.0330   554      1,559   1,782
+    H500     simp    0.0843  0.0741  0.0688   653      2,106   2,538
+    H500     cheap   0.0804  0.0704  0.0657   530      1,625   1,845
+    H1000    simp    0.1573  0.1489  0.1431   656      1,703   1,917
+    H1000    cheap   0.1470  0.1393  0.1343   518      1,720   1,944
+
+Lens A falls with the leak: the shorter the trips, the less a clearing changes them (the home leak
+at 250 m leaves 4% to gain). Under `edge` the raster run's Lens A was 0.2714 (cheap) and 0.3014
+(SIMP), J_2 on the composite raster; on the complex its clearings read L_J2 0.2702 and 0.2966 (the
+2b cross-check's 0.270 and 0.297), against the complex's own presets' 0.2737 and 0.2973, which
+optimize P (region_rows/summary_raster.csv): the complex's clearings lead on the raster's own
+objective too, and the raster's leave 22 and 31 homes walled in on the complex (no free first on
+the complex's geometry).
+
+**Question 1, tendrils or interconnection** (region_leaks.loops; region_rows/summary_loops.csv; the
+maps below). The index: the corridor network at a threshold T is the open pixels (1 m, gap_maps'
+current painted from the triangles' fluxes) whose flow is at least T, the exits the pixels within 2
+m of the street line; its loops are its cycle rank with the exits contracted to one node, b0 -
+chi(Y / X) with chi the Euler characteristic of the pixels' 4-connectivity complex and chi(Y / X) =
+chi(Y) - chi(X) + 1, holes under 25 m^2 filled first (a pixel below T inside a lane). It measures
+the question: a tree of tendrils reaching in from the edge has none, each corridor that joins two
+points of the edge or closes a ring inside adds one, whatever its length. Checked where the answer
+is known (the `loop-index` guard, blocks whose open ground is only 6 m streets, the flow painted
+and every open pixel in the network): a grid of 3 x 3 blocks inside an exit ring gives 8, a ladder
+of 5 bars off a street on one side with a back lane 5, the same bars reaching the far wall (a comb
+of dead ends) 0; not contracting the exits gives the grid 9 (the fault). T is a quantile of the
+baseline's flow over the open pixels, the same for every state of a configuration; the induced
+corridors are the pixels whose flow rose by at least T, so their loops are the interconnection the
+clearing adds. Loops of the induced corridors in the region (per km^2 at 0.9), SIMP's and the cheap
+preset's:
+
+    config   q 0.8     q 0.9 (per km^2)       q 0.95
+    edge     10, 13    4, 4 (0.6, 0.6)        4, 5
+    bar      39, 23    10, 11 (1.6, 1.7)      2, 5
+    U250     91, 90    29, 23 (4.5, 3.6)      9, 10
+    U500     82, 66    18, 12 (2.8, 1.9)      4, 6
+    U1000    56, 50    10, 14 (1.6, 2.2)      3, 6
+    H250     53, 61    24, 34 (3.7, 5.3)      14, 11
+    H500     69, 70    26, 22 (4.0, 3.4)      7, 10
+    H1000    77, 77    16, 18 (2.5, 2.8)      4, 7
+
+(the raster's picks under `edge`: 3 and 11 at 0.9). With the edge as the only exit (edge) the
+corridors a clearing induces are nearly a tree: 4 loops in 6.7 km^2 at q 0.9, about 0.06 km^2 of
+new main lanes reaching up from the south road into the formal grid, the volume-to-point answer.
+The barriers alone take that to 10 -- 11 (the drainage into the north closed, the grid's lanes join
+east -- west too [inferred from the maps]); internal leaks interconnect more at every threshold but
+the highest, the more the shorter the trips: uniform 10 -- 29, building-boundary 16 -- 34 at q 0.9;
+at q 0.8 edge's 10 -- 13, bar's 23 -- 39, the leaks' 50 -- 91. The whole network's loops (the
+baseline's main lanes and the clearing's together) move less cleanly, a clearing also merging lanes
+around the buildings it removes (summary_loops.csv: bar's falls from 801 to 678 under SIMP, U500's
+rises from 770 to 900). The maps (region_rows/maps/<config>_<preset>.png, 16: the flow after
+against the no-buildings prior as the atlas's `rel` layer, the change in flow from the baseline,
+and that change on 5810) show it: under edge and bar the opened lanes are north -- south strands
+through the formal grid's blocks to the south road, the flow drawn away from 5810's informal west
+and, under edge, from the vacant land north of the railway that it drained into; under the home
+leak the flow rises across the whole settlement, the informal west too, in a web rather than
+strands.
+
+**Question 2, formal homes** (region_rows/summary_escape.csv). "On a formal street": a footprint
+within 10 m of the centre line of an OSM residential, living_street or unclassified way (half a 13
+m reserve and a few metres' setback), in a kblock of the formal grid: the member kblocks other than
+5810 whose outline lies within 10 m of such ways along at least half its length (56 kblocks, 5,475
+homes; 5810's own ring is 44% such streets). 2,708 formal homes; deep informal homes: in 5810, at
+least 30 m from every drivable way, 1,112. Beside them the per-block model: each member kblock's
+own baseline on the complex (its street ring the exit; region_leaks `members`, 76 of the 77 here on
+cores, in the region's population units; one, ZAF.9.1.4_1_7283, 22 homes, fails its solve: below).
+Median escape times (90th percentile):
+
+    model       formal homes    deep informal homes    formal / deep
+    per-block   2.9 (12)        173 (381)              0.017
+    edge        1,307 (1,647)   366 (849)              3.6
+    bar         2,252 (3,162)   842 (2,159)            2.7
+    U250        577 (695)       227 (485)              2.5
+    U500        1,264 (1,680)   483 (1,169)            2.6
+    U1000       1,873 (2,592)   704 (1,782)            2.7
+    H250        84 (85)         76 (84)                1.1
+    H500        300 (330)       210 (311)              1.4
+    H1000       841 (1,056)     432 (863)              1.9
+    S3          1,594 (2,156)   674 (1,622)            2.4
+    S3U500      1,028 (1,331)   428 (994)              2.4
+
+Per block a formal home on its street is at an exit (3 against 173). With the region's edge as the
+exits it is not only as deep as an informal one, as the raster found, but deeper (2.5 -- 3.6x, with
+or without barriers and uniform leaks): the formal homes lie further from the region's edge (a
+median 314 m, 90th percentile 531 m, against the deep informal homes' 191 and 436 m: 5810's
+informal west lies along the region's west and south roads) and in the denser fabric, the lanes
+they share carrying more of the region's walk [inferred]. Only the building-boundary leak brings
+them together (1.1x at 250 m), destinations being where people are; the street boost narrows it a
+little (2.7 to 2.4x).
+
+**Question 3, what gets cleared** (region_rows/summary_cleared.csv, summary_jaccard.csv,
+summary_cross.csv). 5810 holds 33% of the region's footprint area, the formal grid 44%.
+
+    config   5810's share of D   the formal grid's   Jaccard with bar's   with the raster's
+             (SIMP, cheap)       (SIMP, cheap)       (SIMP, cheap)        (SIMP, cheap)
+    edge     0.16, 0.25          0.84, 0.75          0.55, 0.42           0.61, 0.33
+    bar      0.11, 0.16          0.89, 0.83          --                   0.44, 0.27
+    U250     0.12, 0.16          0.88, 0.84          0.55, 0.45           0.47, 0.24
+    U500     0.11, 0.20          0.89, 0.80          0.76, 0.63           0.48, 0.26
+    U1000    0.11, 0.15          0.89, 0.84          0.91, 0.70           0.47, 0.26
+    H250     0.36, 0.31          0.62, 0.60          0.22, 0.19           0.20, 0.10
+    H500     0.27, 0.31          0.72, 0.67          0.38, 0.31           0.34, 0.16
+    H1000    0.23, 0.27          0.77, 0.73          0.60, 0.47           0.46, 0.23
+
+Where: under the boundary and the uniform leak 75 -- 89% of the cleared population is the formal
+grid's and 11 -- 25% 5810's (the raster run's 17 -- 20% of the cleared area in 5810); the
+building-boundary leak moves a quarter to a third of it into 5810. The uniform leak at 1,000 m and
+500 m clears much what bar does (Jaccard 0.91 and 0.76 for SIMP), at 250 m and the home leak less
+(0.19 -- 0.60). The presets' order: SIMP's default leads the cheap preset under every configuration
+on all three lenses (L_P +0.015 to +0.021 under the boundary and the uniform leak at 500 -- 1,000
+m, +0.008 at U250, +0.0015 to +0.010 under the home leak; P_{1/2} and J_2 alike), as on the blocks,
+their clearings overlapping at Jaccard 0.37 -- 0.59. Against the raster run's picks: under edge
+SIMP's clearing shares 0.61 with the raster's SIMP clearing and the cheap preset's 0.33 with its,
+less under every other configuration. Each clearing scored under every model (L_P; the diagonal its
+own):
+
+    clearing of     under: edge    bar     U250    U500    U1000   H250    H500    H1000
+    edge   SIMP            0.2825  0.2886  0.1320  0.2058  0.2594  0.0301  0.0708  0.1448
+    bar    SIMP            0.2611  0.3105  0.1356  0.2188  0.2785  0.0290  0.0705  0.1512
+    U250   SIMP            0.2627  0.2970  0.1427  0.2158  0.2684  0.0348  0.0772  0.1521
+    U500   SIMP            0.2642  0.3090  0.1401  0.2207  0.2781  0.0307  0.0728  0.1527
+    U1000  SIMP            0.2634  0.3103  0.1376  0.2199  0.2787  0.0298  0.0717  0.1523
+    H250   SIMP            0.1940  0.2068  0.1069  0.1515  0.1866  0.0441  0.0759  0.1204
+    H500   SIMP            0.2432  0.2681  0.1289  0.1937  0.2416  0.0415  0.0843  0.1493
+    H1000  SIMP            0.2613  0.2990  0.1373  0.2138  0.2690  0.0363  0.0811  0.1573
+
+(the cheap preset's alike: summary_cross.csv). Bar's and the uniform leaks' clearings are
+near-interchangeable (each within 0.0002 -- 0.014 of the others' own on their models); edge's loses
+0.022 under bar and bar's 0.021 under edge; the home leak's clearings lose 0.012 -- 0.10 of L_P
+under bar (the more the shorter the trips), and bar's keeps 66 -- 96% of the home leak's own L_P
+under it.
+
+**Question 4, the street boost: not run** (cut for the GPU budget, above). What the cores could say
+without its runs: the boost (3x on the triangles within 3 m of an OSM way) lowers bar's P_0 27% and
+U500's 17%, serves the street homes more (the formal homes' median escape time 29% lower, the deep
+informal ones' 20%: formal / deep 2.7 to 2.4 under bar), and leaves the leak's role as it was (U500
+drains 37% of the current, S3U500 32%). Bar's clearings under S3 read L_P 0.2782 (SIMP) and 0.2599
+(cheap) against 0.3105 and 0.2891 under bar, U500's under S3U500 0.2153 and 0.2019 against 0.2207
+and 0.2052 (region_rows/summary_cross.csv): a clearing gains less where the streets already carry
+the flow, less so with leaks. Whether the boost changes which buildings are cleared needs its runs
+(about 1.05 GPU-h a configuration).
+
+**What each configuration changes and what it costs** (decision support; not a choice):
+- edge (the boundary only, no barriers; the per-block metric's name on the region): the raster
+  run's setting reproduced on the complex (its picks' L_J2 within 0.001 of the 2b cross-check, our
+  clearings ahead on its own objective); the corridors a near-tree reaching in from the south road;
+  the railway walkable, so the settlement drains into the vacant land to the N1; a formal home 3.6x
+  as deep as an informal one. Cost: none beyond the per-block metric.
+- bar (the reference): the railway and the water closed but at the one path and the boundary
+  bridges; P_0 +86%, J_2 3.7x, the drainage all south and west; Lens A 0.3105 / 0.2891; the
+  clearing 89% / 83% in the formal grid; induced loops 10 -- 11. Cost: the barrier mesh (16.8M
+  triangles against 16.1M; 16 minutes here, 25 on tesla2) and the OSM features read with the
+  region.
+- Uniform leak: changes the level (Lens A 0.14 -- 0.28 at lam 250 -- 1,000 m) more than the choice
+  (Jaccard with bar 0.55 -- 0.91, its clearings within 0.014 of bar's own under each other's model)
+  and interconnects the induced corridors 1 -- 3x bar's; formal homes still 2.5x as deep.
+  Self-absorption negligible. Cost: none measurable (a diagonal term; the same runs' times).
+- Building-boundary leak: changes the choice (Jaccard with bar 0.19 -- 0.60, a quarter to a third
+  of the clearing into 5810), interconnects as the uniform leak's shortest trips do (16 -- 34 loops
+  at q 0.9), and is the only family under which a formal home is about as far from its trips' ends
+  as an informal one (1.1 -- 1.9x); Lens A small (0.04 -- 0.16), the clearing worth little when
+  trips are short. Self-absorption: the large buildings' own destinations take up to 21% of their
+  current at 250 m (9% population-weighted), under 1% from 1,000 m.
+- Street boost: not run (above); its baselines say it narrows the formal homes' disadvantage only a
+  little (2.7 to 2.4x) and lowers what a clearing gains.
+- lam: the uniform family's 1,000 m is near bar (14% of the current leaks); 250 m leaks 63% and
+  halves Lens A; the home family's 250 m makes the clearing nearly worthless (4%) and its
+  self-trips not small.
+
+**The guards** (gap_clear_check; each passes and fails under its fault, both ways at the final
+code: all 77 runs on cores at ea65a237, the six that read region_leaks again at b34b0b8e, the
+device guards on tesla2's cards at 872fdc65). New:
+- `leak-assembly` (19570, 20269; U50 and H50): at the baseline, a random clearing, the most
+  populous building cleared, a fractional state and the eps world, the operator on the fixed
+  pattern against `_operator`'s assembly afresh plus a leak computed from its definition alone
+  (each cell's triangles' area, the cells live at baseline by scipy's own components, the injection
+  from the demand's points): equal to 1.2e-16, P against a direct solve within 1.0e-11, the
+  structure the pattern's. Faults: `drop-one` (the largest leak dropped: P 2.6e-08 -- 7.2e-05 off),
+  `not-live` (a leak on the largest cell not live at baseline: the cell grounded and singular in
+  the oracle, P nan or 7.6e-07 -- 6.9e-05 off).
+- `enclosure` (20269, 23597, the blocks with walled-in homes): under both leak families the homes
+  walled in at baseline are those without leaks (1 and 6). Fault `every-cell`: every walled-in home
+  freed by its own pocket's leak.
+- `leak-gradient` (19570, 38136): the `gradient` guard's states and powers on the runtime's form
+  under both families, within 3.0e-05 of the largest (tolerance 1e-4). Fault `adjoint-unleaked`
+  (J_2's adjoint solved without the leaks): 0.15 -- 0.71 off at power 2 (power 1 is self-adjoint
+  and unaffected).
+- `leak-scale`: above (2.6% spread, +0.2% level; fault `per-cell` 4.3x, +34%).
+- `barriers` (a synthetic block: a street on its south edge only, a railway across with a crossing
+  node's path and a footbridge, a water channel parting the north): 624 open triangles inside the
+  barrier, none outside the gaps; no home walled in; the path removed walls in exactly the
+  north-west, the footbridge the north-east, both both. Faults: `not-inserted` (718 triangles
+  outside the gaps, nothing walled in), `gap-closed` (the north walled in with both crossings).
+- `exits-identity`: the per-block metric `cx+...+v34d40e8a`, 28 constants digesting to 34d40e8a; 26
+  names (the ten configurations and three more under both presets' searches) parse back to their
+  exits and search and are distinct. Faults: `in-code` (the exits module in CODE's walk: 39
+  constants, digest 092d40a2), `suffix-dropped` (the leak's part left out: U250 and bar share a
+  name, 6 names for 26).
+- `loop-index`: above (fault `uncontracted`: the grid 9).
+- `flux` now also a random clearing under the uniform leak, its drainage the street's and the
+  leaks': imbalance 2.9e-11 (fault `flip-one` still 1.0).
+
+The earlier guards, each both ways with its faults (gap_clear_check baseline, weights, reach,
+gradient, free, identity, convex, pattern, constants, roads, flux; gap_check conform, delaunay,
+apertures, filtration, free; gap_flow_check angle, shift, channel, field, law, closed;
+pweight_check identity, total, displacement, gradient, weights; free_roads_check free-roads;
+cluster_check ids), with their previous numbers (baseline 20269 P0 -1.6e-4; constants 28; pattern
+1.2e-16); on the cards (run rl-dev) `device` within 1.5e-10 and 5.1e-11, `device-roads` within
+8.6e-11 and 3.6e-11 on 20269 and 18895, `perturb` seen (0.86 -- 0.97 and 0.69 -- 0.88).
+tests/test_clearings.py: 36 pass. mypy --strict clean on gap_exits, digests, region_leaks (new) and
+the clean modules touched (gap_maps, metrics, cluster); `ruff check .` passes.
+
+**Choices the brief left open, and two defects found:**
+- The barrier tags and widths (above): railways rail, light_rail, narrow_gauge (a tram runs in the
+  street; disused tracks are not fenced); every waterway class but in tunnels and culverts; water
+  areas natural=water, landuse reservoir or basin, waterway riverbank (no wetlands). One width for
+  every line, 8 m, the least that merges the railway's two tracks; 3 m a crossing. A crossing is
+  any highway's bridge or tunnel over a barrier (the region's are the boundary roads' own, at its
+  edge) or the way through a railway crossing node.
+- The leak set: the cells that are unknowns at baseline (a ground cell's leak would do nothing).
+  The leaks are among the reach's seeds (a cell joined to ground is live): the same reach, since
+  they lie where the street reaches, and the `enclosure` guard's fault is then seen.
+- Self-absorption read three ways (own building, own cells, anywhere) over 300 homes drawn
+  uniformly, one solve each, on cores.
+- The loop index's thresholds (the baseline's 0.8, 0.9, 0.95 quantiles) and its 25 m^2 holes;
+  formal and deep homes as defined above.
+- The prior on a card at 2 m (the maps' pixel), the flows of the other states at 1 m here,
+  coarsened 2 x 2 for the maps.
+- The member kblock ZAF.9.1.4_1_7283 (22 buildings, under the source's floor, so never run before):
+  the per-block metric's refined solve raises "refinement stalled at a backward error of 1.0e+00"
+  though its solution is a direct spsolve's (the componentwise backward error of rows whose terms
+  all vanish beside the street); the same at HEAD; its homes are left out of the per-block column.
+  Not traced further.
+- A region's all-cell states (the prior; the eps world of SIMP and the tension) overflow SuperLU's
+  32-bit indices on a core: the region's optimizers run on a GPU only (cuDSS).
+
+**Compute.** GPU, tesla2's V100s, one card a task, at most four at once: 10.0 GPU-h of the 12 (the
+pilot 1.02; rl-runs, 11 runs and 6 priors, 6.62; rl-runs2, the 250 m lambda's 4 runs and 2 priors,
+2.13; the device guards 0.27). CPU here, single-threaded, at most 8 processes: the two region
+meshes (16 minutes each), the ten baselines with the self-absorption (about 3 CPU-h, a first pass
+of six failing at the prior), the 76 member kblocks (about 1), the clearings' scores and the 9 x 16
+cross-scores (about 4), the guards (2.4 h both ways, then 0.5), the report, smoke tests and
+diagnoses: about 13 CPU-h [inferred from the runs' times]. orion and quadro2 were not needed.

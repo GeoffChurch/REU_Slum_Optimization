@@ -322,9 +322,27 @@ items up front"), in the order proposed:
    stay enclosed). Why internal leaks: boundary-only escape is the volume-to-point problem, whose
    optima are trees (constructal), so at city scale tendrils reaching in rather than
    interconnection. Per-block exits are the model's fast limit (a one-block region whose whole
-   edge leaks), kept for the benchmark suites. The test on 5810's region is queued after the
-   effective-width study. For the site: present both families, powers of the escape time (J_p)
-   and priority-weighted P, under established names.
+   edge leaks), kept for the benchmark suites. **The test: done** (NOTES, "Exits as leaks: the
+   region model on the complex (5810@major)"): the exits are three Strategies on the metric
+   (gap_exits: barriers, leaks, a street boost), named in a suffix with their own digest
+   (`+xB8c3U500va03a092b`), the per-block metric's name and digest unchanged; the leaks a fixed
+   conductance on the diagonal (uniform sigma |c| / lam^2, the screened Laplacian, checked to 2.6%;
+   building-boundary at the same total), only on cells live at baseline; the railway and water cut
+   out of the region but at its crossings (one path inside 5810@major). On 5810@major, both presets
+   at D 0.05 under edge, bar and lam 250 -- 1,000 m of both families (16 runs, 10.0 GPU-h; the
+   street boost's two configurations cut for the budget, as ruled): the barriers nearly double P_0;
+   the uniform leak changes Lens A (0.14 -- 0.28 against bar's 0.31) more than the clearing
+   (Jaccard with bar's 0.55 -- 0.91, near-interchangeable under each other's model); the
+   building-boundary leak changes the clearing (a quarter to a third into 5810, Jaccard
+   0.19 -- 0.60) and leaves 0.04 -- 0.16 to gain; the corridors a clearing induces are a near-tree
+   from the edge under edge (4 loops at q 0.9), 10 -- 11 with the barriers, 10 -- 34 with leaks; a
+   formal home is 2.5 -- 3.6x as deep as a deep informal one under the boundary and the uniform
+   leak (per block 0.02x), 1.1 -- 1.9x under the building-boundary leak; its self-trips small for
+   the typical home but 9% population-weighted at 250 m, under 1% from 1,000 m; SIMP's default
+   leads the cheap preset under every configuration. **Open, the owner's**: which exits (the
+   decision-support list closes the section), and whether to run the boost's check (about 1.05
+   GPU-h a configuration). For the site: present both families, powers of the escape time (J_p) and
+   priority-weighted P, under established names.
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights
