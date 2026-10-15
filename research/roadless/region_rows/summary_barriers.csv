@@ -1,0 +1,13 @@
+what,value
+strips in the face (m^2),87637.35290983293
+water areas in the face (m^2),201466.9809131842
+cut from the face (m^2),288963.984369446
+the gaps (m^2),484.07513376585143
+crossings: bridge,3.0
+crossings: tunnel,0.0
+crossings: node,2.0
+the face's parts with the gaps,1.0
+the largest part with the gaps (m^2),6451006.906856708
+the face's parts without them,2.0
+the largest part without them (m^2),3709802.730235358
+footprints touching a barrier,5.0

@@ -16,6 +16,7 @@ area D BUDGET with free first, optimizing P under the area population.
     uv run python $S members <procs>                # the member kblocks' baselines (per block)
     uv run python $S baseline <label>               # the region's baseline under a configuration
     uv run python $S score <label>                  # its runs' clearings: lenses, flows, maps
+    uv run python $S cross <label> <labels,>        # other configurations' clearings under it
     uv run python $S report                         # the summaries (ROWS/summary_*.csv)
 
 `run`'s row (relax.one's or polish_greedy.run's, with the label, the metric's name, the host, the
@@ -33,8 +34,8 @@ rest leaves by the boundary), every home's escape time, and for a leaky configur
 self-absorption of ABSORB_N homes drawn at random (a home's unit injection solved alone: the share
 of its current that leaks on the cells where its own building's injection lands, its own
 building's share of that leak (HomeLeak: the self-trips), and the share that leaks anywhere); the
-flow painted (gap_maps) at baseline on FRAME_H pixels. ROWS/baseline/<label>[_homes|_absorb]
-.parquet, ROWS/images/<label>/baseline.npz.
+flow painted (gap_maps) at baseline on FRAME_H pixels. ROWS/baseline/<label>.parquet (and
+_homes, _absorb), ROWS/images/<label>/baseline.npz.
 
 `run ... prior`: the no-buildings prior (every footprint cleared on the fixed mesh, the atlas's
 prior: the same homes' flow to the same exits) and its P, painted on PRIOR_H pixels (the maps'
@@ -46,12 +47,18 @@ it runs on a GPU (cuDSS); ROWS/baseline/<label>_prior.parquet (its row, the fram
 RASTER_RUNS) scored on its model: L_P, L_{P_1/2}, L_J2 and the population left walled in; its flow
 painted; ROWS/score/<label>.parquet, ROWS/images/<label>/<run>.npz.
 
-`report`: the lens table, the loop index (`loops`) of every painted state, the corridor maps
-(ROWS/maps/<label>_<preset>.png: the flow after against the no-buildings prior, as the atlas's
-`rel` layer, the change in flow from the baseline, and a zoom of it on 5810), the escape times of
-formal and deep informal homes beside the per-block model's, the cleared sets (5810's share, the
-formal homes', Jaccard between configurations and against the raster's picks, the presets'
-order), the street boost's effect; ROWS/summary_*.csv.
+`cross`: the runs of other configurations (both presets) scored under this one's model: what a
+clearing chosen under one exit model is worth under another (the street boost's check, its own
+runs cut for the GPU budget: NOTES); ROWS/cross/<label>.parquet.
+
+`report`: the barriers (summary_barriers), the baselines and self-absorption, the lens table, the
+loop index (`loops`) of every painted state, the other configurations' clearings under each
+(`cross`), the corridor maps (ROWS/maps/<label>_<preset>.png: the flow after against the
+no-buildings prior, as the atlas's `rel` layer, the change in flow from the baseline, and a zoom
+of it on 5810), the escape times of formal homes and deep informal ones (Homes: the formal grid
+the member kblocks whose ring is mostly formal streets) beside the per-block model's, the cleared
+sets (5810's share, the formal grid's, Jaccard between configurations, between the presets and
+against the raster's picks); ROWS/summary_*.csv.
 
 THE LOOP INDEX (`loops`). The corridor network at a threshold T is the open pixels whose flow is
 at least T, and the exits X the pixels within EXIT_PX_M of the street line; with X contracted to
@@ -155,7 +162,12 @@ FRAME_PAD = 2.0         # the frames' margin about the region (m: a multiple of 
 STREET_CLASSES = ("residential", "living_street", "unclassified")   # a formal home's street
 DRIVE_CLASSES = (*STREET_CLASSES, "service", "tertiary", "secondary", "primary", "trunk",
                  "motorway")                                # a deep home is far from all of them
-FORMAL_M = 5.0          # a formal home: its footprint within this of a STREET_CLASSES way (m)
+FORMAL_M = 10.0         # a formal home: its footprint within this of a STREET_CLASSES way's centre
+                        # line (m: a 13 m street reserve's half and a few metres' setback), in a
+                        # kblock of the formal grid
+GRID_SHARE = 0.5        # the formal grid: the member kblocks but SEED_KBLOCK whose outline lies
+                        # within FORMAL_M of a STREET_CLASSES way along at least this share of
+                        # its length (their streets the exits of the per-block model)
 DEEP_M = 30.0           # a deep informal home: in SEED_KBLOCK, this far from every DRIVE_CLASSES
                         # way (m)
 LOOP_Q = (0.8, 0.9, 0.95)   # the loop index's thresholds: quantiles of the baseline's flow
@@ -252,18 +264,34 @@ def synthetic_block(block_id: str, boundary: BaseGeometry, street: BaseGeometry,
 class Homes(NamedTuple):
     """Per building of the region: its member kblock and row there, its footprint area, its
     distance to the nearest formal street way (STREET_CLASSES) and to the nearest drivable one
-    (DRIVE_CLASSES), and the two groups of question 2: `formal` (FORMAL_M of a formal street) and
-    `deep` (in SEED_KBLOCK, at least DEEP_M from every drivable way)."""
+    (DRIVE_CLASSES), whether its kblock is of the formal grid (`grid`: GRID_SHARE), and the two
+    groups of question 2: `formal` (in the formal grid, FORMAL_M of a formal street) and `deep`
+    (in SEED_KBLOCK, at least DEEP_M from every drivable way)."""
     member: NDArray[np.object_]
     member_row: NDArray[np.int64]
     area: NDArray[np.float64]
     street_m: NDArray[np.float64]
     drive_m: NDArray[np.float64]
+    grid: NDArray[np.bool_]
     formal: NDArray[np.bool_]
     deep: NDArray[np.bool_]
 
 
-def homes_of(b: Block) -> Homes:
+def formal_grid(b: Block) -> set[str]:
+    """The member kblocks of the formal grid (GRID_SHARE)."""
+    ways = gx.osm_in(b).ways
+    streets = shapely.buffer(shapely.union_all(ways.geometry.to_numpy()[
+        ways.highway.str.removesuffix("_link").isin(STREET_CLASSES).to_numpy()]), FORMAL_M)
+    out = set()
+    for m in common.member_blocks(sorted(set(b.building_geometries["member"]))):
+        ring = shapely.boundary(cast("BaseGeometry", m.boundary))
+        if (m.block_id != SEED_KBLOCK and float(shapely.length(shapely.intersection(
+                ring, streets))) >= GRID_SHARE * float(shapely.length(ring))):
+            out.add(m.block_id)
+    return out
+
+
+def homes_of(b: Block, grid: set[str]) -> Homes:
     bg = b.building_geometries
     polys = np.asarray(b.buildings.outlines)
     ways = gx.osm_in(b).ways
@@ -276,9 +304,10 @@ def homes_of(b: Block) -> Homes:
         return np.asarray(d, dtype=np.float64)
     street_m, drive_m = dist(STREET_CLASSES), dist(DRIVE_CLASSES)
     member = bg["member"].to_numpy().astype(object)
+    in_grid = np.isin(member.astype(str), sorted(grid))
     return Homes(member=member, member_row=bg["member_row"].to_numpy().astype(np.int64),
                  area=np.asarray(shapely.area(polys), dtype=np.float64), street_m=street_m,
-                 drive_m=drive_m, formal=street_m <= FORMAL_M,
+                 drive_m=drive_m, grid=in_grid, formal=in_grid & (street_m <= FORMAL_M),
                  deep=(member == SEED_KBLOCK) & (drive_m >= DEEP_M))
 
 
@@ -361,8 +390,7 @@ def _save_image(label: str, what: str, img: NDArray[np.float32], pt: Painted) ->
 
 
 def baseline(label: str) -> None:
-    b, m, t_model = _model(label)
-    homes = homes_of(b)
+    _b, m, t_model = _model(label)
     pt = painted_of(m, FRAME_H)
     t0 = time.time()
     img0, fl0, st0 = _paint_state(m, np.zeros(m.n), pt)
@@ -376,10 +404,8 @@ def baseline(label: str) -> None:
                live_area=float(m.leak_site.area[m.leak_site.live].sum()), t_model=t_model,
                region_km2=float(shapely.area(cast("BaseGeometry", m.geo.boundary))) / 1e6)
     (ROWS / "baseline").mkdir(parents=True, exist_ok=True)
-    pd.DataFrame({"u0": m.u_pop0, "walled": m.walled0, "nodem": m.nodem,
-                  "member": homes.member.astype(str), "formal": homes.formal,
-                  "deep": homes.deep, "street_m": homes.street_m, "drive_m": homes.drive_m}
-                 ).to_parquet(ROWS / "baseline" / f"{label}_homes.parquet")
+    pd.DataFrame({"u0": m.u_pop0, "walled": m.walled0, "nodem": m.nodem}).to_parquet(
+        ROWS / "baseline" / f"{label}_homes.parquet")
     row.update(t_state=time.time() - t0)
     absorbed = ROWS / "baseline" / f"{label}_absorb.parquet"
     if not isinstance(m.exits.leak, gx.NoLeak) and not absorbed.exists():
@@ -462,6 +488,26 @@ def score(label: str) -> None:
         print(f"{label} {key}: {rows[-1]}", flush=True)
     (ROWS / "score").mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_parquet(ROWS / "score" / f"{label}.parquet")
+
+
+def cross(label: str, sources: list[str]) -> None:
+    """Other configurations' clearings under this one (module docstring)."""
+    _b, m, _t = _model(label)
+    rows = []
+    for src in sources:
+        for preset in PRESETS:
+            if not run_path(src, preset, REGION).exists():
+                continue
+            ids = cleared_of(src, preset)
+            x = np.zeros(m.n, dtype=bool)
+            x[ids] = True
+            L = m.lenses(x)
+            rows.append(dict(label=label, source=src, preset=preset, n=len(ids),
+                             L_P=1.0 - L.P / m.base.P, L_Pq=1.0 - L.Pq / m.base.Pq,
+                             L_J2=1.0 - (L.J2 / m.base.J2) ** 0.5, enclosed=L.enclosed))
+            print(f"{label} <- {src} {preset}: {rows[-1]}", flush=True)
+    (ROWS / "cross").mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_parquet(ROWS / "cross" / f"{label}.parquet")
 
 
 # ------------------------------------------------------------------ the loop index
@@ -560,7 +606,10 @@ def maps(label: str, homes: Homes, polys: NDArray[np.object_]) -> list[Path]:
     matplotlib.use("Agg")
     import matplotlib.colors as mcolors
     import matplotlib.pyplot as plt
-    r = pd.read_parquet(ROWS / "baseline" / f"{label}_prior.parquet").iloc[0]
+    prior_row = ROWS / "baseline" / f"{label}_prior.parquet"
+    if not prior_row.exists():          # a configuration with no runs (the boost's: NOTES)
+        return []
+    r = pd.read_parquet(prior_row).iloc[0]
     x0, y0, h, ny, nx = float(r.x0), float(r.y0), float(r.h), int(r.ny), int(r.nx)
     px = pd.read_parquet(ROWS / "baseline" / f"{label}_prior_image.parquet")
     sp_ = px.flow.to_numpy().reshape(ny, nx)
@@ -640,7 +689,7 @@ def barrier_rows(b: Block) -> pd.DataFrame:
 def report() -> None:
     [b] = common.build_blocks([REGION])
     barrier_rows(b).to_csv(ROWS / "summary_barriers.csv", index=False)
-    homes = homes_of(b)
+    homes = homes_of(b, formal_grid(b))
     geo = gc.geometry(b)
     polys = geo.polys
     pop = common.AreaPopulation().weights(np.asarray(b.buildings.outlines))
@@ -682,6 +731,11 @@ def report() -> None:
     pd.DataFrame(ab).to_csv(ROWS / "summary_absorb.csv", index=False)
     # the loop index
     loop_rows().to_csv(ROWS / "summary_loops.csv", index=False)
+    # other configurations' clearings under each
+    crossed = sorted((ROWS / "cross").glob("*.parquet"))
+    if crossed:
+        pd.concat([pd.read_parquet(p) for p in crossed], ignore_index=True).to_csv(
+            ROWS / "summary_cross.csv", index=False)
     # formal and deep homes' escape times, beside the per-block model's
     region_mean = float(homes.area.mean())
     mem = pd.concat([pd.read_parquet(p) for p in sorted((ROWS / "members").glob("*.parquet"))],
@@ -690,7 +744,8 @@ def report() -> None:
     per_block = (pd.DataFrame({"member": homes.member.astype(str), "member_row": homes.member_row})
                  .merge(mem, on=["member", "member_row"], how="left"))
     esc = []
-    groups = {"formal": homes.formal, "deep": homes.deep, "all": np.ones(len(homes.area), bool)}
+    groups = {"formal": homes.formal, "deep": homes.deep, "grid": homes.grid,
+              "all": np.ones(len(homes.area), bool)}
     for label in ["per-block", *CONFIGS]:
         if label == "per-block":
             u = per_block.u0_region.to_numpy()
@@ -721,6 +776,8 @@ def report() -> None:
         where.append(dict(label=label, preset=preset, n=len(ids), D=float(cost[ids].sum()),
                           seed_n=int(in_seed.sum()), seed_D_share=float(
                               cost[ids][in_seed].sum() / cost[ids].sum()),
+                          grid_n=int(homes.grid[ids].sum()), grid_D_share=float(
+                              cost[ids][homes.grid[ids]].sum() / cost[ids].sum()),
                           formal_n=int(homes.formal[ids].sum()), formal_D_share=float(
                               cost[ids][homes.formal[ids]].sum() / cost[ids].sum()),
                           deep_n=int(homes.deep[ids].sum()),
@@ -760,6 +817,12 @@ def main(argv: list[str]) -> None:
         members(int(argv[1]))
     elif cmd in ("baseline", "score") and len(argv) == 2 and argv[1] in CONFIGS:
         {"baseline": baseline, "score": score}[cmd](argv[1])
+    elif cmd == "cross" and len(argv) == 3 and argv[1] in CONFIGS:
+        sources = argv[2].split(",")
+        unknown = sorted(set(sources) - set(CONFIGS))
+        if unknown:
+            raise SystemExit(f"unknown configurations {unknown}: {sorted(CONFIGS)}")
+        cross(argv[1], sources)
     elif cmd == "report" and len(argv) == 1:
         report()
     else:
