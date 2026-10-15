@@ -440,7 +440,7 @@ if __name__ == "__main__":
     if a[:1] == ["task"] and len(a) == 3:
         task(a[1], a[2])
     elif a[:1] == ["score"] and len(a) == 3:
-        score(int(a[1]), common.recipients() if a[2] == "all" else a[2].split(","))
+        score(int(a[1]), common.recipients() if a[2] == "all" else common.ids_of(a[2]))
     elif a == ["report"]:
         report()
     else:

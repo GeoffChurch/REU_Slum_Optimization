@@ -767,7 +767,7 @@ def main(mode: str, ids: list[str], power: float, metric: gap_clear.ComplexMetri
 
 if __name__ == "__main__":
     import metrics
-    ids = common.recipients() if sys.argv[2] == "all" else sys.argv[2].split(",")
+    ids = common.recipients() if sys.argv[2] == "all" else common.ids_of(sys.argv[2])
     plan = plan_of(sys.argv[5])
     main(sys.argv[1], ids, float(sys.argv[3]),
          metrics.metric_of(sys.argv[6], device=sys.argv[4]), plan,

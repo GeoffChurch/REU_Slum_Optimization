@@ -49,14 +49,34 @@ def large_blocks() -> list[str]:
     return sorted(pd.read_parquet(LARGE, columns=["block"])["block"])
 
 
+CHECK_BATCH = 40     # ids_of's check builds the blocks this many at a time: memory only
+
+
 def ids_of(arg: str) -> list[str]:
-    """Block ids as a command line names them: `@<file>` (whitespace-separated), `all` (the 220
-    recipients and the 82 large blocks) or comma-separated."""
+    """Block ids as a command line names them, `@<file>` (whitespace-separated), `all` (the 220
+    recipients and the 82 large blocks) or comma-separated, each checked at this boundary: the
+    blocks are built (the bank's, or the source's: build_blocks), so an id it cannot build raises
+    here, before any run's work, every unknown one named (phase 2b's ZAF.9.3.1_1_7851 for
+    ZAF.9.5.4_1_7851: the source holds it under its building floor and yielded nothing)."""
     if arg.startswith("@"):
-        return Path(arg[1:]).read_text().split()
-    if arg == "all":
-        return sorted(set(recipients()) | set(large_blocks()))
-    return arg.split(",")
+        ids = Path(arg[1:]).read_text().split()
+    elif arg == "all":
+        ids = sorted(set(recipients()) | set(large_blocks()))
+    else:
+        ids = arg.split(",")
+    for k in range(0, len(ids), CHECK_BATCH):
+        build_blocks(ids[k:k + CHECK_BATCH])
+    return ids
+
+
+def _known(ids: list[str], have: set[str], *, where: str) -> None:
+    """Raises naming every id of `ids` not in `have`, the blocks `where` yields: a block id is
+    checked against what builds it (the bank, or the source with its building floor), never taken
+    on trust."""
+    missing = sorted(set(ids) - have)
+    if missing:
+        raise ValueError(f"{len(missing)} block id(s) {where} does not yield: "
+                         f"{', '.join(missing)} (mistyped, absent, or under its building floor)")
 
 
 BANK_ENV = "REBLOCK_BLOCK_BANK"
@@ -65,11 +85,12 @@ BANK_ENV = "REBLOCK_BLOCK_BANK"
 def build_blocks(ids: list[str]) -> list:
     """The blocks, fewest buildings first: from the Cape Town source, or, when $REBLOCK_BLOCK_BANK
     names a bank (a cluster node has no source data: cluster.py ships the blocks a run needs),
-    from it -- an id it lacks is an error."""
+    from it. An id the bank or the source does not yield raises (`_known`)."""
     bank = os.environ.get(BANK_ENV)
     if bank:
         with open(bank, "rb") as f:
             held = pickle.load(f)
+        _known(ids, set(held), where=f"the bank {bank}")
         blocks = [held[i] for i in ids]
     else:
         blocks = _from_source(ids)
@@ -101,12 +122,13 @@ def _from_source(ids: list[str]) -> list:
         out += [regions.build(r, every.blocks_path,
                               lambda m: list(every.restricted(m).region().blocks))
                 for r in faces]
+    _known(ids, {b.block_id for b in out}, where="the Cape Town source")
     return out
 
 
 def write_bank(ids: list[str], path: Path) -> dict:
-    """Pickle the blocks `ids` (built from the source) for build_blocks on a machine without it;
-    returns them by id."""
+    """Pickle the blocks `ids` (built from the source, every id checked: `_known`) for
+    build_blocks on a machine without it; returns them by id."""
     bank = {b.block_id: b for b in _from_source(ids)}
     with open(path, "wb") as f:
         pickle.dump(bank, f)

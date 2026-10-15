@@ -212,7 +212,8 @@ def main(argv: Sequence[str]) -> None:
     elif args.cmd == "banks":
         check_banks(store)
     else:
-        rescore(store, args.ids.split(","), args.runs.split(","), args.under)
+        import common
+        rescore(store, common.ids_of(args.ids), args.runs.split(","), args.under)
 
 
 if __name__ == "__main__":

@@ -1405,7 +1405,7 @@ if __name__ == "__main__":
         return {str(b): search.Seed(cleared=[int(i) for i in c], perm=float(pm))
                 for b, c, pm in zip(rows.block, rows.simp_cleared, rows.simp_perm, strict=True)}
 
-    search.main(sys.argv[1].split(","),
+    search.main(common.ids_of(sys.argv[1]),
                 search.plan_of(sys.argv[2], pool=relax.PAIR_POOL,
                                simp_seeds=simp_seeds),
                 power, metric, d_max)

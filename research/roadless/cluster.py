@@ -66,7 +66,9 @@ PRELUDE = ("source research/roadless/cluster_env.sh",
 
 
 def _listed(arg: str) -> list[str]:
-    """A comma-separated list, or @file of whitespace-separated entries."""
+    """A comma-separated list, or @file of whitespace-separated entries. Block ids are checked
+    where the plan writes the bank (common.write_bank: an id the source does not yield raises,
+    before any task is staged)."""
     return Path(arg[1:]).read_text().split() if arg.startswith("@") else arg.split(",")
 
 

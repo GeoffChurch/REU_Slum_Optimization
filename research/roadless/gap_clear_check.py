@@ -17,6 +17,7 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S roads <ids,> [fault]       # fault: one-face-closed
     uv run python $S flux <ids,> [fault]        # fault: flip-one
     uv run python $S device-roads <ids,> [fault]   # fault: perturb (on a GPU)
+    uv run python $S both-ways <guards,> <ids,>    # each guard, then under each of its faults
 
 `baseline`: the fixed mesh (the runtime's metric, METRIC) against the complex rebuilt
 (gap_compare.ComplexModel, gap_flow's mesh under the shy distance at 0.5): P0, P_{1/2},0 and
@@ -947,8 +948,28 @@ def main(guard: str, ids: list[str], fault: str | None) -> None:
         raise SystemExit(f"the fault {fault} went unseen: the guard guards nothing")
 
 
+def both_ways(guards: list[str], ids: list[str]) -> None:
+    """Each guard as it is, then under each of its faults (FAULTS), one after another in this
+    process: one cluster task runs the GPU guards so (`device` and `device-roads` on a block, both
+    ways, in one submit). Raises naming every run not as `main` expects."""
+    wrong = []
+    for guard in guards:
+        for fault in (None, *FAULTS[guard]):
+            try:
+                main(guard, ids, fault)
+            except SystemExit as e:
+                wrong.append(f"{guard}{'' if fault is None else f' under {fault}'}: {e.code}")
+    print(f"both ways, {', '.join(guards)} on {', '.join(ids)}: "
+          + ("as expected" if not wrong else "NOT as expected: " + "; ".join(wrong)), flush=True)
+    if wrong:
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
+    if len(a) == 3 and a[0] == "both-ways" and set(a[1].split(",")) <= set(GUARDS):
+        both_ways(a[1].split(","), common.ids_of(a[2]))
+        raise SystemExit(0)
     if len(a) not in (2, 3) or a[0] not in GUARDS:
         raise SystemExit(__doc__)
-    main(a[0], [] if a[1] == "-" else a[1].split(","), a[2] if len(a) == 3 else None)
+    main(a[0], [] if a[1] == "-" else common.ids_of(a[1]), a[2] if len(a) == 3 else None)

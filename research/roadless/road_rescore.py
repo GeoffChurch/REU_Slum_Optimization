@@ -807,10 +807,10 @@ if __name__ == "__main__":
     elif cmd == "propose-all":
         if a[7] not in ("time-hits", "no"):
             raise SystemExit(f"propose-all takes time-hits or no, not {a[7]!r}")
-        propose_all(Path(a[1]), Path(a[2]), int(a[3]), a[4].split(","), a[5].split(","),
+        propose_all(Path(a[1]), Path(a[2]), int(a[3]), common.ids_of(a[4]), a[5].split(","),
                     float(a[6]) * 3600, a[7] == "time-hits")
     elif cmd == "prefixes":
-        prefixes(Path(a[1]), lineup_of(a[2]), Path(a[3]), int(a[4]), a[5].split(","))
+        prefixes(Path(a[1]), lineup_of(a[2]), Path(a[3]), int(a[4]), common.ids_of(a[5]))
     elif cmd == "cx":
         if len(a) != 7:
             raise SystemExit("cx <rows> <scratch> <metric> <cpu|gpu> <id> <items,>")

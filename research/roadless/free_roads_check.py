@@ -237,4 +237,4 @@ if __name__ == "__main__":
     a = sys.argv[1:]
     if len(a) not in (2, 3) or a[0] not in GUARDS:
         raise SystemExit(__doc__)
-    main(a[0], a[1].split(","), a[2] if len(a) == 3 else None)
+    main(a[0], common.ids_of(a[1]), a[2] if len(a) == 3 else None)
