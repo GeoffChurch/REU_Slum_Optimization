@@ -1,6 +1,7 @@
-"""The no-buildings prior: the same homes' flow to the same edge with every building gone, under
-each metric's conductance (the flux S = sum_k |phi_k| per cell, as the page's layers)."""
-import dataclasses
+"""The no-buildings prior on the gap complex (phase 2b): the same homes' flow to the same edge with
+every building gone (every footprint cleared on the fixed mesh), its crossing current per pixel as
+export.py paints the page's layers (info.json's frame)."""
+import json
 import sys
 from pathlib import Path
 
@@ -9,20 +10,20 @@ import numpy as np
 HERE = Path("/home/gchurchill/src/reblock/research/roadless")
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
-import lifted  # noqa: E402
-from current_map import flow  # noqa: E402
+import gap_clear as gcl  # noqa: E402
+import gap_complex as gc  # noqa: E402
+import gap_factor  # noqa: E402
+import gap_maps  # noqa: E402
+import metrics  # noqa: E402
 
 OUT = Path(sys.argv[1])
-[b] = common.build_blocks(["ZAF.9.3.1_1_5810"])
-base = lifted.Params(3.0, 8, solver=lifted.solver_of("gpu"), cells=lifted.OpenFraction())
-sc = common.Scorer(b, lifted.UniformMesh(0.5, offset=lifted.OFFSET), base,
-                   population=common.POPULATIONS["area"], demand=common.PopulationDemand())
-g = sc.grid
-open_all = g.isub.mean(axis=-1)
-out = {}
-for key, along in (("uni", "uni"), ("ss", "ss100k2n2r30")):
-    p = dataclasses.replace(base, along=lifted.along_of(along, lifted.scans_of("gpu")))
-    f = flow(sc, open_all, p)
-    out[f"open_{key}"] = np.abs(f.phi).sum(axis=0).astype("float32")
-    print(key, "P open", f.P, flush=True)
-np.savez_compressed(OUT / "raw_prior.npz", **out)
+info = json.loads((OUT / "layers" / "info.json").read_text())
+[b] = common.build_blocks([info["block"]])
+m = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU()).clearing(
+    b, demand=common.PopulationDemand())
+fr = gap_maps.Frame.around(gc.geometry(b), info["h"], 0.0)
+st = m.state(np.ones(m.n))
+f = gap_maps.flow_of(m, st, m.pop)
+s = gap_maps.flow_image(m, st, f, fr).ravel() * info["h"]
+np.savez_compressed(OUT / "raw_prior.npz", open_uni=np.nan_to_num(s).astype("float32"))
+print("P open", float(m._rhs(st, m.pop) @ f.u), flush=True)

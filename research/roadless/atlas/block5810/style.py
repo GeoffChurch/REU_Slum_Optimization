@@ -1,6 +1,4 @@
 """Style the raw fields into the page's RGBA layers (row 0 = north), for a dark map ground."""
-import sys
-
 import numpy as np
 from PIL import Image
 
@@ -52,16 +50,9 @@ def escape(ru, name):
     save(rgb, np.where(m, np.clip(np.abs(t) / 0.6, 0, 1) ** 0.7 * 0.85, 0), name)
 
 
-if "ss" not in sys.argv:
-    flux(s0, "flux_before")
-    for k in ("cheap", "default"):
-        flux(r[f"s1_{k}"], f"flux_{k}")
-        change(r[f"s1_{k}"] - s0, f"dflux_{k}")
-        escape(r[f"ru_{k}"], f"escape_{k}")
-else:
-    q = np.load("raw_ss.npz")
-    flux(q["s0"], "flux_before_ss")
-    flux(q["s1_ss"], "flux_ss")
-    change(q["s1_ss"] - q["s0"], "dflux_ss")
-    escape(q["ru_ss"], "escape_ss")
+flux(s0, "flux_before")
+for k in ("cheap", "default"):
+    flux(r[f"s1_{k}"], f"flux_{k}")
+    change(r[f"s1_{k}"] - s0, f"dflux_{k}")
+    escape(r[f"ru_{k}"], f"escape_{k}")
 print("styled", LO, HI)

@@ -11,7 +11,6 @@ import numpy as np
 from PIL import Image
 
 r = np.load("raw.npz")
-q = np.load("raw_ss.npz")
 pr = np.load("raw_prior.npz")
 ny, nx = r["shape"]
 FLOW = [(0, (20, 70, 110)), (0.5, (40, 170, 220)), (1, (210, 248, 255))]
@@ -41,8 +40,7 @@ def save(v, hi, name):
 
 scales = {}
 for metric, before, prior, afters in (
-        ("uni", r["s0"], pr["open_uni"], {"cheap": r["s1_cheap"], "default": r["s1_default"]}),
-        ("ss", q["s0"], pr["open_ss"], {"ss": q["s1_ss"]})):
+        ("uni", r["s0"], pr["open_uni"], {"cheap": r["s1_cheap"], "default": r["s1_default"]}),):
     d0, z0 = dz(before, prior)
     hd, hz = np.nanquantile(d0, 0.995), np.nanquantile(z0, 0.995)
     scales[metric] = (hd, hz)

@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
 HERE = Path("/home/gchurchill/src/reblock/research/roadless")
 sys.path.insert(0, str(HERE))
@@ -23,12 +22,7 @@ def d(poly):
                     for p in getattr(poly, "geoms", [poly]) for r in [p.exterior, *p.interiors])
 
 
-c = pd.read_parquet(HERE / "fine_clearings.parquet")
-c = {n: sorted(int(i) for i in x)
-     for n, x in zip(c[c.block == info["block"]].name, c[c.block == info["block"]].cleared,
-                     strict=True)}
-sets = {"cheap": c["cheap"], "default": c["default"],
-        "ss": sorted(int(i) for i in np.load(OUT / "raw_ss.npz")["cleared"])}
+sets = info["sets"]                 # export.py's arms' cleared sets (the complex's presets)
 (OUT / "layers" / "buildings.json").write_text(json.dumps({"d": [d(p) for p in polys], **sets}))
 v = json.loads((OUT / "layers" / "vectors.json").read_text())
 keep = ("outline", "neighbours", "context_buildings", "osm_major", "osm_minor", "osm_path")
