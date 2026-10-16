@@ -358,11 +358,17 @@ items up front"), in the order proposed:
    1.257 lam). On 5810@major no lam gives a median internal trip of 500 m at any s: it rises only
    to 264 -- 319 m as the leak vanishes (393 m with the boundary's trips counted), the region's
    edge taking the long trips; U500's was 250 m and H500's 119 m. With the street boost the limit
-   is 270.5 m at s 0.9. **Open (the owner)**: a T within reach (at s 0.9, 150 -- 250 m puts lam
-   near 0.7 -- 3 km, 55% to a tenth of the current leaking inside), the leak's strength set by the
-   share ending inside, or a region whose edge is far from most homes; then the eight runs (s 0.75,
-   0.9, 1 and the boost, both presets: about 4.5 GPU-h) and their report. For the site: present
-   both families, powers of the escape time (J_p) and priority-weighted P, under established names.
+   is 270.5 m at s 0.9. **Decided (owner 2026-10-15)**: the edge's trips are real ("If most homes
+   are near the boundary it perhaps suggests they do typically venture to the great beyond"), and
+   the leaks' hyperparameters are set once for every block and region ("rather than them meaning
+   different things per block"): two constants, a leak per m^2 of open ground and a leak per
+   person (no longer a total matched to the region's open ground), chosen once on 5810@major with
+   its edge closed so the median trip is 500 m and 90% of the leak is at buildings, then frozen;
+   and one metric everywhere: per-block runs take the same leaks (their street ring the boundary),
+   RUNTIME's metric switching at the consolidated pass's start, which re-scores every block. Next:
+   the constants, the region's runs (s 0.75, 0.9, 1 equivalents and the boost, both presets) and
+   a per-block check of how much the leaks move the 13 tuning blocks. For the site: present both
+   families, powers of the escape time (J_p) and priority-weighted P, under established names.
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights
