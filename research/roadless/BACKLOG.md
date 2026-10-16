@@ -618,18 +618,21 @@ Not pursued, with what would change that:
 ## Experiment design
 
 - **Pruning by epistemetry's decision layer** (owner 2026-10-14: "Yes"; replayed 2026-10-15 and
-  again 2026-10-16, NOTES "Pruning by epistemetry: a replay against seqscreen" and "Pruning by
-  epistemetry, again: step-wise re-decision and per-arm screens"): **seqscreen stays** for the
-  consolidated pass. The first replay (c1784af) failed the amended rule (loss below at every rate,
-  no more wrong calls, no more asks) in both veto settings; the owner approved the two changes it
-  named and epistemetry built them (bbe2163 `step`, 64aae7f per-arm screens). Replayed at 64aae7f
-  (epireplay.py on the frozen designs, epireplay_designs.json): step 1 is the first replay's
-  stepped diagnostic run for run and fails pairwise (loss above at the bracket's bottom and
-  middle, 318 asks against 280, though 37 wrong calls against 66); the per-arm screen cuts the
-  many-arm screens' cost from 0.821 to 0.464 of the arms' GPU-seconds (seqscreen per variant
-  0.424) and fails too (loss above at the middle and top, 315 asks against 279). Would come back
-  with: a linear-loss target over the bracket priced in the owner's units, a price on asks, and a
-  price per arm in many-arm screens (feedback sent to its author).
+  twice 2026-10-16, NOTES "Pruning by epistemetry: a replay against seqscreen" and "Pruning by
+  epistemetry, again: step-wise re-decision and per-arm screens", with its "A price per arm"):
+  **seqscreen stays** for the consolidated pass. The first replay (c1784af) failed the amended rule
+  (loss below at every rate, no more wrong calls, no more asks) in both veto settings; the owner
+  approved the two changes it named and epistemetry built them (bbe2163 `step`, 64aae7f per-arm
+  screens). Replayed at 64aae7f (epireplay.py on the frozen designs, epireplay_designs.json): step
+  1 is the first replay's stepped diagnostic run for run and fails pairwise (loss above at the
+  bracket's bottom and middle, 318 asks against 280, though 37 wrong calls against 66); the
+  per-arm screen cuts the many-arm screens' cost from 0.821 to 0.464 of the arms' GPU-seconds
+  (seqscreen per variant 0.424) and fails too (loss above at the middle and top, 315 asks against
+  279). At 3a3b9a3 (the feedback built, owner 2026-10-16) each arm priced by its own stake: the
+  many-arm screen is its pairwise step-1 screens summed and fails as they do (203.3 against 174.3
+  and 522.4 against 521.3 at the middle and top, 317 asks against 279); a per-arm price was not
+  the gap. Would come back with: a linear-loss target over the bracket priced in the owner's
+  units, and a price on asks.
 - **Adaptive block selection** (first look done, NOTES "Which blocks tell methods apart": collapses dominate; screen = gated sentinel + random sample; picking 'discriminating' blocks beyond the sentinel misleads. Remaining value: sequential sample size; wiki `pages/methods/adaptive-benchmark-items.md`).
   Fit a factor model to the method x block matrix of paired differences (axes like "opens
   gated pockets", "spreads in dense bands"); for a new variant run first the blocks with the

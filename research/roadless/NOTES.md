@@ -6288,6 +6288,69 @@ the run 5.3 h on 4 workers (95 jobs, the step-1 ones most of it), the six guard 
 each, four at a time. Rows (git-ignored): epireplay2.parquet, epireplay2_screens.parquet and the
 jobs' epireplay2_jobs/; epireplay.py regenerates them from epireplay_designs.json.
 
+**A price per arm** (epistemetry 3a3b9a3, the feedback above built; owner 2026-10-16). 3a3b9a3
+asks each live arm's stop rule of a `StopOf` at each decision past the floor; its calls are one
+row per arm, its fields keyword-only, its orders carry their own streams, one truth is computed
+once, and a run records its decisions. epireplay.py moved to it (pinned 3a3b9a3; `Witness` gone,
+the guards read `Run.decisions`; seqscreen's per-order generator is its order's stream, copied at
+each decision) and prices each arm by its own stake, rate / FUTURE over that arm's Lens A at stake
+at its means so far, as seqscreen prices each variant on its own (`OwnStake`). The shared price
+(`SharedStake`, the live arms' stakes averaged) stays beside it: not dominated (below). On one arm
+the two are one: the 2,600 pairwise step-1 runs at 3a3b9a3 reproduce the second replay's exactly
+(blocks, calls, GPU-seconds), so the pairwise table above stands, and the shared price reproduces
+its 500 many-arm runs. Many-arm, step 1:
+
+    many-arm               realized loss (1e-6) at 2e-6, 6.2e-6, 1.9e-5   wrong  asks  cost
+    seqscreen x arms               132.8   174.3   521.3                    67   279  0.424
+    per-arm, own price              66.6   203.3   522.4                    37   317  0.463
+    per-arm, shared price           66.9   204.5   526.1                    36   315  0.464
+
+**Decision: keep seqscreen, many-arm too.** The own price fails (1) at the middle and top rates
+(203.3 against 174.3; 522.4 against 521.3) and (3), 317 asks against 279, with 37 wrong calls
+against 67. It closes almost none of the gap: its loss is below the shared price's at every rate
+(by 0.3, 1.2 and 3.7e-6) at a hair less cost, for one wrong call and two asks more. Each arm now
+runs as its pairwise screen does: x2 in 2/p64 observes the blocks x2/p64 does in 86 of 100 orders
+(50 at the shared price), cheapx2 in 2/cheap in 94 (64), the rest the Monte Carlo draws the arms
+share, and 2/cheap's screen is its pairwise step-1 screens summed to the medians' digit. So the
+many-arm gap is the pairwise one: 2/p64 (59.5 against 46.8 at the middle rate) and 2/p256 (45.8
+against 27.2) lose where x2/p64, GS/p256 and pPg/p256 lose pairwise. A per-arm price was not the
+gap; items 2 and 3 above (a linear-loss target over the bracket, a price on asks) remain what
+would have to change. The shared price is better on wrong calls (36 against 37) and asks (315
+against 317) and worse on every loss and on cost, so neither dominates and both stay selectable,
+though the margins are a run or two in 500.
+
+Guards, each failing under its fault (`guards none` runs all, `guards <fault>` the one it breaks):
+- migration: the pairwise step-1 runs at the own price reproduce the second replay's, 2,600 of
+  2,600; the shared price its many-arm runs, 500 of 500; and every price the own price gave a live
+  arm, read from the runs' decisions, is that arm's own stake's: 4,198 of 4,198 where the arm's
+  and the next arm's differ (158 of 158 in 2/p64's first 10 orders, run now). Fault (each arm
+  priced by the next arm's stake): the pairwise runs still 2,600 (one arm), 0 of 167 prices on
+  2/p64, FAIL.
+- wrapper: 2,608 of 2,608. Fault (the wrapper's floor 14): 725 of 2,608, FAIL.
+- degenerate: the candidate stops at 15 with "keep" in 100 of 100 orders, both settings. Fault
+  (the floor 1): 0 of 100, FAIL.
+- per-arm drop, from `Run.decisions`: the vetoed arm in 100 of 100 orders; an arm paid for fewer
+  blocks than its screen ran in 2 of 4/base's first 10 orders and in 633 of the run's 1,000
+  many-arm runs, each arm dropped on value (895) live at no later decision, its blocks those seen
+  when dropped, charged so. Fault (`KeepAll`, no veto): 0 of 100 and 0 of 10, FAIL.
+- same orders: all 7,400 runs. Fault (one run handed a reshuffled order): that run flagged, FAIL.
+
+Feedback on 3a3b9a3:
+- `Decision` records the units seen and the live arms but not each arm's prefix: the guards
+  rebuild a dropped arm's from the decision that left it out. Each arm's units would make it
+  direct.
+- The rule each arm was judged by is not recorded: to check the price, the migration guard
+  rebuilds each decision's `Seen` and asks the `StopOf` again. A decision could carry its rules'
+  readings, the ledger form the stopping rules already have.
+- A Run does not carry its order; runs are matched to the orders handed by position.
+- seqscreen replays from the first block with a fixed generator, so it takes a copy of its order's
+  stream at each decision; that works because the harness never draws from the stream itself,
+  which the docs could promise.
+
+Compute: here, single-threaded, at most 4 processes: the run 4.1 h on 4 workers (69 jobs, the
+pairwise step-1 migration most of it), the shared price's 5 jobs 2.0 h, the guard runs 0.1 -- 0.8
+h each. Rows (git-ignored): epireplay3.parquet, epireplay3_screens.parquet and epireplay3_jobs/.
+
 ### Exits as leaks: the region model on the complex (5810@major)
 
 BACKLOG 4, decision (4) (the brief: .superpowers/sdd/2026-10-13-region-leaks; the owner
