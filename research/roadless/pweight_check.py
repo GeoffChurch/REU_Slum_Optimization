@@ -27,9 +27,10 @@ P_{1/2}, P_1 and J_2 against P's, bit for bit. Fault `cost-from-demand`: the mod
 injection.
 
 `gradient`: the relaxation's gradient of P_q (q 1/2 and 1) and of P at a random fractional
-clearing, SIMP's q 1 and 3, in SIMP base's eps world (1e-4), against the closest of the central
-differences at GRAD_STEPS on GRAD_BUILDINGS buildings: the largest difference within GRAD_TOL of
-the largest |gradient| checked. Fault `J-population`: the model's J weighting the population while
+clearing, SIMP's q 1 and 3, in SIMP base's eps world (1e-4), against differences on
+GRAD_BUILDINGS buildings as gap_clear_check's `gradient` guard takes them
+(gap_clear_check.against_differences): the largest difference within its GRAD_TOL of the largest
+|gradient| checked. Fault `J-population`: the model's J weighting the population while
 the solve injects the priority demand (lam = u is then not J's adjoint).
 
 `weights` (phase 2b): P_{1/2}'s weight of every home (gap_clear.Model.inj_q over the population)
@@ -52,6 +53,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
+import gap_clear_check as gcc  # noqa: E402
 import pweight  # noqa: E402
 
 Q_TOTAL = (0.5, 1.0, 2.0)
@@ -59,12 +61,6 @@ TOTAL_TOL = 1e-12
 GRAD_BUILDINGS = 6
 GRAD_SIMP_Q = (1.0, 3.0)
 GRAD_EPS = 1e-4          # SIMP base's (pweight.PLAN.eps)
-GRAD_STEPS = (1e-3, 1e-4, 1e-5)   # the closest central difference: the factors are piecewise
-                                  # linear (one step straddling a kink of the minimum, another
-                                  # not), and the solves' roundoff on P (9e4 on 20269) reaches
-                                  # 1e-4 of the gradient at a step of 1e-5 and 1e-3 at 1e-6
-                                  # (measured), where 1e-3 and 1e-4 agree within 6e-6
-GRAD_TOL = 1e-4          # as gap_clear_check's gradient guard
 WEIGHT_TOL = 1e-9        # the model's weights against the direct computation (a refined solve
                          # against an unrefined direct one: ~1e-12)
 SEED = 20261012
@@ -161,20 +157,10 @@ def gradient(ids: list[str]) -> list[str]:
             x0 = rng.uniform(0.1, 0.4, m.n)
             pick = rng.choice(m.n, GRAD_BUILDINGS, replace=False)
             for sq in GRAD_SIMP_Q:
-                rel = m.relaxation(o.power, q=sq, eps=GRAD_EPS)
-                _, g = rel.value_grad(x0)
-                errs = []
-                for j in pick:
-                    best = np.inf
-                    for h in GRAD_STEPS:
-                        e = np.zeros(m.n)
-                        e[j] = h
-                        fd = (rel.value(x0 + e) - rel.value(x0 - e)) / (2 * h)
-                        best = min(best, abs(fd - g[j]))
-                    errs.append(best)
-                err = float(np.max(errs) / np.abs(g[pick]).max())
-                ok = err <= GRAD_TOL
-                print(f"{bid} {o.name} SIMP q {sq:g}: gradient against central differences on "
+                err = gcc.against_differences(m.relaxation(o.power, q=sq, eps=GRAD_EPS), x0,
+                                              pick)
+                ok = err <= gcc.GRAD_TOL
+                print(f"{bid} {o.name} SIMP q {sq:g}: gradient against differences on "
                       f"{GRAD_BUILDINGS} buildings, {err:.1e} of the largest -> "
                       f"{'ok' if ok else 'FAILS'}", flush=True)
                 if not ok:

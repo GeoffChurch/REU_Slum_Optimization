@@ -50,9 +50,11 @@ the complex grown by w / 2 reaches at width 0 (gap_complex's test), home for hom
 reaching the street counted as reaching it: gap_flow.Ring.live).
 `gradient`: the model's gradient (power 1 and 2, q 1 and 3, eps GRAD_EPS) at a random x in [0.1,
 0.4] and at SIMP's start (x = D everywhere: every triangle within w / 2 of two footprints a tie)
-against the closer of the central differences at GRAD_STEPS on GRAD_BUILDINGS buildings (at the
-start, those in the most two-way ties and no wider one, `_paired`), within GRAD_TOL of the
-largest, under each of GRAD_FORMS. Fault `tie`: a tie's gradient broken to one building
+against differences on GRAD_BUILDINGS buildings (at the start, those in the most two-way ties and
+no wider one, `_paired`): per building the closest over GRAD_STEPS of the central difference
+extrapolated from h and h / 2 (`against_differences`), within GRAD_TOL of the largest, under each
+of GRAD_FORMS. Run on 19570, 38136 and 20269 (a large block: its solves' roundoff, divided by the
+step, is what the steps are chosen against). Fault `tie`: a tie's gradient broken to one building
 (gap_flow.Terms.vjp).
 `free`: free first on the complex (Model.free_first, budget 1) frees every walled-in home, and the
 flow model's own reach agrees home for home (Model.free_first raises where it does not). Fault
@@ -238,7 +240,10 @@ GRAD_FORMS = ("shy0.5", "close0.125", "ramp0.5")
 GRAD_EPS = 1e-4          # SIMP base's eps world
 GRAD_BUILDINGS = 6
 GRAD_Q = (1.0, 3.0)
-GRAD_STEPS = (1e-5, 1e-6)    # the closer central difference (the factors are piecewise linear)
+GRAD_STEPS = (1e-3, 1e-4)    # against_differences' steps h (each with h / 2), the closest taken:
+                             # above the solves' roundoff over the step (on 20269, 1e-4 of the
+                             # gradient at 1e-5 and 1e-3 at 1e-6, measured), the extrapolation
+                             # cancelling a tie's O(h) term (the start's: 2e-4 at 1e-4 on 38136)
 GRAD_TOL = 1e-4
 CONVEX_LINES = 4
 CONVEX_POINTS = 7
@@ -465,34 +470,52 @@ def gradient(ids: list[str]) -> list[str]:
     for bid in ids:
         [b] = common.build_blocks([bid])
         for token in GRAD_FORMS:
-            metric = _form_metric(token)
-            m = _model(b, metric)
-            rng = np.random.default_rng(SEED)
-            starts = {"random": (rng.uniform(0.1, 0.4, m.n),
-                                 rng.choice(m.n, GRAD_BUILDINGS, replace=False)),
-                      "start": (np.full(m.n, BUDGET), _paired(m.terms, m.n))}
-            for where, (x0, pick) in starts.items():
+            m = _model(b, _form_metric(token))
+            for where, (x0, pick) in _grad_states(m).items():
                 for power in (1.0, 2.0):
                     for q in GRAD_Q:
-                        rel = m.relaxation(power, q=q, eps=GRAD_EPS)
-                        _J, g = rel.value_grad(x0)
-                        err_j = []
-                        for j in pick:
-                            best = np.inf
-                            for h in GRAD_STEPS:
-                                e = np.zeros(m.n)
-                                e[j] = h
-                                fd = (rel.value(x0 + e) - rel.value(x0 - e)) / (2 * h)
-                                best = min(best, abs(fd - g[j]))
-                            err_j.append(best)
-                        err = float(np.max(err_j) / np.abs(g[pick]).max())
+                        err = against_differences(m.relaxation(power, q=q, eps=GRAD_EPS), x0,
+                                                  pick)
                         ok = err <= GRAD_TOL
                         print(f"{bid} {token} {where} J_{power:g} q {q:g}: gradient against "
-                              f"central differences {err:.1e} of the largest -> "
+                              f"differences {err:.1e} of the largest -> "
                               f"{'ok' if ok else 'FAILS'}", flush=True)
                         if not ok:
                             bad.append(f"{bid} {token} {where} p{power:g} q{q:g}")
     return bad
+
+
+def _grad_states(m: gcl.Model) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """The gradient guards' states, each with the buildings checked: a random x in [0.1, 0.4]
+    (GRAD_BUILDINGS random buildings) and SIMP's start, x = BUDGET everywhere (`_paired`'s)."""
+    rng = np.random.default_rng(SEED)
+    return {"random": (rng.uniform(0.1, 0.4, m.n),
+                       rng.choice(m.n, GRAD_BUILDINGS, replace=False)),
+            "start": (np.full(m.n, BUDGET), _paired(m.terms, m.n))}
+
+
+def against_differences(rel: gcl.Relaxation, x0: np.ndarray, pick: np.ndarray) -> float:
+    """The adjoint gradient of `rel` at x0 against differences on the buildings `pick`: per
+    building the closest, over the steps h of GRAD_STEPS, of the central difference extrapolated
+    from h and h / 2, 2 D(h / 2) - D(h); the largest difference, of the largest |gradient| among
+    them. D(h) reaches the derivative at O(h^2) where J is smooth, but at a tie of the minimum
+    (SIMP's start) it reaches the mean of the two one-sided derivatives, which is the tie's
+    shared gradient, only at O(h) (the two sides curve apart): the extrapolation cancels that
+    term, so a step large enough for the solves' roundoff serves both (NOTES, "Before the
+    consolidated pass: three fixes")."""
+    _J, g = rel.value_grad(x0)
+    err = []
+    for j in pick:
+        best = np.inf
+        for h in GRAD_STEPS:
+            d = []
+            for step in (h, h / 2.0):
+                e = np.zeros(len(x0))
+                e[j] = step
+                d.append((rel.value(x0 + e) - rel.value(x0 - e)) / (2.0 * step))
+            best = min(best, abs(2.0 * d[1] - d[0] - g[j]))
+        err.append(best)
+    return float(np.max(err) / np.abs(g[pick]).max())
 
 
 def _paired(terms: gf.Terms, n: int) -> np.ndarray:
@@ -1296,28 +1319,14 @@ def leak_gradient(ids: list[str]) -> list[str]:
         [b] = common.build_blocks([bid])
         for leak in LEAKS:
             m = _model(b, _leaky(leak))
-            rng = np.random.default_rng(SEED)
-            starts = {"random": (rng.uniform(0.1, 0.4, m.n),
-                                 rng.choice(m.n, GRAD_BUILDINGS, replace=False)),
-                      "start": (np.full(m.n, BUDGET), _paired(m.terms, m.n))}
-            for where, (x0, pick) in starts.items():
+            for where, (x0, pick) in _grad_states(m).items():
                 for power in (1.0, 2.0):
                     for q in GRAD_Q:
-                        rel = m.relaxation(power, q=q, eps=GRAD_EPS)
-                        _J, g = rel.value_grad(x0)
-                        err_j = []
-                        for j in pick:
-                            best = np.inf
-                            for h in GRAD_STEPS:
-                                e = np.zeros(m.n)
-                                e[j] = h
-                                fd = (rel.value(x0 + e) - rel.value(x0 - e)) / (2 * h)
-                                best = min(best, abs(fd - g[j]))
-                            err_j.append(best)
-                        err = float(np.max(err_j) / np.abs(g[pick]).max())
+                        err = against_differences(m.relaxation(power, q=q, eps=GRAD_EPS), x0,
+                                                  pick)
                         ok = err <= GRAD_TOL
                         print(f"{bid} {leak.name} {where} J_{power:g} q {q:g}: gradient against "
-                              f"central differences {err:.1e} of the largest -> "
+                              f"differences {err:.1e} of the largest -> "
                               f"{'ok' if ok else 'FAILS'}", flush=True)
                         if not ok:
                             bad.append(f"{bid} {leak.name} {where} p{power:g} q{q:g}")
