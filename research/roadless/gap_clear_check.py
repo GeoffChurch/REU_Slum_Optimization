@@ -225,7 +225,8 @@ if TYPE_CHECKING:
 
     from reblock.contracts import Block
 
-NAME = metrics.RUNTIME            # the runtime's (owner 2026-10-14)
+NAME = metrics.PER_BLOCK          # the complex's core: the per-block metric (no exits; RUNTIME's
+                                  # exits are the leak, barrier and boost guards')
 METRIC = gcl.complex_of(NAME, factorization=gap_factor.SuperLU())
 BUDGET = 0.05
 BASE_TOL = 2e-3          # the baseline against the rebuild: the rebuild's own lattice, moved,
@@ -1633,9 +1634,13 @@ def _stored_names() -> list[_Stored]:
     lens = pd.read_csv(rows / "summary_lenses.csv")
     for label, preset, name in zip(lens["label"], lens["preset"], lens["metric"], strict=True):
         out.append(_Stored("summary_lenses.csv", str(label), str(preset), str(name)))
-    for path in sorted((rows / "runs").glob(f"*/*/{region_leaks.REGION}.parquet")):
+    for path in sorted((rows / "runs").glob(f"*/*/*/{region_leaks.REGION}.parquet")):
         r = pd.read_parquet(path).iloc[0]
-        label, preset = path.parent.parent.name, path.parent.name
+        label, preset = path.parent.parent.parent.name, path.parent.parent.name
+        if path.parent.name != r["metric"]:
+            out.append(_Stored(str(path.relative_to(rows)), f"{label}?", preset,
+                               f"its directory {path.parent.name}, its row {r['metric']}"))
+            continue
         named = f"{label} {preset}" if (r["label"], r["preset"]) == (label, preset) \
             else f"its row's {r['label']} {r['preset']}"
         out.append(_Stored(str(path.relative_to(rows)) + ("" if named == f"{label} {preset}"

@@ -186,17 +186,16 @@ CHEAP = polish_greedy.CHEAP
 # two tracks, 3.7 -- 7.7 m apart on 5810@major, a median 4.25, merge into one corridor), a
 # crossing's gap 3 m (a footway's: the region's one crossing of the railway inside it is an
 # unpaved path)
-BARRIERS = gx.OsmBarriers(line_m=8.0, cross_m=3.0)
+BARRIERS = metrics.BARRIERS             # RUNTIME's since the consolidated pass
 STREET_CLASSES = ("residential", "living_street", "unclassified")   # a formal home's street
-DRIVE_CLASSES = (*STREET_CLASSES, "service", "tertiary", "secondary", "primary", "trunk",
-                 "motorway")    # the drivable streets: a deep home is far from all of them
+DRIVE_CLASSES = metrics.DRIVE_CLASSES   # the drivable streets: a deep home is far from all of them
 # The street boost (gap_exits.StreetBoost): 3x on every way with a highway tag on 5810@major (the
 # region test's check, its classes spelt out, `_link` folded), and 10x on the drivable streets
 # alone (owner 2026-10-16: "a 10x boost is I think reasonable"; footways, paths and tracks not)
 REGION_HIGHWAYS = ("footway", "motorway", "path", "residential", "secondary", "service",
                    "services", "tertiary", "track", "unclassified")
 BOOST = gx.StreetBoost(factor=3.0, classes=REGION_HIGHWAYS)
-DRIVE_BOOST = gx.StreetBoost(factor=10.0, classes=tuple(sorted(DRIVE_CLASSES)))
+DRIVE_BOOST = metrics.BOOST             # 10x on DRIVE_CLASSES: RUNTIME's
 TRIP_M = 500.0          # the median trip the constants are chosen for, on the closed reference (m;
                         # owner 2026-10-15: "What if we just use T=500m?")
 SHARES = (0.9, 0.75, 1.0)   # the share of the leak at buildings on the closed reference: the
@@ -211,7 +210,7 @@ LAMS = (250.0, 500.0, 1000.0)    # the region test's nominal lam (m), at s 0 and
 # share at buildings, frozen. The central pair (90%): a median trip of 499.5 m there (4,000 draws,
 # the bootstrap's sd 3.2 m)
 CALIBRATED: dict[float, gx.InternalLeak] = {
-    0.9: gx.InternalLeak(open_m=6214.0, foot_m=562.0),
+    0.9: metrics.LEAK,                                      # RUNTIME's: open_m 6214, foot_m 562
     0.75: gx.InternalLeak(open_m=3608.0, foot_m=565.0),     # 500.1 m
     1.0: gx.InternalLeak(open_m=math.inf, foot_m=552.0),    # 492.2 m (sd 3.3 m)
 }
@@ -493,8 +492,9 @@ CHEAP_ROWS = gap_calib.rows_of(per_block("cpu").name) / "preset" / "gpu" / "chea
 
 
 def block_exits() -> gx.Exits:
-    """The per-block metric with the central constants (one metric everywhere: the block's street
-    ring its edge, open; no barriers, a kblock has no OSM features)."""
+    """The per-block metric with the central constants alone (the per-block check of 2026-10-16,
+    before kblocks carried their OSM features: the block's street ring its edge, open; no barriers,
+    no boost). RUNTIME adds both since the consolidated pass (metrics.EXITS)."""
     return gx.Exits(barriers=gx.NoBarriers(), edge=gx.OpenEdge(), leak=CALIBRATED[SHARES[0]],
                     boost=gx.NoBoost())
 

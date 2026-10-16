@@ -13,7 +13,9 @@ or a waterway (not in a tunnel or culvert) is a strip `line_m` wide about its li
 water areas (natural=water, landuse reservoir or basin, waterway riverbank) are themselves.
 They are open only at real crossings: a way of the walking network (any highway) on a bridge or in
 a tunnel over a barrier, or through a railway crossing node (railway=crossing or level_crossing:
-the way's piece within `line_m` of the node), each a gap `cross_m` wide about the way's line. A
+the way's piece within `line_m` of the node; a node on a track that no way passes through, the
+segment across the track there, `line_m` either side of it), each a gap `cross_m` wide about the
+way's line. A
 barrier changes the mesh: the fixed mesh is built on the cut block, so its cache key (the block's
 boundary) and the metric's name (the suffix) both carry it.
 
@@ -248,13 +250,20 @@ class OsmBarriers:
         for g, bridge in zip(over.geometry, over.bridge, strict=True):
             crossings.append(("bridge" if bridge else "tunnel", g))
         walk_g = walk.geometry.to_numpy()
+        rail_g = ways[ways.railway.isin(RAIL)].geometry.to_numpy()
         for node in nodes[nodes.railway.isin(CROSSING_NODES)].geometry.to_numpy():
             through = walk_g[shapely.dwithin(walk_g, node, NODE_TOL_M)]
-            if not len(through):
-                raise ValueError(f"{block.block_id}: a railway crossing node at {node} with no "
-                                 "way through it")
-            crossings.append(("node", shapely.intersection(shapely.union_all(through),
-                                                           shapely.buffer(node, self.line_m))))
+            if len(through):
+                crossings.append(("node", shapely.intersection(
+                    shapely.union_all(through), shapely.buffer(node, self.line_m))))
+                continue
+            # a crossing tagged on the track whose way the extract lacks (38366's two): the
+            # crossing straight across the track at the node, within line_m of it
+            track = rail_g[shapely.dwithin(rail_g, node, NODE_TOL_M)]
+            if not len(track):
+                raise ValueError(f"{block.block_id}: a railway crossing node at {node} on no way "
+                                 "and no track")
+            crossings.append(("node-across", _across(track[0], node, self.line_m)))
         gaps = shapely.union_all(shapely.buffer(np.asarray([g for _k, g in crossings],
                                                            dtype=object), self.cross_m / 2.0))
         return BarrierParts(barrier=shapely.difference(whole, gaps), strips=strips, areas=wet,
@@ -262,12 +271,31 @@ class OsmBarriers:
 
     def block(self, block: Block) -> Block:
         """`block` with its barriers cut out of its polygon (its streets as they are: no face of
-        the mesh lies on the street line within a barrier, so the edge there is no exit)."""
-        cut = shapely.make_valid(shapely.difference(block.boundary, self.parts(block).barrier))
+        the mesh lies on the street line within a barrier, so the edge there is no exit); a block
+        no barrier meets is itself, polygon and all (a difference with nothing would reorder its
+        rings: another mesh key, and a mesh the per-block metric's only to floating point)."""
+        barrier = self.parts(block).barrier
+        if not shapely.intersects(block.boundary, barrier):
+            return block
+        cut = shapely.make_valid(shapely.difference(block.boundary, barrier))
         polys = [p for p in shapely.get_parts(cut)
                  if shapely.get_type_id(p) == 3 and shapely.area(p) > 0]
         return dataclasses.replace(block, boundary=shapely.multipolygons(polys)
                                    if len(polys) > 1 else polys[0])
+
+
+def _across(track: Any, node: Any, half: float) -> Any:
+    """The segment 2 `half` long across `track` (a line) at `node`, perpendicular to it there:
+    a crossing tagged on a track with no way through it."""
+    s = shapely.line_locate_point(track, node)
+    a = np.asarray(shapely.get_coordinates(shapely.line_interpolate_point(
+        track, max(s - 0.5, 0.0))))
+    b = np.asarray(shapely.get_coordinates(shapely.line_interpolate_point(
+        track, min(s + 0.5, shapely.length(track)))))
+    t = (b - a)[0]
+    n = np.array([-t[1], t[0]]) / float(np.hypot(t[0], t[1]))
+    p = np.asarray(shapely.get_coordinates(node))[0]
+    return shapely.LineString([p - half * n, p + half * n])
 
 
 # ------------------------------------------------------------------ the street boost

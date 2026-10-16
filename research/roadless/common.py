@@ -1,11 +1,11 @@
 """Blocks, the lineup, the populations and the demands.
 
-The 220 consensus recipients on real footprints (the group Steiner study's sample) and the 82
-large blocks, the blocks themselves (from the Cape Town source, each with its OSM features, or a
-bank shipped to a cluster node), the method-comparison lineup through the derive cache, the populations (a building's
-weight), the demands (what each home injects) and a road prefix's displacement. (`Scorer`, the
-raster's scorer of a road set, and its grids went with the raster: NOTES, "The complex as the
-runtime: the raster retired".)
+The 220 consensus recipients on real footprints (the group Steiner study's sample) and the 82 large
+blocks, the blocks themselves (from the Cape Town source, each with its OSM features, or a bank
+shipped to a cluster node), the method-comparison lineup through the derive cache, the populations
+(a building's weight), the demands (what each home injects) and a road prefix's displacement.
+(`Scorer`, the raster's scorer of a road set, and its grids went with the raster: NOTES, "The
+complex as the runtime: the raster retired".)
 """
 from __future__ import annotations
 

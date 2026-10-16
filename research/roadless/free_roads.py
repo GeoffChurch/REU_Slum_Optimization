@@ -195,7 +195,9 @@ class FreeEnclosed:
         bid = block.block_id
         polys = np.asarray(block.buildings.outlines)
         metric = gcl.complex_of(self.metric, factorization=gap_factor.SuperLU())
-        geo = gc.geometry(block)
+        # the block as the metric meshes it: its barriers cut out (its scorer's reach, which the
+        # leaks and the boost do not change)
+        geo = gc.geometry(metric.exits.barriers.block(block))
         reach0 = _Reach.of(geo, metric, carve=None)
         enclosed = np.flatnonzero(~reach0.live)
         if not len(enclosed):
