@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, NamedTuple, cast
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 import pyogrio
 import shapely
@@ -42,6 +43,7 @@ from shapely.geometry import LineString, Polygon
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import polygonize, unary_union
 
+import gap_exits as gx
 from gap_exits import Osm
 from reblock.buildings import ANCHOR_COL
 from reblock.contracts import Block
@@ -53,7 +55,8 @@ MAX_WINDOW_M = 40000.0
 OSM_PAD_M = 100.0        # the OSM features are read in the face's box grown by this (m)
 EXTRACT_PAD_M = 10000.0  # the cached extract covers the kblock source's blocks grown by this (m):
                          # every face of the major network about a kblock (checked at each use)
-EXTRACT_REV = 1          # what a cached extract holds (its key): the layers and columns of _read
+EXTRACT_REV = 2          # what a cached extract holds (its key): the layers, columns and rows of
+                         # _read (2: the features no reader reads dropped)
 
 
 @dataclass(frozen=True)
@@ -171,7 +174,11 @@ class Extract(NamedTuple):
 
 
 def _read(iso: str, crs: Any, box: tuple[float, float, float, float]) -> Osm:
-    """The extract's features whose envelope meets `box` (in `crs`), their tags read once."""
+    """The extract's features whose envelope meets `box` (in `crs`), their tags read once, less
+    those no reader reads (the barriers and the boost select by these tags alone, gap_exits; a
+    region's formal and deep homes by the highway tag, region_leaks): the lines with no highway,
+    railway or waterway tag, the points with no railway tag, the areas that are not water (the
+    province's and the city's boundaries among them, which met every block and filled its bank)."""
     bbox = tuple(gpd.GeoSeries([shapely.box(*box)], crs=crs).to_crs(4326).total_bounds)
     path = pbf_path(iso)
 
@@ -194,7 +201,15 @@ def _read(iso: str, crs: Any, box: tuple[float, float, float, float]) -> Osm:
         {"natural": a.natural.fillna("").to_numpy(), "landuse": a.landuse.fillna("").to_numpy(),
          "waterway": _tag(_tags(a.other_tags), "waterway")},
         geometry=a.geometry.to_numpy(), crs=crs)
-    return Osm(ways=ways, nodes=nodes, areas=areas)
+
+    def keep(g: gpd.GeoDataFrame, mask: Any) -> gpd.GeoDataFrame:
+        return cast(gpd.GeoDataFrame, g[np.asarray(mask)].reset_index(drop=True))
+    return Osm(ways=keep(ways, (ways.highway != "") | (ways.railway != "")
+                         | (ways.waterway != "")),
+               nodes=keep(nodes, nodes.railway != ""),
+               areas=keep(areas, areas.natural.isin(gx.WATER_NATURAL)
+                          | areas.landuse.isin(gx.WATER_LANDUSE)
+                          | areas.waterway.isin(gx.WATER_WATERWAY)))
 
 
 def extract_of(blocks_path: Any, iso: str) -> Extract:
