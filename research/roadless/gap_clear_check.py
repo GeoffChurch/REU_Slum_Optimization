@@ -22,12 +22,14 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S enclosure <ids,> [fault]      # fault: every-cell
     uv run python $S leak-gradient <ids,> [fault]  # fault: adjoint-unleaked
     uv run python $S leak-scale - [fault]          # fault: per-cell
-    uv run python $S barriers - [fault]            # faults: not-inserted, gap-closed
+    uv run python $S barriers <-|ids,> [fault]     # faults: not-inserted, gap-closed,
+                                                   # features-dropped, unshifted
     uv run python $S exits-identity - [fault]      # faults: in-code, suffix-dropped
     uv run python $S loop-index - [fault]          # fault: uncontracted
     uv run python $S trip-calibration - [fault]    # faults: boundary-trips, wrong-home
     uv run python $S closed-edge - [fault]         # fault: edge-open
-    uv run python $S street-boost - [fault]        # fault: classes-dropped
+    uv run python $S street-boost <-|ids,> [fault]  # fault: classes-dropped
+    uv run python $S no-features <ids,> [fault]    # fault: neighbour-features
     uv run python $S underflow - [fault]           # fault: unfloored
     uv run python $S both-ways <guards,> <ids,|->  # each guard, then under each of its faults
 
@@ -140,10 +142,19 @@ area.
 node's path and a footbridge, a water channel north of the railway parting the north in two), every
 open triangle inside a barrier lies in a crossing's gap, no home is walled in, and each crossing
 removed walls in the homes it alone served, exactly (the path the north-west's, the footbridge the
-north-east's). Faults: `not-inserted` (the barriers not cut), `gap-closed` (the crossings' gaps not
-cut).
+north-east's), and the crossing node with its path missing from the features still opens the
+north-west (its gap across the track); and on each real block named (a railway or water meets
+it, read from its own features afresh: common.own_osm), RUNTIME's fixed mesh has no triangle inside
+the cut where the leak-only metric's has some, the mesh's cache key is not the uncut block's, and
+RUNTIME's name carries the barriers, its atoms are the footprints in the cut mesh's own frame,
+and the complex walls in the homes the flow model does (Model.free_first's check). Faults:
+`not-inserted` (the barriers not cut), `gap-closed` (the crossings' gaps not cut),
+`features-dropped` (every block built with no OSM features: the cut absent), `unshifted` (the
+atoms left in the uncut block's frame: on 3934, whose railway cut moves its origin, the
+footprints misplaced and the complex's walled-in homes not the flow model's).
 `exits-identity`: the per-block metric's name is PER_BLOCK and its code digests 28 constants to the
-same digest; every configuration of region_leaks (and more shares and lam with the boost) under
+same digest; RUNTIME is the per-block metric with metrics.EXITS, read back, and the region's
+T500b90D10; every configuration of region_leaks (and more shares and lam with the boost) under
 each preset's search spells a name that parses back to it, and no two share a name; every stored
 region run's name (the committed region_rows/summary_lenses.csv, and the runs' rows where they
 are) and every baseline's suffix (summary_baseline.csv) parses back and is its label's
@@ -170,8 +181,15 @@ injection, and the pooled median trip is the method of images' with the images a
 `street-boost`: on STREET_BOOST_BLOCK (a residential way, a footway and a tertiary link), the boost
 on residential and tertiary at 10x boosts every triangle within BOOST_M of the residential way and
 the link (`_link` folded) and none near the footway, and multiplies a passage between boosted
-triangles by 10 and the others by 1. Fault `classes-dropped`: every way with a highway tag
-boosted.
+triangles by 10 and the others by 1; and on each real block named (a drivable way and a footway
+inside it), RUNTIME's boost raises every triangle near a drivable way, none near only a footway or
+path, a passage between boosted triangles 10x and the others 1x. Fault `classes-dropped`: every way
+with a highway tag boosted.
+`no-features` (RUNTIME's switch, NOTES "The consolidated pass"): on each block named, carrying its
+own features less every drivable way and barrier feature (no real block lacks a drivable street
+on its ring), RUNTIME's baseline (P0, P_{1/2},0, J_2,0, every home's escape time, the homes walled
+in) is the leak-only metric's to NO_FEATURES_TOL. Fault `neighbour-features`: the block carries a
+neighbouring kblock's features (the one sharing the most drivable street with it).
 
 `underflow` (the refined solve's stopping test, gap_factor._residual; NOTES, "Before the
 consolidated pass: three fixes"): on UNDERFLOW_BLOCK (22 homes at one end of a strip 4 km long,
@@ -290,6 +308,9 @@ TRIP_EDGE_M = 50.0       # ... TRIP_BLOCK's second home: its centre this far fro
 TRIP_LAM = 60.0          # ... the lam the two homes' pooled trips are read at
 TRIP_ORACLE_DR = 0.05    # ... the oracle's polar grid: radial step (m) and angles
 TRIP_ORACLE_NT = 1440
+BARRIER_EDGE_M = 0.05   # barriers on a real block: the cut less this (m) holds no triangle (its
+                        # edges are the mesh's own, noded at LINE_SNAP_M)
+NO_FEATURES_TOL = 1e-12  # no-features: RUNTIME's baseline against the leak-only metric's (relative)
 UNDERFLOW_BLOCK = "ZAF.9.1.4_1_7283"    # underflow: its potential underflows along a 4 km strip
 UNDERFLOW_TOL = 1e-9     # ... its refined solve against spsolve, of the largest (9.6e-13 apart)
 
@@ -1428,9 +1449,11 @@ _BAR_HOMES = {"south": [(10.0, 10.0), (50.0, 10.0), (100.0, 10.0), (70.0, 25.0)]
               "north-east": [(75.0, 60.0), (100.0, 55.0)]}
 
 
-def _barrier_block(*, node: bool, bridge: bool) -> Block:
+def _barrier_block(*, node: bool, bridge: bool, path: bool = True) -> Block:
     """The barriers guard's block with its crossing node (`node`) and its footbridge (`bridge`) or
-    without them (the path and the footway without their crossing tags)."""
+    without them (the path and the footway without their crossing tags); `path` False: the node's
+    path missing from the features (a crossing tagged on the track alone: its gap across it)."""
+    keep = [True, path, True]
     ways = gpd.GeoDataFrame(
         {"highway": ["", "footway", "footway"], "railway": ["rail", "", ""],
          "waterway": ["", "", ""], "bridge": [False, False, bridge],
@@ -1438,6 +1461,7 @@ def _barrier_block(*, node: bool, bridge: bool) -> Block:
         geometry=[shapely.LineString([(-10, 40), (130, 40)]),
                   shapely.LineString([(30, 20), (30, 60)]),
                   shapely.LineString([(90, 30), (90, 50)])])
+    ways = cast(gpd.GeoDataFrame, ways[keep].reset_index(drop=True))
     nodes = gpd.GeoDataFrame({"railway": ["crossing"] if node else []},
                              geometry=[shapely.Point(30, 40)] if node else [])
     areas = gpd.GeoDataFrame({"natural": ["water"], "landuse": [""], "waterway": [""]},
@@ -1448,23 +1472,24 @@ def _barrier_block(*, node: bool, bridge: bool) -> Block:
                       gx.Osm(ways=ways, nodes=nodes, areas=areas))
 
 
-def barriers(_ids: list[str]) -> list[str]:
+def barriers(ids: list[str]) -> list[str]:
     metric = dataclasses.replace(METRIC, exits=gx.Exits(barriers=region_leaks.BARRIERS,
                                                         edge=gx.OpenEdge(), leak=gx.NoLeak(),
                                                         boost=gx.NoBoost()))
     groups = np.repeat(list(_BAR_HOMES), [len(v) for v in _BAR_HOMES.values()])
     bad = []
     parts = []
-    for node, bridge, expect in ((True, True, ()), (False, True, ("north-west",)),
-                                 (True, False, ("north-east",)),
-                                 (False, False, ("north-west", "north-east"))):
-        b = _barrier_block(node=node, bridge=bridge)
+    for node, bridge, path, expect in ((True, True, True, ()), (False, True, True, ("north-west",)),
+                                       (True, False, True, ("north-east",)),
+                                       (False, False, True, ("north-west", "north-east")),
+                                       (True, True, False, ())):
+        b = _barrier_block(node=node, bridge=bridge, path=path)
         bp = region_leaks.BARRIERS.parts(b)
         m = _model(b, metric)
         walled = sorted({str(g) for g in groups[m.walled0]})
         want = sorted(set(expect))
         ok = walled == want
-        if node and bridge:
+        if node and bridge and path:
             # every open triangle inside a barrier (the strips and areas before the gaps) lies in a
             # crossing's gap
             geo = m.geo
@@ -1478,12 +1503,176 @@ def barriers(_ids: list[str]) -> list[str]:
             ok = ok and stray == 0 and int(inside.sum()) > 0
             parts.append(f"both crossings: {int(inside.sum())} open triangles inside a barrier, "
                          f"{stray} outside the gaps")
-        parts.append(f"{'path' if node else 'no path'}, {'bridge' if bridge else 'no bridge'}: "
-                     f"walled in {walled or 'none'} (expected {want or 'none'})"
-                     + ("" if ok else " FAILS"))
+        parts.append(f"{'path' if node else 'no path'}"
+                     f"{'' if path else ' (its node alone, the way missing)'}, "
+                     f"{'bridge' if bridge else 'no bridge'}: walled in {walled or 'none'} "
+                     f"(expected {want or 'none'})" + ("" if ok else " FAILS"))
         if not ok:
-            bad.append(f"node {node} bridge {bridge}")
+            bad.append(f"node {node} bridge {bridge} path {path}")
     print("barriers: " + "; ".join(parts), flush=True)
+    for b in common.build_blocks(ids):
+        bad += _barriers_on_block(b)
+    return bad
+
+
+def _runtime() -> gcl.ComplexMetric:
+    """RUNTIME on this code (metrics.EXITS on the per-block metric)."""
+    return dataclasses.replace(METRIC, exits=metrics.EXITS)
+
+
+def _leak_only() -> gcl.ComplexMetric:
+    """The per-block metric with RUNTIME's leak alone (no barriers, no boost)."""
+    return dataclasses.replace(METRIC, exits=dataclasses.replace(gx.per_block(),
+                                                                 leak=metrics.EXITS.leak))
+
+
+def _runtime_barriers() -> gx.OsmBarriers:
+    return metrics.BARRIERS
+
+
+def _centroids(fm: gcl.FullMesh) -> np.ndarray:
+    cen = fm.xy[fm.tri].mean(axis=1)
+    return np.asarray(shapely.points(cen[:, 0], cen[:, 1]))
+
+
+def _barriers_on_block(b: Block) -> list[str]:
+    """A real block a railway or water meets (the premise, read from its own features afresh,
+    common.own_osm): under RUNTIME its fixed mesh has no triangle inside the cut (the barrier
+    within the block, less BARRIER_EDGE_M) where the leak-only metric's mesh has some, the mesh's
+    cache key is not the uncut block's, and the metric's name carries the barriers' part."""
+    bid = b.block_id
+    bar = _runtime_barriers()
+    own = dataclasses.replace(b, attrs={**b.attrs, "osm": common.own_osm(b)})
+    want = shapely.intersection(b.boundary, bar.parts(own).barrier)
+    if want.area <= 0.0:
+        return [f"{bid}: no railway or water meets it (the premise)"]
+    counts = {}
+    for key, metric in (("runtime", _runtime()), ("leak-only", _leak_only())):
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = metric.fixed(b, cache=Path(tmp), carving=gcl.Carving.none(gc.geometry(b)))
+        geo = gc.geometry(metric.exits.barriers.block(b))
+        core = geo.local(shapely.buffer(want, -BARRIER_EDGE_M))
+        counts[key] = int(shapely.contains(core, _centroids(fx.fm)).sum())
+    runtime = _runtime()
+    keys = {k: gcl.Fixed.key(blk, runtime.spec, runtime.fs, runtime.form)
+            for k, blk in (("cut", bar.block(b)), ("uncut", b))}
+    # the atoms are the footprints in the cut mesh's own frame (a cut at the block's edge moves
+    # its origin), and the complex's walled-in homes are the flow model's (Model.free_first)
+    m = _model(b, runtime)
+    moved = gc.origin_of(b) != gc.origin_of(bar.block(b))
+    atoms = bool(np.all(shapely.equals_exact(m.fx.carving.polys, m.geo.polys, 1e-6)))
+    try:
+        m.free_first(budget=BUDGET, held=np.zeros(m.n, dtype=bool))
+        agree = True
+    except RuntimeError as e:
+        agree = False
+        print(f"barriers on {bid}: {e}", flush=True)
+    ok = (counts["runtime"] == 0 < counts["leak-only"] and keys["cut"] != keys["uncut"]
+          and f"+x{bar.name}" in runtime.name and atoms and agree)
+    print(f"barriers on {bid}: the cut {want.area:.0f} m^2 ({want.area / b.boundary.area:.4f} of "
+          f"the block); triangles inside it {counts['runtime']} under RUNTIME, "
+          f"{counts['leak-only']} under the leak alone; mesh keys "
+          f"{'differ' if keys['cut'] != keys['uncut'] else 'EQUAL'}; the name carries "
+          f"{bar.name}: {f'+x{bar.name}' in runtime.name}; the frame "
+          f"{'moved' if moved else 'kept'}, the atoms on the footprints {atoms}, the walled-in "
+          f"homes the flow model's {agree} -> {'ok' if ok else 'FAILS'}", flush=True)
+    return [] if ok else [f"{bid}: {counts}, keys {keys}, atoms {atoms}, walled alike {agree}"]
+
+
+def _features_dropped() -> contextlib.AbstractContextManager[None]:
+    """Fault `features-dropped`: every block built with no OSM features (empty frames)."""
+    import regions
+    with_osm = regions.with_osm
+
+    def empty(b: Block, extract: regions.Extract) -> Block:
+        got = with_osm(b, extract)
+        osm = gx.osm_in(got)
+        return dataclasses.replace(got, attrs={**got.attrs, "osm": gx.Osm(
+            ways=cast(gpd.GeoDataFrame, osm.ways.iloc[:0]),
+            nodes=cast(gpd.GeoDataFrame, osm.nodes.iloc[:0]),
+            areas=cast(gpd.GeoDataFrame, osm.areas.iloc[:0]))})
+    return _patched(regions, "with_osm", empty)
+
+
+def _no_feature_osm(b: Block) -> gx.Osm:
+    """`b`'s own features (common.own_osm) less every drivable way (metrics.DRIVE_CLASSES, `_link`
+    folded) and every feature a barrier is made of: the block as it would read if no barrier and
+    no drivable way met it (every real block has a drivable street on its ring: the survey,
+    consolidated_rows/features), its footways, paths and the rest kept."""
+    osm = common.own_osm(b)
+    w = osm.ways
+    drive = w.highway.str.removesuffix("_link").isin(metrics.DRIVE_CLASSES)
+    barrier = w.railway.isin(gx.RAIL) | w.waterway.isin(gx.WATERWAYS)
+    a = osm.areas
+    water = (a.natural.isin(gx.WATER_NATURAL) | a.landuse.isin(gx.WATER_LANDUSE)
+             | a.waterway.isin(gx.WATER_WATERWAY))
+    return gx.Osm(ways=cast(gpd.GeoDataFrame, w[~drive & ~barrier].reset_index(drop=True)),
+                  nodes=cast(gpd.GeoDataFrame, osm.nodes[~osm.nodes.railway.isin(
+                      gx.CROSSING_NODES)].reset_index(drop=True)),
+                  areas=cast(gpd.GeoDataFrame, a[~water].reset_index(drop=True)))
+
+
+def _attached_osm(b: Block) -> gx.Osm:
+    """The features `no-features` attaches to its block (fault `neighbour-features`: another
+    block's)."""
+    return _no_feature_osm(b)
+
+
+def _neighbour_osm(b: Block) -> gx.Osm:
+    """The features meeting the kblock that touches `b` and shares the most drivable way with it
+    (within BOOST_M of its polygon): a neighbouring block's (fault `neighbour-features`)."""
+    import regions
+    src = common._source()
+    allb = gpd.read_parquet(src.blocks_path, columns=["block_id", "geometry"])
+    allb = allb.to_crs(b.crs)
+    near = allb[(allb.block_id.astype(str) != b.block_id)
+                & (shapely.distance(allb.geometry.to_numpy(), b.boundary) < 0.5)]
+    extract = regions.extract_of(src.blocks_path, b.block_id.split(".", 1)[0])
+    best, shared = None, -1.0
+    for bid, poly in zip(near.block_id.astype(str), near.geometry, strict=True):
+        osm = extract.meeting(poly)
+        w = osm.ways[osm.ways.highway.str.removesuffix("_link").isin(metrics.DRIVE_CLASSES)]
+        reach = shapely.intersection(w.geometry.to_numpy(), b.boundary.buffer(gx.BOOST_M))
+        got = float(shapely.length(reach).sum())
+        if got > shared:
+            best, shared = osm, got
+    if best is None:
+        raise ValueError(f"{b.block_id}: no kblock touches it")
+    return best
+
+
+def no_features(ids: list[str]) -> list[str]:
+    """On each block, with the features no barrier or boost reads (`_no_feature_osm`: the premise,
+    checked on them), RUNTIME's baseline (P0, P_{1/2},0, J_2,0, every home's escape time, the homes
+    walled in) equals the leak-only metric's to NO_FEATURES_TOL: the barriers and the boost change
+    nothing where they meet nothing. Fault `neighbour-features`: the block carries the features of
+    a neighbouring kblock (its drivable streets along the shared ring)."""
+    bad = []
+    for b in common.build_blocks(ids):
+        bid = b.block_id
+        premise = _no_feature_osm(b)
+        pb = dataclasses.replace(b, attrs={**b.attrs, "osm": premise})
+        bar = _runtime_barriers()
+        if (shapely.intersects(b.boundary, bar.parts(pb).barrier)
+                or premise.ways.highway.str.removesuffix("_link").isin(
+                    metrics.DRIVE_CLASSES).any()):
+            bad.append(f"{bid}: the premise (no barrier, no drivable way) does not hold")
+            continue
+        bare = dataclasses.replace(b, attrs={**b.attrs, "osm": _attached_osm(b)})
+        rt, lo = _model(bare, _runtime()), _model(b, _leak_only())
+        rel = {k: abs(getattr(rt.base, k) / getattr(lo.base, k) - 1.0) for k in ("P", "Pq", "J2")}
+        live = np.isfinite(lo.u_pop0) & (lo.u_pop0 > 0)
+        homes = float(np.max(np.abs(rt.u_pop0[live] / lo.u_pop0[live] - 1.0))) if live.any() \
+            else 0.0
+        same_walled = bool(np.array_equal(rt.walled0, lo.walled0))
+        worst = max(*rel.values(), homes)
+        ok = worst <= NO_FEATURES_TOL and same_walled
+        print(f"no-features on {bid} ({len(premise.ways)} ways kept, none drivable, no barrier): "
+              f"RUNTIME against the leak alone, P0 {rel['P']:.1e}, Pq0 {rel['Pq']:.1e}, J2_0 "
+              f"{rel['J2']:.1e}, homes {homes:.1e}, walled in alike {same_walled} -> "
+              f"{'ok' if ok else 'FAILS'}", flush=True)
+        if not ok:
+            bad.append(f"{bid}: {worst:.1e} apart")
     return bad
 
 
@@ -1516,7 +1705,7 @@ def _boost_block() -> Block:
                                         gx.Osm(ways=ways, nodes=empty, areas=areas))
 
 
-def street_boost(_ids: list[str]) -> list[str]:
+def street_boost(ids: list[str]) -> list[str]:
     boost = gx.StreetBoost(factor=10.0, classes=("residential", "tertiary"))
     b = _boost_block()
     m = _model(b, dataclasses.replace(METRIC, exits=gx.Exits(
@@ -1547,7 +1736,50 @@ def street_boost(_ids: list[str]) -> list[str]:
           f"{foot[1]}; passages between boosted triangles x{float(ratio_on.min()):.12g} -- "
           f"{float(ratio_on.max()):.12g}, between others x{float(ratio_off.min()):.12g} -- "
           f"{float(ratio_off.max()):.12g} -> {'ok' if ok else 'FAILS'}", flush=True)
-    return [] if ok else [f"residential {res}, link {link}, footway {foot}"]
+    out = [] if ok else [f"residential {res}, link {link}, footway {foot}"]
+    for b in common.build_blocks(ids):
+        out += _boost_on_block(b)
+    return out
+
+
+FOOT_CLASSES = ("footway", "path")      # the real block's ways the boost must leave alone
+
+
+def _boost_on_block(b: Block) -> list[str]:
+    """A real block with a drivable way and a footway inside it (the premise, from its own
+    features read afresh): under RUNTIME every triangle within BOOST_M - 0.5 m of a drivable way
+    is boosted, none within BOOST_M - 0.5 m of a footway or path and beyond BOOST_M + 0.5 m of
+    every drivable way, and a passage between two boosted triangles conducts 10x, between two
+    others as before."""
+    bid = b.block_id
+    runtime = _runtime()
+    boost = metrics.BOOST
+    m = _model(b, runtime)
+    fm0, geo = m.fx.fm, m.geo
+    pts = _centroids(fm0)
+    ways = common.own_osm(b).ways
+    cls = ways.highway.str.removesuffix("_link")
+    drive = geo.local(shapely.union_all(ways.geometry[cls.isin(boost.classes)].to_numpy()))
+    foot = geo.local(shapely.union_all(ways.geometry[cls.isin(FOOT_CLASSES)].to_numpy()))
+    near_drive = np.asarray(shapely.dwithin(drive, pts, gx.BOOST_M - 0.5))
+    far_drive = ~np.asarray(shapely.dwithin(drive, pts, gx.BOOST_M + 0.5))
+    near_foot = np.asarray(shapely.dwithin(foot, pts, gx.BOOST_M - 0.5)) & far_drive
+    on = boost.on_way(fm0, geo, b)
+    both = on[fm0.pa] & on[fm0.pb]
+    none = ~on[fm0.pa] & ~on[fm0.pb]
+    fin = np.isfinite(fm0.T) & (fm0.T > 0)
+    ratio_on = m.fm.T[both & fin] / fm0.T[both & fin]
+    ratio_off = m.fm.T[none & fin] / fm0.T[none & fin]
+    d = int((near_drive & on).sum()), int(near_drive.sum())
+    f = int((near_foot & on).sum()), int(near_foot.sum())
+    ok = (d[0] == d[1] > 0 and f[0] == 0 < f[1] and len(ratio_on) > 0
+          and bool(np.allclose(ratio_on, boost.factor, rtol=1e-12))
+          and bool(np.allclose(ratio_off, 1.0, rtol=1e-12)))
+    print(f"street-boost on {bid}: boosted triangles near a drivable way {d[0]} of {d[1]}, near a "
+          f"footway or path only {f[0]} of {f[1]}; passages between boosted triangles "
+          f"x{float(ratio_on.min()) if len(ratio_on) else float('nan'):.12g}, between others "
+          f"x{float(ratio_off.max()):.12g} -> {'ok' if ok else 'FAILS'}", flush=True)
+    return [] if ok else [f"{bid}: drivable {d}, footway {f}"]
 
 
 _ON_WAY = gx.StreetBoost.on_way
@@ -1570,6 +1802,17 @@ def exits_identity(_ids: list[str]) -> list[str]:
     if NAME != PER_BLOCK or f"+v{digest}" not in PER_BLOCK or n_const != PER_BLOCK_CONSTANTS:
         bad.append(f"the per-block metric is {NAME} with {n_const} constants digesting to "
                    f"{digest}, not {PER_BLOCK} with {PER_BLOCK_CONSTANTS}")
+    try:
+        runtime = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())
+        rt_ok = (metrics.RUNTIME == PER_BLOCK + metrics.EXITS.suffix
+                 and runtime.name == metrics.RUNTIME and runtime.exits == metrics.EXITS
+                 and region_leaks.metric_of("T500b90D10", "simp", "cpu").name == metrics.RUNTIME)
+    except ValueError as e:
+        rt_ok = False
+        print(f"RUNTIME: {e}", flush=True)
+    if not rt_ok:
+        bad.append(f"RUNTIME {metrics.RUNTIME} is not the per-block metric with metrics.EXITS "
+                   "read back, or not the region's T500b90D10")
     configs = {label: c.exits for label, c in region_leaks.CONFIGS.items()}
     for leak in (gx.InternalLeak(open_m=math.inf, foot_m=135.57463805510008),
                  gx.InternalLeak(open_m=250.0, foot_m=math.inf),
@@ -1867,7 +2110,7 @@ GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "enclosure": enclosure, "leak-gradient": leak_gradient, "leak-scale": leak_scale,
     "barriers": barriers, "exits-identity": exits_identity, "loop-index": loop_index,
     "trip-calibration": trip_calibration, "closed-edge": closed_edge,
-    "street-boost": street_boost, "underflow": underflow}
+    "street-boost": street_boost, "underflow": underflow, "no-features": no_features}
 
 
 def _fault_exits():
@@ -1900,7 +2143,11 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "leak-scale": {"per-cell": lambda: _leak_fault(_per_cell)},
     "barriers": {"not-inserted": lambda: _patched(gx.OsmBarriers, "block",
                                                   lambda self, block: block),
-                 "gap-closed": lambda: _patched(gx.OsmBarriers, "parts", _gap_closed)},
+                 "gap-closed": lambda: _patched(gx.OsmBarriers, "parts", _gap_closed),
+                 "features-dropped": _features_dropped,
+                 "unshifted": lambda: _patched(gcl.Carving, "shifted", lambda self, by: self)},
+    "no-features": {"neighbour-features": lambda: _patched(sys.modules[__name__], "_attached_osm",
+                                                           _neighbour_osm)},
     "exits-identity": {"in-code": lambda: _patched(gcl, "_identity_modules",
                                                    lambda: (*_IDENTITY_MODULES(), gx)),
                        "suffix-dropped": lambda: _patched(gx.Exits, "suffix",
