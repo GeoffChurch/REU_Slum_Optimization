@@ -689,5 +689,12 @@ Not pursued, with what would change that:
   on quadro2; the 13 tuning blocks' 481 networks and their prefixes took 28 task-h, each
   network identical to its twin computed here, where one was (NOTES); the 46 held-out blocks'
   782, 22.7 task-h.
+- **At the next cluster_submit bump** (pinned at b9dc6f0): since GeoffChurch/cluster_submit
+  6b718fc, `Kind.more` takes a required keyword-only `killed` (the ids of a lease's tasks killed at
+  their walltime; owner 2026-10-16: a lease killed mid-job is continued, one killed while idle is
+  not, each kind deciding through `more`). cluster.py's two kinds (`more`, both returning False)
+  must accept `*, killed`; answering no keeps today's behaviour, a killed lease ending its chain.
+  Its `Source.argv` -> `Source.args` (e33d540) does not touch reblock (clearings_export's `Source`
+  is its own class).
 - **GPU sizing recalibrated**: closed, the raster's sizing (GB_PER_MILLION) went with it; `--gb`
   sizes every card (wiki `pages/reblock/raster-escape-time-metric-retired.md`).
