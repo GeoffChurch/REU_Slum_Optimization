@@ -1,8 +1,8 @@
 """Blocks, the lineup, the populations and the demands.
 
 The 220 consensus recipients on real footprints (the group Steiner study's sample) and the 82
-large blocks, the blocks themselves (from the Cape Town source, or a bank shipped to a cluster
-node), the method-comparison lineup through the derive cache, the populations (a building's
+large blocks, the blocks themselves (from the Cape Town source, each with its OSM features, or a
+bank shipped to a cluster node), the method-comparison lineup through the derive cache, the populations (a building's
 weight), the demands (what each home injects) and a road prefix's displacement. (`Scorer`, the
 raster's scorer of a road set, and its grids went with the raster: NOTES, "The complex as the
 runtime: the raster retired".)
@@ -109,18 +109,42 @@ def _source(*overrides: str):
 
 
 def _from_source(ids: list[str]) -> list:
-    """kblocks from the Cape Town source; an id `<kblock>@<network>` is a region (regions.py),
-    built from that source's blocks at any building count."""
+    """kblocks from the Cape Town source, each with its OSM features (`_with_osm`); an id
+    `<kblock>@<network>` is a region (regions.py), built from that source's blocks at any
+    building count, its features its face's."""
     import regions
 
     named = {i: regions.parse(i) for i in ids}
     plain = [i for i, r in named.items() if r is None]
-    out = list(_source().restricted(plain).region().blocks) if plain else []
+    src = _source()
+    out = _with_osm(list(src.restricted(plain).region().blocks), src.blocks_path) if plain else []
     faces = [r for r in named.values() if r is not None]
     if faces:
         out += [regions.build(r, _every().blocks_path, member_blocks) for r in faces]
     _known(ids, {b.block_id for b in out}, where="the Cape Town source")
     return out
+
+
+def _with_osm(blocks: list[Block], blocks_path: Any) -> list[Block]:
+    """Each block with its OSM features (regions.with_osm: the features of its country's extract
+    meeting its polygon, attrs["osm"]), which the metric's barriers and street boost read: one
+    metric for every block and region (NOTES, "The consolidated pass"). The extract is read once,
+    over the source's blocks (regions.extract_of, cached), and each block's features are a query
+    of it; a bank (write_bank) carries them to a cluster node, which has no extract."""
+    import regions
+
+    isos = {b.block_id.split(".", 1)[0] for b in blocks}
+    extract = {iso: regions.extract_of(blocks_path, iso) for iso in isos}
+    return [regions.with_osm(b, extract[b.block_id.split(".", 1)[0]]) for b in blocks]
+
+
+def own_osm(b: Block) -> Any:
+    """`b`'s OSM features read afresh from the cached extract (regions.Extract.meeting), whatever
+    the block carries: the guards' premise, independent of what its build attached."""
+    import regions
+
+    return regions.extract_of(_source().blocks_path, b.block_id.split(".", 1)[0]).meeting(
+        b.boundary)
 
 
 def _every() -> Any:
@@ -129,11 +153,12 @@ def _every() -> Any:
 
 
 def member_blocks(ids: list[str]) -> list[Block]:
-    """The kblocks of `ids` the Cape Town source holds at any building count: a region's members
-    (regions.build, from every kblock whose interior point its face holds: one with no building
-    yields none; the per-block model of a region's homes, region_leaks, which checks it got every
-    member it asked for)."""
-    return list(_every().restricted(ids).region().blocks)
+    """The kblocks of `ids` the Cape Town source holds at any building count, each with its OSM
+    features (`_with_osm`): a region's members (regions.build, from every kblock whose interior
+    point its face holds: one with no building yields none; the per-block model of a region's
+    homes, region_leaks, which checks it got every member it asked for)."""
+    src = _every()
+    return _with_osm(list(src.restricted(ids).region().blocks), src.blocks_path)
 
 
 def write_bank(ids: list[str], path: Path) -> dict:

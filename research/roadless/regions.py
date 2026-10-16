@@ -16,22 +16,30 @@ published anchor is inside the face, each with its kblock (`member`) and its row
 (`member_row`).
 
 Its OSM features (gap_exits.Osm, attrs["osm"]: the extract's ways, railway nodes and water areas
-meeting the face, their tags read once here, `osm_of`) are what the region model's barriers and
-street boost read (gap_exits: NOTES, "Exits as leaks: the region model on the complex
-(5810@major)").
+meeting the face, their tags read once, `with_osm`) are what the metric's barriers and street
+boost read (gap_exits: NOTES, "Exits as leaks: the region model on the complex (5810@major)"); every
+kblock carries its own since the consolidated pass (common.build_blocks), all from one cached read
+of the extract over the kblock source's bounds (`Extract`).
 """
 from __future__ import annotations
 
+import dataclasses
+import hashlib
+import json
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from pathlib import Path
+from typing import Any, NamedTuple, cast
 
 import geopandas as gpd
 import pandas as pd
 import pyogrio
 import shapely
+from pyproj import CRS
 from shapely.geometry import LineString, Polygon
+from shapely.geometry.base import BaseGeometry
 from shapely.ops import polygonize, unary_union
 
 from gap_exits import Osm
@@ -43,6 +51,9 @@ from reblock.region import shared_tier
 FIRST_WINDOW_M = 5000.0
 MAX_WINDOW_M = 40000.0
 OSM_PAD_M = 100.0        # the OSM features are read in the face's box grown by this (m)
+EXTRACT_PAD_M = 10000.0  # the cached extract covers the kblock source's blocks grown by this (m):
+                         # every face of the major network about a kblock (checked at each use)
+EXTRACT_REV = 1          # what a cached extract holds (its key): the layers and columns of _read
 
 
 @dataclass(frozen=True)
@@ -111,16 +122,61 @@ def _tag(tags: list[dict[str, str]], key: str) -> list[str]:
     return [t[key] if key in t else "" for t in tags]
 
 
-def osm_of(f: Polygon, crs: Any, iso: str) -> Osm:
-    """The OSM features of the country's extract meeting the face `f` (module docstring)."""
-    bbox = tuple(gpd.GeoSeries([shapely.box(*f.buffer(OSM_PAD_M).bounds)], crs=crs)
-                 .to_crs(4326).total_bounds)
+class Extract(NamedTuple):
+    """The country's extract's features (gap_exits.Osm's columns) whose envelope meets `box` (the
+    kblock source's blocks' bounds grown by EXTRACT_PAD_M, in `crs`): read from the extract once
+    and cached beside it (`of`), so a block's features are a query, not a 40 s scan of the
+    extract."""
+    box: tuple[float, float, float, float]
+    osm: Osm
+
+    @staticmethod
+    def _dir(iso: str, crs: Any, box: tuple[float, float, float, float]) -> Path:
+        """The cache's directory: keyed by the extract's file (name, size, mtime), the CRS, the box
+        and what a cached extract holds (EXTRACT_REV)."""
+        pbf = pbf_path(iso)
+        st = pbf.stat()
+        key = json.dumps(dict(pbf=pbf.name, size=st.st_size, mtime_ns=st.st_mtime_ns,
+                              crs=CRS.from_user_input(crs).to_string(),
+                              box=[round(v, 3) for v in box], rev=EXTRACT_REV), sort_keys=True)
+        return pbf.parent / f"{pbf.name}.osm-{hashlib.sha256(key.encode()).hexdigest()[:16]}"
+
+    @classmethod
+    def of(cls, iso: str, crs: Any, box: tuple[float, float, float, float]) -> Extract:
+        d = cls._dir(iso, crs, box)
+        parts = ("ways", "nodes", "areas")
+        if all((d / f"{k}.parquet").exists() for k in parts):
+            return cls(box=box, osm=Osm(*(gpd.read_parquet(d / f"{k}.parquet") for k in parts)))
+        osm = _read(iso, crs, box)
+        d.mkdir(parents=True, exist_ok=True)
+        for k, g in zip(parts, osm, strict=True):
+            tmp = d / f"{k}.parquet.{os.getpid()}.tmp"
+            g.to_parquet(tmp)
+            os.replace(tmp, d / f"{k}.parquet")
+        return cls(box=box, osm=osm)
+
+    def meeting(self, f: BaseGeometry) -> Osm:
+        """The features meeting `f` (a face, a block's polygon), in the extract's order; `f`'s
+        bounds grown by OSM_PAD_M must lie inside the box (or a feature could be missing)."""
+        x0, y0, x1, y1 = f.buffer(OSM_PAD_M).bounds
+        bx0, by0, bx1, by1 = self.box
+        if not (bx0 <= x0 and by0 <= y0 and x1 <= bx1 and y1 <= by1):
+            raise ValueError(f"a face's bounds {f.bounds} lie outside the cached extract's box "
+                             f"{self.box}: grow EXTRACT_PAD_M")
+
+        def meet(g: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+            return cast(gpd.GeoDataFrame,
+                        g[shapely.intersects(g.geometry.to_numpy(), f)].reset_index(drop=True))
+        return Osm(*(meet(g) for g in self.osm))
+
+
+def _read(iso: str, crs: Any, box: tuple[float, float, float, float]) -> Osm:
+    """The extract's features whose envelope meets `box` (in `crs`), their tags read once."""
+    bbox = tuple(gpd.GeoSeries([shapely.box(*box)], crs=crs).to_crs(4326).total_bounds)
     path = pbf_path(iso)
 
     def read(layer: str, columns: list[str]) -> gpd.GeoDataFrame:
-        g = pyogrio.read_dataframe(path, layer=layer, bbox=bbox, columns=columns).to_crs(crs)
-        return cast(gpd.GeoDataFrame,
-                    g[shapely.intersects(g.geometry.to_numpy(), f)].reset_index(drop=True))
+        return pyogrio.read_dataframe(path, layer=layer, bbox=bbox, columns=columns).to_crs(crs)
 
     w = read("lines", ["highway", "railway", "waterway", "other_tags"])
     wt = _tags(w.other_tags)
@@ -139,6 +195,27 @@ def osm_of(f: Polygon, crs: Any, iso: str) -> Osm:
          "waterway": _tag(_tags(a.other_tags), "waterway")},
         geometry=a.geometry.to_numpy(), crs=crs)
     return Osm(ways=ways, nodes=nodes, areas=areas)
+
+
+def extract_of(blocks_path: Any, iso: str) -> Extract:
+    """The cached extract covering every kblock of the source's `blocks_path` (its bounds grown by
+    EXTRACT_PAD_M), in the source's frame (its blocks' estimated UTM CRS, as `build` takes it)."""
+    allb = gpd.read_parquet(blocks_path, columns=["geometry"])
+    crs = allb.estimate_utm_crs()
+    x0, y0, x1, y1 = allb.to_crs(crs).total_bounds
+    pad = EXTRACT_PAD_M
+    return Extract.of(iso, crs, (float(x0 - pad), float(y0 - pad), float(x1 + pad),
+                                 float(y1 + pad)))
+
+
+def with_osm(b: Block, extract: Extract) -> Block:
+    """`b` with its OSM features (attrs["osm"]: the extract's features meeting its polygon), as
+    the metric's barriers and street boost read them (gap_exits.osm_in): every block, a kblock as
+    a region (owner 2026-10-16: one metric for every block and region; NOTES, "The consolidated
+    pass")."""
+    if CRS.from_user_input(b.crs) != CRS.from_user_input(extract.osm.ways.crs):
+        raise ValueError(f"{b.block_id}: its CRS {b.crs} is not the extract's")
+    return dataclasses.replace(b, attrs={**b.attrs, "osm": extract.meeting(b.boundary)})
 
 
 def build(region: FaceRegion, blocks_path, members_of: Callable[[list[str]], list[Block]]
@@ -163,9 +240,10 @@ def build(region: FaceRegion, blocks_path, members_of: Callable[[list[str]], lis
     parcels = gpd.GeoDataFrame(pd.concat([m.parcels for m in members], ignore_index=True),
                                geometry="geometry", crs=crs)
     parcels["parcel_id"] = range(len(parcels))
-    return Block(block_id=region.block_id, crs=crs, boundary=f, parcels=parcels,
-                 streets=gpd.GeoDataFrame(geometry=[LineString(f.exterior.coords)], crs=crs),
-                 source_content_hash=None, building_geometries=bld,
-                 building_tier=shared_tier(members),
-                 attrs={"members": len(members), "network": region.network.name,
-                        "osm": osm_of(f, crs, region.seed.split(".", 1)[0])})
+    return with_osm(Block(block_id=region.block_id, crs=crs, boundary=f, parcels=parcels,
+                          streets=gpd.GeoDataFrame(geometry=[LineString(f.exterior.coords)],
+                                                   crs=crs),
+                          source_content_hash=None, building_geometries=bld,
+                          building_tier=shared_tier(members),
+                          attrs={"members": len(members), "network": region.network.name}),
+                    extract_of(blocks_path, region.seed.split(".", 1)[0]))
