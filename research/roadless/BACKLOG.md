@@ -392,9 +392,12 @@ items up front"), in the order proposed:
    displace by 5% (13 -- 16% of the displaced; the median helps ten times its own), almost none at
    1% (the median seventy times); on the region's central SIMP clearing (a sample of 142 of 707)
    69% at 5% and 11% at 1% (the median 0 and 16 times): a clearing serves many people a little.
-   **Open (the owner)**: fairness in the objective (a price per displaced person in place of the
-   budget, or people helped rather than escape time saved), and the boost. For the site: present
-   both families, powers of the escape time (J_p) and priority-weighted P, under established names.
+   **Decided (owner 2026-10-16)**: the boost, 10x on the drivable streets, is adopted into the one
+   metric ("Yes, adopt the 10x drivable-street boost"), with the leaks' central constants
+   (`Lo6214b562`) and the barriers: RUNTIME switches to it at the consolidated pass's start, every
+   block re-scored under it. The objective stays as it is; the price per displaced person is
+   written down under "Coverage and model". For the site: present both families, powers of the
+   escape time (J_p) and priority-weighted P, under established names.
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights
