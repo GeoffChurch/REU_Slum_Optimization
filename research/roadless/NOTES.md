@@ -6715,17 +6715,19 @@ island so all traffic was internal"; "we should probably have some small leakage
 since you can in principle live off the land, but buildings should have greater leakage"; streets
 "more conductive, but not make them leak more"; "What if we just use T=500m?"). The two leak
 families of the region test folded into one with a building share s, its strength to be set by the
-median length T of an internal trip rather than by a nominal lam, then run at T 500 m. In two
-halves. **First (to "What the owner could choose instead"): no lam gives a median internal trip of
+median length T of an internal trip rather than by a nominal lam, then run at T 500 m. In three
+parts. **First (to "What the owner could choose instead"): no lam gives a median internal trip of
 500 m on 5810@major with its edge open, at any s; the runs waited for the owner.** **Then (from
 "The owner's decisions after the refusal"): two constants, a leak per m^2 of open ground and one
 per m^2 of footprint, chosen once on 5810@major with its edge closed for a 500 m median trip, the
 same for every block and region; five of the eight runs at the 6 GPU-h cap; the 13 tuning blocks
-under one metric.** Code: gap_exits.py (InternalLeak, the edge), gap_clear.py (Model.leaked_state:
-a leak's other strength on the same pattern; the leak site with the edge open), gap_maps.py
-(leak_drain and cell_geometry, shared with flow_of), region_leaks.py (the configurations,
-home_solves, the trips, `calibrate`, `blocks`), gap_clear_check.py (`leak-fold`,
-`trip-calibration`, `closed-edge`, the leak guards at mixed leaks).
+under one metric.** **Last (from "A 10x boost on the drivable streets"): the boost on drivable
+streets at 10x, and who each cleared building helps against whom it displaces.** Code: gap_exits.py
+(InternalLeak, the edge), gap_clear.py (Model.leaked_state: a leak's other strength on the same
+pattern; the leak site with the edge open), gap_maps.py (leak_drain and cell_geometry, shared with
+flow_of), region_leaks.py (the configurations, home_solves, the trips, `calibrate`, `blocks`),
+gap_clear_check.py (`leak-fold`, `trip-calibration`, `closed-edge`, the leak guards at mixed
+leaks).
 
 **The fold** (gap_exits.InternalLeak(s, lam), its name `L<lam>s<s>`). One Strategy, two parameters:
 the total sigma |A| / lam^2 over the cells live at baseline, as before; a share s of it at the
@@ -7110,3 +7112,99 @@ calibrations (the central pair at 2,000 draws 4.2 CPU-h, at 4,000 2.8; the 75% a
 and 3.9), the per-block check 0.4, the region's baselines, scores and cross-scores about 3, the
 migration's re-scores 0.3, the guards about 5.3: about 25 CPU-h [inferred from the steps' times],
 beside the refusal's 16.
+
+**A 10x boost on the drivable streets, and who each clearing helps** (addendum 2:
+.superpowers/sdd/2026-10-15-region-mixed-leak/addendum2.md; the owner 2026-10-16, on the formal
+grid taking most of the clearing: a strong street boost "rewards the infrastructure investment,
+which was likely undertaken for various factors we don't have visibility into"; "I don't want a
+100x boost for drivable streets, but a 10x boost is I think reasonable"; and "Clearing N people's
+homes to provide access to n<N people's homes seems unfair (on average at least)", to be measured
+before anything changes in the objective).
+
+**The boost's classes** (gap_exits.StreetBoost(factor, classes), named `S<factor>h<classes>`, the
+classes sorted and joined by `-`, a way's highway tag with `_link` folded). The 3x check boosted
+every way with a highway tag, footways, paths and tracks among them; its runs keep their labels
+(`S3`, `L500s0S3`, `T500b90S3`) and their names now spell its classes out, every tag on 5810@major
+(`S3hfootway-motorway-path-residential-secondary-service-services-tertiary-track-unclassified`: the
+same triangles, S3's baseline re-scored bit for bit). The new boost is 10x on the drivable streets
+alone, region_leaks.DRIVE_CLASSES
+(`S10hliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassified`),
+with the central constants: `T500b90D10`. New guard `street-boost` (a synthetic block with a
+residential way, a footway and a tertiary link, the boost on residential and tertiary at 10x: the
+366 triangles on the residential way and the 49 on the link boosted, none of the 96 on the footway,
+passages between boosted triangles x10 and the others x1; fault `classes-dropped`, the class filter
+dropped: the footway's 96 boosted).
+
+**The 10x runs** (tesla2, run lc-d10; both presets; the edge open, the barriers, the central
+constants):
+
+    config       preset  L_P     L_P1/2  L_J2    cleared  t (s)   wall (s)
+    T500b90D10   simp    0.2610  0.2585  0.2525  638      2,124   2,819
+    T500b90D10   cheap   0.2428  0.2404  0.2352  465      1,881   2,170
+    T500b90S3    simp    0.2421  0.2383  0.2331  682      1,524   1,809
+    T500b90      simp    0.2438  0.2448  0.2391  707      1,543   1,766
+
+At baseline the 10x boost carries the walk to the edge on the streets: P_0 7.28e+06, 43% under the
+unboosted central pair's (3x: 21%), the leaks draining 10% of the current (18% unboosted; a typical
+home 12% inside, against 20%), a formal home 2.1x as deep as a deep informal one (886 against 414;
+2.4x unboosted, 2.2x at 3x). **What gets cleared** moves toward 5810: its share of the cleared
+population 0.21 (SIMP) and 0.29 (cheap) against 0.17 and 0.21 unboosted, the formal grid's 0.78 and
+0.68 against 0.83 and 0.78 (3x: 0.20, 0.27; 0.80, 0.72). The clearing changes much more than at 3x:
+Jaccard with the unboosted central pair's 0.35 (SIMP) and 0.31 (cheap), with bar's 0.33, 0.29, with
+the 3x boost's 0.54, 0.41 (the presets' own overlap 0.44). **Each clearing under the other's
+model** (L_P, SIMP's): the unboosted clearing under the 10x model 0.2273 against the 10x clearing's
+0.2610 (-0.034, 13% of Lens A), the 10x clearing under the unboosted model 0.2050 against 0.2438
+(-0.039, 16%); the cheap preset's -0.028 and -0.026. At 3x the losses were 3 -- 4%: the 10x boost
+changes both which buildings are cleared and what a clearing is worth. The induced corridors' loops
+at q 0.9: 6 (SIMP) and 15 (cheap), against 9 and 10 unboosted; at q 0.8 28 and 36 against 54 and 42
+(the network's own loops fall too, 797 to 377 for SIMP: the streets carry what lanes carried).
+Maps: region_rows/maps/T500b90D10_simp.png, T500b90D10_cheap.png.
+
+**Who each clearing helps** (region_leaks.leave_one_out; summary_loo.csv; a measurement, no
+objective changed). Each building of a final clearing restored alone (leave-one-out from it, the
+clearing otherwise kept): `helped` the population of the other homes standing whose escape time
+rises by at least 5% (and 1%), or that the restoring walls in (none did); `displaced` its own
+population; `gain` the rise in P. On the 13 tuning blocks' stored SIMP-default and cheap-preset
+clearings under today's per-block metric (cores), and on the region's central SIMP clearing
+(T500b90) on a card, in a seeded random order within a 3,000 s budget: 142 of its 707 buildings, a
+sample.
+
+    clearing                 buildings  5%: helped < displaced   median    1%: same,    median
+                                        (buildings, pop.)        ratio     buildings    ratio
+    13 blocks, SIMP          1,541      0.22, 0.16               9.9       0.018        66
+    13 blocks, cheap         1,368      0.20, 0.13               10.5      0.016        71
+      9712 SIMP; cheap       92; 92     0.55, 0.40; 0.46, 0.32   0; 1.4    0; 0.01      29; 31
+      9717                   68; 63     0.40, 0.30; 0.35, 0.30   1.6; 2.6  0.015; 0     29; 32
+      5810 (the kblock)      292; 260   0.56, 0.36; 0.49, 0.31   0.6; 1.1  0.04; 0.03   25; 30
+      22422                  99; 97     0.32, 0.20; 0.25, 0.11   3.1; 4.6  0; 0.01      45; 53
+      the other 9                       <= 0.20, <= 0.10         11 -- 31  <= 0.07      66 -- 166
+    5810@major T500b90 SIMP  142 of 707 0.69, 0.49               0         0.11         16
+
+(the per-block rows: SIMP's, then the cheap preset's; the ratio helped / displaced; at 1% the
+displaced population's share under is at most 0.02 on every block and 0.06 on the region.) On a
+block, the typical cleared building serves about ten times its own population at the 5% threshold
+and some seventy at 1%; a fifth of the buildings serve fewer than they displace at 5%, holding 13
+-- 16% of the displaced, almost none at 1%. The exceptions are the deep blocks whose clearings are
+long corridors (9712, 9717, 5810, 22422): a building in a corridor changes many homes' escape times
+by a few percent each, so at 5% it helps no one and at 1% it helps twenty to fifty times its
+population. On the region it is sharper: escape times there are long (a formal home's median 1,604
+under the central constants), one building's restoring moves most homes' by under 5%, and 69% of
+the sampled buildings (49% of their population) pass the 5% test for fewer than they displace, the
+median helping no one; at 1% 11% do (6% of the population), the median serving 16 times its own. So
+whether a clearing is unfair in the owner's sense depends on the threshold more than on the
+clearing: a building's clearing serves many people a little rather than a few people a lot
+[inferred from the two thresholds]. The gain (the rise in P when a building is restored) follows
+the population helped (correlation 0.81 on the blocks' SIMP clearings at 5%).
+
+**The guards** for this step (both ways at the final code): `street-boost` (above),
+`exits-identity` (48 names of 48 configurations and presets, 58 stored names their labels', the
+per-block metric's 28 constants digesting to 34d40e8a; faults `in-code`, `suffix-dropped`). mypy
+--strict clean on gap_exits and region_leaks; `ruff check .` passes; tests/test_clearings.py: 36
+pass. The leave-one-out has no guard of its own [its homes' rise is read from Model.home_u and
+live_homes_of, which the `reach` and `baseline` guards cover; inferred].
+
+**Compute.** GPU 2.39 GPU-h of the 3: the 10x runs 0.79 (SIMP) and 0.61 (cheap), their prior 0.09;
+the region's leave-one-out 0.91 (142 buildings in its 3,000 s: about 21 s each on a V100 with the
+host's work, so the 707 would have taken about 4 h). CPU here, at most 4 processes: the 13 blocks'
+leave-one-out about 3.5 CPU-h, the 10x baseline, scores and cross-scores about 1, the report and
+the guards about 0.5.

@@ -381,9 +381,20 @@ items up front"), in the order proposed:
    under the other's model). Five of the eight runs at the 6 GPU-h cap (the 100% cheap preset and
    the 75% pair cut). Per block (the 13, on cores): the leaks drain 0.3 -- 2.8%, P_0 falls 0.4 --
    4.5%, Lens A by 0.0008 -- 0.011, the presets' order unchanged on every block and lens. The
-   switch (at the consolidated pass): RUNTIME `...+v34d40e8a+xLo6214b562va03a092b`. For the site:
-   present both families, powers of the escape time (J_p) and priority-weighted P, under
-   established names.
+   switch (at the consolidated pass): RUNTIME `...+v34d40e8a+xLo6214b562va03a092b`. **Then (owner
+   2026-10-16: "a 10x boost is I think reasonable"; "Clearing N people's homes to provide access to
+   n<N people's homes seems unfair")**: StreetBoost takes its highway classes (`S<f>h<classes>`);
+   10x on the drivable streets with the central constants (T500b90D10) moves the clearing toward
+   5810 (its share 0.21 / 0.29, the formal grid's 0.78 / 0.68; Jaccard with the unboosted 0.35 /
+   0.31) and changes its worth (each clearing loses 13 -- 16% of Lens A under the other's model),
+   Lens A 0.261 / 0.243. Who each cleared building helps (leave-one-out, a measurement): on the 13
+   blocks a fifth of the cleared buildings raise the escape times of fewer people than they
+   displace by 5% (13 -- 16% of the displaced; the median helps ten times its own), almost none at
+   1% (the median seventy times); on the region's central SIMP clearing (a sample of 142 of 707)
+   69% at 5% and 11% at 1% (the median 0 and 16 times): a clearing serves many people a little.
+   **Open (the owner)**: fairness in the objective (a price per displaced person in place of the
+   budget, or people helped rather than escape time saved), and the boost. For the site: present
+   both families, powers of the escape time (J_p) and priority-weighted P, under established names.
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights
