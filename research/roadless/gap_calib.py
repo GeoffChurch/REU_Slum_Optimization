@@ -9,8 +9,8 @@ its numbers are in NOTES and gap_rows/summary_runtime_acceptance.csv.
 
     S=research/roadless/gap_calib.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S warm <id>                      # the block's fixed mesh into gap_clear.CACHE
-    uv run python $S preset <id> <simp[E]|cheap[E]@e0.05> <cpu|gpu>  # a preset on the complex
-    uv run python $S presets <id> <items,> <cpu|gpu>   # several, one after another (one GPU run)
+    uv run python $S preset <id> <simp[E]|cheap[E]@e0.05> <cpu|gpu> [--replace]  # a preset
+    uv run python $S presets <id> <items,> <cpu|gpu> [--replace]   # several, one after another
     uv run python $S baseline <ids,|@file> <procs>  # the fixed mesh's baseline against the rebuild
     uv run python $S clearings <ids,|@file> <procs> # every clearing on the fixed mesh and rebuilt
     uv run python $S speed <ids,|@file> <procs> <cpu|gpu>  # the breakdowns on a device
@@ -76,6 +76,7 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import clearings  # noqa: E402
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
 import gap_compare as gcmp  # noqa: E402
@@ -190,7 +191,9 @@ def warm(bid: str) -> None:
           f"{fx.t_build:.0f}s); peak {peak_gb():.1f} GB", flush=True)
 
 
-def preset(bid: str, item: str, device: str) -> None:
+def preset(bid: str, item: str, device: str, *, replace: bool) -> None:
+    """A preset item on `bid` (module docstring), its row written once (clearings.write_once: a
+    row standing under its identity refuses the run before any work, unless `replace`)."""
     m = ITEM.fullmatch(item)
     if m is None:
         raise SystemExit(f"unknown preset item {item!r}: simp[E] or "
@@ -203,6 +206,7 @@ def preset(bid: str, item: str, device: str) -> None:
                          f"{metric.name.removeprefix(base.name)}")
     scoring = search.polish_scoring_of(exact)
     out = ROWS / "preset" / device / item / f"{bid}.parquet"
+    clearings.check_new(out, replace=replace)
     t0 = time.time()
 
     def run() -> dict[str, object]:
@@ -219,8 +223,7 @@ def preset(bid: str, item: str, device: str) -> None:
         row, gpu_gb = run(), np.nan
     row.update(item=item, metric=metric.name, host=socket.gethostname(), peak_rss_gb=peak_gb(),
                gpu_gb=gpu_gb, wall=time.time() - t0)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([row]).to_parquet(out)
+    clearings.write_once(pd.DataFrame([row]), out, replace=replace)
     print(f"{bid} {item} on {device}: peak {peak_gb():.1f} GB, {row['wall']:.0f}s", flush=True)
 
 
@@ -580,15 +583,16 @@ def main(argv: list[str]) -> None:
               "NUMBA_NUM_THREADS"):
         if os.environ.get(v) != "1":
             raise SystemExit(f"{v}=1 is required (single-threaded workers)")
+    argv, again = clearings.replace_flag(argv)
     cmd = argv[0]
     failed: list[str] = []
     if cmd == "warm":
         warm(argv[1])
     elif cmd == "preset":
-        preset(argv[1], argv[2], argv[3])
+        preset(argv[1], argv[2], argv[3], replace=again)
     elif cmd == "presets":
         for item in argv[2].split(","):
-            preset(argv[1], item, argv[3])
+            preset(argv[1], item, argv[3], replace=again)
     elif cmd == "speed":
         _SPEED_DEVICE.append(argv[3])
         failed = _pool(speed_one, common.ids_of(argv[1]), int(argv[2]))

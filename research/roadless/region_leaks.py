@@ -17,7 +17,7 @@ cheap preset (polish_greedy.CHEAP: its runs named `<metric>@e0.05`) and SIMP's d
 
     S=research/roadless/region_leaks.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S warm <id> <label>              # the label's fixed mesh into gap_clear.CACHE
-    uv run python $S run <id> <label> <simp|cheap|prior> <cpu|gpu>   # a preset, or the prior
+    uv run python $S run <id> <label> <simp|cheap|prior> <cpu|gpu> [--replace]   # a preset
     uv run python $S members <procs>                # the member kblocks' baselines (per block)
     uv run python $S blocks <procs>                 # one metric everywhere: the 13, per block
     uv run python $S loo-blocks <procs>             # who each clearing helps: the 13's presets
@@ -156,6 +156,7 @@ from scipy.sparse.csgraph import connected_components
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import clearings  # noqa: E402
 import common  # noqa: E402
 import gap_calib  # noqa: E402
 import gap_clear as gcl  # noqa: E402
@@ -322,10 +323,13 @@ def run_path(label: str, preset: str, bid: str) -> Path:
     return ROWS / "runs" / label / preset / f"{bid}.parquet"
 
 
-def run(bid: str, label: str, preset: str, device: str) -> None:
-    """A preset under a configuration (module docstring)."""
+def run(bid: str, label: str, preset: str, device: str, *, replace: bool) -> None:
+    """A preset under a configuration (module docstring), its row written once
+    (clearings.write_once: a row standing under its identity refuses the run before any work,
+    unless `replace`)."""
     metric = metric_of(label, preset, device)
     out = run_path(label, preset, bid)
+    clearings.check_new(out, replace=replace)
     t0 = time.time()
 
     def go() -> dict[str, object]:
@@ -342,8 +346,7 @@ def run(bid: str, label: str, preset: str, device: str) -> None:
     row.update(label=label, preset=preset, metric=metric.name, trip_m=CONFIGS[label].trip_m,
                host=socket.gethostname(),
                peak_rss_gb=gap_calib.peak_gb(), gpu_gb=gpu_gb, wall=time.time() - t0)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([row]).to_parquet(out)
+    clearings.write_once(pd.DataFrame([row]), out, replace=replace)
     print(f"{bid} {label} {preset} on {device}: {metric.name}; peak {gap_calib.peak_gb():.1f} GB, "
           f"GPU {gpu_gb:.1f} GB, {row['wall']:.0f}s", flush=True)
 
@@ -1478,11 +1481,12 @@ def _single_threaded() -> None:
 
 def main(argv: list[str]) -> None:
     _single_threaded()
+    argv, again = clearings.replace_flag(argv)
     cmd = argv[0] if argv else ""
     if cmd == "warm" and len(argv) == 3:
         warm(common.ids_of(argv[1])[0], argv[2])
     elif cmd == "run" and len(argv) == 5 and argv[3] in PRESETS:
-        run(common.ids_of(argv[1])[0], argv[2], argv[3], argv[4])
+        run(common.ids_of(argv[1])[0], argv[2], argv[3], argv[4], replace=again)
     elif cmd == "run" and len(argv) == 5 and argv[3] == "prior" and argv[2] in CONFIGS:
         prior(common.ids_of(argv[1])[0], argv[2], argv[4])
     elif cmd == "members" and len(argv) == 2:

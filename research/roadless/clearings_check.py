@@ -5,6 +5,7 @@ rest are unit tests (tests/test_clearings.py).
     PYTHONPATH=. uv run python research/roadless/clearings_check.py banks
     PYTHONPATH=. uv run python research/roadless/clearings_check.py rescore <ids,> <run[@step]>,... \
         <own|metric>
+    PYTHONPATH=. uv run python research/roadless/clearings_check.py overwrite <ids,> [no-check]
 
 From the repo root, on the CPU, single-threaded (OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1).
@@ -31,12 +32,20 @@ row's own D, Lens A (`perm`) and enclosed share. `run@step` names a nested run's
 `last` or `mid` (a single-budget run is step 1, written `run` alone). A complex run must match:
 its name carries every constant that can move a score. A run the retired raster made is a record:
 its clearings read under a complex metric named, never under its own (`own` raises).
+
+`overwrite`: the optimizers' no-overwrite guard (clearings.write_once; NOTES, "The consolidated
+pass"). On each block, in a temporary rows root, SIMP (relax.main `one`, a short plan) and the
+greedy and its polish (polish_greedy.main, a coarse picker) each run once; run again, each must
+refuse (clearings.Exists) before any work and leave the first row's bytes; run with `replace`,
+each must write a new row in its place. Fault `no-check` (check_new a no-op and the exclusive
+link an os.replace: the check removed): the second run writes over the first, and the guard
+fails.
 """
 from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -196,16 +205,102 @@ def rescore(store: Store, block_ids: Sequence[str], specs: Sequence[str], under:
         del models
 
 
+# `overwrite`'s runs: cheap settings, the guard is of the writer, not the optimizer
+GUARD_PLAN = "fw0.q1.5.i2"                     # SIMP: one stage, two updates
+GUARD_GREEDY = ("S0.05cat", 4, 2)              # the greedy's picker, the polish's tries and width
+
+
+def overwrite(block_ids: Sequence[str]) -> list[str]:
+    """`overwrite` (module docstring): the failures, one line each."""
+    import os
+    import tempfile
+    from unittest import mock
+
+    import metrics
+    import polish_greedy
+    import relax
+    import search
+
+    metric = metrics.metric_of(metrics.RUNTIME, device="cpu")
+    plan = relax.plan_of(GUARD_PLAN)
+    picker, tries, width = GUARD_GREEDY
+    bad = []
+    with tempfile.TemporaryDirectory() as tmp, \
+            mock.patch.object(relax, "OUT", Path(tmp) / "relax_rows"), \
+            mock.patch.object(polish_greedy, "HERE", Path(tmp)):
+        for bid in block_ids:
+            def simp(again: bool, b: str = bid) -> None:
+                relax.main("one", [b], 1.0, metric, plan, 1, relax.D_LENS, replace=again)
+
+            def greedy(again: bool, b: str = bid) -> None:
+                polish_greedy.main(b, 1.0, metric, picker, tries, width, relax.D_LENS, False,
+                                   scoring=search.InEps(), replace=again)
+            runs: dict[str, tuple[Callable[[bool], None], Path]] = {
+                "simp": (simp, relax.rows_of(plan, metric.name, relax.D_LENS)
+                         / f"{bid}_p1.parquet"),
+                "greedy+polish": (greedy, polish_greedy.rows_of(
+                    picker, tries, width, False, search.InEps(), metric.name, relax.D_LENS)
+                    / f"{bid}_p1.parquet")}
+            for what, (go, row) in runs.items():
+                go(False)
+                first = (row.read_bytes(), os.stat(row).st_ino)
+                try:
+                    go(False)
+                    bad.append(f"{bid} {what}: a second run of its identity was not refused")
+                except clearings.Exists as e:
+                    print(f"{bid} {what}: the second run refused ({e})", flush=True)
+                if (row.read_bytes(), os.stat(row).st_ino) != first:
+                    bad.append(f"{bid} {what}: the second run replaced the first row")
+                go(True)
+                if os.stat(row).st_ino == first[1]:
+                    bad.append(f"{bid} {what}: --replace wrote no new row")
+                print(f"{bid} {what}: the replacement named, a new row in its place", flush=True)
+    return bad
+
+
+def _no_check() -> Any:
+    """The fault: the no-overwrite check removed (check_new a no-op; the exclusive link an
+    os.replace, as an unguarded writer's to_parquet would)."""
+    import contextlib
+    import os
+    from unittest import mock
+    stack = contextlib.ExitStack()
+    stack.enter_context(mock.patch.object(clearings, "check_new", lambda path, *, replace: None))
+    stack.enter_context(mock.patch.object(clearings, "_exclusive", os.replace))
+    return stack
+
+
+OVERWRITE_FAULTS = {"no-check": _no_check}
+
+
 def main(argv: Sequence[str]) -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("blocks")
     sub.add_parser("banks")
+    ow = sub.add_parser("overwrite")
+    ow.add_argument("ids")
+    ow.add_argument("fault", nargs="?", choices=sorted(OVERWRITE_FAULTS))
     rs = sub.add_parser("rescore")
     rs.add_argument("ids")
     rs.add_argument("runs")
     rs.add_argument("under", help="own (each run under its own metric) or a metric's name")
     args = ap.parse_args(argv)
+    if args.cmd == "overwrite":
+        import common
+        ids = common.ids_of(args.ids)
+        if args.fault is None:
+            bad = overwrite(ids)
+        else:
+            with OVERWRITE_FAULTS[args.fault]():
+                bad = overwrite(ids)
+        print(f"overwrite{'' if args.fault is None else f' under the fault {args.fault}'}: "
+              + ("FAILS: " + "; ".join(bad) if bad else "passes"), flush=True)
+        if bad and args.fault is None:
+            raise SystemExit(1)
+        if not bad and args.fault is not None:
+            raise SystemExit(f"the fault {args.fault} went unseen: the guard guards nothing")
+        return
     store = Store.committed()
     if args.cmd == "blocks":
         check_blocks(store)

@@ -12,7 +12,7 @@ complex (decision (2)).
     uv run python $S propose-all <rows> <scratch> <procs> <ids,> <methods,> <timeout h> \
         <time-hits|no>
     uv run python $S prefixes <rows> <lineup,> <scratch> <procs> <ids,>
-    uv run python $S cx <rows> <scratch> <metric> <cpu|gpu> <id> <items,>    # on the complex
+    uv run python $S cx <rows> <scratch> <metric> <cpu|gpu> <id> <items,> [--replace]
     uv run python $S cxreport <rows> <lineup,> <metric> <cpu|gpu>
 
 ON THE COMPLEX (phase 2b; NOTES, "The complex as the runtime: the ports and the cross-checks"):
@@ -526,15 +526,14 @@ def _block_row(m: gcl.Model) -> dict[str, object]:
 
 
 def cx_network(rows: Path, scratch: Path, metric: gcl.ComplexMetric, b: Block,
-               name: str) -> None:
+               name: str, *, replace: bool) -> None:
     """One network on the complex: its area prefixes' corridors (prefix_dir's rows: every budget
     and the whole network) cut into the footprints, one mesh (built in a temporary directory:
     it serves this network only), each prefix a state; the rows, the prefix rows with the lenses
-    added, to cx_dir."""
+    added, to cx_dir, written once (clearings.write_once, unless `replace`)."""
     bid = b.block_id
     out = cx_dir(rows, metric) / f"{bid}__{name}.parquet"
-    if out.exists():
-        return
+    clearings.check_new(out, replace=replace)
     t0 = time.perf_counter()
     every = pd.read_parquet(prefix_dir(rows) / f"{bid}__{name}.parquet")
     pre = every[every["pop"] == CX_POP].reset_index(drop=True)
@@ -559,8 +558,7 @@ def cx_network(rows: Path, scratch: Path, metric: gcl.ComplexMetric, b: Block,
         **{k: v for k, v in _block_row(m).items() if k != "n"}, t_carve=t_carve,
         t_mesh=t_mesh, t_model=t_model, t_total=time.perf_counter() - t0,
         peak_rss_gb=_status_gb("VmHWM"))
-    out.parent.mkdir(parents=True, exist_ok=True)
-    write_parquet(df, out)
+    clearings.write_once(df, out, replace=replace)
     at = df[np.isclose(df.budget, PRICE_BUDGET)]
     print(f"{time.strftime('%H:%M:%S')} {bid} {name}: {len(stops)} prefixes, {carving.n} atoms, "
           f"mesh {fx.fm.nt} triangles in {t_mesh:.0f}s, model {t_model:.0f}s, states "
@@ -569,23 +567,24 @@ def cx_network(rows: Path, scratch: Path, metric: gcl.ComplexMetric, b: Block,
 
 
 def cx_plain(rows: Path, metric: gcl.ComplexMetric, b: Block, *,
-             scoring: search.PolishScoring) -> None:
+             scoring: search.PolishScoring, replace: bool) -> None:
     """The block's plain mesh (the node's cache): its baseline and each home's P_{1/2} weight
     (`<id>__homes`), the stored clearings (cx_stored) scored, then SIMP's default and the cheap
     preset run under P at D PRICE_BUDGET (their rows where relax.py and polish_greedy.py keep them,
-    their polish scored by `scoring`) and their clearings scored (`<id>__plain`)."""
+    their polish scored by `scoring`; a preset whose rows stand is read, not run again) and their
+    clearings scored (`<id>__plain`). Every row written once (clearings.write_once, unless
+    `replace`, which runs the presets again too)."""
     bid = b.block_id
     d = cx_dir(rows, metric)
     out = d / f"{bid}__plain.parquet"
-    if out.exists():
-        return
-    d.mkdir(parents=True, exist_ok=True)
+    clearings.check_new(out, replace=replace)
     pop = common.PopulationDemand()
     t0 = time.perf_counter()
     m = metric.clearing(b, demand=pop)
-    write_parquet(pd.DataFrame(dict(block=bid, home=np.arange(m.n), pop=m.pop, u0=m.u_pop0,
-                                    a_q=m.inj_q / m.pop, nodem=m.nodem, walled0=m.walled0)),
-                  d / f"{bid}__homes.parquet")
+    clearings.write_once(pd.DataFrame(dict(block=bid, home=np.arange(m.n), pop=m.pop,
+                                           u0=m.u_pop0, a_q=m.inj_q / m.pop, nodem=m.nodem,
+                                           walled0=m.walled0)),
+                         d / f"{bid}__homes.parquet", replace=replace)
     store = clearings.Store.committed()
     out_rows = [dict(clearing="baseline", run="", n_cleared=0, D=0.0, stored_perm=np.nan,
                      **_lens_row(m, m.base), t=0.0)]
@@ -617,16 +616,15 @@ def cx_plain(rows: Path, metric: gcl.ComplexMetric, b: Block, *,
     dirs = cx_presets(metric, scoring)
     simp_rows = dirs.simp / f"{bid}_p{CX_POWER:g}.parquet"
     ts = time.perf_counter()
-    if not simp_rows.exists():
-        simp_rows.parent.mkdir(parents=True, exist_ok=True)
-        write_parquet(pd.DataFrame([relax.one(bid, CX_POWER, metric, plan, PRICE_BUDGET,
-                                              demand=pop)]), simp_rows)
+    if replace or not simp_rows.exists():
+        clearings.write_once(pd.DataFrame([relax.one(bid, CX_POWER, metric, plan, PRICE_BUDGET,
+                                                     demand=pop)]), simp_rows, replace=replace)
     t_simp = time.perf_counter() - ts
     cheap_rows = dirs.cheap / f"{bid}_p{CX_POWER:g}.parquet"
     ts = time.perf_counter()
-    if not cheap_rows.exists():
+    if replace or not cheap_rows.exists():
         polish_greedy.main(bid, CX_POWER, c.on(metric), c.picker, c.tries, c.width,
-                           PRICE_BUDGET, c.pairs, scoring=scoring)
+                           PRICE_BUDGET, c.pairs, scoring=scoring, replace=replace)
     t_cheap = time.perf_counter() - ts
     m = metric.clearing(b, demand=pop)
     cheap_search = c.on(metric).name.removeprefix(metric.name)       # the cheap preset's @e<eps>
@@ -637,25 +635,25 @@ def cx_plain(rows: Path, metric: gcl.ComplexMetric, b: Block, *,
         r = pd.read_parquet(f).iloc[0]
         score(key, store_run(f.parent), np.asarray(r[ids_col], dtype=np.int64),
               float(r[perm_col]))
-    write_parquet(pd.DataFrame(out_rows).assign(
+    clearings.write_once(pd.DataFrame(out_rows).assign(
         block=bid, metric=metric.name, device=metric.device, **_block_row(m),
         t_stored=t_stored, t_simp=t_simp, t_cheap=t_cheap, t_total=time.perf_counter() - t0,
-        peak_rss_gb=_status_gb("VmHWM")), out)
+        peak_rss_gb=_status_gb("VmHWM")), out, replace=replace)
     print(f"{time.strftime('%H:%M:%S')} {bid} plain: {len(out_rows)} states, SIMP {t_simp:.0f}s, "
           f"cheap {t_cheap:.0f}s, total {time.perf_counter() - t0:.0f}s", flush=True)
 
 
 def cx(rows: Path, scratch: Path, metric: gcl.ComplexMetric, bid: str, items: list[str], *,
-       scoring: search.PolishScoring) -> None:
+       scoring: search.PolishScoring, replace: bool) -> None:
     """The block's items on the complex, one after another: `plain` (cx_plain) or a network of
     prefix_dir (cx_network)."""
     _check_single_threaded()
     [b] = common.build_blocks([bid])
     for item in items:
         if item == "plain":
-            cx_plain(rows, metric, b, scoring=scoring)
+            cx_plain(rows, metric, b, scoring=scoring, replace=replace)
         else:
-            cx_network(rows, scratch, metric, b, item)
+            cx_network(rows, scratch, metric, b, item, replace=replace)
 
 
 # ------------------------------------------------------------------ report
@@ -798,7 +796,7 @@ def lineup_of(arg: str) -> tuple[str, ...]:
 
 
 if __name__ == "__main__":
-    a = sys.argv[1:]
+    a, again = clearings.replace_flag(sys.argv[1:])
     cmd = a[0]
     if cmd == "propose":
         if a[5] not in ("cache", "fresh"):
@@ -819,7 +817,7 @@ if __name__ == "__main__":
         polish = {"cpu": "E", "gpu": ""}[a[4]]
         cx(Path(a[1]), Path(a[2]),
            gcl.complex_of(a[3], factorization=gap_factor.factorization_of(a[4])), a[5],
-           a[6].split(","), scoring=search.polish_scoring_of(polish))
+           a[6].split(","), scoring=search.polish_scoring_of(polish), replace=again)
     elif cmd == "cxreport":
         if len(a) != 5:
             raise SystemExit("cxreport <rows> <lineup,> <metric> <cpu|gpu>")

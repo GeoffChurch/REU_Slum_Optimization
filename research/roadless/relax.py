@@ -19,7 +19,9 @@ score exactly.
     CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/relax.py one|path <ids,|all> <p> <cpu|gpu> <plan> <metric> [workers] [budget]
 
 metric: the gap complex's name (gap_clear.ComplexMetric; cpu or gpu, its factorization's),
-resolved here (metrics.metric_of) and handed down. one: SIMP at one budget (default D_LENS, 0.05;
+resolved here (metrics.metric_of) and handed down. A block whose rows stand under the run's
+identity refuses the run (clearings.write_once: the no-overwrite guard) unless `--replace` is
+given anywhere on the line. one: SIMP at one budget (default D_LENS, 0.05;
 plus the Frank-Wolfe relaxation and bound if fw > 0), rows in relax_rows/<metric>/<plan>/D<budget>/.
 path: nested budgets D 0.01 .. 0.15, rows in the greedy's format (clear.rows_dir, picker
 SIMP<plan>).
@@ -53,6 +55,7 @@ import pandas as pd
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import clearings  # noqa: E402
 import common  # noqa: E402
 import search  # noqa: E402
 from clear import EPS, rows_dir  # noqa: E402
@@ -721,17 +724,17 @@ _CFG: dict = {}
 def _run(bid: str) -> str | None:
     """`bid` if it failed (reported, and main exits non-zero at the end). The rows (named by
     the power alone) are the population's own demand's; pweight.py runs priority-weighted P."""
-    mode, power, metric, plan, budget = (_CFG[k] for k in (
-        "mode", "power", "metric", "plan", "budget"))
+    mode, power, metric, plan, budget, replace = (_CFG[k] for k in (
+        "mode", "power", "metric", "plan", "budget", "replace"))
     demand = common.PopulationDemand()
+    out = _target(mode, bid, power, plan, metric.name, budget)
     try:
         if mode == "one":
-            pd.DataFrame([one(bid, power, metric, plan, budget, demand=demand)]).to_parquet(
-                rows_of(plan, metric.name, budget) / f"{bid}_p{power:g}.parquet")
+            clearings.write_once(pd.DataFrame([one(bid, power, metric, plan, budget,
+                                                   demand=demand)]), out, replace=replace)
         else:
-            out = rows_dir(f"SIMP{plan.name}", power=power, metric=metric.name) / f"{bid}.parquet"
-            path(bid, power, metric, plan, demand=demand).assign(device=metric.device).to_parquet(
-                out)
+            clearings.write_once(path(bid, power, metric, plan, demand=demand).assign(
+                device=metric.device), out, replace=replace)
             print(f"{time.strftime('%H:%M:%S')} {bid} path done", flush=True)
     except Exception as e:
         print(f"{bid} FAILED {type(e).__name__}: {e}"[:300], flush=True)
@@ -746,13 +749,15 @@ def _target(mode: str, bid: str, power: float, plan: Plan, along: str, budget: f
 
 
 def main(mode: str, ids: list[str], power: float, metric: gap_clear.ComplexMetric, plan: Plan,
-         workers: int, budget: float) -> None:
+         workers: int, budget: float, *, replace: bool) -> None:
+    """Every block's run; a block whose rows stand under this identity refuses the whole run
+    before any work (clearings.check_new), unless `replace` names the replacement."""
     if mode not in ("one", "path"):
         raise ValueError(f"unknown mode {mode!r}")
-    _target(mode, ids[0], power, plan, metric.name, budget).parent.mkdir(parents=True,
-                                                                         exist_ok=True)
-    _CFG.update(mode=mode, power=power, metric=metric, plan=plan, budget=budget)
-    todo = [i for i in ids if not _target(mode, i, power, plan, metric.name, budget).exists()]
+    for i in ids:
+        clearings.check_new(_target(mode, i, power, plan, metric.name, budget), replace=replace)
+    _CFG.update(mode=mode, power=power, metric=metric, plan=plan, budget=budget, replace=replace)
+    todo = list(ids)
     if workers == 1:
         failed = [f for f in map(_run, todo) if f]
     else:
@@ -765,9 +770,10 @@ def main(mode: str, ids: list[str], power: float, metric: gap_clear.ComplexMetri
 
 if __name__ == "__main__":
     import metrics
-    ids = common.recipients() if sys.argv[2] == "all" else common.ids_of(sys.argv[2])
-    plan = plan_of(sys.argv[5])
-    main(sys.argv[1], ids, float(sys.argv[3]),
-         metrics.metric_of(sys.argv[6], device=sys.argv[4]), plan,
-         int(sys.argv[7]) if len(sys.argv) > 7 else 1,
-         float(sys.argv[8]) if len(sys.argv) > 8 else D_LENS)
+    argv, again = clearings.replace_flag(sys.argv)
+    ids = common.recipients() if argv[2] == "all" else common.ids_of(argv[2])
+    plan = plan_of(argv[5])
+    main(argv[1], ids, float(argv[3]),
+         metrics.metric_of(argv[6], device=argv[4]), plan,
+         int(argv[7]) if len(argv) > 7 else 1,
+         float(argv[8]) if len(argv) > 8 else D_LENS, replace=again)

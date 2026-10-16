@@ -330,6 +330,25 @@ def test_the_audit_refuses_a_column_it_does_not_know() -> None:
         exporter.audit([*cols, "brand_new"], exporter.SIMP, Path("f"))
 
 
+def test_a_runs_row_is_written_once_unless_its_replacement_is_named(tmp_path: Path) -> None:
+    """The optimizers' no-overwrite guard (clearings.write_once): a second write of one identity
+    raises and leaves the first row; `replace` names the replacement. Fault-injected: with
+    `_exclusive` an os.replace (the check removed) the second write replaced the first and this
+    failed; clearings_check.py `overwrite` runs it through the optimizers."""
+    f = tmp_path / "relax_rows" / "m" / "plan" / "D0.05" / "b_p1.parquet"
+    clearings.write_once(pd.DataFrame({"perm": [0.1]}), f, replace=False)
+    with pytest.raises(clearings.Exists):
+        clearings.check_new(f, replace=False)
+    with pytest.raises(clearings.Exists):
+        clearings.write_once(pd.DataFrame({"perm": [0.2]}), f, replace=False)
+    assert pd.read_parquet(f)["perm"].tolist() == [0.1]
+    assert not [g for g in f.parent.iterdir() if g != f]          # no temp file left behind
+    clearings.check_new(f, replace=True)
+    clearings.write_once(pd.DataFrame({"perm": [0.3]}), f, replace=True)
+    assert pd.read_parquet(f)["perm"].tolist() == [0.3]
+    assert clearings.replace_flag(["one", "--replace", "x"]) == (["one", "x"], True)
+
+
 def test_merging_keeps_what_the_sources_lost_adds_what_is_new_and_flags_an_overwrite(
         tmp_path: Path) -> None:
     s = clearings.Store(tmp_path)

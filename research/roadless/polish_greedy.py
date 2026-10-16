@@ -12,7 +12,7 @@ budget) and the polish never moves them. Where no home is walled in nothing is h
 as before.
 
     PYTHONPATH=. uv run python research/roadless/polish_greedy.py <id> <p> <cpu|gpu> <picker> \\
-        <tries> <width> <metric> <budget> [x2] [E]
+        <tries> <width> <metric> <budget> [x2] [E] [--replace]
 
 metric: the gap complex's name (metrics.metric_of; cpu or gpu, its factorization's device). `x2`:
 two-for-one moves too (search.Swaps' pairs); `E`: the candidates scored exactly. Rows in
@@ -37,6 +37,7 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import clear  # noqa: E402
+import clearings  # noqa: E402
 import common  # noqa: E402
 import search  # noqa: E402
 import relax  # noqa: E402
@@ -78,13 +79,16 @@ def rows_of(picker: str, tries: int, width: int, pairs: bool, scoring: search.Po
 
 
 def main(bid: str, power: float, metric: gap_clear.ComplexMetric, picker_spec: str, tries: int,
-         width: int, budget: float, pairs: bool, *, scoring: search.PolishScoring) -> None:
-    """`metric` the run's (metrics.metric_of); its row (`run`'s) in rows_of."""
+         width: int, budget: float, pairs: bool, *, scoring: search.PolishScoring,
+         replace: bool) -> None:
+    """`metric` the run's (metrics.metric_of); its row (`run`'s) in rows_of, written once
+    (clearings.write_once: a row standing under its identity refuses the run before any work,
+    unless `replace`)."""
     out = (rows_of(picker_spec, tries, width, pairs, scoring, metric.name, budget)
            / f"{bid}_p{power:g}.parquet")
+    clearings.check_new(out, replace=replace)
     row = run(bid, power, metric, picker_spec, tries, width, budget, pairs, scoring=scoring)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame([row]).to_parquet(out)
+    clearings.write_once(pd.DataFrame([row]), out, replace=replace)
 
 
 def run(bid: str, power: float, metric: gap_clear.ComplexMetric, picker_spec: str, tries: int,
@@ -133,10 +137,11 @@ def run(bid: str, power: float, metric: gap_clear.ComplexMetric, picker_spec: st
 
 if __name__ == "__main__":
     import metrics
-    a = sys.argv[1:]
+    a, again = clearings.replace_flag(sys.argv[1:])
     flags = a[8:]
     if len(a) < 8 or flags not in ([], ["x2"], ["E"], ["x2", "E"]):
         raise SystemExit("usage: <id> <p> <cpu|gpu> <picker> <tries> <width> <metric> <budget> "
-                         "[x2] [E]")
+                         "[x2] [E] [--replace]")
     main(a[0], float(a[1]), metrics.metric_of(a[6], device=a[2]), a[3], int(a[4]), int(a[5]),
-         float(a[7]), "x2" in flags, scoring=search.polish_scoring_of("E" if "E" in flags else ""))
+         float(a[7]), "x2" in flags, scoring=search.polish_scoring_of("E" if "E" in flags else ""),
+         replace=again)

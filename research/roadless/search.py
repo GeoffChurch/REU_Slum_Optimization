@@ -31,7 +31,10 @@ relax.py's rows of that plan, power and conductance): the seed is the first move
 and checked against SIMP's own score of it, so a swing from it finishes SIMP's answer.
 
     CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/search.py <ids,> <spec> <p> \
-        <cpu|gpu> <metric> <d_max>
+        <cpu|gpu> <metric> <d_max> [--replace]
+
+A block whose rows stand under the run's identity refuses the run (clearings.write_once: the
+no-overwrite guard) unless `--replace` names the replacement.
 
 metric: the complex's name (gap_clear.ComplexMetric; cpu or gpu, its factorization's):
 metrics.metric_of, resolved here and handed down.
@@ -53,7 +56,6 @@ The check that audits the parts' pairings (a Gradient ranking with TopSingles is
 from __future__ import annotations
 
 import dataclasses
-import os
 import re
 import sys
 import time
@@ -1352,7 +1354,10 @@ def prune_block(b: Any, plan: SearchPlan, *, metric: gap_clear.ComplexMetric,
 
 
 def main(ids: list[str], plan: SearchPlan, power: float, metric: gap_clear.ComplexMetric,
-         d_max: float) -> None:
+         d_max: float, *, replace: bool) -> None:
+    """Every block's rows in clear.rows_dir, written once (clearings.write_once): a block whose
+    rows stand under this identity refuses the run before any work, unless `replace`."""
+    import clearings
     import polish_greedy  # the cheap preset's polish world
 
     def screen_of(c: gap_clear.Model, pw: float) -> Valuer:
@@ -1364,12 +1369,11 @@ def main(ids: list[str], plan: SearchPlan, power: float, metric: gap_clear.Compl
                             eps=polish_greedy.SCORE_EPS).metric_world(polish_greedy.SCORE_EPS)
 
     out = rows_dir(f"{plan.name}D{d_max:g}", power=power, metric=metric.name)
-    out.mkdir(parents=True, exist_ok=True)
+    for bid in ids:
+        clearings.check_new(out / f"{bid}.parquet", replace=replace)
     failed = []
     for b in common.build_blocks(ids):
         f = out / f"{b.block_id}.parquet"
-        if f.exists():
-            continue
         try:
             rows = prune_block(b, plan, metric=metric, screen_of=screen_of, polish_of=polish_of,
                                power=power, d_max=d_max)
@@ -1377,9 +1381,7 @@ def main(ids: list[str], plan: SearchPlan, power: float, metric: gap_clear.Compl
             print(f"{b.block_id} FAILED {type(e).__name__}: {str(e)[:200]}", flush=True)
             failed.append(b.block_id)
             continue
-        tmp = f.with_suffix(f".{os.getpid()}.tmp")
-        rows.to_parquet(tmp)
-        os.replace(tmp, f)
+        clearings.write_once(rows, f, replace=replace)
     if failed:
         raise SystemExit(f"{len(failed)} blocks failed: {', '.join(failed)}")
 
@@ -1389,8 +1391,9 @@ if __name__ == "__main__":
     import relax
     import search       # run as a script this file would be `__main__`, and relax's `search`
                         # a second copy of the engine (its own EXACT and classes)
-    power, device, along, d_max = (float(sys.argv[3]), sys.argv[4], sys.argv[5],
-                                   float(sys.argv[6]))
+    import clearings
+    argv, again = clearings.replace_flag(sys.argv)
+    power, device, along, d_max = (float(argv[3]), argv[4], argv[5], float(argv[6]))
     metric = metrics.metric_of(along, device=device)
 
     def simp_seeds(name: str) -> dict[str, search.Seed]:
@@ -1405,7 +1408,7 @@ if __name__ == "__main__":
         return {str(b): search.Seed(cleared=[int(i) for i in c], perm=float(pm))
                 for b, c, pm in zip(rows.block, rows.simp_cleared, rows.simp_perm, strict=True)}
 
-    search.main(common.ids_of(sys.argv[1]),
-                search.plan_of(sys.argv[2], pool=relax.PAIR_POOL,
+    search.main(common.ids_of(argv[1]),
+                search.plan_of(argv[2], pool=relax.PAIR_POOL,
                                simp_seeds=simp_seeds),
-                power, metric, d_max)
+                power, metric, d_max, replace=again)

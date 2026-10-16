@@ -18,7 +18,7 @@ every objective on the complex's model, with each home's escape time under the p
 the summaries.
 
     S=research/roadless/pweight.py     # from the repo root, PYTHONPATH=., single-threaded
-    uv run python $S task <id> <item>             # one (block, item): a cluster.py `cpu` task
+    uv run python $S task <id> <item> [--replace]  # one (block, item): a cluster.py `cpu` task
     uv run python $S score <procs> <ids,|all>     # here, every block whose items are all back
     uv run python $S report
 
@@ -45,6 +45,7 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import clear  # noqa: E402
+import clearings  # noqa: E402
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
 import gap_factor  # noqa: E402
@@ -132,13 +133,15 @@ def bound(bid: str, obj: Objective) -> dict[str, object]:
                 fw_D=float(c.cost @ x), t=time.time() - t0)
 
 
-def task(bid: str, item: str) -> None:
+def task(bid: str, item: str, *, replace: bool) -> None:
     """One (block, item), single-threaded: SIMP base (simp-) or the bound (fw-), its row to
-    row_path, written whole (rr.write_parquet)."""
+    row_path, written whole and once (clearings.write_once: a row standing under its identity
+    refuses the task before any work, unless `replace`)."""
     rr._check_single_threaded()
     stage, _, token = item.partition("-")
     obj = objective_of(token)
     out = row_path(stage, obj, bid)
+    clearings.check_new(out, replace=replace)
     t0 = time.time()
     if stage == "simp":
         row = relax.one(bid, obj.power, METRIC, PLAN, BUDGET, demand=obj.demand)
@@ -148,8 +151,7 @@ def task(bid: str, item: str) -> None:
         raise SystemExit(f"unknown item {item!r}: simp-<objective> or fw-<objective>")
     row.update(objective=obj.name, item=item, budget=BUDGET, host=socket.gethostname(),
                peak_rss_gb=rr._status_gb("VmHWM"), wall=time.time() - t0)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    rr.write_parquet(pd.DataFrame([row]), out)
+    clearings.write_once(pd.DataFrame([row]), out, replace=replace)
     print(f"{time.strftime('%H:%M:%S')} {bid} {item} done in {time.time() - t0:.0f}s", flush=True)
 
 
@@ -436,9 +438,9 @@ def report() -> None:
 
 
 if __name__ == "__main__":
-    a = sys.argv[1:]
+    a, again = clearings.replace_flag(sys.argv[1:])
     if a[:1] == ["task"] and len(a) == 3:
-        task(a[1], a[2])
+        task(a[1], a[2], replace=again)
     elif a[:1] == ["score"] and len(a) == 3:
         score(int(a[1]), common.recipients() if a[2] == "all" else common.ids_of(a[2]))
     elif a == ["report"]:

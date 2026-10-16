@@ -92,6 +92,10 @@ BLOCKS = "blocks.csv"
 RUNS = "runs.csv"
 
 
+class Exists(FileExistsError):
+    """A run's row already stands under its identity (`write_once`)."""
+
+
 class StaleClearing(ValueError):
     """A committed clearing's block is no longer the block its positions were committed for."""
 
@@ -452,3 +456,49 @@ class Store:
 def cleared_positions(run: str, block: BlockLike, *, step: int) -> NDArray[np.intp]:
     """`Store.committed().cleared(run, block, step=step)`."""
     return Store.committed().cleared(run, block, step=step)
+
+
+# ------------------------------------------------------------------ the runs' rows, written once
+
+def check_new(path: Path, *, replace: bool) -> None:
+    """Refuses (`Exists`) to start a run whose row `path` already stands, unless `replace` (the
+    caller naming a deliberate replacement): the optimizers' no-overwrite guard (BACKLOG, "The
+    stored clearings made durable"; NOTES, "The consolidated pass"). A row's path is its identity:
+    the block, the preset or method, the metric's name, the budget and the seed (each optimizer's
+    rows directory spells them: relax.rows_of, polish_greedy.rows_of, clear.rows_dir, ...), so a
+    finished identity re-run is an error, before any work."""
+    if path.exists() and not replace:
+        raise Exists(f"{path}: a row stands under this identity (block, preset or method, metric, "
+                     "budget, seed); a replacement is named, never taken (--replace)")
+
+
+def _exclusive(tmp: Path, path: Path) -> None:
+    """`tmp` to `path` if nothing stands there (a hard link: atomic, and it fails if `path`
+    exists, so two runs racing for one identity cannot both write)."""
+    os.link(tmp, path)
+
+
+def write_once(df: pd.DataFrame, path: Path, *, replace: bool) -> None:
+    """A run's rows to `path` whole (a temp name no pull matches, then into place) and only if no
+    row stands there, unless `replace` (check_new): a second write of one identity raises
+    `Exists` and leaves the first. The guard: clearings_check.py `overwrite` (fault `no-check`)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    df.to_parquet(tmp)
+    try:
+        if replace:
+            os.replace(tmp, path)
+            return
+        try:
+            _exclusive(tmp, path)
+        except FileExistsError:
+            raise Exists(f"{path}: a row stands under this identity; not replaced (--replace "
+                         "names a replacement)") from None
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def replace_flag(argv: list[str]) -> tuple[list[str], bool]:
+    """A command line less its `--replace` (the caller naming a deliberate replacement of the
+    rows its run would write), and whether it was given."""
+    return [a for a in argv if a != "--replace"], "--replace" in argv
