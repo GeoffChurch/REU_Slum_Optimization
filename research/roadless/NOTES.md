@@ -6102,6 +6102,192 @@ bracket run 1.1 h on 7, the stepped diagnostic 3.0 h on 4, the four guard runs 1
 each. Rows (git-ignored): epireplay.parquet, epireplay_bracket.parquet and its jobs'
 epireplay_bracket_jobs/; epireplay.py, deleted in phase 3, regenerates them from 0c2e588e^.
 
+### Pruning by epistemetry, again: step-wise re-decision and per-arm screens (owner 2026-10-15; BACKLOG, "Pruning by epistemetry's decision layer")
+
+The first replay (above) kept seqscreen and named what would have to change: re-deciding after
+every block, and a per-arm drop in many-arm screens. The owner approved both (2026-10-15) and
+GeoffChurch/epistemetry built them: bbe2163, ValueOfMoreUnits' required `step` (every horizon
+valued, at most `step` units of the best one's observed before deciding again), and 64aae7f,
+per-arm screens in its replay harness (each arm on its own prefix of the order, stopping on its
+own value at its marginal cost; the veto a drop rule of the harness, applied to every policy and
+to the truth alike). The replay ran again before the consolidated pass, under the same rule,
+pinned at 64aae7f through an ephemeral overlay as before.
+
+**The rule, as fixed** (the first replay's, amended): adopt epistemetry for the consolidated
+pass's pruning only if (1) its median realized loss is below seqscreen's at every rate tested
+(per rate, the sum over the designs of each one's median over orders), (2) it makes no more wrong
+calls in all and (3) no more asks in all; pairwise in both veto settings, and a many-arm screen
+counted against the pairwise screens it replaces. Realized loss, wrong calls (AsksApart) and asks
+as before.
+
+**The designs, frozen as data.** The first replay's 13 pairwise designs (the collapse C1m4/p64
+among them) and 5 many-arm ones were extracted once by its own code (`git archive 0c2e588e^`, run
+in a scratch directory with the git-ignored rows linked in; at 0c2e588e^ seqscreen's loaders had
+already lost the raster greedy's, so it was handed simp_compare's, as when the first replay ran)
+into epireplay_designs.json (committed, 263 kB): per design the names, the block ids, each arm's
+Lens A gain over the base and its GPU-seconds, the base's GPU-seconds and the 100 orders. The new
+epireplay.py reads only that file; nothing reads the raster's rows. Its `check` holds the file to
+the first replay's stored runs (epireplay_bracket.parquet, equal to its 95 jobs' files): 9,500 of
+9,500 runs were handed the design's order, 9,500 of 9,500 whole-design calls are the data's, and
+3,800 of 3,800 stored seqscreen runs (blocks, call, GPU-seconds) replay exactly from the data.
+
+**The test.** Every policy on the same 100 orders a design (one `replay` call an order, its
+generator [ORDER_SEED, order]), judged against the same truth, in both veto settings: everywhere,
+the harness's VetoBelow (-0.1 on the gain, KEEP); nowhere, NoVeto with seqscreen's own COLLAPSE
+patched off in the process.
+- seqscreen unchanged, as a Policy of one arm: stop_at on the arm's prefix, a block a step.
+- ValueOfMoreUnits on FinitePopulation with AdoptKeepAsk over the bracket, matched as before:
+  floor 15, every horizon, seqscreen's ratio cost model (now a CostModel holding the base's times,
+  handed the seen blocks' indices), no Monte Carlo margin, and the price rate / FUTURE over the
+  Lens A at stake at the means so far, rebuilt each decision (the mean over the live arms, which
+  share one prefix, of |gain - rate x extra|). At `step` 1. A card's batch is one block here (the
+  local card runs one GPU process; the cluster one card a block-task), and seqscreen, unchanged,
+  decides after every block, so step 1 is the only batch that fits the first replay's choices; no
+  other was run.
+- many-arm: one ValueOfMoreUnits at step 1 over every variant of a design, each arm stopping on
+  its own value (the per-arm screen), against seqscreen once per variant on the same orders,
+  summed. No block of any many-arm design is below -0.1 (the worst -0.012), so the two veto
+  settings are the same run there; run without, as before.
+
+Per design, without the veto (C1m4/p64's veto line beside); blocks and cost are medians over the
+100 orders, wrong calls and asks counts in them; many-arm in block-arm runs, its whole calls per
+variant (A adopt, k keep, ? ask), seqscreen once per variant summed:
+
+    design         all    seqscreen             step 1                   first adopt/keep/ask
+                          blocks cost  wr  ask  blocks    cost  wr  ask  blocks     cost  wr  ask
+    p64/base       adopt  15     0.33   0    0  15 (15)   0.33   0    0  15 (15)    0.33   0    0
+    x2/base        adopt  15     0.41   0    0  15 (15)   0.41   0    0  15 (15)    0.41   0    0
+    both/base      adopt  15     0.34   0    0  15 (24)   0.34   0    0  15 (46)    0.35   0    0
+    both/p64       keep   15     0.34   0    0  15 (43)   0.34   0    7  15 (46)    0.34   0    5
+    r2/base        ask    20     0.43   2   98  15 (30)   0.35   2   98  15 (46)    0.36   2   98
+    x2/p64         ask    15     0.44  35   65  15 (34)   0.46  19   81  15 (36)    0.46  18   82
+    pPg/p256       keep   15     0.34   0   30  15 (36)   0.35   0   33  15 (46)    0.35   0   31
+    GS/p256        ask    15.5   0.36  28   72  17 (44)   0.38  16   84  21.5 (46)  0.46  16   84
+    cheapx2/cheap  adopt  15     0.43   1   15  15 (32)   0.45   0   15  15 (36)    0.46   0   12
+    p256/cheap     adopt  15     0.42   0    0  15 (15)   0.42   0    0  15 (15)    0.42   0    0
+    g005/g01       adopt  15     0.34   0    0  15 (15)   0.34   0    0  15 (15)    0.34   0    0
+    cheap/g01      adopt  15     0.43   0    0  15 (30)   0.47   0    0  15 (36)    0.53   0    0
+    C1m4/p64       keep   12     1.00   0    0  12 (12)   1.00   0    0  12 (12)    1.00   0    0
+      with the veto       5      0.48   0    0  5 (12)    0.48   0    0  5 (12)     0.48   0    0
+    4/base         ?AAA   64     0.46   3   97  62 (74)   0.45   2   98  144 (144)  1.00   1   99
+    2/p64          ?k     33     0.44  35   65  40.5 (69) 0.55  18   87  72 (72)    1.00  13   93
+    2/p256         k?     31     0.35  28  102  36 (76)   0.40  16  116  47 (92)    0.54  12  115
+    2/cheap        AA     30     0.42   1   15  31 (47)   0.43   0   13  72 (72)    1.00   0    2
+    2/g01          AA     30     0.45   0    0  31 (44)   0.49   0    1  30 (68)    0.56   0    0
+
+    the rule        realized loss (1e-6) at 2e-6, 6.2e-6, 1.9e-5   wrong  asks  cost
+    no veto  seqscreen               57.3   178.2   538.9          66   280  0.431
+             step 1                  60.2   183.0   532.1          37   318  0.433
+             first: adopt/keep/ask   66.9   193.0   554.3          36   312  0.447
+             first: stepped          60.2   183.0   532.1          37   318  0.433
+    veto     seqscreen               53.5   166.3   502.0          66   280  0.391
+             step 1                  56.3   171.0   495.2          37   318  0.393
+             first: adopt/keep/ask   63.0   181.0   517.4          36   312  0.407
+             first: stepped          56.3   171.0   495.2          37   318  0.393
+    many-arm seqscreen x arms       132.8   174.3   521.3          67   279  0.424
+             per-arm, step 1         66.9   204.5   526.1          36   315  0.464
+             first: adopt/keep/ask  116.6   359.5  1007.3          26   309  0.821
+
+**Step 1 is the first replay's stepped diagnostic, run for run.** On all 2,600 pairwise runs (13
+designs, 100 orders, both settings) its blocks, calls and GPU-seconds equal those of `Stepped`
+(df863119) exactly: min(step, the best horizon) at step 1 is what that wrapper did by hand. The
+pairwise result is therefore the diagnostic's, now from the layer itself.
+
+**Decision: keep seqscreen, pairwise and many-arm.**
+- Pairwise, in both settings, step 1 fails (1) and (3): its loss is above seqscreen's at the
+  bracket's bottom and middle rates (no veto 60.2 against 57.3 and 183.0 against 178.2; veto 56.3
+  against 53.5 and 171.0 against 166.3) and below at its top (532.1 against 538.9; 495.2 against
+  502.0), with 37 wrong calls against 66 and 318 asks against 280.
+- Many-arm, the per-arm screen fails (1) and (3): below seqscreen once per variant at the bottom
+  rate (66.9 against 132.8), above at the middle (204.5 against 174.3) and top (526.1 against
+  521.3), with 36 wrong calls against 67 and 315 asks against 279. The per-arm drop does what it
+  was built for: the screen spends 0.464 of all its arms' GPU-seconds where the joint screen spent
+  0.821 (seqscreen 0.424), and its loss at the bracket's top halves (526.1 against 1007.3).
+
+Where they differ:
+- **Asks for wrong calls, as before.** Step 1 makes 29 fewer wrong calls and 38 more asks, all on
+  the near-ties: x2/p64 19 wrong and 81 asks against 35 and 65, GS/p256 16 and 84 against 28 and
+  72, both/p64 7 asks against 0, pPg/p256 33 against 30. Under the amended rule both count.
+- **Longer tails, and three near-ties.** Its median blocks are seqscreen's on 11 of 13 designs (15
+  against 20 on r2/base; 17 against 15.5 on GS/p256), but its longest runs are longer on seven
+  (24 -- 44 blocks against 18 -- 36: GS/p256 44 against 22, both/p64 43 against 36, pPg/p256 36
+  against 24, x2/p64 34 against 22). Its loss is above seqscreen's at the bottom and middle rates
+  on GS/p256 (7.3 and 22.8 against 5.1 and 15.4), x2/p64 (6.0 and 18.6 against 5.2 and 16.1) and
+  pPg/p256 (4.6 and 11.0 against 3.5 and 10.5); its win on r2/base (6.9 and 21.6 against 8.4 and
+  28.0), settling the ask at the floor, does not make that up.
+- **Many-arm: the pairwise screens summed, priced together.** Where a design's variants have
+  pairwise designs on its very blocks (2/p256, 2/cheap), the per-arm screen's median loss is within
+  1.1e-6 of the pairwise step-1 screens' summed per order, at every rate (2/p256: 15.8, 45.2, 86.9
+  against 16.5, 45.2, 85.8). It differs from them only by its price, which the live arms share
+  (the layer takes one stop rule): beside a dearer arm a near-tie runs on, x2 in 2/p64 observing
+  more blocks than in x2/p64 in 48 of 100 orders (median 17 against 15), cheapx2 in 2/cheap in 32.
+  Against seqscreen per variant it wins 4/base at every rate (24.5, 77.6, 230.9 against 25.2,
+  80.5, 238.2) and 2/p256 at the bottom (15.8 against 86.0: seqscreen's definite calls on GS,
+  wrong at the low rate), and loses 2/p64 (60.9 against 46.8 at the middle) and 2/p256 at the
+  middle (45.2 against 27.2).
+- **The call at a stop.** The likeliest call and the posterior mean's agree at every stop, as
+  before.
+
+**What would still have to change** (the first measured, the others inferred):
+1. Re-deciding after every block is built and measured: it closes most of the gap (above), not
+   all of it.
+2. A linear-loss target over the bracket, priced in the owner's units (Lens A per GPU-second over
+   FUTURE), instead of a 0-1 risk priced through the plug-in stake: the remaining loss is on three
+   near-ties at the bracket's bottom and middle.
+3. The asks: an ask costs the owner's attention, which no target prices; to win on both counts a
+   policy must stop where the call is clear or spend enough to settle it.
+4. Many-arm: each arm priced by its own stake (a price, or a stop rule, per arm). The many-arm
+   screen would then be the pairwise step-1 screens summed (it is already, where its arms' shared
+   price does not move them), so it would pass where they pass: it needs 2 and 3 too.
+
+**Guards** (each with its fault; `guards none|step|floor|ignored|observing|shuffled`):
+- migration: the one-arm designs at step 46 (at least every horizon) reproduce the first replay's
+  adopt/keep/ask runs exactly, 2,600 of 2,600 (blocks, calls, GPU-seconds, both settings). Fault
+  (step 1 given instead): 2,046 of 2,600, FAIL.
+- wrapper: seqscreen as a Policy reproduces seqscreen's own replay order by order (stop_at on the
+  data's orders, 13 designs, both settings) and seqscreen.main's printed summary on the 8 designs
+  without dropped blocks (main's reader handed the data file's rows): 2,608 of 2,608. Fault (the
+  wrapper's floor 14): 725 of 2,608, FAIL.
+- degenerate: on p64 against base with p64's gains replaced by the base's, step 1 and step 46,
+  both settings, stop at the floor with "keep" in all 100 orders. Fault (the floor ignored, 1):
+  every run stops at 1 block, FAIL.
+- per-arm drop: on C1m4 beside a copy without its collapse (12 tuning blocks, the veto on), the
+  collapsing arm observed no block past its collapse and was charged for none while the other ran
+  on, in 100 of 100 orders; arms dropped on value (left out of a step while another goes on) kept
+  their prefix and stopped paying, in 5 of 4/base's first 10 orders (15 arms) and in all 355 of
+  the run's 500 many-arm screens with such a drop (504 arms). Fault (the dropped arm kept
+  observing: every live arm stepped while any goes on, and no veto): 0 of 100 collapse runs and 0
+  of 5 runs with a drop on 4/base, FAIL.
+- same orders: every policy on an order was handed that order, at every decision, in all 9,500
+  runs. Fault (step 1 without the veto on both/p64 handed a reshuffled order 3): that run
+  flagged, FAIL.
+
+**Feedback for epistemetry** (for its author):
+- One stop rule, so one price, for every arm: the price here is the Lens A at stake at the means
+  so far, which per arm is that arm's own; the layer cannot take it (its stop rule is not told the
+  arm), so the live arms share their mean, and a near-tie beside a dearer arm runs on (above).
+- The price depends on what was seen, so the policy is rebuilt at each decision; before any block
+  there is nothing to price, and `calls` needs a ValueOfMoreUnits (a stop rule) though it reads
+  none (`Observed(())` stands in for both). A price as a function of Seen would do away with both.
+- `calls`' rows: AdoptKeepAsk's decision on one arm's draws is a length-1 array, so
+  ValueOfMoreUnits' calls are (arms, 1) where a policy deciding one call per arm returns (arms,);
+  `replay` takes both (its overrule and scoring broadcast), so Run.calls' shape depends on the
+  policy.
+- ValueOfMoreUnits' twelve fields are required but positional: outer and inner, or step and floor,
+  swap without an error (kw_only would catch it).
+- `replay` still passes no order number, so a policy with a per-order generator (seqscreen's)
+  needs a call per order, each recomputing the whole-design calls; the truth across policies is
+  still the caller's to assert.
+- No record of the decisions: the guards wrap every policy (`Witness`) to see the order shown,
+  each arm's prefix and the step answered; Run could carry its steps.
+- Carried over: a linear-loss target over the bracket, the rate as a distribution, and
+  FinitePopulation's population the design's (right for a replay's truth, not for FUTURE runs).
+
+Compute: here, single-threaded, at most 4 processes: the extraction and the check minutes each,
+the run 5.3 h on 4 workers (95 jobs, the step-1 ones most of it), the six guard runs 0.9 -- 1.1 h
+each, four at a time. Rows (git-ignored): epireplay2.parquet, epireplay2_screens.parquet and the
+jobs' epireplay2_jobs/; epireplay.py regenerates them from epireplay_designs.json.
+
 ### Exits as leaks: the region model on the complex (5810@major)
 
 BACKLOG 4, decision (4) (the brief: .superpowers/sdd/2026-10-13-region-leaks; the owner
