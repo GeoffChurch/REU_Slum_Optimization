@@ -697,6 +697,11 @@ class Carving(NamedTuple):
     def n(self) -> int:
         return len(self.polys)
 
+    def shifted(self, by: tuple[float, float]) -> Carving:
+        """The same atoms in a frame where every point's coordinates are its coordinates here
+        plus `by` (a block's local frame moved by its barriers' cut: ComplexMetric.fixed)."""
+        return self._replace(polys=shapely.transform(self.polys, lambda xy: xy + np.array(by)))
+
     @staticmethod
     def none(geo: gc.Geometry) -> Carving:
         """No roads: every building one atom (the plain fixed mesh)."""
@@ -1661,11 +1666,17 @@ class ComplexMetric:
                      tension_eps=self.search_eps, exits=self.exits)
 
     def fixed(self, block, *, cache: Path, carving: Carving) -> Fixed:
-        """The block's fixed mesh on `carving`'s atoms: Carving.none, the metric's own mesh (every
-        clearing a state); a road network's (Carving.of), its prefixes states too. The block as
-        the exits' barriers cut it (its polygon less them: the mesh's identity carries them)."""
-        return Fixed.of(self.exits.barriers.block(block), self.spec, self.fs, self.form,
-                        cache=cache, carving=carving)
+        """The block's fixed mesh on `carving`'s atoms (in `block`'s local frame, gc.geometry):
+        Carving.none, the metric's own mesh (every clearing a state); a road network's
+        (Carving.of), its prefixes states too. The block as the exits' barriers cut it (its
+        polygon less them: the mesh's identity carries them), the atoms moved into the cut
+        block's frame (its origin is its polygon's lower bounds, which a cut at the block's edge
+        moves: 3934's railway, NOTES "The consolidated pass")."""
+        cut = self.exits.barriers.block(block)
+        (x0, y0), (x1, y1) = gc.origin_of(block), gc.origin_of(cut)
+        by = (x0 - x1, y0 - y1)
+        return Fixed.of(cut, self.spec, self.fs, self.form, cache=cache,
+                        carving=carving if by == (0.0, 0.0) else carving.shifted(by))
 
     def clearing(self, block, *, demand: common.Demand) -> Model:
         return self.model(block, self.fixed(block, cache=CACHE,

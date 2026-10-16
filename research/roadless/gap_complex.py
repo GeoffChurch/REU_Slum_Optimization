@@ -124,8 +124,13 @@ def _shifted(g: Any, origin: tuple[float, float]) -> Any:
     return shapely.transform(g, lambda xy: xy - np.array(origin))
 
 
+def origin_of(block) -> tuple[float, float]:
+    """The block's local frame's origin: its polygon's lower bounds."""
+    return (float(block.boundary.bounds[0]), float(block.boundary.bounds[1]))
+
+
 def geometry(block) -> Geometry:
-    origin = (float(block.boundary.bounds[0]), float(block.boundary.bounds[1]))
+    origin = origin_of(block)
     return Geometry(boundary=_shifted(block.boundary, origin),
                     polys=_shifted(np.asarray(block.buildings.outlines), origin),
                     streets=_shifted(shapely.union_all(list(block.streets.geometry)), origin),
