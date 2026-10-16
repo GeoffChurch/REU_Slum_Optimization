@@ -44,8 +44,9 @@ from numba import njit
 from numpy.typing import NDArray
 
 REFINE_BERR = 4 * float(np.finfo(np.float64).eps)  # a solve is refined until its componentwise
-                                                   # backward error max |r| / (|A| |x| + |b|) is
-                                                   # this,
+                                                   # backward error max |r| / (|A| |x| + |b|)
+                                                   # (each term at least what the format
+                                                   # resolves: _residual) is this,
 REFINE_ACCEPT = 1e-8  # ... or stops falling by half (refinement can do no better), when it must
                       # be at most this (a solve worse than that raises)
 REFINE_STEPS = 8
@@ -89,8 +90,21 @@ class Refined:
 
 @njit(cache=True)
 def _residual(indptr, indices, data, b, x):  # type: ignore[no-untyped-def]
-    """(the componentwise backward error max_i |r_i| / (|A| |x| + |b|)_i, 0 where that is 0; the
-    residual r = b - A x), one pass over A (CSR)."""
+    """(the componentwise backward error max_i |r_i| / (|b| + |A| |x|)_i, each term of the
+    denominator counted at no less than the format resolves; the residual r = b - A x), one pass
+    over A (CSR). Below the smallest normal number (tiny, 2^-1022) a float is held, and a product
+    rounded, to the subnormal spacing eps tiny, an absolute precision: x_j is resolved only as a
+    number of size tiny is, and a product only to tiny's eps. So x_j counts at max(|x_j|, tiny)
+    and each |a_ij| max(|x_j|, tiny) at no less than tiny: a row of normal terms is measured as
+    before, bit for bit (a stored zero's tiny vanishes beside a denominator above tiny / eps), and
+    a row on a potential's underflow front by what the format can hold there. Read relatively,
+    such a row is 1 whatever the solve (LAPACK's xGERFS reads it so too, and stops; here it
+    raised): on ZAF.9.1.4_1_7283, its 22 homes at one end of a 4 km strip, the potential falls
+    through the subnormals to 0 some 2.4 km from them, and a row whose only nonzero term is a
+    neighbour's 2^-1074 has a residual equal to its whole denominator (NOTES, "Before the
+    consolidated pass: three fixes"). Every row stores its diagonal, so the denominator is
+    positive."""
+    tiny = np.finfo(np.float64).tiny
     n = len(b)
     r = np.empty(n)
     berr = 0.0
@@ -98,14 +112,13 @@ def _residual(indptr, indices, data, b, x):  # type: ignore[no-untyped-def]
         s = b[i]
         d = abs(b[i])
         for p in range(indptr[i], indptr[i + 1]):
-            v = data[p] * x[indices[p]]
-            s -= v
-            d += abs(v)
+            xj = x[indices[p]]
+            s -= data[p] * xj
+            d += max(abs(data[p]) * max(abs(xj), tiny), tiny)
         r[i] = s
-        if d > 0.0:
-            e = abs(s) / d
-            if e > berr:
-                berr = e
+        e = abs(s) / d
+        if e > berr:
+            berr = e
     return berr, r
 
 

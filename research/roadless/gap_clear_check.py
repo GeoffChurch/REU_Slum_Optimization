@@ -28,6 +28,7 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S trip-calibration - [fault]    # faults: boundary-trips, wrong-home
     uv run python $S closed-edge - [fault]         # fault: edge-open
     uv run python $S street-boost - [fault]        # fault: classes-dropped
+    uv run python $S underflow - [fault]           # fault: unfloored
     uv run python $S both-ways <guards,> <ids,|->  # each guard, then under each of its faults
 
 `baseline`: the fixed mesh (the runtime's metric, METRIC) against the complex rebuilt
@@ -169,6 +170,15 @@ on residential and tertiary at 10x boosts every triangle within BOOST_M of the r
 the link (`_link` folded) and none near the footway, and multiplies a passage between boosted
 triangles by 10 and the others by 1. Fault `classes-dropped`: every way with a highway tag
 boosted.
+
+`underflow` (the refined solve's stopping test, gap_factor._residual; NOTES, "Before the
+consolidated pass: three fixes"): on UNDERFLOW_BLOCK (22 homes at one end of a strip 4 km long,
+under the source's building floor: built through common.member_blocks), whose potential falls
+through the subnormals to 0 along the strip, the model builds (its baseline's solves refined),
+the potential under the population's demand has subnormal cells by a direct solve (the premise:
+the underflow front is there), and the refined solve equals scipy's spsolve within UNDERFLOW_TOL
+of the largest. Fault `unfloored`: the backward error with each term read at its own size
+(_residual before the fix, verbatim): the baseline's solve stalls at a backward error of 1.
 """
 from __future__ import annotations
 
@@ -187,6 +197,7 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 import shapely
+from numba import njit
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -273,6 +284,8 @@ TRIP_EDGE_M = 50.0       # ... TRIP_BLOCK's second home: its centre this far fro
 TRIP_LAM = 60.0          # ... the lam the two homes' pooled trips are read at
 TRIP_ORACLE_DR = 0.05    # ... the oracle's polar grid: radial step (m) and angles
 TRIP_ORACLE_NT = 1440
+UNDERFLOW_BLOCK = "ZAF.9.1.4_1_7283"    # underflow: its potential underflows along a 4 km strip
+UNDERFLOW_TOL = 1e-9     # ... its refined solve against spsolve, of the largest (9.6e-13 apart)
 
 
 @contextmanager
@@ -913,6 +926,60 @@ def _perturb_one() -> contextlib.AbstractContextManager[None]:
             data = np.where(rows == p.indices, data * (1.0 + PERTURB), data)
         return _CUDSS_FACTOR(self, data, unknown)
     return _patched(gap_factor._CuDSSPlan, "factor", factor)
+
+
+# ------------------------------------------------------------------ the refined solve
+
+def underflow(_ids: list[str]) -> list[str]:
+    from scipy.sparse.linalg import spsolve
+    bid = UNDERFLOW_BLOCK
+    got = common.member_blocks([bid])       # under the source's building floor: ids_of refuses it
+    if [g.block_id for g in got] != [bid]:
+        raise ValueError(f"the source yields {[g.block_id for g in got]} for {bid}")
+    [b] = got
+    try:
+        m = _model(b)
+    except RuntimeError as e:
+        print(f"{bid}: the baseline's solve raises ({e}) -> FAILS", flush=True)
+        return [f"{bid}: {e}"]
+    st = m.state(np.zeros(m.n))
+    assert st.A is not None
+    unk = st.reach.unknown
+    u = m.solve(st, m.pop)[unk]
+    direct = np.asarray(spsolve(st.A[unk][:, unk].tocsc(), m._rhs(st, m.pop)[unk]))
+    err = float(np.abs(u - direct).max() / np.abs(direct).max())
+    sub = int(((direct != 0.0) & (np.abs(direct) < np.finfo(np.float64).tiny)).sum())
+    bad = []
+    if not sub:
+        bad.append(f"{bid}: no subnormal potential: not a block for this guard")
+    if err > UNDERFLOW_TOL:
+        bad.append(f"{bid}: the refined solve {err:.1e} of the largest off spsolve's")
+    print(f"{bid}: {m.n} homes, {int(unk.sum())} unknowns, {sub} of them subnormal by spsolve; "
+          f"the model's refined solve against it {err:.1e} of the largest -> "
+          f"{'ok' if not bad else 'FAILS'}", flush=True)
+    return bad
+
+
+@njit
+def _residual_unfloored(indptr, indices, data, b, x):  # type: ignore[no-untyped-def]
+    """gap_factor._residual before the underflow fix, verbatim (fault `unfloored`): each term of
+    the denominator at its own size, a row whose denominator is 0 passed over."""
+    n = len(b)
+    r = np.empty(n)
+    berr = 0.0
+    for i in range(n):
+        s = b[i]
+        d = abs(b[i])
+        for p in range(indptr[i], indptr[i + 1]):
+            v = data[p] * x[indices[p]]
+            s -= v
+            d += abs(v)
+        r[i] = s
+        if d > 0.0:
+            e = abs(s) / d
+            if e > berr:
+                berr = e
+    return berr, r
 
 
 # ------------------------------------------------------------------ roads
@@ -1786,7 +1853,7 @@ GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "enclosure": enclosure, "leak-gradient": leak_gradient, "leak-scale": leak_scale,
     "barriers": barriers, "exits-identity": exits_identity, "loop-index": loop_index,
     "trip-calibration": trip_calibration, "closed-edge": closed_edge,
-    "street-boost": street_boost}
+    "street-boost": street_boost, "underflow": underflow}
 
 
 def _fault_exits():
@@ -1827,6 +1894,7 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "loop-index": {"uncontracted": lambda: _patched_item(_CONTRACT, 0, False)},
     "closed-edge": {"edge-open": lambda: _patched(gx.ClosedEdge, "mesh", lambda self, fm: fm)},
     "street-boost": {"classes-dropped": lambda: _patched(gx.StreetBoost, "on_way", _every_class)},
+    "underflow": {"unfloored": lambda: _patched(gap_factor, "_residual", _residual_unfloored)},
     "trip-calibration": {"boundary-trips": lambda: _patched(gap_maps, "leak_drain",
                                                             _with_street),
                          "wrong-home": lambda: _patched(region_leaks, "trip_origins",
