@@ -70,7 +70,6 @@ import shapely
 from numpy.typing import NDArray
 from scipy.sparse import csr_matrix
 from scipy.sparse.csgraph import dijkstra
-from scipy.spatial import cKDTree
 from shapely.geometry import LineString, Point
 from shapely.geometry.base import BaseGeometry
 from shapely.ops import nearest_points, unary_union
@@ -91,6 +90,13 @@ from reblock.permeability import with_width  # noqa: E402
 
 # This module's code and its research imports', in every identity: no reblock closure reaches them.
 CODE = source_hash(Path(__file__), Path(common.__file__), Path(gc.__file__))
+# The research lineup's stage (BACKLOG 5's TODO, made the road methods' default in the consolidated
+# pass: road_rescore.lineup_arms) and the free-roads guard's (free_roads_check.FREE)
+FREE_BUDGET = 0.05       # the stage's displacement budget (Lens A's: the transparency experiment's)
+FREE_MARGIN_M = 0.05     # a target within half the road's width less the form's growth and this:
+                         # the buffer's polygon falls inside its circle by under 0.005 m at a 3.5 m
+                         # radius
+FREE_LENGTH_TIE = 1e-12  # per metre on every edge: among equal displacements the shorter road
 
 
 class Population(Protocol):
@@ -375,3 +381,12 @@ def _cheapest(graph: RoutingGraph, g: _Graph, t: _Targets, dist: NDArray[np.floa
         if len(coords) >= 2:     # a street node exactly on the street, alone, makes no line
             return HeldRoad(geometry=LineString(coords), nodes=tuple(int(k) for k in path))
     return None
+
+
+def lineup_free() -> FreeEnclosed:
+    """The research lineup's free-first stage: FreeEnclosed under RUNTIME (metrics.RUNTIME), the
+    area population routing and ordering, FREE_BUDGET, FREE_MARGIN_M and FREE_LENGTH_TIE."""
+    import metrics
+    return FreeEnclosed(budget=FREE_BUDGET, metric=metrics.RUNTIME,
+                        population=common.AreaPopulation(), target_margin_m=FREE_MARGIN_M,
+                        length_tie=FREE_LENGTH_TIE)

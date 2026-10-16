@@ -10,8 +10,8 @@ experiment's, so the plan is now held on the plan methods' own graphs.
     uv run python $S free-roads <ids,> [fault]   # fault: one-short
 
 `free-roads`, on blocks with homes walled in at baseline: FREE's plan (the stage as the
-transparency experiment configured it: area D FREE_BUDGET under both weightings, the runtime's
-metric) on the routing graph of each plan method's preset (PLAN_METHODS: compare_config's
+transparency experiment configured it, the research lineup's, free_roads.lineup_free: area D
+FREE_BUDGET under both weightings, the runtime's metric) on the routing graph of each plan method's preset (PLAN_METHODS: compare_config's
 all_methods, common.arms(); clearance_looped's tree), the same roads on all; then the metric
 itself (`_Oracle`: the gap complex's flow model, its reach on the fixed mesh with the roads carved,
 independent of the stage's own test on the complex rebuilt) finds the same walled-in homes, each
@@ -55,19 +55,11 @@ import free_roads as fr  # noqa: E402
 import gap_clear as gcl  # noqa: E402
 import gap_complex as gc  # noqa: E402
 import gap_factor  # noqa: E402
-import metrics  # noqa: E402
 
 SINGLE = dict(OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1",
               NUMBA_NUM_THREADS="1", PYTHONDONTWRITEBYTECODE="1")
 PLAN_METHODS = ("clearance_looped", "cycle_native", "resistance_lp")   # the methods with a stage
-FREE_BUDGET = 0.05       # the stage's displacement budget (the transparency experiment's LENS_D)
-FREE_MARGIN_M = 0.05     # a target within half the road's width less the form's growth and this:
-                         # the buffer's polygon falls inside its circle by under 0.005 m at a 3.5 m
-                         # radius
-FREE_LENGTH_TIE = 1e-12  # per metre on every edge: among equal displacements the shorter road
-FREE = fr.FreeEnclosed(budget=FREE_BUDGET, metric=metrics.RUNTIME,
-                       population=common.AreaPopulation(), target_margin_m=FREE_MARGIN_M,
-                       length_tie=FREE_LENGTH_TIE)
+FREE = fr.lineup_free()  # the research lineup's stage (free_roads: its budget, margin and tie)
 SHARE_TOL = 1e-12        # the oracle's walled-in share and displacements against the plan's
 
 

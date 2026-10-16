@@ -191,6 +191,56 @@ def _arms() -> dict:
     return out
 
 
+# The research lineup (the consolidated pass; BACKLOG 5's TODO, owner 2026-10-12 "leave a TODO"):
+# every method that holds roads first holds free_roads.lineup_free() (FreeEnclosed under RUNTIME)
+# in place of HoldNothing (clearance, clearance_looped's tree, cycle_native, cycle_desire,
+# resistance_lp; the grid and the arterial hold no stage), and the arterial's road cap lifted from
+# its preset's 60 to ARTERIAL_MAX_ROADS so it reaches the Lens A budget (at 60 it reached area D
+# 0.011 -- 0.044 on the sentinel's 9712, 22422 and 5810: NOTES, "Re-scoring the road methods: the
+# large-block sentinel"). Its rows' root carries this identity (lineup_rows), so no row of another
+# lineup or metric reads as its own.
+ARTERIAL = "greedy_arterial_access_displacement"
+ARTERIAL_MAX_ROADS = 300
+
+
+def lineup_arms() -> dict:
+    """The research lineup's methods (above), by name."""
+    import free_roads
+    from reblock.methods.clearance import ClearanceReblocker
+    from reblock.methods.cycle_native import CycleNativeReblocker
+    from reblock.methods.loop_closure import LoopClosureRefiner
+    from reblock.methods.resistance_lp import ResistanceLPReblocker
+    free = free_roads.lineup_free()
+    out = {}
+    for name, m in _arms().items():
+        if isinstance(m, LoopClosureRefiner):
+            m = dataclasses.replace(m, base=dataclasses.replace(m.base, free_first=free))
+        elif isinstance(m, CycleNativeReblocker | ResistanceLPReblocker | ClearanceReblocker):
+            m = dataclasses.replace(m, free_first=free)
+        if name == ARTERIAL:
+            m = dataclasses.replace(m, max_roads=ARTERIAL_MAX_ROADS)
+        out[name] = m
+    return out
+
+
+def lineup_rows() -> Path:
+    """The research lineup's rows root: road_rows/lineup-<digest of its free-first stage's
+    identity (the metric's name in it) and the arterial's cap>."""
+    import hashlib
+
+    import free_roads
+    ident = repr((free_roads.lineup_free().identity, ARTERIAL_MAX_ROADS))
+    return ROADLESS / "road_rows" / f"lineup-{hashlib.sha256(ident.encode()).hexdigest()[:8]}"
+
+
+def _lineup_root(rows: Path) -> Path:
+    """`rows` if it is the research lineup's root (lineup_rows), else a refusal: proposals and
+    prefixes are made by the lineup's arms only, under its identity."""
+    if rows.resolve() != lineup_rows().resolve():
+        raise SystemExit(f"{rows}: the lineup's rows are {lineup_rows()} (its stage and cap)")
+    return rows
+
+
 def _fresh(method, block):
     """`method` on `block` with no derive cache anywhere: a refiner (LoopClosureRefiner), which
     fetches its base's proposal through the cache when it is given none, is handed its base's
@@ -262,9 +312,9 @@ def propose_all(rows: Path, scratch: Path, procs: int, ids: list[str], methods: 
     pair (its cost). A job past `timeout_s` of wall time is killed (by PID) and recorded: a
     finding (the sentinel ran 2 h)."""
     _check_single_threaded()
-    unknown = sorted(set(methods) - set(_arms()))
+    unknown = sorted(set(methods) - set(lineup_arms()))
     if unknown:
-        raise SystemExit(f"not methods of common.arms(): {unknown}")
+        raise SystemExit(f"not methods of the lineup (lineup_arms): {unknown}")
     sizes = pd.read_parquet(ROADLESS / "large82_area.parquet").set_index("block")["n"]
     snap = scratch / "road_rescore_snapshot.py"         # the children run this copy: edits to the
     shutil.copy(__file__, snap)                          # script mid-run cannot reach them
@@ -801,14 +851,16 @@ if __name__ == "__main__":
     if cmd == "propose":
         if a[5] not in ("cache", "fresh"):
             raise SystemExit(f"propose takes cache or fresh, not {a[5]!r}")
-        propose(Path(a[1]), Path(a[2]), a[3], a[4], _arms()[a[4]], a[5] == "fresh")
+        propose(_lineup_root(Path(a[1])), Path(a[2]), a[3], a[4], lineup_arms()[a[4]],
+                a[5] == "fresh")
     elif cmd == "propose-all":
         if a[7] not in ("time-hits", "no"):
             raise SystemExit(f"propose-all takes time-hits or no, not {a[7]!r}")
-        propose_all(Path(a[1]), Path(a[2]), int(a[3]), common.ids_of(a[4]), a[5].split(","),
-                    float(a[6]) * 3600, a[7] == "time-hits")
+        propose_all(_lineup_root(Path(a[1])), Path(a[2]), int(a[3]), common.ids_of(a[4]),
+                    a[5].split(","), float(a[6]) * 3600, a[7] == "time-hits")
     elif cmd == "prefixes":
-        prefixes(Path(a[1]), lineup_of(a[2]), Path(a[3]), int(a[4]), common.ids_of(a[5]))
+        prefixes(_lineup_root(Path(a[1])), lineup_of(a[2]), Path(a[3]), int(a[4]),
+                 common.ids_of(a[5]))
     elif cmd == "cx":
         if len(a) != 7:
             raise SystemExit("cx <rows> <scratch> <metric> <cpu|gpu> <id> <items,>")
