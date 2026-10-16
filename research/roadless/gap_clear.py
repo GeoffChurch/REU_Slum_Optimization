@@ -1705,7 +1705,7 @@ def complex_of(name: str, *, factorization: gap_factor.Factorization) -> Complex
     if m is None:
         raise ValueError(f"unknown complex metric {name!r}: cx+<form><w>+s<s>r<ring>b<band>+"
                          "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped]+v<code>"
-                         "[+x[B<line>c<cross>][E0][L[o<open>][b<foot>]][S<boost>]v<exits code>]"
+                         "[+x[B<line>c<cross>][E0][L[o<open>][b<foot>]][S<boost>h<classes>]v<exits code>]"
                          "[@e<search eps>]")
     (kind, w, ramp_s, s_, ring, band, R, levels, grade, quad, sigma, ox, oy,
      lumped, code, *exits, search) = m.groups()

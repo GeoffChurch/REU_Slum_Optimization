@@ -20,6 +20,8 @@ cheap preset (polish_greedy.CHEAP: its runs named `<metric>@e0.05`) and SIMP's d
     uv run python $S run <id> <label> <simp|cheap|prior> <cpu|gpu>   # a preset, or the prior
     uv run python $S members <procs>                # the member kblocks' baselines (per block)
     uv run python $S blocks <procs>                 # one metric everywhere: the 13, per block
+    uv run python $S loo-blocks <procs>             # who each clearing helps: the 13's presets
+    uv run python $S loo <id> <label> <budget s> <cpu|gpu>   # ... the region's SIMP clearing
     uv run python $S calibrate <share> <T> <start> <procs>   # the constants (closed reference)
     uv run python $S baseline <label>               # the region's baseline under a configuration
     uv run python $S score <label>                  # its runs' clearings: lenses, flows, maps
@@ -50,7 +52,18 @@ re-optimization: each block under the per-block metric (`plain`) and under it wi
 constants (`leaky`, block_exits: the street ring the edge): P0, P_{1/2},0, J_2,0; under the leak
 the share of the current leaking at baseline, and self-absorption (absorb: a typical home's share
 leaking inside, `anywhere`, and at its own building); the stored SIMP-default and cheap-preset
-clearings (relax_rows, CHEAP_ROWS) scored under each: Lens A on each lens. ROWS/blocks/<id>.parquet.
+clearings (relax_rows, CHEAP_ROWS) scored under each: Lens A on each lens.
+ROWS/blocks/<id>.parquet.
+
+`loo-blocks`, `loo`: who each clearing helps (owner 2026-10-16: "Clearing N people's homes to
+provide access to n<N people's homes seems unfair (on average at least)"; a measurement, no
+objective changed). Each cleared building of a final clearing restored alone (leave-one-out from
+it): the population of the other homes standing whose escape time rises by at least LOO_RISES (or
+that the restoring walls in) is what its clearing serves (`helped`), against its own population
+(`displaced`), with the rise in P (`gain`). On TUNING's stored SIMP-default and cheap-preset
+clearings under the per-block metric, on cores; on the region's SIMP clearing under a
+configuration, on a GPU within a wall budget (a seeded random order: a cut leaves a sample).
+ROWS/loo/<where>_<preset>.parquet; summary_loo.csv.
 
 `baseline`: the region's model under a configuration on a core: P0, P_{1/2},0, J_2,0, the homes
 walled in, the leaks' total and the share of the injected current they drain at baseline (the
@@ -173,7 +186,16 @@ CHEAP = polish_greedy.CHEAP
 # crossing's gap 3 m (a footway's: the region's one crossing of the railway inside it is an
 # unpaved path)
 BARRIERS = gx.OsmBarriers(line_m=8.0, cross_m=3.0)
-BOOST = gx.StreetBoost(factor=3.0)
+STREET_CLASSES = ("residential", "living_street", "unclassified")   # a formal home's street
+DRIVE_CLASSES = (*STREET_CLASSES, "service", "tertiary", "secondary", "primary", "trunk",
+                 "motorway")    # the drivable streets: a deep home is far from all of them
+# The street boost (gap_exits.StreetBoost): 3x on every way with a highway tag on 5810@major (the
+# region test's check, its classes spelt out, `_link` folded), and 10x on the drivable streets
+# alone (owner 2026-10-16: "a 10x boost is I think reasonable"; footways, paths and tracks not)
+REGION_HIGHWAYS = ("footway", "motorway", "path", "residential", "secondary", "service",
+                   "services", "tertiary", "track", "unclassified")
+BOOST = gx.StreetBoost(factor=3.0, classes=REGION_HIGHWAYS)
+DRIVE_BOOST = gx.StreetBoost(factor=10.0, classes=tuple(sorted(DRIVE_CLASSES)))
 TRIP_M = 500.0          # the median trip the constants are chosen for, on the closed reference (m;
                         # owner 2026-10-15: "What if we just use T=500m?")
 SHARES = (0.9, 0.75, 1.0)   # the share of the leak at buildings on the closed reference: the
@@ -216,9 +238,9 @@ def region_test_leak(s: float, lam: float) -> gx.InternalLeak:
     raise ValueError(f"the region test's shares were 0 and 1, not {s}")
 
 
-def calibrated_label(share: float, boost: gx.NoBoost | gx.StreetBoost) -> str:
-    """`T<TRIP_M>b<percent at buildings>[S<factor>]`."""
-    return f"T{TRIP_M:g}b{100.0 * share:g}" + boost.name
+def calibrated_label(share: float) -> str:
+    """`T<TRIP_M>b<percent at buildings>`."""
+    return f"T{TRIP_M:g}b{100.0 * share:g}"
 
 
 def _configs() -> dict[str, Config]:
@@ -231,10 +253,11 @@ def _configs() -> dict[str, Config]:
     out["S3"] = Config(exits=_bar(gx.NoLeak(), BOOST), trip_m=None)
     out["L500s0S3"] = Config(exits=_bar(region_test_leak(0.0, 500.0), BOOST), trip_m=None)
     for share, leak in CALIBRATED.items():
-        out[calibrated_label(share, gx.NoBoost())] = Config(exits=_bar(leak, gx.NoBoost()),
-                                                            trip_m=TRIP_M)
-    out[calibrated_label(SHARES[0], BOOST)] = Config(exits=_bar(CALIBRATED[SHARES[0]], BOOST),
-                                                     trip_m=TRIP_M)
+        out[calibrated_label(share)] = Config(exits=_bar(leak, gx.NoBoost()), trip_m=TRIP_M)
+    central = CALIBRATED[SHARES[0]]
+    out[calibrated_label(SHARES[0]) + "S3"] = Config(exits=_bar(central, BOOST), trip_m=TRIP_M)
+    out[calibrated_label(SHARES[0]) + "D10"] = Config(exits=_bar(central, DRIVE_BOOST),
+                                                      trip_m=TRIP_M)
     return out
 
 
@@ -263,9 +286,6 @@ LIMIT_LAM_M = 1e6       # ... the median's limit as the leak vanishes, read at t
 FRAME_H = 1.0           # the painted flow's pixel (m)
 PRIOR_H = 2.0           # the prior's and the maps' pixel (m: FRAME_H's 2 x 2, on the same edges)
 FRAME_PAD = 2.0         # the frames' margin about the region (m: a multiple of both pixels)
-STREET_CLASSES = ("residential", "living_street", "unclassified")   # a formal home's street
-DRIVE_CLASSES = (*STREET_CLASSES, "service", "tertiary", "secondary", "primary", "trunk",
-                 "motorway")                                # a deep home is far from all of them
 FORMAL_M = 10.0         # a formal home: its footprint within this of a STREET_CLASSES way's centre
                         # line (m: a 13 m street reserve's half and a few metres' setback), in a
                         # kblock of the formal grid
@@ -449,7 +469,7 @@ def members(procs: int) -> None:
         raise SystemExit(f"{len(failed)} members failed: {', '.join(failed)}")
 
 
-# ------------------------------------------------------------------ one metric everywhere: the blocks
+# ------------------------------------------------------------------ one metric everywhere
 
 TUNING = seqscreen.TUNING      # the 13 large blocks the presets were tuned on
 # their stored preset clearings under the per-block metric (metrics.RUNTIME), P at area D BUDGET:
@@ -527,6 +547,119 @@ def blocks(procs: int) -> None:
         failed = [f for f in pool.imap_unordered(_block_one, todo) if f]
     if failed:
         raise SystemExit(f"{len(failed)} blocks failed: {', '.join(failed)}")
+
+
+# ------------------------------------------------------------------ who each clearing helps
+
+LOO_RISES = (0.05, 0.01)    # leave-one-out: a home is helped by a cleared building when its
+                            # escape time rises by at least this (relative) with the building
+                            # restored (owner 2026-10-16: "Clearing N people's homes to provide
+                            # access to n<N people's homes seems unfair")
+LOO_SEED = 20261018         # ... the order the cleared buildings are restored in (a budget cut
+                            # leaves a random sample)
+
+
+def leave_one_out(m: gcl.Model, x: NDArray[np.bool_], *, budget_s: float,
+                  seed: int) -> pd.DataFrame:
+    """Each building cleared in `x` restored alone (module docstring), in a seeded random order
+    until `budget_s` of wall time: its population (`displaced`), the rise in P (`gain`), and per
+    threshold of LOO_RISES the population of the other homes standing in `x` (not cleared, with
+    demand, reached) whose escape time rises by at least it, or that the restoring walls in
+    (`helped<rise>`, and their count). P and the escape times under the area population."""
+    st = m.state(m.k_of(x))
+    u = m.solve(st, m.pop)
+    uh0 = m.home_u(st, u)
+    P0 = float(m._rhs(st, m.pop) @ u)
+    stay = ~x & ~m.nodem & m.live_homes_of(st)
+    order = np.random.default_rng(seed).permutation(np.flatnonzero(x))
+    rows = []
+    t0 = time.time()
+    for b in order:
+        if time.time() - t0 > budget_s:
+            break
+        x1 = x.copy()
+        x1[b] = False
+        st1 = m.state(m.k_of(x1))
+        u1 = m.solve(st1, m.pop)
+        uh1 = m.home_u(st1, u1)
+        walled = stay & ~m.live_homes_of(st1)
+        row: dict[str, float | int] = dict(
+            building=int(b), displaced=float(m.pop[b]),
+            gain=float(m._rhs(st1, m.pop) @ u1) - P0, walled=int(walled.sum()))
+        for r in LOO_RISES:
+            helped = walled | (stay & ~walled & (uh1 >= (1.0 + r) * uh0))
+            row[f"helped{r:g}"] = float(m.pop[helped].sum())
+            row[f"n_helped{r:g}"] = int(helped.sum())
+        rows.append(row)
+    print(f"leave-one-out: {len(rows)} of {int(x.sum())} cleared buildings in "
+          f"{time.time() - t0:.0f}s", flush=True)
+    return pd.DataFrame(rows).assign(cleared=int(x.sum()), P0=P0, budget_s=budget_s, seed=seed)
+
+
+def loo_path(where: str, preset: str) -> Path:
+    return ROWS / "loo" / f"{where}_{preset}.parquet"
+
+
+def _loo_block(bid: str) -> str | None:
+    try:
+        [b] = common.build_blocks([bid])
+        m = metrics.metric_of(metrics.RUNTIME, device="cpu").clearing(b, demand=POP)
+        for preset, x in _stored_clearings(bid, m.n).items():
+            leave_one_out(m, x, budget_s=math.inf, seed=LOO_SEED).assign(
+                where=bid, preset=preset, metric=metrics.RUNTIME).to_parquet(
+                    loo_path(bid, preset))
+        print(f"{bid}: leave-one-out done", flush=True)
+    except Exception as e:      # noqa: BLE001 -- reported, the pool goes on
+        print(f"{bid} FAILED {type(e).__name__}: {e}"[:300], flush=True)
+        return bid
+    return None
+
+
+def loo_blocks(procs: int) -> None:
+    """leave_one_out on TUNING's stored presets' clearings, under the per-block metric."""
+    (ROWS / "loo").mkdir(parents=True, exist_ok=True)
+    todo = [i for i in TUNING if not loo_path(i, "cheap").exists()]
+    with multiprocessing.get_context("fork").Pool(procs, maxtasksperchild=1) as pool:
+        failed = [f for f in pool.imap_unordered(_loo_block, todo) if f]
+    if failed:
+        raise SystemExit(f"{len(failed)} blocks failed: {', '.join(failed)}")
+
+
+def loo_region(bid: str, label: str, budget_s: float, device: str) -> None:
+    """Leave-one-out on the region's SIMP clearing under a configuration, within `budget_s`."""
+    [b] = common.build_blocks([bid])
+    metric = metric_of(label, "simp", device)
+    m = metric.clearing(b, demand=POP)
+    x = np.zeros(m.n, dtype=bool)
+    x[cleared_of(label, "simp")] = True
+    out = loo_path(f"{bid}_{label}", "simp")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    leave_one_out(m, x, budget_s=budget_s, seed=LOO_SEED).assign(
+        where=f"{bid} {label}", preset="simp", metric=metric.name, device=device,
+        host=socket.gethostname()).to_parquet(out)
+
+
+def loo_rows() -> pd.DataFrame:
+    """Per clearing measured (ROWS/loo/): the share of its cleared buildings, and of the displaced
+    population, whose helped population is below their own, the median helped / displaced, per
+    threshold; the buildings done of those cleared."""
+    out = []
+    for p in sorted((ROWS / "loo").glob("*.parquet")):
+        d = pd.read_parquet(p)
+        row: dict[str, object] = dict(where=d["where"].iloc[0], preset=d["preset"].iloc[0],
+                                      done=len(d), cleared=int(d["cleared"].iloc[0]),
+                                      displaced=float(d["displaced"].sum()),
+                                      gain_median=float(d["gain"].median()))
+        for r in LOO_RISES:
+            h = d[f"helped{r:g}"]
+            under = h < d["displaced"]
+            row.update({f"under{r:g}": float(under.mean()),
+                        f"under_pop{r:g}": float(d.loc[under, "displaced"].sum()
+                                                 / d["displaced"].sum()),
+                        f"ratio_median{r:g}": float((h / d["displaced"]).median()),
+                        f"helped_total{r:g}": float(h.sum())})
+        out.append(row)
+    return pd.DataFrame(out)
 
 
 # ------------------------------------------------------------------ the region's model on a core
@@ -878,7 +1011,7 @@ def trip_boot(rows: NDArray[np.float64], sample: TripSample, *, n: int,
 
 
 def calib_path(share: float) -> Path:
-    return ROWS / "calib" / f"{calibrated_label(share, gx.NoBoost())}.parquet"
+    return ROWS / "calib" / f"{calibrated_label(share)}.parquet"
 
 
 def pair_of(share: float, scale: float, *, open_m2: float, foot_m2: float) -> gx.InternalLeak:
@@ -1227,6 +1360,7 @@ def report() -> None:
     calib_rows().to_csv(ROWS / "summary_calib.csv", index=False)
     pd.concat([pd.read_parquet(p) for p in sorted((ROWS / "blocks").glob("*.parquet"))],
               ignore_index=True).to_csv(ROWS / "summary_blocks.csv", index=False)
+    loo_rows().to_csv(ROWS / "summary_loo.csv", index=False)
     homes = homes_of(b, formal_grid(b))
     geo = gc.geometry(b)
     polys = geo.polys
@@ -1355,6 +1489,10 @@ def main(argv: list[str]) -> None:
         members(int(argv[1]))
     elif cmd == "blocks" and len(argv) == 2:
         blocks(int(argv[1]))
+    elif cmd == "loo-blocks" and len(argv) == 2:
+        loo_blocks(int(argv[1]))
+    elif cmd == "loo" and len(argv) == 5 and argv[2] in CONFIGS:
+        loo_region(common.ids_of(argv[1])[0], argv[2], float(argv[3]), argv[4])
     elif cmd == "calibrate" and len(argv) == 5 and float(argv[1]) in SHARES:
         calibrate(float(argv[1]), float(argv[2]), float(argv[3]), int(argv[4]))
     elif cmd in ("baseline", "score") and len(argv) == 2 and argv[1] in CONFIGS:

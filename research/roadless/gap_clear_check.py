@@ -27,6 +27,7 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S loop-index - [fault]          # fault: uncontracted
     uv run python $S trip-calibration - [fault]    # faults: boundary-trips, wrong-home
     uv run python $S closed-edge - [fault]         # fault: edge-open
+    uv run python $S street-boost - [fault]        # fault: classes-dropped
     uv run python $S both-ways <guards,> <ids,|->  # each guard, then under each of its faults
 
 `baseline`: the fixed mesh (the runtime's metric, METRIC) against the complex rebuilt
@@ -159,6 +160,15 @@ current) the pooled median trip at TRIP_LAM is within TRIP_TOL of the method of 
 home's point source less its first images in the square's four edges, integrated on a polar grid,
 the trips inside the square only). Faults: `boundary-trips` (the street faces' drainage counted
 as trips), `wrong-home` (each home's trips measured from the next home's injection).
+`closed-edge`: on TRIP_BLOCK with its edge closed (gap_exits.ClosedEdge), every live component has
+a leak and the cells live are the open edge's, the street drains nothing and the leaks the
+injection, and the pooled median trip is the method of images' with the images added. Fault
+`edge-open`: ClosedEdge.mesh leaving the edge open.
+`street-boost`: on STREET_BOOST_BLOCK (a residential way, a footway and a tertiary link), the boost
+on residential and tertiary at 10x boosts every triangle within BOOST_M of the residential way and
+the link (`_link` folded) and none near the footway, and multiplies a passage between boosted
+triangles by 10 and the others by 1. Fault `classes-dropped`: every way with a highway tag
+boosted.
 """
 from __future__ import annotations
 
@@ -1409,6 +1419,71 @@ def _gap_closed(self: gx.OsmBarriers, block: Block) -> gx.BarrierParts:
     return p._replace(barrier=shapely.union(p.strips, p.areas))
 
 
+# ------------------------------------------------------------------ the street boost
+
+def _boost_block() -> Block:
+    """STREET_BOOST_BLOCK: 120 x 80 m, its south edge the street; a residential way across it
+    (y 40), a footway (y 65) and a tertiary link (x 20, y 5 -- 30); homes clear of them."""
+    ways = gpd.GeoDataFrame(
+        {"highway": ["residential", "footway", "tertiary_link"], "railway": ["", "", ""],
+         "waterway": ["", "", ""], "bridge": [False, False, False],
+         "tunnel": [False, False, False]},
+        geometry=[shapely.LineString([(-10, 40), (130, 40)]),
+                  shapely.LineString([(10, 65), (110, 65)]),
+                  shapely.LineString([(20, 5), (20, 30)])])
+    empty = gpd.GeoDataFrame({"railway": []}, geometry=[])
+    areas = gpd.GeoDataFrame({"natural": [], "landuse": [], "waterway": []}, geometry=[])
+    homes = [_square(x, y, 4.0) for x, y in ((60.0, 15.0), (95.0, 50.0), (40.0, 72.0))]
+    return region_leaks.synthetic_block("synthetic-boost", shapely.box(0, 0, 120, 80),
+                                        shapely.LineString([(0, 0), (120, 0)]), homes,
+                                        gx.Osm(ways=ways, nodes=empty, areas=areas))
+
+
+def street_boost(_ids: list[str]) -> list[str]:
+    boost = gx.StreetBoost(factor=10.0, classes=("residential", "tertiary"))
+    b = _boost_block()
+    m = _model(b, dataclasses.replace(METRIC, exits=gx.Exits(
+        barriers=gx.NoBarriers(), edge=gx.OpenEdge(), leak=gx.NoLeak(), boost=boost)))
+    fm0 = m.fx.fm
+    cen = fm0.xy[fm0.tri].mean(axis=1)
+    pts = shapely.points(cen[:, 0], cen[:, 1])
+    geo = m.geo
+    lines = {k: geo.local(g) for k, g in zip(gx.osm_in(b).ways.highway,
+                                             gx.osm_in(b).ways.geometry, strict=True)}
+    near = {k: np.asarray(shapely.dwithin(g, pts, gx.BOOST_M - 0.5)) for k, g in lines.items()}
+    far = ~np.asarray(shapely.dwithin(lines["residential"], pts, gx.BOOST_M + 0.5))
+    on = boost.on_way(fm0, geo, b)
+    # the passages' weights: 10x between two boosted triangles, as they were between two others
+    both = on[fm0.pa] & on[fm0.pb]
+    none = ~on[fm0.pa] & ~on[fm0.pb]
+    fin = np.isfinite(fm0.T) & (fm0.T > 0)
+    ratio_on = m.fm.T[both & fin] / fm0.T[both & fin]
+    ratio_off = m.fm.T[none & fin] / fm0.T[none & fin]
+    res = int((near["residential"] & on).sum()), int(near["residential"].sum())
+    link = int((near["tertiary_link"] & on).sum()), int(near["tertiary_link"].sum())
+    foot = int((near["footway"] & far & on).sum()), int((near["footway"] & far).sum())
+    ok = (res[0] == res[1] > 0 and link[0] == link[1] > 0 and foot[0] == 0 < foot[1]
+          and bool(np.allclose(ratio_on, 10.0, rtol=1e-12))
+          and bool(np.allclose(ratio_off, 1.0, rtol=1e-12)))
+    print(f"street-boost ({boost.name}): boosted triangles on the residential way {res[0]} of "
+          f"{res[1]}, on the tertiary link {link[0]} of {link[1]}, on the footway {foot[0]} of "
+          f"{foot[1]}; passages between boosted triangles x{float(ratio_on.min()):.12g} -- "
+          f"{float(ratio_on.max()):.12g}, between others x{float(ratio_off.min()):.12g} -- "
+          f"{float(ratio_off.max()):.12g} -> {'ok' if ok else 'FAILS'}", flush=True)
+    return [] if ok else [f"residential {res}, link {link}, footway {foot}"]
+
+
+_ON_WAY = gx.StreetBoost.on_way
+
+
+def _every_class(self: gx.StreetBoost, fm: gcl.FullMesh, geo: gc.Geometry,
+                 block: Block) -> np.ndarray:
+    """StreetBoost.on_way with its class filter dropped: every way with a highway tag (fault
+    `classes-dropped`)."""
+    every = sorted(set(gx.osm_in(block).ways.highway.str.removesuffix("_link")) - {""})
+    return np.asarray(_ON_WAY(dataclasses.replace(self, classes=tuple(every)), fm, geo, block))
+
+
 # ------------------------------------------------------------------ the exits' identity
 
 def exits_identity(_ids: list[str]) -> list[str]:
@@ -1710,7 +1785,8 @@ GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "device-roads": device_roads, "leak-assembly": leak_assembly, "leak-fold": leak_fold,
     "enclosure": enclosure, "leak-gradient": leak_gradient, "leak-scale": leak_scale,
     "barriers": barriers, "exits-identity": exits_identity, "loop-index": loop_index,
-    "trip-calibration": trip_calibration, "closed-edge": closed_edge}
+    "trip-calibration": trip_calibration, "closed-edge": closed_edge,
+    "street-boost": street_boost}
 
 
 def _fault_exits():
@@ -1750,6 +1826,7 @@ FAULTS: dict[str, dict[str, Callable]] = {
                                                           property(_suffix_without_leak))},
     "loop-index": {"uncontracted": lambda: _patched_item(_CONTRACT, 0, False)},
     "closed-edge": {"edge-open": lambda: _patched(gx.ClosedEdge, "mesh", lambda self, fm: fm)},
+    "street-boost": {"classes-dropped": lambda: _patched(gx.StreetBoost, "on_way", _every_class)},
     "trip-calibration": {"boundary-trips": lambda: _patched(gap_maps, "leak_drain",
                                                             _with_street),
                          "wrong-home": lambda: _patched(region_leaks, "trip_origins",

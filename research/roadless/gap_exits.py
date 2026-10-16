@@ -38,14 +38,17 @@ EDGE (`Edge`): `OpenEdge`, the street's faces ground (as the per-block metric ha
 `ClosedEdge`, no street face grounds, so every trip ends at a leak: the reference the constants
 are chosen on (its leaks on the cells the open edge's street reaches).
 
-BOOST (`Boost`): `NoBoost`; `StreetBoost(factor)`: the sheet conductance times `factor` on the
-triangles whose centroid lies within BOOST_M of an OSM way's line (a passage by the harmonic mean
-of its two triangles' factors, a street face by its triangle's): a check only.
+BOOST (`Boost`): `NoBoost`; `StreetBoost(factor, classes)`: the sheet conductance times `factor`
+on the triangles whose centroid lies within BOOST_M of the line of an OSM way whose highway tag
+(`_link` folded) is one of `classes` (a passage by the harmonic mean of its two triangles'
+factors, a street face by its triangle's). The streets' lever (owner 2026-10-16: "it rewards the
+infrastructure investment"; "a 10x boost is I think reasonable"), on the drivable streets.
 
 THE NAME. The per-block metric (no barriers, no leak, no boost, the edge open: the block's whole
 street ring the exit) has no suffix, so its name and digest are as before. Any other names its
-parts in a suffix `+x[B<line_m>c<cross_m>][E0][L[o<open_m>][b<foot_m>]][S<factor>]v<EXITS_CODE>`
-before the search's `@e<eps>` (a number as `:g` spells it, or its repr where that would round it);
+parts in a suffix `+x[B<line_m>c<cross_m>][E0][L[o<open_m>][b<foot_m>]][S<factor>h<classes>]
+v<EXITS_CODE>` (the classes joined by `-`) before the search's `@e<eps>` (a number as `:g` spells
+it, or its repr where that would round it);
 EXITS_CODE digests this module's constants (digests.constants_of), so editing them renames only
 the metrics that use them. `exits_of` parses a suffix back.
 
@@ -58,6 +61,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import re
 import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
@@ -291,18 +295,28 @@ class NoBoost:
 
 @dataclass(frozen=True, kw_only=True)
 class StreetBoost:
-    """sigma x `factor` on the triangles on an OSM way (module docstring)."""
+    """sigma x `factor` on the triangles on an OSM way of one of `classes` (module docstring:
+    highway tags, sorted and distinct, `_link` folded)."""
     factor: float
+    classes: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not (self.factor > 0.0 and self.classes
+                and self.classes == tuple(sorted(set(self.classes)))
+                and all(re.fullmatch(r"[a-z_]+", c) for c in self.classes)):
+            raise ValueError(f"a boost's factor positive and its highway classes sorted, "
+                             f"distinct, [a-z_]+: {self.factor}, {self.classes}")
 
     @property
     def name(self) -> str:
-        return f"S{self.factor:g}"
+        return f"S{num(self.factor)}h{'-'.join(self.classes)}"
 
     def on_way(self, fm: gap_clear.FullMesh, geo: gc.Geometry, block: Block) -> NDArray[np.bool_]:
-        """Per triangle of `fm`: its centroid within BOOST_M of a way of `block` (its attrs'
-        `osm`; a block without one raises)."""
+        """Per triangle of `fm`: its centroid within BOOST_M of a way of `block` of one of the
+        classes (its attrs' `osm`; a block without one raises)."""
         ways = osm_in(block).ways
-        lines = geo.local(ways.geometry.to_numpy()[(ways.highway != "").to_numpy()])
+        of = ways.highway.str.removesuffix("_link").isin(self.classes).to_numpy()
+        lines = geo.local(ways.geometry.to_numpy()[of])
         cen = fm.xy[fm.tri].mean(axis=1)
         qi, _qw = shapely.STRtree(lines).query(shapely.points(cen[:, 0], cen[:, 1]),
                                                predicate="dwithin", distance=BOOST_M)
@@ -375,15 +389,15 @@ def per_block() -> Exits:
 
 
 _N = r"[0-9]+(?:\.[0-9]+)?(?:e[-+]?[0-9]+)?"
-# the suffix as gap_clear's name grammar embeds it: barriers, edge, leak, boost, digest (7 groups)
-SUFFIX_RE = (rf"(?:\+x(?:B({_N})c({_N}))?(E0)?(?:L(?:o({_N}))?(?:b({_N}))?)?(?:S({_N}))?"
-             rf"v([0-9a-f]+))?")
+# the suffix as gap_clear's name grammar embeds it: barriers, edge, leak, boost, digest (8 groups)
+SUFFIX_RE = (rf"(?:\+x(?:B({_N})c({_N}))?(E0)?(?:L(?:o({_N}))?(?:b({_N}))?)?"
+             rf"(?:S({_N})h([a-z_]+(?:-[a-z_]+)*))?v([0-9a-f]+))?")
 
 
 def exits_of(groups: tuple[str | None, ...]) -> Exits:
     """The Exits SUFFIX_RE's groups name (none matched: the per-block exits); a digest not this
     code's raises (the rows are another code's)."""
-    line, cross, closed, open_m, foot_m, factor, code = groups
+    line, cross, closed, open_m, foot_m, factor, classes, code = groups
     if code is None:
         return per_block()
     if code != EXITS_CODE:
@@ -395,8 +409,8 @@ def exits_of(groups: tuple[str | None, ...]) -> Exits:
     leak: NoLeak | InternalLeak = (NoLeak() if open_m is None and foot_m is None else InternalLeak(
         open_m=math.inf if open_m is None else float(open_m),
         foot_m=math.inf if foot_m is None else float(foot_m)))
-    boost: NoBoost | StreetBoost = (NoBoost() if factor is None
-                                    else StreetBoost(factor=float(factor)))
+    boost: NoBoost | StreetBoost = (NoBoost() if factor is None else StreetBoost(
+        factor=float(factor), classes=tuple(str(classes).split("-"))))
     return Exits(barriers=barriers, edge=edge, leak=leak, boost=boost)
 
 
