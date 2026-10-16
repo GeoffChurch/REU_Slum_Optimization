@@ -636,6 +636,10 @@ Not pursued, with what would change that:
   and 522.4 against 521.3 at the middle and top, 317 asks against 279); a per-arm price was not
   the gap. Would come back with: a linear-loss target over the bracket priced in the owner's
   units, and a price on asks.
+  epireplay.py stays pinned at 3a3b9a3; epistemetry 046675b (the replay's four API notes built:
+  `Truth.of`, `Judgement`, `Decision`'s readings, `Run.order`) changes the API it calls, so the
+  pin moves with the next replay, when the linear-loss target lands (it waits on two numbers
+  from the owner, asked through epistemetry's maintainer).
 - **Adaptive block selection** (first look done, NOTES "Which blocks tell methods apart": collapses dominate; screen = gated sentinel + random sample; picking 'discriminating' blocks beyond the sentinel misleads. Remaining value: sequential sample size; wiki `pages/methods/adaptive-benchmark-items.md`).
   Fit a factor model to the method x block matrix of paired differences (axes like "opens
   gated pockets", "spreads in dense bands"); for a new variant run first the blocks with the
