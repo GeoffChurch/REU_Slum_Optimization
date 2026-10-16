@@ -19,7 +19,8 @@ cheap preset (polish_greedy.CHEAP: its runs named `<metric>@e0.05`) and SIMP's d
     uv run python $S warm <id> <label>              # the label's fixed mesh into gap_clear.CACHE
     uv run python $S run <id> <label> <simp|cheap|prior> <cpu|gpu>   # a preset, or the prior
     uv run python $S members <procs>                # the member kblocks' baselines (per block)
-    uv run python $S calibrate <share> <T> <procs>  # the leak's constants, on the closed reference
+    uv run python $S blocks <procs>                 # one metric everywhere: the 13, per block
+    uv run python $S calibrate <share> <T> <start> <procs>   # the constants (closed reference)
     uv run python $S baseline <label>               # the region's baseline under a configuration
     uv run python $S score <label>                  # its runs' clearings: lenses, flows, maps
     uv run python $S cross <label> <labels,>        # other configurations' clearings under it
@@ -43,6 +44,13 @@ component has a leak) and _boot.parquet (the bootstrap's medians at the constant
 (its own street ring the exit) on a core: every home's escape time at baseline (the population's
 demand), in the region's population units (AreaPopulation normalises each block to mean 1: a
 kblock's potentials times its mean footprint area over the region's); ROWS/members/<kblock>.parquet.
+
+`blocks`: one metric everywhere (owner 2026-10-15), checked per block on TUNING, on a core, no
+re-optimization: each block under the per-block metric (`plain`) and under it with the central
+constants (`leaky`, block_exits: the street ring the edge): P0, P_{1/2},0, J_2,0; under the leak
+the share of the current leaking at baseline, and self-absorption (absorb: a typical home's share
+leaking inside, `anywhere`, and at its own building); the stored SIMP-default and cheap-preset
+clearings (relax_rows, CHEAP_ROWS) scored under each: Lens A on each lens. ROWS/blocks/<id>.parquet.
 
 `baseline`: the region's model under a configuration on a core: P0, P_{1/2},0, J_2,0, the homes
 walled in, the leaks' total and the share of the injected current they drain at baseline (the
@@ -145,6 +153,7 @@ import metrics  # noqa: E402
 import polish_greedy  # noqa: E402
 import relax  # noqa: E402
 import search  # noqa: E402
+import seqscreen  # noqa: E402
 
 if TYPE_CHECKING:
     from shapely.geometry.base import BaseGeometry
@@ -235,10 +244,12 @@ RASTER_RUNS = {
                     / f"{REGION}_p2.parquet")}
 ABSORB_N = 300          # self-absorption: homes drawn
 ABSORB_SEED = 20261015
-TRIP_N = 2000           # the trips: homes drawn by population (with replacement)
+TRIP_N = 4000           # the trips: homes drawn by population (with replacement; on the closed
+                        # reference the bootstrap's sd at 2,000 draws was 0.9% of the median, so
+                        # about 0.64% here, a third of TRIP_TOL)
 TRIP_SEED = 20261016
 TRIP_BIN_M = 1.0        # ... a trip's length binned (m)
-TRIP_TOL = 0.01         # ... the bisection stops at a median within this of T (relative)
+TRIP_TOL = 0.02         # ... the bisection stops at a median within this of T (relative)
 TRIP_BOOT = 2000        # ... the bootstrap's resamples of the draws
 TRIP_BOOT_SEED = 20261017
 SECANT_MAX = 4.0        # ... a bracketing step changes lam by at most this factor
@@ -432,6 +443,86 @@ def members(procs: int) -> None:
         failed = [f for f in pool.imap_unordered(_member_one, todo) if f]
     if failed:
         raise SystemExit(f"{len(failed)} members failed: {', '.join(failed)}")
+
+
+# ------------------------------------------------------------------ one metric everywhere: the blocks
+
+TUNING = seqscreen.TUNING      # the 13 large blocks the presets were tuned on
+# their stored preset clearings under the per-block metric (metrics.RUNTIME), P at area D BUDGET:
+# SIMP's default (relax_rows) and the cheap preset, the translucent search (the acceptance's
+# per-device rows, phase 3: no polish_rows of its own)
+CHEAP_ROWS = HERE / "gap_rows" / "runtime" / "preset" / "gpu" / "cheap@e0.05"
+
+
+def block_exits() -> gx.Exits:
+    """The per-block metric with the central constants (one metric everywhere: the block's street
+    ring its edge, open; no barriers, a kblock has no OSM features)."""
+    return gx.Exits(barriers=gx.NoBarriers(), edge=gx.OpenEdge(), leak=CALIBRATED[SHARES[0]],
+                    boost=gx.NoBoost())
+
+
+def _stored_clearings(bid: str, n: int) -> dict[str, NDArray[np.bool_]]:
+    plain = metrics.metric_of(metrics.RUNTIME, device="cpu")
+    simp = pd.read_parquet(relax.rows_of(PLAN, plain.name, BUDGET) / f"{bid}_p1.parquet").iloc[0]
+    cheap = pd.read_parquet(CHEAP_ROWS / f"{bid}.parquet").iloc[0]
+    if cheap["metric"] != CHEAP.on(plain).name:
+        raise ValueError(f"{bid}: the cheap preset's row is {cheap['metric']}'s")
+    out = {}
+    for key, ids in (("simp", simp["simp_cleared"]), ("cheap", cheap["cleared"])):
+        x = np.zeros(n, dtype=bool)
+        x[np.asarray(ids, dtype=np.int64)] = True
+        out[key] = x
+    return out
+
+
+def _block_one(bid: str) -> str | None:
+    out = ROWS / "blocks" / f"{bid}.parquet"
+    try:
+        [b] = common.build_blocks([bid])
+        plain = metrics.metric_of(metrics.RUNTIME, device="cpu")
+        rows = []
+        for name, metric in (("plain", plain), ("leaky", dataclasses.replace(
+                plain, exits=block_exits()))):
+            t0 = time.time()
+            m = metric.clearing(b, demand=POP)
+            st0 = m.state(np.zeros(m.n))
+            base = dict(block=bid, model=name, metric=metric.name, n=m.n,
+                        walled=int(m.walled0.sum()), P0=m.base.P, Pq0=m.base.Pq, J2_0=m.base.J2)
+            if name == "leaky":
+                fl = gap_maps.flow_of(m, st0, m.pop)
+                a = absorb(bid, m, st0)
+                w: pd.Series = a["pop"] / a["pop"].sum()
+                base.update(leak_share=float(fl.leak.sum() / fl.drain.sum()),
+                            inside_median=float(a["anywhere"].median()),
+                            inside_pop=float((a["anywhere"] * w).sum()),
+                            own_median=float(a["own_building"].median()),
+                            own_pop=float((a["own_building"] * w).sum()),
+                            own_p90=float(a["own_building"].quantile(0.9)),
+                            own_max=float(a["own_building"].max()), absorb_n=len(a))
+            for key, x in _stored_clearings(bid, m.n).items():
+                L = m.lenses(x)
+                base.update({f"{key}_L_P": 1.0 - L.P / m.base.P,
+                             f"{key}_L_Pq": 1.0 - L.Pq / m.base.Pq,
+                             f"{key}_L_J2": 1.0 - (L.J2 / m.base.J2) ** 0.5,
+                             f"{key}_D": float(m.cost[x].sum())})
+            base.update(t=time.time() - t0)
+            rows.append(base)
+        pd.DataFrame(rows).to_parquet(out)
+        print(f"{bid}: {rows}", flush=True)
+    except Exception as e:      # noqa: BLE001 -- reported, the pool goes on
+        print(f"{bid} FAILED {type(e).__name__}: {e}"[:300], flush=True)
+        return bid
+    return None
+
+
+def blocks(procs: int) -> None:
+    """The per-block check (module docstring) on TUNING."""
+    (ROWS / "blocks").mkdir(parents=True, exist_ok=True)
+    todo = [i for i in TUNING if not (ROWS / "blocks" / f"{i}.parquet").exists()]
+    with multiprocessing.get_context("fork").Pool(procs, maxtasksperchild=1) as pool:
+        failed = [f for f in pool.imap_unordered(_block_one, todo) if f]
+    if failed:
+        raise SystemExit(f"{len(failed)} blocks failed: {', '.join(failed)}")
 
 
 # ------------------------------------------------------------------ the region's model on a core
@@ -825,9 +916,10 @@ def closed_check(m: gcl.Model, st: gcl.State, open_walled: int) -> ClosedCheck:
                        walled=int(m.walled0.sum()), walled_open=open_walled)
 
 
-def calibrate(share: float, target: float, procs: int) -> None:
+def calibrate(share: float, target: float, start: float, procs: int) -> None:
     """The leak's constants with `share` of it at buildings for a median trip `target` on the
-    closed reference (module docstring): 5810@major with the barriers and its edge closed."""
+    closed reference (module docstring): 5810@major with the barriers and its edge closed; the
+    search from the scale `start` (m: recorded)."""
     [b] = common.build_blocks([REGION])
     exits = gx.Exits(barriers=BARRIERS, edge=gx.ClosedEdge(),
                      leak=gx.InternalLeak(open_m=target, foot_m=target), boost=gx.NoBoost())
@@ -858,7 +950,8 @@ def calibrate(share: float, target: float, procs: int) -> None:
         g_open = ls.sigma / last.open_m ** 2
         g_foot = last.per_foot(ls)
         df = pd.DataFrame([st._asdict() for st in steps])
-        df = df.assign(share=share, target=target, region=REGION, barriers=BARRIERS.name,
+        df = df.assign(share=share, target=target, start=start, region=REGION,
+                       barriers=BARRIERS.name,
                        edge="closed", open_m2=open_m2, foot_m2=foot_m2,
                        share_at=g_foot * foot_m2 / (g_foot * foot_m2 + g_open * open_m2),
                        tol=TRIP_TOL, n_draws=TRIP_N, n_homes=len(sample.homes), seed=TRIP_SEED,
@@ -872,7 +965,7 @@ def calibrate(share: float, target: float, procs: int) -> None:
         print(df.to_string(), flush=True)
     try:
         steps, rows = calibrate_lam(m, leak_of=leak_of, target=target, tol=TRIP_TOL,
-                                    lam0=target, resolution=LAM_RES_M, limit_lam=LIMIT_LAM_M,
+                                    lam0=start, resolution=LAM_RES_M, limit_lam=LIMIT_LAM_M,
                                     sample=sample, site=site, procs=procs)
     except Unreachable as e:
         record(e.steps, e.rows, reached=False)
@@ -1128,6 +1221,8 @@ def report() -> None:
     [b] = common.build_blocks([REGION])
     barrier_rows(b).to_csv(ROWS / "summary_barriers.csv", index=False)
     calib_rows().to_csv(ROWS / "summary_calib.csv", index=False)
+    pd.concat([pd.read_parquet(p) for p in sorted((ROWS / "blocks").glob("*.parquet"))],
+              ignore_index=True).to_csv(ROWS / "summary_blocks.csv", index=False)
     homes = homes_of(b, formal_grid(b))
     geo = gc.geometry(b)
     polys = geo.polys
@@ -1254,8 +1349,10 @@ def main(argv: list[str]) -> None:
         prior(common.ids_of(argv[1])[0], argv[2], argv[4])
     elif cmd == "members" and len(argv) == 2:
         members(int(argv[1]))
-    elif cmd == "calibrate" and len(argv) == 4 and float(argv[1]) in SHARES:
-        calibrate(float(argv[1]), float(argv[2]), int(argv[3]))
+    elif cmd == "blocks" and len(argv) == 2:
+        blocks(int(argv[1]))
+    elif cmd == "calibrate" and len(argv) == 5 and float(argv[1]) in SHARES:
+        calibrate(float(argv[1]), float(argv[2]), float(argv[3]), int(argv[4]))
     elif cmd in ("baseline", "score") and len(argv) == 2 and argv[1] in CONFIGS:
         {"baseline": baseline, "score": score}[cmd](argv[1])
     elif cmd == "cross" and len(argv) == 3 and argv[1] in CONFIGS:
