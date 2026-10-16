@@ -239,7 +239,7 @@ SIMP = Slot(
     check=("block", "n", "power", "plan", "along", "demand", "objective", "item", "budget"),
     drop={"simp_x": "SIMP's final design, a float a building: not the clearing, and half the "
                     "rows' bytes", "x": "the Frank-Wolfe iterate, a float a building",
-          "host": "the machine", "peak_rss_gb": "the machine",
+          "host": "the machine", "peak_rss_gb": "the machine", "gpu_gb": "the machine",
           "device": "the solves' device (gap_clear.ComplexMetric.device): scores alike to the "
                     "floating point, not the run's identity"},
     sibling=("iters", "relaxed_perm", "bound_perm", "rounded_perm", "rounded_D", "frac_share",
@@ -341,9 +341,10 @@ POLISH = Slot(
     commit={"perm": "perm", "D": "D", "cleared": "cleared", "greedy_perm": "greedy_perm",
             "greedy_D": "greedy_D", "moves": "moves", "scorings": "scorings", "t": "t",
             "t_greedy": "t_greedy", "free_D": "free_D", "free_cleared": "free_cleared",
-            "enclosed": "enclosed"},
+            "enclosed": "enclosed", "wall": "wall"},
     check=("block", "n", "picker"),
-    drop={"device": SIMP.drop["device"],
+    drop={"device": SIMP.drop["device"], "host": "the machine", "peak_rss_gb": "the machine",
+          "gpu_gb": "the machine",
           "mesh": "the retired raster's grid (lifted.MeshSpec.name), h0.5 in the complex's rows "
                   "made before phase 3: a placeholder the complex ignored"})
 
@@ -502,8 +503,7 @@ REGION_EXTRA: Mapping[str, str] = {
               "clearing's",
     "host": "the machine", "peak_rss_gb": "the machine", "gpu_gb": "the machine"}
 REGION_SIMP = replace(SIMP, drop={**SIMP.drop, **REGION_EXTRA})
-REGION_POLISH = replace(POLISH, commit={**POLISH.commit, "wall": "wall"},
-                        drop={**POLISH.drop, **REGION_EXTRA})
+REGION_POLISH = replace(POLISH, drop={**POLISH.drop, **REGION_EXTRA})
 
 
 @dataclass(frozen=True)
