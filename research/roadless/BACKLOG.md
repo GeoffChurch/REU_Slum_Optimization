@@ -645,6 +645,24 @@ Not pursued, with what would change that:
 
 ## Coverage and model
 
+- **A price per displaced person in place of the budget** (owner 2026-10-16: "Write down the price
+  per displaced person in place of the budget idea so we don't forget it"; the concern: "Clearing N
+  people's homes to provide access to n<N people's homes seems unfair"). Today a run clears up to a
+  fixed displacement D (with area population, D is the share of the people displaced), and the
+  greedy ranks buildings by gain per displaced person. The idea: drop D and price displacement at
+  mu per person, the budget's Lagrangian. A building is cleared only while it cuts the objective by
+  at least mu per person it displaces, so every clearing pays for itself and the displacement
+  becomes each block's output. SIMP's budget becomes a linear penalty (still convex); the greedy
+  stops when its best gain per displaced person falls below mu. It traces the same frontier as the
+  budget (each mu is the curve's slope at one point), so what changes is the point each block runs
+  at: equal marginal worth across blocks instead of equal displacement. Not a ratio objective: gain
+  / displaced alone is maximized by one building. Measured first (NOTES, "The region's leaks", its
+  third part; a leave-one-out from the final clearing): on the 13 tuning blocks a cleared building
+  serves a median 10x its own population at a 5% rise in escape time (66x at 1%), a fifth serving
+  fewer than it displaces at 5%, almost none at 1%; on the deep blocks and the region many serve
+  fewer at 5%: clearings serve many people a little, so the verdict turns on the threshold.
+  Counting people helped above a threshold (the other form) rewards concentrated gains; not
+  proposed. Open: mu's value and units, and how the site compares methods without a common D.
 - **Blocks over ~1.4 km^2** (done 2026-10-08): local coarsening (`lifted.CompositeGrid`, plan
   suffix `.a<d0>x<smax>`) keeps h 0.5 within d0 of every building, street and the block edge and
   doubles the cell with each doubling of distance; within 0.004 of uniform h 0.5 on the 59 at a5
