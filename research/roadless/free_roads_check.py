@@ -19,7 +19,9 @@ held road frees its home (and every home its step says it frees) once the roads 
 carved, what the roads leave walled in is the plan's share, and their true displacement under both
 weightings is the plan's and within its budget. Fault `one-short`: every held road one segment
 short (its last point dropped as the stage routes it): the stage itself raises, its road not
-freeing its home by the metric's test.
+freeing its home by the metric's test. Its blocks: 20269, 18895 and 23597 (1, 1 and 6 homes
+walled in on the complex; 23597's home 272 found the targets' reach missing the form's growth:
+NOTES, "Before the consolidated pass: three fixes").
 """
 from __future__ import annotations
 
@@ -59,8 +61,9 @@ SINGLE = dict(OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1"
               NUMBA_NUM_THREADS="1", PYTHONDONTWRITEBYTECODE="1")
 PLAN_METHODS = ("clearance_looped", "cycle_native", "resistance_lp")   # the methods with a stage
 FREE_BUDGET = 0.05       # the stage's displacement budget (the transparency experiment's LENS_D)
-FREE_MARGIN_M = 0.05     # a target within half the road's width less this: the buffer's polygon
-                         # falls inside its circle by under 0.005 m at a 3.5 m radius
+FREE_MARGIN_M = 0.05     # a target within half the road's width less the form's growth and this:
+                         # the buffer's polygon falls inside its circle by under 0.005 m at a 3.5 m
+                         # radius
 FREE_LENGTH_TIE = 1e-12  # per metre on every edge: among equal displacements the shorter road
 FREE = fr.FreeEnclosed(budget=FREE_BUDGET, metric=metrics.RUNTIME,
                        population=common.AreaPopulation(), target_margin_m=FREE_MARGIN_M,

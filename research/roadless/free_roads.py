@@ -15,10 +15,13 @@ What it does, per block:
    exactly the corridor, every road buffered by half its width), opens ground that frees the
    home: ground within ring_m of its outline (its own footprint's included), or the sealed pocket
    of the complex those touch (its components at the filtration width that hold a ring triangle
-   and not the street). Every edge and node of the graph whose corridor comes within half the
-   width (less `target_margin_m`, for the polygonal buffer) of that region is a TARGET; the road
-   is the cheapest path to a target node, or through a target edge to its far end, in one
-   Dijkstra a round.
+   and not the street). Every edge and node of the graph within half the width of that region,
+   less the width form's growth and `target_margin_m` (for the polygonal buffer), is a TARGET:
+   the footprints a corridor cuts grow back into it by the form's growth (the shy distance's w /
+   2), so only its ground that deep inside is open (23597's home 272: a corridor 0.80 m from it,
+   its open ground 1.05 m, outside the 1 m ring; NOTES, "Before the consolidated pass: three
+   fixes"). The road is the cheapest path to a target node, or through a target edge to its far
+   end, in one Dijkstra a round.
 3. The route's cost is DISPLACEMENT, not length: an edge weighs the population share its own
    corridor displaces (`population`'s weights, the share of each footprint the buffered edge
    covers), plus `length_tie` per metre so that among equal displacements the shorter road wins
@@ -157,8 +160,9 @@ class FreeEnclosed:
     """Roads that free the homes enclosed at baseline (the module's docstring), within `budget` of
     true displacement under both weightings, ordered and routed by `population`'s; under `metric`,
     a gap complex metric's name (gap_clear.complex_of: its Spec and width form give the homes it
-    walls in and its test of reach); a target within half the road's width less `target_margin_m`
-    of the ground that frees a home; `length_tie` per metre on every edge."""
+    walls in and its test of reach); a target within half the road's width less the form's
+    growth and `target_margin_m` of the ground that frees a home; `length_tie` per metre on every
+    edge."""
 
     budget: float
     metric: str
@@ -201,7 +205,7 @@ class FreeEnclosed:
         area_w = common.AreaPopulation().weights(polys)         # the budget's two weightings
         count_w = common.CountPopulation().weights(polys)
         g = _routing(block, graph, width_m, w, self.length_tie)
-        reach = width_m / 2.0 - self.target_margin_m
+        reach = width_m / 2.0 - metric.form.grow - self.target_margin_m
         targets = _targets(geo, reach0, graph, g, enclosed, reach, metric.form.filtration_w)
         street = unary_union(list(block.streets.geometry))
         seeds = np.flatnonzero(shapely.dwithin(shapely.points(graph.pts), street, graph.net_tol))
