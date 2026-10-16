@@ -6520,3 +6520,158 @@ meshes (16 minutes each), the ten baselines with the self-absorption (about 3 CP
 of six failing at the prior), the 76 member kblocks (about 1), the clearings' scores and the 9 x 16
 cross-scores (about 4), the guards (2.4 h both ways, then 0.5), the report, smoke tests and
 diagnoses: about 13 CPU-h [inferred from the runs' times]. orion and quadro2 were not needed.
+
+### The region's leaks: destinations at buildings and on open ground (5810@major)
+
+BACKLOG 4, decision (4) (the brief: .superpowers/sdd/2026-10-15-region-mixed-leak; the owner
+2026-10-15: the barriers adopted; internal trips count, "especially if you e.g. cleared an entire
+island so all traffic was internal"; "we should probably have some small leakage in open space,
+since you can in principle live off the land, but buildings should have greater leakage"; streets
+"more conductive, but not make them leak more"; "What if we just use T=500m?"). The two leak
+families of the region test folded into one with a building share s, its strength to be set by the
+median length T of an internal trip rather than by a nominal lam, then run at T 500 m. **The fold,
+the migration and the calibration are done; the runs are not: no lam gives a median internal trip
+of 500 m on 5810@major, at any s (below). The owner's T is needed before the runs.** Code:
+gap_exits.py (InternalLeak), gap_clear.py (Model.leaked_state: a leak's other lam on the same
+pattern), gap_maps.py (leak_drain and cell_geometry, shared with flow_of), region_leaks.py (the
+configurations' labels, home_solves, the trips and `calibrate`), gap_clear_check.py (`leak-fold`,
+`trip-calibration`, the leak guards at a mixed s).
+
+**The fold** (gap_exits.InternalLeak(s, lam), its name `L<lam>s<s>`). One Strategy, two parameters:
+the total sigma |A| / lam^2 over the cells live at baseline, as before; a share s of it at the
+buildings, placed as HomeLeak placed it (by each cell's population injection at baseline), and 1 -
+s on open ground, as UniformLeak placed it (sigma |c| / lam^2 on every live cell). Each cell's
+conductance is (1 - s) times the open ground's term plus s times the buildings', so at s 0 and s 1
+the other term is multiplied by 0 and added: the old classes' answer bit for bit. `leak-fold`
+(19570, lam 50 m): the leak per cell against the two formulas copied verbatim from before the fold,
+0 apart at s 0, s 1 and s 0.75; against the definition's independent oracle 0 (s 0), 3.5e-16 (s 1)
+and 4.7e-16 (s 0.75); the baseline's operator against the one assembled afresh 5.8e-17. On the
+region the migrated `L500s0` and `L500s1` (U500 and H500) re-score bit for bit: P_0, P_{1/2},0,
+J_2,0, the leak's total and its cells, and every home's escape time equal to the stored rows' (a
+script, not kept).
+
+**The migration.** The region test's names: U<lam> is `L<lam>s0`, H<lam> `L<lam>s1`, S3U500
+`L500s0S3` (labels; the run directories region_rows/runs/<label>/; the baseline, cross, score and
+image files and the maps; the rows' label, source and metric columns; the committed summaries,
+field by field as text, their numbers untouched); bar, edge and S3 keep theirs. A suffix reads
+`+xB8c3L500s0va03a092b` where it read `+xB8c3U500va03a092b`: the exits code is unchanged (a03a092b:
+no constant moved), and so is the per-block metric (`cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a`, 28
+constants). No reader of the old names is left: the grammar is
+`[B<line>c<cross>][L<lam>s<s>][S<factor>]`, and gap_clear.complex_of refuses a `U500`. The run rows
+gain `trip_m` (the median trip a configuration's lam was calibrated to; empty for the nominal lam).
+`exits-identity` reads the 42 stored names (summary_lenses.csv, the runs' rows,
+summary_baseline.csv) and every one parses back to its label's configuration.
+
+**The trips** (region_leaks, THE TRIPS). At baseline under a configuration's leak, a home's trips
+are its current leaking inside: its unit injection solved alone (home_solves, the solves
+self-absorption reads too), the current to ground through each cell's leak (gap_maps.leak_drain) a
+trip's end, the trip's length the straight-line distance from the centroid of the home's injection
+points (weighted as it injects) to the cell's centroid, its weight that current. Current leaving by
+the boundary (the street faces and the ground cells) is not a trip of the leak and is not counted.
+Trips pool over TRIP_N 2,000 homes drawn by population with replacement (seeded; among the homes
+with demand not walled in), each draw its home's trips per unit of its injection; the median is the
+pooled distribution's (1 m bins, linear within a bin). `calibrate <s> <T> <boost> <procs>` finds
+lam by bisection in log lam over whole metres after a bracketing search (secant steps in log-log),
+the same draws at every step, to a median within TRIP_TOL (1%) of T, and bootstraps the draws
+(2,000 resamples) for the median's uncertainty. The median rises with lam toward a limit as the
+leak vanishes (the trips then end where the no-leak potential times the leak's shape puts them,
+nearly all the current leaving by the boundary; read at lam 10^6 m): a T past it is refused, its
+steps recorded (ROWS/calib/, summary_calib.csv).
+
+**Checked where the answer is known** (`trip-calibration`). On the `leak-scale` block (open ground
+800 m square, its edge the street, one 2 m home at its centre) at s 0, calibrating to T 63 m gives
+lam 50.07 m, and 1.2572 lam (the screened point source's median: x K1(x) = 1/2) is T within 8.6e-4;
+a target past the limit (1.5 times it) is refused. With a second home 50 m from the street edge
+(the boundary taking 44% of its current), the pooled median at lam 60 m, 67.75 m, is the method of
+images' 67.54 m (each home's point source less its first images in the four edges, integrated on a
+polar grid) within 3.1e-3; per home 75.02 and 54.83 m against 75.03 and 54.96. Faults:
+`boundary-trips` (the street faces' drainage counted as trips) 62.44 m, -7.5e-2; `wrong-home` (each
+home's trips measured from the next home's injection) 346 m.
+
+**No lam reaches T 500 m on 5810@major.** The median internal trip at baseline with the barriers
+(1,000 draws, 857 homes, by a scratch script on region_leaks' functions; * 400 draws, 368 homes;
+`inside` the pooled share of the current leaking inside; the last column the median with the
+boundary's trips counted too, each ending at the cell it drains from):
+
+    s      lam (m)    median internal trip (m)   inside   with the boundary's trips (m)
+    0      250        174                        0.63     173
+    0      400 *      230                        0.47     --
+    0      500        250                        0.37     262
+    0      1,000      296                        0.14     340
+    0      -> inf     319                        0        393
+    0.75   2,000 *    245                        0.16     --
+    0.75   5,000 *    264                        0.03     --
+    0.75   -> inf     267                        0        393
+    0.9    400        105                        0.67     122
+    0.9    450 *      115                        0.66     --
+    0.9    1,000      192                        0.40     231
+    0.9    2,000 *    240                        0.18     --
+    0.9    5,000 *    262                        0.04     --
+    0.9    12,000 *   266                        0.007    --
+    0.9    -> inf     265                        0        393
+    1      250        66                         0.77     78
+    1      500        119                        0.62     141
+    1      1,000      187                        0.41     226
+    1      2,000 *    237                        0.19     --
+    1      -> inf     264                        0        393
+
+(-> inf: the no-leak potential times the leak's shape, every share from one set of solves; at s
+0.25 and 0.5 the limit is 281 and 271 m; the bootstrap's sd 1.5 -- 2.1 m at 400 draws.) So the
+longest median internal trip the region allows is 264 -- 319 m, approached only as the leak
+vanishes, and even with the boundary's trips counted the median is at most 393 m. The reason is the
+region's edge: its roads are exits, the deep informal homes a median 191 m from it and the formal
+homes 314 m (the region test's Question 2), so a trip that would end 500 m away mostly leaves by
+the boundary first, and the trips that end inside are the short ones. At the region test's nominal
+lam the median internal trips were 250 m (U500, now L500s0) and 119 m (H500, L500s1); the leak's
+median on open ground, 1.257 lam, is 629 m at lam 500 m. The shipped command refuses on its own
+(`calibrate <s> 500 <boost>`, 2,000 draws, 1,570 homes; ROWS/calib/, summary_calib.csv): the limit
+at s 0.9 is 263.5 m (the bootstrap's sd 0.89 m, 95% 261.9 -- 265.3), at s 0.75 265.3 m (sd 0.88),
+at s 1 262.6 m (sd 0.90); with the street boost (3x on the OSM ways) at s 0.9 270.5 m (sd 0.86 m):
+the streets' conductance lengthens the internal trips by 7 m, not toward 500.
+
+What the owner could choose instead (decision support; the runs wait for it):
+- a T within reach of internal trips, at s 0.9: 150 m puts lam near 700 m (about 55% of the current
+  leaking inside), 200 m near 1.15 km (about 35%), 250 m near 3 km (about a tenth), close to the
+  limit, where lam is ill-determined (the median nearly flat in it) [lam and the shares inferred
+  from the table];
+- the trips with the boundary's counted: their median is at most 393 m (no leak at all), still
+  short of 500 m;
+- the leak's strength set by the share of the current that ends inside rather than by a length (at
+  s 0.9 half of it between lam 400 and 1,000 m, 0.67 and 0.40);
+- a region whose edge lies far from most homes, where 500 m internal trips fit.
+
+The draws' size: at 2,000 draws (TRIP_N) the bootstrap's sd is 0.34% of the median at the limit
+(1.4% at 400 draws, at lam 450 m), so the 1% tolerance (TRIP_TOL) is about 3 sd there; at a shorter
+T the relative sd is larger (the 400 draws' 1.4% at 115 m would be about 0.6% at 2,000), and the
+tolerance would be 2% or the draws more. A step on a core is a factorization of the region (about a
+minute) and 1.8 s a home on one process (1,570 homes: 48 minutes; 24 on two).
+
+**Not run**: the eight runs (four configurations, two presets), the priors and maps, the baselines,
+scores and cross-scores, the loop index and the boost's verdict, all waiting for T. No GPU time was
+used.
+
+**The guards** (gap_clear_check; each passes and fails under its fault, both ways at the final
+code): `leak-fold` and `trip-calibration` (above); `leak-scale` at s 0 and 0.5 (at s 0.5 the open
+ground's share alone screens the far field, lam' = lam / sqrt(1 - s), and the home's own building
+drains 98% of its current: the ratio's spread 2.2%, its level +8e-4 against Q' / (2 pi sigma); s 0
+as before, 2.6%, +2.1e-3; fault `per-cell` 4.3x and 1.2x off); `leak-assembly` (19570, 20269, at s
+0, 1 and 0.5: the operator against the one assembled afresh plus the oracle within 1.2e-16, P
+within 1.0e-11; faults `drop-one`, `not-live`), `enclosure` (20269, 23597: 1 and 6 homes walled in
+at every s, as without leaks; fault `every-cell`), `leak-gradient` (19570, 38136: within 3.3e-5 of
+the largest at every s; fault `adjoint-unleaked` 0.06 -- 0.71 off at power 2), `flux` (the leaky
+clearing at s 0 within 2.7e-11, every state within 5.0e-11; fault `flip-one`); `loop-index` and
+`barriers` (they read region_leaks) as before (8, 5, 0; 624 open triangles inside the barriers,
+none outside the gaps; their faults seen); `exits-identity` (30 names of 30 configurations and
+presets distinct and parsing back, the 42 stored names their labels', the per-block metric's 28
+constants digesting to 34d40e8a; faults `in-code` 39 constants, digest ef375dc2, `suffix-dropped` 6
+names for 30). mypy --strict clean on gap_exits, gap_maps, region_leaks (gap_clear and
+gap_clear_check as before: 32 and 10 errors); `ruff check .` passes; tests/test_clearings.py: 36
+pass. The earlier guards (gap_clear_check's baseline to device-roads, gap_check's,
+gap_flow_check's, pweight_check's) were not rerun at this code: it moves two of gap_maps.flow_of's
+computations into functions (bit for bit; `flux` reads it) and adds Model.leaked_state, which none
+of them calls; they are for the end of the study, with its runs' code.
+
+**Compute.** CPU here, single-threaded, at most 8 processes, then 4 (the controller's ruling: a
+second agent shares the machine): the trips' pilot, scan and limits (about 9 CPU-h), the fold's two
+region baselines (0.2), the four shipped calibrations (about 4), the guards (about 3): about 16
+CPU-h [inferred from the steps' times]. GPU: none.

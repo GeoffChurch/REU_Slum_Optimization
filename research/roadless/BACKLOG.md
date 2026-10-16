@@ -348,8 +348,21 @@ items up front"), in the order proposed:
    street leak; the boost is the streets' lever. **Open**: the building leak's strength (at the
    same nominal lam its trips are shorter than the uniform leak's: a typical home's current
    leaks inside 78% at H500, 49% at H1000, against U500's 41%), and the boost's check at the
-   adopted configuration (about 1.05 GPU-h). For the site: present both families, powers of the
-   escape time (J_p) and priority-weighted P, under established names.
+   adopted configuration (about 1.05 GPU-h). **The leaks folded; T 500 m out of reach
+   (2026-10-15)** (NOTES, "The region's leaks: destinations at buildings and on open ground
+   (5810@major)"; the owner: "some small leakage in open space ... buildings should have greater
+   leakage", "What if we just use T=500m?"): one family, InternalLeak(s, lam) (`L<lam>s<s>`, s the
+   share at buildings; bit for bit UniformLeak at s 0 and HomeLeak at s 1, so the region test's
+   rows are migrated, U500 now `L500s0`, H500 `L500s1`, S3U500 `L500s0S3`), lam calibrated to a
+   median internal trip (region_leaks `calibrate`, checked against the screened point source's
+   1.257 lam). On 5810@major no lam gives a median internal trip of 500 m at any s: it rises only
+   to 264 -- 319 m as the leak vanishes (393 m with the boundary's trips counted), the region's
+   edge taking the long trips; U500's was 250 m and H500's 119 m. With the street boost the limit
+   is 270.5 m at s 0.9. **Open (the owner)**: a T within reach (at s 0.9, 150 -- 250 m puts lam
+   near 0.7 -- 3 km, 55% to a tenth of the current leaking inside), the leak's strength set by the
+   share ending inside, or a region whose edge is far from most homes; then the eight runs (s 0.75,
+   0.9, 1 and the boost, both presets: about 4.5 GPU-h) and their report. For the site: present
+   both families, powers of the escape time (J_p) and priority-weighted P, under established names.
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights
