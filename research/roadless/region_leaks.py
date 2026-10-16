@@ -185,8 +185,11 @@ REF_OPEN_M2 = 5944597.3272020295
 REF_FOOT_M2 = 437058.2681828446
 LAMS = (250.0, 500.0, 1000.0)    # the region test's nominal lam (m), at s 0 and 1
 # The constants chosen on the closed reference (`calibrate`; ROWS/calib/, summary_calib.csv): per
-# share at buildings, frozen
-CALIBRATED: dict[float, gx.InternalLeak] = {}
+# share at buildings, frozen. The central pair (90%): a median trip of 499.5 m there (4,000 draws,
+# the bootstrap's sd 3.2 m)
+CALIBRATED: dict[float, gx.InternalLeak] = {
+    0.9: gx.InternalLeak(open_m=6214.0, foot_m=562.0),
+}
 
 
 class Config(NamedTuple):
@@ -228,9 +231,8 @@ def _configs() -> dict[str, Config]:
     for share, leak in CALIBRATED.items():
         out[calibrated_label(share, gx.NoBoost())] = Config(exits=_bar(leak, gx.NoBoost()),
                                                             trip_m=TRIP_M)
-    if SHARES[0] in CALIBRATED:
-        out[calibrated_label(SHARES[0], BOOST)] = Config(
-            exits=_bar(CALIBRATED[SHARES[0]], BOOST), trip_m=TRIP_M)
+    out[calibrated_label(SHARES[0], BOOST)] = Config(exits=_bar(CALIBRATED[SHARES[0]], BOOST),
+                                                     trip_m=TRIP_M)
     return out
 
 
