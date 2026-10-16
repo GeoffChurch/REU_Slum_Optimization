@@ -38,10 +38,9 @@ Also closed: wider polish rounds (w16 = w8 at 1.28x) and late sampling on top of
 preset (+0.0001 at 1.33x); the greedy's unused scoring skipped (the preset 1.30x -> 1.21x).
 
 Prioritized (owner 2026-10-08: "I want to do all of the following"), each entry below:
-- **Goal-oriented refinement** (Coverage and model): done, the o1 goal mesh, on the 59 and the
-  oversized blocks.
-- **Sightline and the greedy on the composite** (Coverage and model): done, on the 59.
-- **The cheap preset on the composite** (Coverage and model): done, on the oversized blocks.
+- **Goal-oriented refinement**, **sightline and the greedy on the composite**, **the cheap preset
+  on the composite** (Coverage and model): closed with the raster (consolidated pass; wiki
+  `pages/reblock/raster-escape-time-metric-retired.md`).
 - **The add/remove search as one Strategy** (New methods): built, with floating search.
 - **An outcome model for kernelcore** (Experiment design): dropped on review (owner
   2026-10-09); the stop is built in seqscreen.py instead, by the value of more blocks (NOTES,
@@ -78,31 +77,33 @@ items up front"), in the order proposed:
    composite mesh, and a re-score under the sightline metric. With uniform chosen for the metric
    and the pictures (owner 2026-10-13; item 4, decision 3), the turning-boost call and these
    follow-ups have no use left: parked, sightline stays selectable (kept or pruned in the
-   consolidated pass). The passable width: the grid fix (item 4, decision 3) removes the phantom
-   passages; closing real gaps under a width stays a separate choice.
-   Buildings as imperfect insulators (owner 2026-10-11; NOTES, "The insulator world"): no single
-   eps both meets the owner's first criterion (a walled-in home worse, but not massively worse,
-   than its open neighbours: 1e-3 -- 3e-3) and keeps the gates (1e-4 or less). Tested for that
-   criterion: the shadowed homes on their open side (kept), one door link per walled-in home, a
-   toll after the solve (the door's numbers without its edge) and private walls (the tail halved
-   by letting a pocket out on every side); crossing.py, stopped. Then the owner dropped the
-   criterion: enclosed homes may be much worse off, with one wall resistance for everyone. Tested
-   (walls.py; NOTES, "Uniform walls"): one number at eps 1e-4 (A) against two (B: the population
-   still enclosed, then today's Lens A over the rest). No eps is canonical: the enclosed homes'
-   weight in J_2 goes as 1/eps^2, and at 1e-4 one home holds 80% of 20543's; A also leaks 0.02 --
-   0.04 at the gates. B is the same family's leak-free end, its optimizer two stages (free the
-   enclosed homes, D median 0.0022 a block, then today's search; a search at the gate-keeping eps
-   4.2e-6 is out, the GPU solver stalls there). The owner chose B (2026-10-11: "B SGTM"), and it
-   is ported (NOTES, "The port": lifted.Placement, Scorer.enclosed_left; insulator.py,
-   crossing.py and walls.py deleted, the door's, the toll's and the private walls' code with
-   them). Scored (item 4): in B's order the best road prefix at D 0.05 was ahead of SIMP's stored
-   default on 9 of the 12 large blocks with enclosed homes, on (i) alone. B's optimizer (NOTES,
-   "B's optimizer: free first"; clear.free_first, then today's search with the rest of the
-   budget) frees every home on all 12 for D 0.0001 -- 0.0026, at a median 0.003 of Lens A, and
-   both presets now lead the best road on all 12. Not free-first yet: the composite mesh
-   (free_first raises there; the a5x8 clearings predate B), the plain greedy (clear.greedy_block,
-   the track), and the stored rows on the other blocks with enclosed homes (21 small ones among
-   the 40 checked; the oversized).
+   consolidated pass). **Closed (consolidated pass)**: sightline went with the raster (phase 3), so
+   there is nothing to keep or prune, and the transparency question is settled by the translucent
+   search being the cheap preset (wiki `pages/reblock/raster-escape-time-metric-retired.md`). The
+   passable width: the grid fix (item 4, decision 3) removes the phantom passages; closing real
+   gaps under a width stays a separate choice. Buildings as imperfect insulators (owner 2026-10-11;
+   NOTES, "The insulator world"): no single eps both meets the owner's first criterion (a walled-in
+   home worse, but not massively worse, than its open neighbours: 1e-3 -- 3e-3) and keeps the gates
+   (1e-4 or less). Tested for that criterion: the shadowed homes on their open side (kept), one
+   door link per walled-in home, a toll after the solve (the door's numbers without its edge) and
+   private walls (the tail halved by letting a pocket out on every side); crossing.py, stopped.
+   Then the owner dropped the criterion: enclosed homes may be much worse off, with one wall
+   resistance for everyone. Tested (walls.py; NOTES, "Uniform walls"): one number at eps 1e-4 (A)
+   against two (B: the population still enclosed, then today's Lens A over the rest). No eps is
+   canonical: the enclosed homes' weight in J_2 goes as 1/eps^2, and at 1e-4 one home holds 80% of
+   20543's; A also leaks 0.02 -- 0.04 at the gates. B is the same family's leak-free end, its
+   optimizer two stages (free the enclosed homes, D median 0.0022 a block, then today's search; a
+   search at the gate-keeping eps 4.2e-6 is out, the GPU solver stalls there). The owner chose B
+   (2026-10-11: "B SGTM"), and it is ported (NOTES, "The port": lifted.Placement,
+   Scorer.enclosed_left; insulator.py, crossing.py and walls.py deleted, the door's, the toll's and
+   the private walls' code with them). Scored (item 4): in B's order the best road prefix at D 0.05
+   was ahead of SIMP's stored default on 9 of the 12 large blocks with enclosed homes, on (i)
+   alone. B's optimizer (NOTES, "B's optimizer: free first"; clear.free_first, then today's search
+   with the rest of the budget) frees every home on all 12 for D 0.0001 -- 0.0026, at a median
+   0.003 of Lens A, and both presets now lead the best road on all 12. Not free-first yet: the
+   composite mesh (free_first raises there; the a5x8 clearings predate B), the plain greedy
+   (clear.greedy_block, the track), and the stored rows on the other blocks with enclosed homes (21
+   small ones among the 40 checked; the oversized).
 4. **Evaluation** (discussion): (a) the roadless cost and benefit thought through (population as
    footprint area, J_2, the budget D); (b) a Galois connection between clearings and road
    networks over a fixed road universe: L(network) = the buildings it displaces, R(clearing) =
@@ -505,12 +506,10 @@ Open:
   owner's answer moves an end of the bracket to that screen's break-even rate. None is live.
 
 Not pursued, with what would change that:
-- *A Galerkin coarse model* (the solver's AMG level as the design problem's model, which keeps a
-  sub-cell gate's conductance where re-gridding loses it): coarse runs were not cheap enough to pay
-  even where they kept gates (`.C0.75.m2` 1.36x, dominated) -- worth it only if a coarse model were
-  several times cheaper per update than h 0.75 and kept every gate.
-- *The greedy's sweep kernel* (results identical, ~20 -- 30% of the greedy): the greedy is now a
-  0.3 -- 0.4x add-on of the hard-block preset; worth it if the greedy becomes the main method.
+- *A Galerkin coarse model*: closed, the raster's (its AMG level; every solve on the complex is
+  direct; wiki `pages/reblock/raster-escape-time-metric-retired.md`).
+- *The greedy's sweep kernel*: closed, the raster's GPU sweep (the complex's greedy sweeps on the
+  host, clear.Catchment; wiki `pages/reblock/raster-escape-time-metric-retired.md`).
 
 ## How we run experiments
 
@@ -535,18 +534,9 @@ Not pursued, with what would change that:
   0.170, 22422 0.815 / 0.814 / -; monotone, smaller is better at 1.3 -- 3x the time; 0.02
   dropped from the full run.
 - **Screening width** (idea). Exact-score more top candidates per round (as `M4` does).
-- **Speed** (measured 2026-10-04, gramprobe.py and a timing probe; NOTES "Greedy speed"). A step
-  on 30848 is 8 -- 12 s: the ranking (two solves at rtol 1e-3) 3 -- 4.5 s, the gram 1 -- 7 s,
-  scoring 2 -- 6 s.
-  - Scoring's rtol 1e-5 -> 1e-3 moves perm by at most 3.5e-5 and cannot change a pick (the
-    picker ignores the scoring J). It is 5 -- 10% of a step: take it with the next change.
-  - The gram scales with candidates x unknowns, about 0.03 s per candidate on 12 -- 16M
-    unknowns. The waves do not matter (Kahn's pass is 0.1 -- 0.25 s for 3 -- 7K waves), so
-    batching wave launches is dead.
-  - The levers left: fewer candidates (the picker's `reach`, which changes picks), or a sweep
-    kernel that reads each node's neighbour indices once rather than once per candidate column
-    (results identical; GPU kernel work).
-  - Altogether perhaps 20 -- 30% off the greedy, not 2x.
+- **Speed**: closed, the raster greedy's (its gram, waves and AMG solves; on the complex a step's
+  cost is the factorization, NOTES "The complex as the runtime: its speed and a GPU path"; wiki
+  `pages/reblock/raster-escape-time-metric-retired.md`).
 
 ## SIMP
 
@@ -557,14 +547,9 @@ Not pursued, with what would change that:
   iterate holds (NOTES, "SIMP: every 2nd candidate, coarse-to-fine, damped OC, MMA").
 - **Warm nested path** (measured, `.w3`: 2.6 -- 2.9x faster, Lens A 0.002 -- 0.022 below the
   cold path on 3 blocks; a cheaper preset; NOTES).
-- **Memory** (partly done, 63fa484; 2026-10-04): structures are cached only for a pattern seen
-  twice, and the greedy releases its tension before the exact scoring (22422 fits again); 1558,
-  20023, 30796 fit under `.k1s1e-06`. Fixed 2026-10-04: the K-cycle's closures formed a reference
-  cycle that kept every system's AMG hierarchy (2.6 GB on 30796) until the cycle collector ran,
-  about 11 GB of dead hierarchies at the peak (NOTES, "Translucent greedy on 30796"). With a
-  release of cupy's cached blocks before each new system, 14401, 7851 and 32841 now fit 48 GB for
-  the greedy and SIMP (62 of 82 large blocks). Done: 19593 and 6498 on the H100; 53556, 45267 and
-  the other 16 through local coarsening (Status, above).
+- **Memory**: closed, the raster's (cupy's AMG hierarchies on 48 GB cards; the complex's peaks are
+  the factorization's, NOTES "The complex as the runtime"; wiki
+  `pages/reblock/raster-escape-time-metric-retired.md`).
 - **Damped OC or MMA** (done 2026-10-04, null; NOTES). Damped OC ties or trails slightly on the
   13 (median -0.0005 / -0.0001), and MMA collapses on 22422. Both stay selectable (`.u`).
 - **Sturdier gate capture** (from that null). On a gated block SIMP's answer is one lucky
@@ -584,11 +569,9 @@ Not pursued, with what would change that:
   one (identical on 12 of 13, 2.12x); coarse multi-start `.C<h>.m<k>` neither faster nor better.
 - **Projection** (measured, kept selectable: `.b8-32` wins some gated blocks, loses some
   controls; not needed against collapses once the incumbent is on).
-- **SIMP + incumbent under the sightline metric** (done: the 13 at D 0.10 and D 0.05, and the 46
-  held-out blocks at D 0.05, NOTES "Sightline on the held-out blocks at D 0.05". SIMP leads the
-  plain greedy by a median of +0.021 [+0.015, +0.026], ahead on 96% of blocks, and the translucent
-  greedy by +0.005 [+0.002, +0.012] (all 46, with 30796 after the memory fix), at 3.1x their
-  time. The translucent greedy keeps its gate tail, 18910 -0.165.)
+- **SIMP + incumbent under the sightline metric**: closed, sightline deleted with the raster (its
+  translucent search the cheap preset now; wiki
+  `pages/reblock/raster-escape-time-metric-retired.md`, "Sightline conductance").
 
 ## New methods
 
@@ -617,12 +600,8 @@ Not pursued, with what would change that:
   common among the large ones (it is the only held-out block over 3000 buildings). The adaptive
   form waits on a schedule worth adapting. Neighbours: oscillating search, VNS, adaptive LNS
   (wiki page above, "Swing schedules").
-- **The restore screen's solve on gated blocks** (2026-10-10, NOTES "Swings as SIMP's
-  finisher"). Its eps world (EPS_SCREEN 1e-6) did not converge on 30848 (AMG-CG 2000 iterations,
-  1.9e-5 -- 5.0e-5 against 1e-5); every restore round can meet it. Fixes to weigh: warm starts
-  from the current state's solution, a looser rtol for a screen that only ranks, a larger
-  screen eps. The exact score can meet it too on a fine grid: 38616 at h 0.25, uncleared, 4.9e-8
-  after 2000 (NOTES, "The metric's resolution floor").
+- **The restore screen's solve on gated blocks**: closed, the raster's iterative solve (AMG-CG);
+  every solve on the complex is direct (wiki `pages/reblock/raster-escape-time-metric-retired.md`).
 
 ## Experiment design
 
@@ -679,45 +658,19 @@ Not pursued, with what would change that:
   fewer at 5%: clearings serve many people a little, so the verdict turns on the threshold.
   Counting people helped above a threshold (the other form) rewards concentrated gains; not
   proposed. Open: mu's value and units, and how the site compares methods without a common D.
-- **Blocks over ~1.4 km^2** (done 2026-10-08): local coarsening (`lifted.CompositeGrid`, plan
-  suffix `.a<d0>x<smax>`) keeps h 0.5 within d0 of every building, street and the block edge and
-  doubles the cell with each doubling of distance; within 0.004 of uniform h 0.5 on the 59 at a5
-  (order kept but for ties), though 14401 reads 0.009 low at a5 (0.0014 at a20: the order still
-  kept), and 2.4 -- 5.1M cells on the oversized blocks. Also an idea on top of it: a separate d0
-  for streets and the block edge.
-- **Goal-oriented refinement** (**prioritized**). Refine where the dual-weighted residual (the
-  adjoint, which the tension already solves for, weighting each cell's residual) says Lens A is
-  sensitive, instead of by distance: 14401 reads 0.009 low at a5 where the 59 read at most 0.004,
-  so distance alone misses some of what the score depends on. Measure: Lens A error against
-  uniform h 0.5 per cell spent, on the 59 and 14401, against a5 and a10. Built (common.GoalMesh);
-  with nothing cleared in the indicator's world it lost to distance on a third of the 59 (NOTES);
-  with the buildings open (o1) it is ahead of distance on 49 of 53 blocks at f1.2 (2.8x less
-  error at equal cells, median; 0.11 of the uniform cells fewer at equal error). Its five losers
-  are two sign crossings of the distance meshes' bias (20952, 44602: a5 near zero by luck), a tie
-  and two mild losses (NOTES). On the 19 oversized blocks at a5's cells it leaves a sixth of a5's
-  error (median 4.9x less, ahead on 18, the 19th a tie), against the finest goal mesh that fits.
-- **Sightline and the greedy on the composite** (**prioritized**). Sightline and SoftSightline
-  scan raster lines (`needs_raster`), as the metric or as the greedy's translucent search; both
-  raise on a composite. The greedy under uni has no raster check but has never run on one: first
-  establish that it does (against uniform h 0.5 on the 59), then give the sightline scans a
-  composite form. Both done (NOTES, "Sightline on the composite"): the scans run on the fine
-  raster, painted and averaged per cell; under the sightline metric on the 59 every mesh reads as
-  under uni (a20 p95 |error| 0.0006), the goal mesh ahead of distance on 38 of 40 but by less
-  (1.9x, 0.05 of the cells; 8152 0.18x, not looked at). Next: the sightline presets on the
-  oversized blocks.
-- **The cheap preset on the composite** (**prioritized**). polish_greedy.py builds a uniform h 0.5
-  grid; it takes a mesh, and greedy + polish runs on the oversized blocks. Needs the greedy on the
-  composite (above).
-- **Coarse-to-fine** (`.c1`, tried 2026-10-04; NOTES). 0.75x the time, but it collapses on 30848
-  (-0.255). Kept selectable. Worth retrying only with a coarse h that keeps 30848's gate (0.75?)
-  or with only the first stage coarse.
+- **Blocks over ~1.4 km^2** (local coarsening), **goal-oriented refinement**, **sightline and the
+  greedy on the composite**, **the cheap preset on the composite**: closed with the raster; the
+  complex meshes every block once, fine at walls and coarse in the open, oversized blocks included
+  (wiki `pages/reblock/raster-escape-time-metric-retired.md`, "Composite and goal-oriented
+  meshes").
+- **Coarse-to-fine** (`.c1`): closed, the raster's coarse plans (`.c`, `.C`) went with it (wiki
+  `pages/reblock/raster-escape-time-metric-retired.md`).
 
 ## Infrastructure
 
 - **Faster submits** (done 2026-10-08; NOTES "Faster submits"): a staged `dwithin` near test, a
   count without the cells' attributes, 8 blocks counted at a time; sizing 16 -- 18x faster, the
-  meshes identical. A goal-oriented mesh, whose cells come from a solve, will need its own
-  `cells` (its cell budget, say) rather than a build at submit.
+  meshes identical.
 - **Cluster launcher: bookgen and mycooc on GeoffChurch/cluster_submit** (done): mycooc deleted
   its old launcher (3ad93ac5), bookgen deleted ltcluster with no compatibility path (b901184b).
 - **CPU runs on orion and quadro2** (built 2026-10-12, for BACKLOG 5's 13 tuning blocks; owner:
@@ -736,9 +689,5 @@ Not pursued, with what would change that:
   on quadro2; the 13 tuning blocks' 481 networks and their prefixes took 28 task-h, each
   network identical to its twin computed here, where one was (NOTES); the 46 held-out blocks'
   782, 22.7 task-h.
-- **GPU sizing recalibrated** (done 2026-10-12): cluster.py's GB_PER_MILLION 0.7 -> 0.95, from
-  the scorer's measured peaks on the 13 (0.83 -- 0.87 GB per million unknowns on the large
-  blocks; at 0.7 item 4's run had sent 1558, 14401 and 20023 to 32 GB cards they would not fit).
-  cluster_check.py `gpu <run> <rows>` checks a recorded scoring run's measured peaks against the
-  sizing (every card holds its block's peak with 5% to spare; fault-injected at 0.7 and 0.9);
-  transp-held-score passed it. SIMP and the greedies peak at ~0.65, so they get room to spare.
+- **GPU sizing recalibrated**: closed, the raster's sizing (GB_PER_MILLION) went with it; `--gb`
+  sizes every card (wiki `pages/reblock/raster-escape-time-metric-retired.md`).
