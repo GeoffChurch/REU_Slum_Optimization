@@ -189,6 +189,7 @@ LAMS = (250.0, 500.0, 1000.0)    # the region test's nominal lam (m), at s 0 and
 # the bootstrap's sd 3.2 m)
 CALIBRATED: dict[float, gx.InternalLeak] = {
     0.9: gx.InternalLeak(open_m=6214.0, foot_m=562.0),
+    0.75: gx.InternalLeak(open_m=3608.0, foot_m=565.0),     # 500.1 m
     1.0: gx.InternalLeak(open_m=math.inf, foot_m=552.0),    # 492.2 m (sd 3.3 m)
 }
 
