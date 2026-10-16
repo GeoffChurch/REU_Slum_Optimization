@@ -7271,3 +7271,160 @@ the region's leave-one-out 0.91 (142 buildings in its 3,000 s: about 21 s each o
 host's work, so the 707 would have taken about 4 h). CPU here, at most 4 processes: the 13 blocks'
 leave-one-out about 3.5 CPU-h, the 10x baseline, scores and cross-scores about 1, the report and
 the guards about 0.5.
+
+### Before the consolidated pass: three fixes
+
+BACKLOG, the two "Before that pass" entries (the brief: .superpowers/sdd/2026-10-16-prepass-fixes).
+A pass over every block must not stop on a false error or lean on a guard whose failure nobody
+understands: the refined solve's false stall on ZAF.9.1.4_1_7283, the `gradient` guard on 20269 and
+the `free-roads` guard on 23597. Two were real defects (the stopping test, the free-first stage's
+targets), one the guard's premise; each now has a guard that fails under its fault.
+
+**1. The refined solve's false stall: the stopping test** (gap_factor._residual; guard
+gap_clear_check `underflow`). 7283 (under the source's building floor, so built through
+common.member_blocks) is a sliver between two streets, 5 -- 16 m wide and 3.5 km long, with a
+triangle at its east end that holds the 22 homes (121,190 m^2 in all, its whole boundary the street
+ring). Along the sliver the potential falls by an e-fold every 4.6 m or so (2e-8 at 200 m from the
+nearest home, 4e-27 at 400 m: a strip grounded on both sides), below the smallest normal number
+(tiny, 2^-1022) from 2.43 km and to exactly 0 from 2.47 km: of the 270,614 unknowns 57,342 are 0
+and 1,843 subnormal. The region test's diagnosis, corrected: not 0 / 0. The 57,328 rows whose
+denominator (|A| |x| + |b|) is exactly 0 were already passed over (`d > 0`). The 728 rows that read
+above 1e-8 all have a denominator under tiny, on the underflow front, and the worst read exactly 1:
+a row whose only nonzero term is a neighbour's 2^-1074 (the smallest subnormal) has a residual, a
+2^-1074 rounded, equal to its whole denominator, and no refinement can lower it (x is held to the
+subnormal grid there). "Beside the street" is right: every such row is within 1.6 m of a street
+cell. The solve was right all along (its first solve 1.7e-12 of the largest from spsolve's).
+LAPACK's xGERFS, whose rule Refined follows, reads such rows as 1 too (scipy's dgesvx: BERR 1 for A
+= I, b = 0, and for a tridiagonal system whose solution underflows), but stops there and reports
+it; the raise at REFINE_ACCEPT made it an error here.
+
+The fix (gap_factor.py:92, `_residual`, the floor at :117): each term of the denominator counted at
+no less than the format resolves. Below tiny a float is held, and a product rounded, to the
+subnormal spacing eps tiny, an absolute precision; so x_j counts at max(|x_j|, tiny) and each
+|a_ij| max(|x_j|, tiny) at no less than tiny. A row of normal terms is measured as before, bit for
+bit (a stored zero's tiny vanishes beside any denominator above tiny / eps); a row on an underflow
+front is measured by what the format can hold there. No tolerance moved and no constant changed:
+tiny is read from the format inside the kernel, and the code's digest stays 34d40e8a, so the metric
+keeps its name. Both factorizations share the test (SuperLU's and cuDSS's factors are each a
+`Refined`, as is the rebuild's, gap_flow.factor). 7283 now solves at a backward error of 7.0e-16,
+under 4 eps at the first solve, 9.6e-13 of the largest from spsolve's.
+
+**No score changes where the old test passed.** On the 13 tuning blocks (the 4-block sentinel
+22422, 30848, 5810 and 9712 among them), each model built twice, under the old test (the guard's
+fault, verbatim) and under the new: P0, P_{1/2},0 and J_2,0, the stored SIMP default clearing's P,
+P_{1/2}, J_2, B (i) and every home's escape time, and every refined solve's backward-error history
+(7 -- 14 evaluations a block, at most 1.5e-15) are bit-identical, and the baselines are road_rows'
+stored ones bit for bit. The least nonzero potential on any of them is 1.2e-18 (23597), far above
+tiny.
+
+The guard, `underflow`: 7283 meshed afresh, its model builds (every baseline solve refined), the
+direct solve has subnormal cells (1,844: the premise, that the block still has an underflow front),
+and the refined solve is within UNDERFLOW_TOL (1e-9) of spsolve's: 9.6e-13. Fault `unfloored` (the
+old _residual, verbatim): the baseline's solve raises "refinement stalled at a backward error of
+1.0e+00". The solve path changed, so the device guards ran on the cards (run pp-dev at 2cbc39ed,
+one submit, both ways): `device` within 1.4e-10 (20269) and 5.1e-11 (18895), `perturb` 0.97 and
+0.86 off; `device-roads` within 8.9e-11 and 3.7e-11, `perturb` 0.88 and 0.69: rl-dev's before the
+fix were 1.5e-10, 5.1e-11, 8.6e-11 and 3.6e-11.
+
+**2. The `gradient` guard on 20269: the guard's premise, not the code** (gap_clear_check
+`against_differences`, GRAD_STEPS). At HEAD (and at 72cabeac, the region test found) the guard
+failed 7 of its 24 checks on 20269: shy0.5 at the random x (J_1 q 1, J_2 q 1 and q 3: 1.0e-4 --
+1.2e-4), shy0.5 at SIMP's start (q 3: 4.1e-4 and 5.6e-4) and close0.125 at the start (q 3: 1.3e-4,
+1.8e-4). The evidence: every check of the guard (3 forms, 2 states, 2 powers, 2 q, its 6 buildings)
+at steps 1e-3, 3e-4, 1e-4, 3e-5, 1e-5 and 1e-6 on 19570, 38136 and 20269, with the forward and
+backward differences beside the central ones and, per building, the distance in x to the nearest
+kink of the factors' minimum (a crossing of its term with another's at some point):
+- At the random x the disagreement is the solves' roundoff over the step. On 20269 it grows as 1 /
+  h below 3e-4 (shy0.5 J_1 q 1: 3.2e-6 at 3e-4, 1.1e-5 at 1e-4, 1.1e-4 at 1e-5, 1.1e-3 at 1e-6): J
+  is deterministic (the same value twice, bit for bit) but rounded at about 3e-12 of itself
+  [inferred from the 1 / h slope], and on 20269 (J 3.2e4 over 1.42M cells, its picked buildings'
+  gradients 23 -- 142) that is 1e-4 of the gradient at 1e-5. No kink is near: the nearest crossing
+  lies 2.5e-3 -- 9.7e-2 away in x under shy0.5 and close0.125 (ramp0.5's continuous phi has
+  sub-point crossings within 5e-6, each a sliver of one triangle's factor, too small to see). The
+  forward and backward differences close on each other linearly in h and straddle the adjoint:
+  curvature, not a kink.
+- At SIMP's start (x = D everywhere, each picked building in two-way ties: a kink exactly at x0, by
+  design, for the fault `tie`) the central difference reaches the tie's shared gradient, the mean
+  of the one-sided derivatives, only at O(h), the two sides curving apart: 38136 shy0.5 J_2 q 3
+  1.9e-3 at 1e-3, 2.0e-4 at 1e-4, 2.0e-5 at 1e-5. So the start needs the small steps 20269's
+  roundoff forbids, and there no single central difference passes: shy0.5 J_1 q 3 is at least
+  1.9e-4 off at every step (2.9e-3 at 1e-3, 2.9e-4 at 1e-4, 1.9e-4 at 3e-5, 4.1e-4 at 1e-5, 2.4e-3
+  at 1e-6). Over the 72 checks the best single step per building still leaves 2.2e-4.
+- At those ties the one-sided derivatives, each extrapolated to h -> 0 from 1e-3 and 3e-4, differ
+  by 0.3 -- 72% of the gradient (a real kink), and their mean is the adjoint's within 2.6e-5 --
+  5.4e-5 of the largest on every block and form, each alone at least 1.0e-4 off: the adjoint takes
+  the subgradient it is meant to (gap_flow.Terms.vjp, a tie's share split equally). The code is
+  right.
+
+The fix is the guard's (gap_clear_check.py:497, `against_differences`; GRAD_STEPS at :243): per
+building, the closest over GRAD_STEPS = (1e-3, 1e-4) of the central difference extrapolated from h
+and h / 2, 2 D(h / 2) - D(h). Where J is smooth it is the derivative to O(h^2), as D(h) is; at a
+tie it cancels D's O(h) term, so it is the mean of the one-sided derivatives to O(h^2); and its
+steps lie above 20269's roundoff (the sweep's extrapolations from steps 1e-3 and 3e-4 and from 1e-4
+and 3e-5, the closer taken: at most 3.6e-5 over the 72 checks). One function now serves `gradient`,
+`leak-gradient` and pweight_check's `gradient` (three copies of the loop before; pweight_check had
+moved to steps 1e-3 -- 1e-5 against the same roundoff on 20269's P). The guard's blocks: 19570,
+38136 and 20269. Now within 1.8e-5 (19570), 3.8e-5 (38136, ramp0.5 at the start) and 2.4e-5 (20269,
+24 of 24; 77 minutes on a core); fault `tie` 6.1e-3 -- 0.10 on 19570 and 38136 and 8.0e-3 -- 0.19
+on 20269, every start check of each block failing.
+
+**3. The `free-roads` guard on 23597: the stage, not the guard** (free_roads.FreeEnclosed.plan;
+guard free_roads_check `free-roads`). The stage itself raised, before the guard's oracle was asked
+("the road held for home 272 (12 nodes, 94.6 m) does not free it by the metric's test"; the same at
+72cabeac). Its targets are the graph's nodes and edges within half the road's width (less
+`target_margin_m`, 0.05 m, for the buffer's polygon) of the ground that frees the home (within
+ring_m, 1 m, of its outline, or its sealed pocket). But the metric carves a road as the footprints
+less its corridor, grown by the width form's growth (the shy distance's w / 2, 0.25 m): the
+footprints the corridor cuts grow back into it by 0.25 m, and its open ground starts that far
+inside its edge. The targets did not know it. Home 272: the corridor comes within 0.80 m of its
+outline (0.15 m^2 of it inside the 1 m ring), but its open ground, the complex rebuilt with it
+carved, within 1.05 m (0.80 + 0.25): outside the ring, the home's ring still in its sealed pocket.
+A mismatch between the routing's reach and the complex's, so the stage. The fix
+(free_roads.py:208): the targets' reach less `metric.form.grow` (0 under Closing). A point within
+half the width less the growth and the margin of the road lies at least the growth beyond every
+footprint left standing, so it is open, and the corridor's open core (6.5 m wide) joins it to the
+street: the road frees the home by construction.
+
+**What it changes** (the stage before and after on the 39 of the 60 large blocks with homes walled
+in on the complex, 234 homes, on clearance_looped's graph: the guard finds the three graphs' plans
+the same on its blocks): before, the stage raised on 7 of the 39 (6310, 22267, 23597, 30796, 30848,
+39240, 41515), so the consolidated pass would have stopped on each; after, it raises on none and
+frees all 234 homes with 173 roads, none unreachable or over the budget. Of the 32 plans it made
+before, 26 are unchanged and 6 change: five by a target the old reach allowed where the corridor
+happened to border open ground rather than a cut footprint (the road freed its home but is excluded
+now: D area +0.0001 -- +0.0003, 1558, 20080, 38528, 43708, 8235) and one cheaper (17608, two roads
+for three, -0.0003). Not pursued: a target test exact to the footprints the corridor cuts, or
+routing with the old reach and re-routing when the held road fails its check, would recover those
+five, at most 0.0003 of D area a block against the stage's budget of 0.05.
+
+With the fix, 23597's six walled-in homes (45, 93, 272, 375, 765, 889) are freed by five roads (D
+area 0.0027, count 0.0107), each by the guard's oracle (the flow model's reach on the fixed mesh
+with the roads carved), nothing left walled in; under `one-short` the stage raises on 23597 (home
+45's road) and 18895. 23597 joins the guard's blocks (20269, 18895, 23597).
+
+**Stored road results affected: none.** road_rows (item 4's lineup on the 60) hold no held roads
+(every arm holds nothing: reblock.free_first.HoldNothing), and the only stored networks with held
+roads (transparency_rows/free and free_local, 444 files) were written on 2026-10-12 by the raster's
+stage, before the complex. No stored result was made by the stage on the complex: the fix changes
+what the consolidated pass will make (BACKLOG 5's TODO, free first the road methods' default), on
+13 of the 39 blocks above.
+
+**The guards** at the final code (0d01da48), each passing on it and failing under each of its
+faults, on a core here unless named (90 runs, 5.1 h of core time, two to six at once, besides
+20269's `gradient` pass above): gap_clear_check baseline, weights, reach, gradient (19570, 38136;
+20269 above), free, identity, convex, pattern, constants (28 constants, the digest 34d40e8a),
+roads, flux, leak-assembly, leak-fold, enclosure, leak-gradient (19570, 38136: within 1.1e-5
+through the shared check; `adjoint-unleaked` 0.062 -- 0.97), leak-scale, barriers, exits-identity,
+loop-index, trip-calibration, closed-edge, street-boost and the new underflow; gap_check conform,
+delaunay, apertures, filtration, free; gap_flow_check angle, shift, channel, field, law, closed;
+pweight_check identity, total, displacement, gradient (within 5.2e-6; `J-population` 0.22 -- 0.37),
+weights; free_roads_check free-roads (20269, 18895, 23597); cluster_check ids and cpu. The device
+guards on the cards, above. mypy --strict clean on gap_factor and free_roads; gap_clear_check and
+pweight_check at their counts before (10 and 6 errors); `ruff check .` passes;
+tests/test_clearings.py: 36 pass.
+
+**Compute.** GPU: 0.23 GPU-h of the 1 (pp-dev: 6.6 and 6.9 minutes on an H100 and a V100). CPU
+here, single-threaded, at most 8 processes: the 7283 diagnosis and the no-change check on the 13
+(about 0.4 CPU-h), the gradient sweep (9 runs, about 3), the stage before and after on the 39
+(about 3.5), the guards (6.4, 20269's `gradient` pass among them) and the first runs at HEAD (about
+1): about 15 CPU-h [inferred from the runs' times].
