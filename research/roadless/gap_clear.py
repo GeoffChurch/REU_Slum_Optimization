@@ -1220,9 +1220,9 @@ class Model:
     owner's), `demand` what each home injects in J_power (common.Demand); `factorization` the
     run's (gap_factor: its device); `lumped` every building's interior one cell; `tension_eps`
     the eps world the tension ranks in (clear.EPS, or the translucent search's); `exits` the
-    region model's (gap_exits: the street boost on the mesh's weights, the leaks on the cells live
-    at baseline; the barriers are in `block` and its mesh already: ComplexMetric.fixed and
-    .model). The mesh's atoms (fx.carving: the buildings, or a road network's pieces) carry the
+    region model's (gap_exits: the street boost on the mesh's weights, a closed edge on its street
+    faces', the leaks on the cells live at baseline with the edge open; the barriers are in
+    `block` and its mesh already: ComplexMetric.fixed and .model). The mesh's atoms (fx.carving: the buildings, or a road network's pieces) carry the
     width form's factors; a clearing k is per building and each atom takes its building's k, or 1
     where the state's road prefix (`stop`) carves it (`road_state`); the homes are the
     buildings."""
@@ -1235,7 +1235,8 @@ class Model:
         self.tension_eps = tension_eps
         self.exits = exits
         self.geo = gc.geometry(block)
-        self.fm = exits.boost.mesh(fx.fm, self.geo, block)
+        fm_open = exits.boost.mesh(fx.fm, self.geo, block)
+        self.fm = exits.edge.mesh(fm_open)
         self.n_ = len(self.geo.polys)
         self.carving = fx.carving
         if self.carving.parent.max(initial=-1) >= self.n_:
@@ -1252,14 +1253,17 @@ class Model:
         cells = full_cells(self.fm, lumped=lumped)
         bare = System(cells, graph=Graph(self.fm, cells, leak=np.zeros(cells.n)), dem=fx.dem,
                       ptri=fx.ptri, factorization=factorization)
-        # the leaks on the cells that are unknowns at baseline (every footprint standing), fixed
+        # the leaks on the cells that are unknowns at baseline (every footprint standing) with the
+        # edge open (a closed edge grounds no face: its leaks lie where the open edge's street
+        # reaches, the cells ground there among them), fixed
         a, b, c = (self.fm.xy[self.fm.tri[:, k]] for k in range(3))
         tri_area = 0.5 * np.abs((b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1])
                                 - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0]))
+        f0 = self._factors(bare, np.zeros(self.n_), prefix=_NO_ROADS)
         self.leak_site = gx.LeakSite(
             area=np.bincount(cells.cell, weights=tri_area, minlength=cells.n),
-            live=self._factors(bare, np.zeros(self.n_), prefix=_NO_ROADS).reach.unknown,
-            inj=np.asarray(bare.Pc @ pop), sigma=fs.sigma)
+            live=bare.graph.reach(fm_open, f0.kt, f0.kp).unknown,
+            foot=np.asarray(bare.Pc @ shapely.area(self.polys_)), sigma=fs.sigma)
         self.sys = bare.with_graph(bare.graph.with_leak(exits.leak.per_cell(self.leak_site)))
         self.dem = fx.dem
         self.nodem = fx.dem.walled            # the homes with no demand point: out of every J
@@ -1621,8 +1625,8 @@ class ComplexMetric:
     never read as the raster's. `search_eps`: the eps world the tension ranks in (the greedy's
     and the polish's ranking: clear.EPS, the metric's own, or a larger one, the translucent search,
     the raster's `@<search>` on the complex), its name's `@e<eps>` where it differs from clear.EPS;
-    every score is under the metric. `exits` the region model's (gap_exits: barriers, leaks and a
-    street boost; the per-block exits, the block's whole street ring, name nothing), its name's
+    every score is under the metric. `exits` the region model's (gap_exits: barriers, the edge, leaks
+    and a street boost; the per-block exits, the block's whole street ring, name nothing), its name's
     `+x...` where it has any. `factorization` is the run's device (gap_factor): it moves scores
     only at the floating-point level, so it is not in the name; the rows record it."""
     spec: gc.Spec
@@ -1701,7 +1705,7 @@ def complex_of(name: str, *, factorization: gap_factor.Factorization) -> Complex
     if m is None:
         raise ValueError(f"unknown complex metric {name!r}: cx+<form><w>+s<s>r<ring>b<band>+"
                          "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped]+v<code>"
-                         "[+x[B<line>c<cross>][L<lam>s<s>][S<boost>]v<exits code>]"
+                         "[+x[B<line>c<cross>][E0][L[o<open>][b<foot>]][S<boost>]v<exits code>]"
                          "[@e<search eps>]")
     (kind, w, ramp_s, s_, ring, band, R, levels, grade, quad, sigma, ox, oy,
      lumped, code, *exits, search) = m.groups()

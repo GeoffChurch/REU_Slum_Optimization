@@ -26,6 +26,7 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S exits-identity - [fault]      # faults: in-code, suffix-dropped
     uv run python $S loop-index - [fault]          # fault: uncontracted
     uv run python $S trip-calibration - [fault]    # faults: boundary-trips, wrong-home
+    uv run python $S closed-edge - [fault]         # fault: edge-open
     uv run python $S both-ways <guards,> <ids,|->  # each guard, then under each of its faults
 
 `baseline`: the fixed mesh (the runtime's metric, METRIC) against the complex rebuilt
@@ -163,6 +164,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import math
 import sys
 import tempfile
 from collections.abc import Callable, Iterator
@@ -237,9 +239,10 @@ FLUX_TOL = 1e-9          # a cell's imbalance, of the largest current through a 
                          # refined to the backward-error floor: 2e-11 -- 5e-11 on 19570
                          # and 20269)
 LEAK_LAM = 50.0          # the leak guards' lam (m): a small block's scale (19570 is 215 m long)
-LEAK_SHARES = (0.0, 1.0, 0.5)    # ... their building shares s: all on open ground, all at
-                                 # buildings (the region test's two families), half and half
-FOLD_SHARES = (0.0, 1.0, 0.75)   # leak-fold's shares (0.75: not symmetric under the swap)
+LEAK_PAIRS = ((LEAK_LAM, math.inf), (math.inf, 20.0), (100.0, 25.0))   # ... the leak's lengths
+                         # (open_m, foot_m): open ground only, footprints only, both
+FOLD_SHARES = (0.0, 1.0, 0.75)   # leak-fold: the region test's shares at LEAK_LAM, as constants
+                                 # (0.75: not symmetric under the swap)
 PER_BLOCK = "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a"   # the per-block metric's name: every
                                                           # stored per-block row's, unchanged
 PER_BLOCK_CONSTANTS = 28
@@ -249,7 +252,9 @@ SCALE_LAM = 60.0         # ... the uniform leak's lam (the square's half-side ov
 SCALE_R = (10.0, 200.0)  # ... the distances read (m): beyond the home's ring, short of the edge
 SCALE_BINS = 12
 SCALE_TOL = 0.03         # ... the ratio's spread over the bins, and its level against the formula
-SCALE_SHARES = (0.0, 0.5)   # ... the building shares (0.5: half the leak on the home's own cells)
+SCALE_PAIRS = ((SCALE_LAM, math.inf), (SCALE_LAM * math.sqrt(2.0), 2.0))   # ... the leak's
+                         # lengths: open ground only, and with the home's own footprint leaking
+CLOSED_EDGE_M = 50.0     # closed-edge: TRIP_BLOCK's second home this far from the closed edge
 TRIP_T = 63.0            # trip-calibration: the median trip calibrated to on SCALE_BLOCK (m: lam
                          # near 50, where the square's edge takes 0.1% of the current)
 TRIP_GUARD_TOL = 1e-3    # ... the bisection's tolerance there (relative), and lam's resolution (m)
@@ -971,7 +976,7 @@ def flux(ids: list[str]) -> list[str]:
     for bid in ids:
         [b] = common.build_blocks([bid])
         m = _model(b)
-        ml = _model(b, _leaky(gx.InternalLeak(s=0.0, lam=LEAK_LAM)))
+        ml = _model(b, _leaky(gx.InternalLeak(open_m=LEAK_LAM, foot_m=math.inf)))
         rng = np.random.default_rng(SEED + 6)
         states = {"baseline": (m, np.zeros(m.n))}
         for k in range(FLUX_RANDOM):
@@ -1008,13 +1013,15 @@ def _flip_one() -> contextlib.AbstractContextManager[None]:
 
 # ------------------------------------------------------------------ the exits: leaks
 
-LEAKS = tuple(gx.InternalLeak(s=s, lam=LEAK_LAM) for s in LEAK_SHARES)
+LEAKS = tuple(gx.InternalLeak(open_m=o, foot_m=f) for o, f in LEAK_PAIRS)
 
 
-def _leaky(leak: gx.NoLeak | gx.InternalLeak) -> gcl.ComplexMetric:
-    """The runtime's metric with `leak` (no barriers, no boost: a kblock has no OSM features)."""
-    return dataclasses.replace(METRIC, exits=gx.Exits(barriers=gx.NoBarriers(), leak=leak,
-                                                      boost=gx.NoBoost()))
+def _leaky(leak: gx.NoLeak | gx.InternalLeak, *,
+           edge: gx.OpenEdge | gx.ClosedEdge = gx.OpenEdge()) -> gcl.ComplexMetric:
+    """The runtime's metric with `leak` (no barriers, no boost: a kblock has no OSM features),
+    its edge `edge` (the street ring open, as the per-block metric's, unless a guard closes it)."""
+    return dataclasses.replace(METRIC, exits=gx.Exits(barriers=gx.NoBarriers(), edge=edge,
+                                                      leak=leak, boost=gx.NoBoost()))
 
 
 def _tri_area(fm: gcl.FullMesh) -> np.ndarray:
@@ -1029,7 +1036,8 @@ def _leak_oracle(m: gcl.Model, leak: gx.InternalLeak) -> np.ndarray:
     each cell's triangles' area, the cells live at baseline by a search of their own (scipy's
     components over the passages conducting at baseline and a street node joined to the cells
     with a conducting street face or a ground cell), the injection per cell from the demand's
-    points; 1 - s of the total on open ground by area, s at the buildings by injection."""
+    points with each building's footprint area; sigma / open_m^2 per m^2 of open ground,
+    sigma / foot_m^2 per m^2 of footprint injected."""
     from scipy.sparse.csgraph import connected_components
     fm, c = m.fm, m.c
     area = np.bincount(c.cell, weights=_tri_area(fm), minlength=c.n)
@@ -1047,24 +1055,23 @@ def _leak_oracle(m: gcl.Model, leak: gx.InternalLeak) -> np.ndarray:
     live = (lab[:c.n] == lab[street]) & ~is_ground
     sigma = m.fs.sigma
     pts = np.flatnonzero(m.fx.ptri >= 0)
-    inj = np.bincount(c.cell[m.fx.ptri[pts]], weights=np.asarray(m.dem.S @ m.pop)[pts],
-                      minlength=c.n)
-    inj = np.where(live, inj, 0.0)
-    total = sigma * area[live].sum() / leak.lam ** 2
-    return ((1.0 - leak.s) * np.where(live, sigma * area / leak.lam ** 2, 0.0)
-            + leak.s * total * inj / inj.sum())
+    foot_area = np.asarray(shapely.area(np.asarray(m.block.buildings.outlines)))
+    foot = np.bincount(c.cell[m.fx.ptri[pts]], weights=np.asarray(m.dem.S @ foot_area)[pts],
+                       minlength=c.n)
+    return (np.where(live, sigma * area / leak.open_m ** 2, 0.0)
+            + np.where(live, sigma * foot / leak.foot_m ** 2, 0.0))
 
 
 def _uniform_was(site: gx.LeakSite, lam: float) -> np.ndarray:
-    """UniformLeak.per_cell before the fold (the region test's code, verbatim)."""
+    """UniformLeak.per_cell of the region test (verbatim)."""
     return np.where(site.live, site.sigma * site.area / lam ** 2, 0.0)
 
 
-def _home_was(site: gx.LeakSite, lam: float) -> np.ndarray:
-    """HomeLeak.per_cell before the fold (the region test's code, verbatim: its total
-    UniformLeak's)."""
+def _home_was(site: gx.LeakSite, lam: float, pop_inj: np.ndarray) -> np.ndarray:
+    """HomeLeak.per_cell of the region test (verbatim: its total UniformLeak's, placed by the
+    population's injection `pop_inj`, System.Pc @ pop)."""
     total = float(site.sigma * site.area[site.live].sum() / lam ** 2)
-    inj = np.where(site.live, site.inj, 0.0)
+    inj = np.where(site.live, pop_inj, 0.0)
     return total * inj / float(inj.sum())
 
 
@@ -1074,14 +1081,20 @@ def leak_fold(ids: list[str]) -> list[str]:
         [b] = common.build_blocks([bid])
         with tempfile.TemporaryDirectory() as tmp:
             fx = METRIC.fixed(b, cache=Path(tmp), carving=gcl.Carving.none(gc.geometry(b)))
+        bare = METRIC.model(b, fx, demand=POP)
+        site = bare.leak_site
+        open_m2 = float(site.area[site.live].sum())
+        foot_m2 = float(site.foot[site.live].sum())
         parts = []
         for s in FOLD_SHARES:
-            leak = gx.InternalLeak(s=s, lam=LEAK_LAM)
+            # the region test's (s, LEAK_LAM) as the two constants on this block (unrounded)
+            leak = gx.InternalLeak(
+                open_m=LEAK_LAM / math.sqrt(1.0 - s) if s < 1.0 else math.inf,
+                foot_m=LEAK_LAM * math.sqrt(foot_m2 / (s * open_m2)) if s > 0.0 else math.inf)
             m = _leaky(leak).model(b, fx, demand=POP)
             got = m.sys.graph.leak
             was = ((1.0 - s) * _uniform_was(m.leak_site, LEAK_LAM)
-                   + s * _home_was(m.leak_site, LEAK_LAM))
-            exact = s in (0.0, 1.0)
+                   + s * _home_was(m.leak_site, LEAK_LAM, np.asarray(m.sys.Pc @ m.pop)))
             d_was = float(np.abs(got - was).max() / np.abs(was).max())
             oracle = _leak_oracle(m, leak)
             d_oracle = float(np.abs(got - oracle).max() / np.abs(oracle).max())
@@ -1091,10 +1104,10 @@ def leak_fold(ids: list[str]) -> list[str]:
             ref, cells = _operator(st)
             ref = (ref + sp.diags(oracle[cells])).tocsr()
             d_op = float(abs(A[cells][:, cells] - ref).max() / abs(ref).max())
-            ok = ((d_was == 0.0 if exact else d_was <= PATTERN_TOL) and d_oracle <= PATTERN_TOL
-                  and d_op <= PATTERN_TOL)
-            parts.append(f"s {s:g}: against the formulas before the fold {d_was:.1e}"
-                         + (" (bit for bit)" if exact and d_was == 0.0 else "")
+            ok = ((d_was == 0.0 if s == 0.0 else d_was <= PATTERN_TOL)
+                  and d_oracle <= PATTERN_TOL and d_op <= PATTERN_TOL)
+            parts.append(f"s {s:g} ({leak.name}): against the region test's formulas {d_was:.1e}"
+                         + (" (bit for bit)" if d_was == 0.0 else "")
                          + f", the oracle {d_oracle:.1e}, the operator {d_op:.1e}"
                          + ("" if ok else " FAILS"))
             if not ok:
@@ -1106,10 +1119,10 @@ def leak_fold(ids: list[str]) -> list[str]:
 _INTERNAL_PER_CELL = gx.InternalLeak.per_cell
 
 
-def _shares_swapped(self: gx.InternalLeak, site: gx.LeakSite) -> np.ndarray:
-    """InternalLeak.per_cell with the open ground's share applied to the buildings and the
-    buildings' to open ground (fault `shares-swapped`)."""
-    return _INTERNAL_PER_CELL(dataclasses.replace(self, s=1.0 - self.s), site)
+def _lengths_swapped(self: gx.InternalLeak, site: gx.LeakSite) -> np.ndarray:
+    """InternalLeak.per_cell with the open ground's length applied to the footprints and the
+    footprints' to open ground (fault `lengths-swapped`)."""
+    return _INTERNAL_PER_CELL(gx.InternalLeak(open_m=self.foot_m, foot_m=self.open_m), site)
 
 
 def leak_assembly(ids: list[str]) -> list[str]:
@@ -1280,8 +1293,8 @@ def leak_scale(_ids: list[str]) -> list[str]:
     with tempfile.TemporaryDirectory() as tmp:
         fx = METRIC.fixed(b, cache=Path(tmp), carving=gcl.Carving.none(gc.geometry(b)))
     bad = []
-    for s in SCALE_SHARES:
-        leak = gx.InternalLeak(s=s, lam=SCALE_LAM)
+    for open_m, foot_m in SCALE_PAIRS:
+        leak = gx.InternalLeak(open_m=open_m, foot_m=foot_m)
         m = _leaky(leak).model(b, fx, demand=POP)
         st = m.state(np.zeros(m.n))
         u = m.solve(st, m.pop)
@@ -1291,27 +1304,27 @@ def leak_scale(_ids: list[str]) -> list[str]:
         on = st.reach.unknown & (r >= SCALE_R[0]) & (r <= SCALE_R[1])
         edges = np.geomspace(SCALE_R[0], SCALE_R[1], SCALE_BINS + 1)
         which = np.digitize(r[on], edges) - 1
-        lam_open = SCALE_LAM / np.sqrt(1.0 - s)
+        lam_open = open_m
         ratio = u[on] / k0(r[on] / lam_open)
         per_bin = np.array([np.median(ratio[which == k]) for k in range(SCALE_BINS)])
         rhs = m._rhs(st, m.pop)
-        # the current the home's own building's destination drains (the buildings' share: s 0
-        # none), the rest spreading on the open ground
-        own = leak.kappa(m.leak_site) * np.where(m.leak_site.live, m.leak_site.inj, 0.0) * u
+        # the current the home's own footprint's destination drains (none without a footprint
+        # leak), the rest spreading on the open ground
+        own = leak.per_foot(m.leak_site) * np.where(m.leak_site.live, m.leak_site.foot, 0.0) * u
         Q = float(rhs.sum() - own.sum())
         expect = Q / (2.0 * np.pi * m.fs.sigma)
         spread = float(per_bin.max() / per_bin.min() - 1.0)
         level = float(np.median(per_bin) / expect - 1.0)
         sizes = cg.area[on]
         ok = spread <= SCALE_TOL and abs(level) <= SCALE_TOL
-        print(f"leak-scale s {s:g}: open ground {SCALE_L:g} m, lam {SCALE_LAM:g} m (the open "
-              f"ground's {lam_open:.4g} m), {int(on.sum())} cells at {SCALE_R[0]:g} -- "
+        print(f"leak-scale {leak.name}: open ground {SCALE_L:g} m, {int(on.sum())} cells at "
+              f"{SCALE_R[0]:g} -- "
               f"{SCALE_R[1]:g} m (areas {sizes.min():.2g} -- {sizes.max():.2g} m^2); u / K0(r / "
               f"lam') per bin {np.round(per_bin / expect, 4).tolist()} of Q' / (2 pi sigma) = "
               f"{expect:.4g} (Q' {Q / float(rhs.sum()):.4g} of the home's current): spread "
               f"{spread:.1e}, level {level:+.1e} -> {'ok' if ok else 'FAILS'}", flush=True)
         if not ok:
-            bad.append(f"s {s:g}: spread {spread:.1e}, level {level:+.1e}")
+            bad.append(f"{leak.name}: spread {spread:.1e}, level {level:+.1e}")
     return bad
 
 
@@ -1350,7 +1363,8 @@ def _barrier_block(*, node: bool, bridge: bool) -> Block:
 
 def barriers(_ids: list[str]) -> list[str]:
     metric = dataclasses.replace(METRIC, exits=gx.Exits(barriers=region_leaks.BARRIERS,
-                                                        leak=gx.NoLeak(), boost=gx.NoBoost()))
+                                                        edge=gx.OpenEdge(), leak=gx.NoLeak(),
+                                                        boost=gx.NoBoost()))
     groups = np.repeat(list(_BAR_HOMES), [len(v) for v in _BAR_HOMES.values()])
     bad = []
     parts = []
@@ -1405,12 +1419,18 @@ def exits_identity(_ids: list[str]) -> list[str]:
         bad.append(f"the per-block metric is {NAME} with {n_const} constants digesting to "
                    f"{digest}, not {PER_BLOCK} with {PER_BLOCK_CONSTANTS}")
     configs = {label: c.exits for label, c in region_leaks.CONFIGS.items()}
-    for leak in (gx.InternalLeak(s=1.0, lam=500.0), gx.InternalLeak(s=0.0, lam=250.0),
-                 gx.InternalLeak(s=0.5, lam=612.0), gx.InternalLeak(s=0.9, lam=1e3)):
-        configs[f"{leak.name}S3"] = gx.Exits(barriers=region_leaks.BARRIERS, leak=leak,
-                                            boost=region_leaks.BOOST)
-    configs["L500s0 alone"] = gx.Exits(barriers=gx.NoBarriers(),
-                                       leak=gx.InternalLeak(s=0.0, lam=500.0), boost=gx.NoBoost())
+    for leak in (gx.InternalLeak(open_m=math.inf, foot_m=135.57463805510008),
+                 gx.InternalLeak(open_m=250.0, foot_m=math.inf),
+                 gx.InternalLeak(open_m=1581.0, foot_m=148.0),
+                 gx.InternalLeak(open_m=0.1 + 0.2, foot_m=3e-7)):
+        configs[f"{leak.name}S3"] = gx.Exits(barriers=region_leaks.BARRIERS, edge=gx.OpenEdge(),
+                                            leak=leak, boost=region_leaks.BOOST)
+        configs[f"{leak.name} closed"] = gx.Exits(barriers=region_leaks.BARRIERS,
+                                                  edge=gx.ClosedEdge(), leak=leak,
+                                                  boost=gx.NoBoost())
+    configs["Lo500 alone"] = gx.Exits(barriers=gx.NoBarriers(), edge=gx.OpenEdge(),
+                                      leak=gx.InternalLeak(open_m=500.0, foot_m=math.inf),
+                                      boost=gx.NoBoost())
     names: dict[str, str] = {}
     for label, exits in configs.items():
         for preset in region_leaks.PRESETS:
@@ -1483,11 +1503,12 @@ K0_MEDIAN = 1.2571513906775686   # the median of (r / lam^2) K0(r / lam): x K1(x
 
 
 def _image_rows(srcs: np.ndarray, box: tuple[float, float, float, float], lam: float,
-                nbins: int) -> np.ndarray:
-    """Per source (local metres) its trips on open ground `box` whose edge is held at 0: the
-    screened point source less its first images in the four edges, its leak sigma u / lam^2
-    integrated on a polar grid about it (TRIP_ORACLE_DR, TRIP_ORACLE_NT; the ground outside the
-    box apart), binned as region_leaks bins a home's trips, per unit current."""
+                nbins: int, *, sign: float) -> np.ndarray:
+    """Per source (local metres) its trips on open ground `box`: the screened point source with
+    its first images in the four edges, `sign` -1 (the edge held at 0: an open edge) or +1 (no
+    current through it: a closed edge), its leak sigma u / lam^2 integrated on a polar grid about
+    it (TRIP_ORACLE_DR, TRIP_ORACLE_NT; the ground outside the box apart), binned as region_leaks
+    bins a home's trips, per unit current."""
     from scipy.special import k0
     x0, y0, x1, y1 = box
     r = (np.arange(int(nbins * region_leaks.TRIP_BIN_M / TRIP_ORACLE_DR)) + 0.5) * TRIP_ORACLE_DR
@@ -1498,7 +1519,7 @@ def _image_rows(srcs: np.ndarray, box: tuple[float, float, float, float], lam: f
         X, Y = sx + R * np.cos(TH), sy + R * np.sin(TH)
         u = k0(R / lam)
         for ix, iy in ((2 * x0 - sx, sy), (2 * x1 - sx, sy), (sx, 2 * y0 - sy), (sx, 2 * y1 - sy)):
-            u = u - k0(np.hypot(X - ix, Y - iy) / lam)
+            u = u + sign * k0(np.hypot(X - ix, Y - iy) / lam)
         inside = (X > x0) & (X < x1) & (Y > y0) & (Y < y1)
         ring = (np.where(inside, u, 0.0).sum(axis=1) * r * (2.0 * np.pi / TRIP_ORACLE_NT)
                 * TRIP_ORACLE_DR / (2.0 * np.pi * lam ** 2))
@@ -1509,15 +1530,17 @@ def _image_rows(srcs: np.ndarray, box: tuple[float, float, float, float], lam: f
 
 def trip_calibration(_ids: list[str]) -> list[str]:
     bad = []
-    leak0 = gx.InternalLeak(s=0.0, lam=TRIP_T / K0_MEDIAN)
+    def open_only(lam: float) -> gx.InternalLeak:
+        return gx.InternalLeak(open_m=lam, foot_m=math.inf)
+    lam0 = TRIP_T / K0_MEDIAN
     # the calibration on one home at the centre: the screened point source's median
-    m = _model(_scale_block(), _leaky(leak0))
+    m = _model(_scale_block(), _leaky(open_only(lam0)))
     site = region_leaks.trip_site(m)
     steps, _rows = region_leaks.calibrate_lam(
-        m, s=0.0, target=TRIP_T, tol=TRIP_GUARD_TOL, lam0=leak0.lam * 0.8,
+        m, leak_of=open_only, target=TRIP_T, tol=TRIP_GUARD_TOL, lam0=lam0 * 0.8,
         resolution=TRIP_GUARD_RES, limit_lam=region_leaks.LIMIT_LAM_M,
         sample=region_leaks.every_home(m), site=site, procs=1)
-    lam = steps[-1].lam
+    lam = steps[-1].scale
     analytic = K0_MEDIAN * lam / TRIP_T - 1.0
     ok = abs(analytic) <= region_leaks.TRIP_TOL
     print(f"trip-calibration: one home, T {TRIP_T:g} m: lam {lam:g} m in {len(steps) - 1} steps "
@@ -1530,23 +1553,22 @@ def trip_calibration(_ids: list[str]) -> list[str]:
     past = 1.5 * steps[0].median
     try:
         region_leaks.calibrate_lam(
-            m, s=0.0, target=past, tol=TRIP_GUARD_TOL, lam0=leak0.lam,
+            m, leak_of=open_only, target=past, tol=TRIP_GUARD_TOL, lam0=lam0,
             resolution=TRIP_GUARD_RES, limit_lam=region_leaks.LIMIT_LAM_M,
             sample=region_leaks.every_home(m), site=site, procs=1)
         bad.append(f"one home: T {past:.1f} m, past the limit, was calibrated")
     except region_leaks.Unreachable as e:
         print(f"trip-calibration: one home, T {past:.1f} m: refused ({e})", flush=True)
     # two homes, one near the street edge: the pooled trips against the method of images
-    c = SCALE_L / 2.0
-    b = _open_block("synthetic-open-two", [_square(c - 1.0, c - 1.0, 2.0),
-                                           _square(c - 1.0, TRIP_EDGE_M - 1.0, 2.0)])
-    m = _model(b, _leaky(gx.InternalLeak(s=0.0, lam=TRIP_LAM)))
+    b = _two_homes(TRIP_EDGE_M)
+    m = _model(b, _leaky(open_only(TRIP_LAM)))
     site = region_leaks.trip_site(m)
     sample = region_leaks.every_home(m)
-    step, rows = region_leaks.trip_step(m, s=0.0, lam=TRIP_LAM, sample=sample, site=site,
-                                        procs=1)
+    step, rows = region_leaks.trip_step(m, scale=TRIP_LAM, leak=open_only(TRIP_LAM),
+                                        sample=sample, site=site, procs=1)
     x0, y0, x1, y1 = (float(v) for v in shapely.bounds(cast("BaseGeometry", m.geo.boundary)))
-    oracle = _image_rows(site.home_xy[sample.homes], (x0, y0, x1, y1), TRIP_LAM, site.nbins)
+    oracle = _image_rows(site.home_xy[sample.homes], (x0, y0, x1, y1), TRIP_LAM, site.nbins,
+                         sign=-1.0)
     want = region_leaks.trip_median(sample.w @ oracle)
     err = step.median / want - 1.0
     ok = abs(err) <= region_leaks.TRIP_TOL
@@ -1559,6 +1581,58 @@ def trip_calibration(_ids: list[str]) -> list[str]:
           f"{'ok' if ok else 'FAILS'}", flush=True)
     if not ok:
         bad.append(f"two homes: the median {err:+.1e} off the images'")
+    return bad
+
+
+def _two_homes(edge_m: float) -> Block:
+    """SCALE_L of open ground, its edge the street: a home at the centre and one `edge_m` from the
+    south edge (TRIP_BLOCK)."""
+    c = SCALE_L / 2.0
+    return _open_block("synthetic-open-two", [_square(c - 1.0, c - 1.0, 2.0),
+                                              _square(c - 1.0, edge_m - 1.0, 2.0)])
+
+
+def closed_edge(_ids: list[str]) -> list[str]:
+    bad = []
+    b = _two_homes(CLOSED_EDGE_M)
+    leak = gx.InternalLeak(open_m=TRIP_LAM, foot_m=math.inf)
+    with tempfile.TemporaryDirectory() as tmp:
+        fx = METRIC.fixed(b, cache=Path(tmp), carving=gcl.Carving.none(gc.geometry(b)))
+    m_open = _leaky(leak).model(b, fx, demand=POP)
+    m = _leaky(leak, edge=gx.ClosedEdge()).model(b, fx, demand=POP)
+    st = m.state(np.zeros(m.n))
+    # (i) well posed: every live component has a leak, and the cells live are the open edge's
+    chk = region_leaks.closed_check(m, st, int(m_open.walled0.sum()))
+    ok = chk.unleaked == 0 and chk.live == chk.live_open and chk.walled == chk.walled_open
+    # (ii) the drainage is the leak's alone
+    fl = gap_maps.flow_of(m, st, m.pop)
+    street = float(np.abs(fl.Ff).sum() / fl.inj.sum())
+    leaked = float(fl.leak.sum() / fl.inj.sum() - 1.0)
+    ok = ok and street <= FLUX_TOL and abs(leaked) <= FLUX_TOL
+    # (iii) the trips against the method of images, the images added (no current through the edge)
+    site = region_leaks.trip_site(m)
+    sample = region_leaks.every_home(m)
+    step, rows = region_leaks.trip_step(m, scale=TRIP_LAM, leak=leak, sample=sample, site=site,
+                                        procs=1)
+    x0, y0, x1, y1 = (float(v) for v in shapely.bounds(cast("BaseGeometry", m.geo.boundary)))
+    oracle = _image_rows(site.home_xy[sample.homes], (x0, y0, x1, y1), TRIP_LAM, site.nbins,
+                         sign=1.0)
+    want = region_leaks.trip_median(sample.w @ oracle)
+    err = step.median / want - 1.0
+    inside = rows.sum(axis=1)
+    ok = ok and abs(err) <= region_leaks.TRIP_TOL and bool(np.all(np.abs(inside - 1.0) <= 1e-6))
+    print(f"closed-edge: components {chk.components}, unleaked {chk.unleaked}; cells live "
+          f"{chk.live} (open {chk.live_open}), homes walled in {chk.walled} (open "
+          f"{chk.walled_open}); the street's drainage {street:.1e} of the injection, the leaks' "
+          f"{leaked:+.1e}; two homes ({CLOSED_EDGE_M:g} m from the edge, lam {TRIP_LAM:g} m): "
+          f"pooled median {step.median:.2f} m against the images' {want:.2f} m ({err:+.1e}), "
+          f"inside {np.round(inside, 6).tolist()}; per home "
+          f"{[round(region_leaks.trip_median(r), 2) for r in rows]} against "
+          f"{[round(region_leaks.trip_median(r), 2) for r in oracle]} -> "
+          f"{'ok' if ok else 'FAILS'}", flush=True)
+    if not ok:
+        bad.append(f"closed edge: unleaked {chk.unleaked}, street {street:.1e}, leaks "
+                   f"{leaked:+.1e}, median {err:+.1e}")
     return bad
 
 
@@ -1623,7 +1697,7 @@ _SUFFIX = gx.Exits.suffix
 
 def _suffix_without_leak(self: gx.Exits) -> str:
     """Exits.suffix with the leak's part left out (fault `suffix-dropped`)."""
-    parts = self.barriers.name + self.boost.name
+    parts = self.barriers.name + self.edge.name + self.boost.name
     return f"+x{parts}v{gx.EXITS_CODE}" if parts else ""
 
 
@@ -1636,7 +1710,7 @@ GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "device-roads": device_roads, "leak-assembly": leak_assembly, "leak-fold": leak_fold,
     "enclosure": enclosure, "leak-gradient": leak_gradient, "leak-scale": leak_scale,
     "barriers": barriers, "exits-identity": exits_identity, "loop-index": loop_index,
-    "trip-calibration": trip_calibration}
+    "trip-calibration": trip_calibration, "closed-edge": closed_edge}
 
 
 def _fault_exits():
@@ -1661,8 +1735,8 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "flux": {"flip-one": _flip_one},
     "leak-assembly": {"drop-one": lambda: _leak_fault(_drop_one),
                       "not-live": lambda: _leak_fault(_not_live)},
-    "leak-fold": {"shares-swapped": lambda: _patched(gx.InternalLeak, "per_cell",
-                                                     _shares_swapped)},
+    "leak-fold": {"lengths-swapped": lambda: _patched(gx.InternalLeak, "per_cell",
+                                                      _lengths_swapped)},
     "enclosure": {"every-cell": lambda: _leak_fault(_every_cell)},
     "leak-gradient": {"adjoint-unleaked": lambda: _patched(gcl.Relaxation, "value_sgrad",
                                                            _sgrad_unleaked)},
@@ -1675,6 +1749,7 @@ FAULTS: dict[str, dict[str, Callable]] = {
                        "suffix-dropped": lambda: _patched(gx.Exits, "suffix",
                                                           property(_suffix_without_leak))},
     "loop-index": {"uncontracted": lambda: _patched_item(_CONTRACT, 0, False)},
+    "closed-edge": {"edge-open": lambda: _patched(gx.ClosedEdge, "mesh", lambda self, fm: fm)},
     "trip-calibration": {"boundary-trips": lambda: _patched(gap_maps, "leak_drain",
                                                             _with_street),
                          "wrong-home": lambda: _patched(region_leaks, "trip_origins",
