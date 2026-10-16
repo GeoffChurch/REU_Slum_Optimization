@@ -31,7 +31,7 @@ cheap preset (polish_greedy.CHEAP: its runs named `<metric>@e0.05`) and SIMP's d
 `run`'s row (relax.one's or polish_greedy.run's, with the label, the metric's name, the median
 trip its constants were chosen for (`trip_m`, None for the region test's), the host, the peak host
 memory, the device's peak memory on a GPU and the wall time) in
-ROWS/runs/<label>/<preset>/<id>.parquet.
+ROWS/runs/<label>/<preset>/<metric>/<id>.parquet.
 
 `calibrate`: the leak's two constants (owner 2026-10-15: set once, the same on every block and
 region) with `share` of the leak at buildings and a median trip T (THE TRIPS, below) on the closed
@@ -300,6 +300,15 @@ HOLE_M2 = 25.0          # ... holes in the network under this filled (m^2)
 EXIT_PX_M = 2.0         # ... the exits: pixels within this of the street line (m)
 
 
+def per_block(device: str) -> gcl.ComplexMetric:
+    """The per-block metric (each kblock's whole street ring its exit: gap_exits.per_block, no
+    barriers, no leak, no boost) on RUNTIME's complex, the model the region is set beside
+    (`members`, `blocks`): pinned here, not RUNTIME itself, which switched to the region model's
+    exits at the consolidated pass."""
+    return dataclasses.replace(metrics.metric_of(metrics.RUNTIME, device=device),
+                               exits=gx.per_block())
+
+
 def metric_of(label: str, preset: str, device: str) -> gcl.ComplexMetric:
     """The configuration's metric for a preset (the cheap preset's search its own: `@e0.05`)."""
     base = dataclasses.replace(metrics.metric_of(metrics.RUNTIME, device=device),
@@ -320,7 +329,9 @@ def warm(bid: str, label: str) -> None:
 
 
 def run_path(label: str, preset: str, bid: str) -> Path:
-    return ROWS / "runs" / label / preset / f"{bid}.parquet"
+    """A run's row: under its label and preset, and its metric's full name (metric_of: every
+    writer keyed by its metric, so no row of another code or RUNTIME reads as this one's)."""
+    return ROWS / "runs" / label / preset / metric_of(label, preset, "cpu").name / f"{bid}.parquet"
 
 
 def run(bid: str, label: str, preset: str, device: str, *, replace: bool) -> None:
@@ -448,7 +459,7 @@ def _member_one(bid: str) -> str | None:
         if [g.block_id for g in got] != [bid]:
             raise ValueError(f"the source yields {[g.block_id for g in got]} for {bid}")
         [b] = got
-        m = metrics.metric_of(metrics.RUNTIME, device="cpu").clearing(b, demand=POP)
+        m = per_block("cpu").clearing(b, demand=POP)
         area = np.asarray(shapely.area(np.asarray(b.buildings.outlines)), dtype=np.float64)
         pd.DataFrame({"member": bid, "member_row": np.arange(m.n), "u0": m.u_pop0,
                       "walled": m.walled0, "nodem": m.nodem, "area": area,
@@ -475,10 +486,10 @@ def members(procs: int) -> None:
 # ------------------------------------------------------------------ one metric everywhere
 
 TUNING = seqscreen.TUNING      # the 13 large blocks the presets were tuned on
-# their stored preset clearings under the per-block metric (metrics.RUNTIME), P at area D BUDGET:
+# their stored preset clearings under the per-block metric (per_block), P at area D BUDGET:
 # SIMP's default (relax_rows) and the cheap preset, the translucent search (the acceptance's
 # per-device rows, phase 3: no polish_rows of its own)
-CHEAP_ROWS = HERE / "gap_rows" / "runtime" / "preset" / "gpu" / "cheap@e0.05"
+CHEAP_ROWS = gap_calib.rows_of(per_block("cpu").name) / "preset" / "gpu" / "cheap@e0.05"
 
 
 def block_exits() -> gx.Exits:
@@ -489,7 +500,7 @@ def block_exits() -> gx.Exits:
 
 
 def _stored_clearings(bid: str, n: int) -> dict[str, NDArray[np.bool_]]:
-    plain = metrics.metric_of(metrics.RUNTIME, device="cpu")
+    plain = per_block("cpu")
     simp = pd.read_parquet(relax.rows_of(PLAN, plain.name, BUDGET) / f"{bid}_p1.parquet").iloc[0]
     cheap = pd.read_parquet(CHEAP_ROWS / f"{bid}.parquet").iloc[0]
     if cheap["metric"] != CHEAP.on(plain).name:
@@ -506,7 +517,7 @@ def _block_one(bid: str) -> str | None:
     out = ROWS / "blocks" / f"{bid}.parquet"
     try:
         [b] = common.build_blocks([bid])
-        plain = metrics.metric_of(metrics.RUNTIME, device="cpu")
+        plain = per_block("cpu")
         rows = []
         for name, metric in (("plain", plain), ("leaky", dataclasses.replace(
                 plain, exits=block_exits()))):
@@ -606,10 +617,10 @@ def loo_path(where: str, preset: str) -> Path:
 def _loo_block(bid: str) -> str | None:
     try:
         [b] = common.build_blocks([bid])
-        m = metrics.metric_of(metrics.RUNTIME, device="cpu").clearing(b, demand=POP)
+        m = per_block("cpu").clearing(b, demand=POP)
         for preset, x in _stored_clearings(bid, m.n).items():
             leave_one_out(m, x, budget_s=math.inf, seed=LOO_SEED).assign(
-                where=bid, preset=preset, metric=metrics.RUNTIME).to_parquet(
+                where=bid, preset=preset, metric=per_block("cpu").name).to_parquet(
                     loo_path(bid, preset))
         print(f"{bid}: leave-one-out done", flush=True)
     except Exception as e:      # noqa: BLE001 -- reported, the pool goes on

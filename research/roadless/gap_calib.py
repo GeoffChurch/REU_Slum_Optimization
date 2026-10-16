@@ -16,7 +16,7 @@ its numbers are in NOTES and gap_rows/summary_runtime_acceptance.csv.
     uv run python $S speed <ids,|@file> <procs> <cpu|gpu>  # the breakdowns on a device
     uv run python $S rescore <ids,|@file> <procs>   # the stored runs re-scored under their name
     uv run python $S roads <ids,|@file> <procs>     # carved meshes' prefixes against the rebuild
-    uv run python $S report                         # gap_rows/summary_runtime_*.csv
+    uv run python $S report                         # ROWS/summary_runtime_*.csv
 
 `preset`: the cheap preset (polish_greedy.CHEAP: S0.01cat P64w8 ranking in the eps world at its
 search eps, 0.05, the translucent search: item `cheap@e0.05`) or SIMP's default (relax.one, PLAN,
@@ -24,7 +24,7 @@ the metric's own tension: item `simp`) at area D BUDGET, power 1 (P), free first
 on the device's factorization; `E` the polish's candidates scored exactly (search.Exactly). An
 item names its rows, so it spells its preset's search: a bare `cheap` (the plain form, before
 phase 3: its rows under preset/<device>/cheap[E]/ stay as records) and an `@e` on `simp` are
-refused. Rows
+refused. ROWS is gap_rows/runtime/<METRIC's name> (`rows_of`). Rows
 ROWS/preset/<device>/<item>/<id>.parquet (the run's row, its item, metric, host, peak memory and
 wall time; on a GPU the device's memory in use, its most over the run, `gpu_gb`): the
 acceptance's own, so that a run on one device never overwrites another's or the stored rows
@@ -96,7 +96,15 @@ POWER = 1.0                             # P, the headline (owner 2026-10-12)
 POP = common.PopulationDemand()
 SPEED_REPS = 2
 GPU_SAMPLE_S = 0.5          # GpuPeak's sampling (measurement only)
-ROWS = HERE / "gap_rows" / "runtime"
+# Every row and summary of this module under the metric's name (NOTES, "The consolidated pass":
+# every writer keyed by its metric), so a run under one RUNTIME never reads as another's: the
+# acceptance's own (phase 1 -- 2b) under the per-block metric's (`cx+...+v34d40e8a`), their
+# summaries the committed gap_rows/summary_runtime_*.csv, records
+def rows_of(metric: str) -> Path:
+    return HERE / "gap_rows" / "runtime" / metric
+
+
+ROWS = rows_of(METRIC.name)
 ITEM = re.compile(r"(simp|cheap)(E?)(@e[0-9.e-]+)?")   # a preset item: the polish's scoring, and
                                                       # the preset's search eps (the metric's
                                                       # `@e<eps>`), as its rows' name spells it
@@ -486,8 +494,8 @@ def _read_nested(sub: str) -> pd.DataFrame:
 
 
 def report() -> None:
-    """ROWS' summaries, gap_rows/summary_runtime_<name>.csv (committed; the rows are not)."""
-    out = HERE / "gap_rows"
+    """ROWS' summaries, ROWS/summary_runtime_<name>.csv (committed; the rows are not)."""
+    out = ROWS
     base = _read("baseline")
     if len(base):
         b = base.assign(dP0=base.P0 / base.P0_rebuild - 1, dPq0=base.Pq0 / base.Pq0_rebuild - 1,

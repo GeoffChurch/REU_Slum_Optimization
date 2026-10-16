@@ -98,6 +98,8 @@ EXCLUDED: Mapping[str, str] = {
                   "(simp/<variant>), a study's record (summary_*.csv)",
     "cross_rows": "the cross-checks of the complex against the raster (phase 2b): the raster's "
                   "scores of the road prefixes and stored clearings, no clearing",
+    "region_rows": "the region model's study (region_leaks.py): baselines, scores, trips, maps and "
+                   "leave-one-out rows; its runs' clearings (region_rows/runs) are RegionFamily's",
     "gap_rows": "the gap complex's study and the runtime's calibration (NOTES, 'The gap complex' "
                 "and 'The complex as the runtime'): scores; simp/ the width forms' SIMP clearings "
                 "on the rebuilt complex (a study's record); runtime/preset/ the acceptance's "
@@ -489,6 +491,66 @@ class PweightFamily:
         return out
 
 
+# -- the region model's runs (region_leaks.py `run`): a preset under a configuration on a region
+
+REGION_EXTRA: Mapping[str, str] = {
+    "label": "the configuration's label (region_leaks.CONFIGS), checked: its exits are the "
+             "metric's suffix",
+    "preset": "the run's preset (simp or cheap), checked: the run's directory",
+    "metric": "the run's metric, checked: the run's directory (region_leaks.run_path)",
+    "trip_m": "the median trip the leak's constants were chosen for: the configuration's, not the "
+              "clearing's",
+    "host": "the machine", "peak_rss_gb": "the machine", "gpu_gb": "the machine"}
+REGION_SIMP = replace(SIMP, drop={**SIMP.drop, **REGION_EXTRA})
+REGION_POLISH = replace(POLISH, commit={**POLISH.commit, "wall": "wall"},
+                        drop={**POLISH.drop, **REGION_EXTRA})
+
+
+@dataclass(frozen=True)
+class RegionFamily:
+    """region_rows/runs/<label>/<preset>/<metric>/<id>.parquet: SIMP's default (relax.one's rows)
+    or the cheap preset (polish_greedy.run's) under a configuration's metric, at area D 0.05
+    (region_leaks.BUDGET), P, free first; a run a directory, its metric the directory's name."""
+    def sources(self, root: Path) -> list[Source]:
+        import relax
+        base = root / "region_rows" / "runs"
+        out: list[Source] = []
+        for d in sorted(base.glob("*/*/*")) if base.is_dir() else []:
+            if not (d.is_dir() and this_code(d.name)):
+                continue
+            files = tuple(sorted(d.glob("*.parquet")))
+            if not files:
+                continue
+            label, preset = d.parent.parent.name, d.parent.name
+            first = pd.read_parquet(files[0]).iloc[0]
+            for what, want in (("metric", d.name), ("label", label), ("preset", preset)):
+                same(what, str(first[what]), want, files[0])
+            along, search = split_along(d.name)
+            rel = d.relative_to(root).as_posix()
+            simp = preset == "simp"
+            meta = Settings(
+                run=rel, family="simp" if simp else "polish", mode="whole",
+                spec=str(first["plan"]) if simp else f"{first['picker']} + polish (the cheap "
+                                                     "preset, polish_greedy.CHEAP)",
+                power=1.0, demand="w", population="area", along=along, search_along=search,
+                mesh="", budget=relax.D_LENS, source=rel,
+                note=f"the region model, configuration {label} (region_leaks.py run)")
+
+            def read(f: Path, meta: Settings = meta, simp: bool = simp) -> list[Row]:
+                if simp:
+                    return simp_reader(REGION_SIMP, meta)(f)
+                df = pd.read_parquet(f)
+                audit(df.columns, REGION_POLISH, f)
+                [r] = (row for _, row in df.iterrows())
+                same("block", r["block"], block_of(f), f)
+                row = commit(r, REGION_POLISH)
+                row.update(block=r["block"], step=1, n=int(r["n"]))
+                return [row]
+            out.append(Source(settings=meta, files=files,
+                              block_ids=tuple(block_of(f) for f in files), read=read))
+        return out
+
+
 # -- rows a cluster run was shipped, since overwritten (the cluster launcher's input tars)
 
 STORE_MEMBER = re.compile(r"^research/roadless/(?P<path>(?P<store>relax_rows|polish_rows|"
@@ -567,7 +629,8 @@ def _record(path: str) -> bool:
     return len(parts) < 2 or not this_code(parts[1])
 
 
-FAMILIES: tuple[Family, ...] = (SimpFamily(), PolishFamily(), GreedyFamily(), PweightFamily())
+FAMILIES: tuple[Family, ...] = (SimpFamily(), PolishFamily(), GreedyFamily(), PweightFamily(),
+                                RegionFamily())
 
 
 ROOTS = ("relax_rows", "polish_rows", "pweight_rows")
