@@ -6715,13 +6715,17 @@ island so all traffic was internal"; "we should probably have some small leakage
 since you can in principle live off the land, but buildings should have greater leakage"; streets
 "more conductive, but not make them leak more"; "What if we just use T=500m?"). The two leak
 families of the region test folded into one with a building share s, its strength to be set by the
-median length T of an internal trip rather than by a nominal lam, then run at T 500 m. **The fold,
-the migration and the calibration are done; the runs are not: no lam gives a median internal trip
-of 500 m on 5810@major, at any s (below). The owner's T is needed before the runs.** Code:
-gap_exits.py (InternalLeak), gap_clear.py (Model.leaked_state: a leak's other lam on the same
-pattern), gap_maps.py (leak_drain and cell_geometry, shared with flow_of), region_leaks.py (the
-configurations' labels, home_solves, the trips and `calibrate`), gap_clear_check.py (`leak-fold`,
-`trip-calibration`, the leak guards at a mixed s).
+median length T of an internal trip rather than by a nominal lam, then run at T 500 m. In two
+halves. **First (to "What the owner could choose instead"): no lam gives a median internal trip of
+500 m on 5810@major with its edge open, at any s; the runs waited for the owner.** **Then (from
+"The owner's decisions after the refusal"): two constants, a leak per m^2 of open ground and one
+per m^2 of footprint, chosen once on 5810@major with its edge closed for a 500 m median trip, the
+same for every block and region; five of the eight runs at the 6 GPU-h cap; the 13 tuning blocks
+under one metric.** Code: gap_exits.py (InternalLeak, the edge), gap_clear.py (Model.leaked_state:
+a leak's other strength on the same pattern; the leak site with the edge open), gap_maps.py
+(leak_drain and cell_geometry, shared with flow_of), region_leaks.py (the configurations,
+home_solves, the trips, `calibrate`, `blocks`), gap_clear_check.py (`leak-fold`,
+`trip-calibration`, `closed-edge`, the leak guards at mixed leaks).
 
 **The fold** (gap_exits.InternalLeak(s, lam), its name `L<lam>s<s>`). One Strategy, two parameters:
 the total sigma |A| / lam^2 over the cells live at baseline, as before; a share s of it at the
@@ -6832,32 +6836,277 @@ T the relative sd is larger (the 400 draws' 1.4% at 115 m would be about 0.6% at
 tolerance would be 2% or the draws more. A step on a core is a factorization of the region (about a
 minute) and 1.8 s a home on one process (1,570 homes: 48 minutes; 24 on two).
 
-**Not run**: the eight runs (four configurations, two presets), the priors and maps, the baselines,
-scores and cross-scores, the loop index and the boost's verdict, all waiting for T. No GPU time was
-used.
+**Not run then**: the eight runs (four configurations, two presets), the priors and maps, the
+baselines, scores and cross-scores, the loop index and the boost's verdict, all waiting for T. No
+GPU time was used.
 
-**The guards** (gap_clear_check; each passes and fails under its fault, both ways at the final
-code): `leak-fold` and `trip-calibration` (above); `leak-scale` at s 0 and 0.5 (at s 0.5 the open
-ground's share alone screens the far field, lam' = lam / sqrt(1 - s), and the home's own building
-drains 98% of its current: the ratio's spread 2.2%, its level +8e-4 against Q' / (2 pi sigma); s 0
-as before, 2.6%, +2.1e-3; fault `per-cell` 4.3x and 1.2x off); `leak-assembly` (19570, 20269, at s
-0, 1 and 0.5: the operator against the one assembled afresh plus the oracle within 1.2e-16, P
-within 1.0e-11; faults `drop-one`, `not-live`), `enclosure` (20269, 23597: 1 and 6 homes walled in
-at every s, as without leaks; fault `every-cell`), `leak-gradient` (19570, 38136: within 3.3e-5 of
-the largest at every s; fault `adjoint-unleaked` 0.06 -- 0.71 off at power 2), `flux` (the leaky
-clearing at s 0 within 2.7e-11, every state within 5.0e-11; fault `flip-one`); `loop-index` and
-`barriers` (they read region_leaks) as before (8, 5, 0; 624 open triangles inside the barriers,
-none outside the gaps; their faults seen); `exits-identity` (30 names of 30 configurations and
-presets distinct and parsing back, the 42 stored names their labels', the per-block metric's 28
-constants digesting to 34d40e8a; faults `in-code` 39 constants, digest ef375dc2, `suffix-dropped` 6
-names for 30). mypy --strict clean on gap_exits, gap_maps, region_leaks (gap_clear and
-gap_clear_check as before: 32 and 10 errors); `ruff check .` passes; tests/test_clearings.py: 36
-pass. The earlier guards (gap_clear_check's baseline to device-roads, gap_check's,
-gap_flow_check's, pweight_check's) were not rerun at this code: it moves two of gap_maps.flow_of's
-computations into functions (bit for bit; `flux` reads it) and adds Model.leaked_state, which none
-of them calls; they are for the end of the study, with its runs' code.
+**The guards at the refusal** (gap_clear_check; each passes and fails under its fault, both ways at
+the final code): `leak-fold` and `trip-calibration` (above); `leak-scale` at s 0 and 0.5 (at s 0.5
+the open ground's share alone screens the far field, lam' = lam / sqrt(1 - s), and the home's own
+building drains 98% of its current: the ratio's spread 2.2%, its level +8e-4 against Q' / (2 pi
+sigma); s 0 as before, 2.6%, +2.1e-3; fault `per-cell` 4.3x and 1.2x off); `leak-assembly` (19570,
+20269, at s 0, 1 and 0.5: the operator against the one assembled afresh plus the oracle within
+1.2e-16, P within 1.0e-11; faults `drop-one`, `not-live`), `enclosure` (20269, 23597: 1 and 6 homes
+walled in at every s, as without leaks; fault `every-cell`), `leak-gradient` (19570, 38136: within
+3.3e-5 of the largest at every s; fault `adjoint-unleaked` 0.06 -- 0.71 off at power 2), `flux`
+(the leaky clearing at s 0 within 2.7e-11, every state within 5.0e-11; fault `flip-one`);
+`loop-index` and `barriers` (they read region_leaks) as before (8, 5, 0; 624 open triangles inside
+the barriers, none outside the gaps; their faults seen); `exits-identity` (30 names of 30
+configurations and presets distinct and parsing back, the 42 stored names their labels', the
+per-block metric's 28 constants digesting to 34d40e8a; faults `in-code` 39 constants, digest
+ef375dc2, `suffix-dropped` 6 names for 30). mypy --strict clean on gap_exits, gap_maps,
+region_leaks (gap_clear and gap_clear_check as before: 32 and 10 errors); `ruff check .` passes;
+tests/test_clearings.py: 36 pass. The earlier guards (gap_clear_check's baseline to device-roads,
+gap_check's, gap_flow_check's, pweight_check's) were not rerun at this code: it moves two of
+gap_maps.flow_of's computations into functions (bit for bit; `flux` reads it) and adds
+Model.leaked_state, which none of them calls; they are for the end of the study, with its runs'
+code.
 
-**Compute.** CPU here, single-threaded, at most 8 processes, then 4 (the controller's ruling: a
-second agent shares the machine): the trips' pilot, scan and limits (about 9 CPU-h), the fold's two
-region baselines (0.2), the four shipped calibrations (about 4), the guards (about 3): about 16
-CPU-h [inferred from the steps' times]. GPU: none.
+**Compute at the refusal.** CPU here, single-threaded, at most 8 processes, then 4 (the
+controller's ruling: a second agent shares the machine): the trips' pilot, scan and limits (about 9
+CPU-h), the fold's two region baselines (0.2), the four shipped calibrations (about 4), the guards
+(about 3): about 16 CPU-h [inferred from the steps' times]. GPU: none.
+
+**The owner's decisions after the refusal** (2026-10-15; the addendum:
+.superpowers/sdd/2026-10-15-region-mixed-leak/addendum.md): the edge's trips are real ("If most
+homes are near the boundary it perhaps suggests they do typically venture to the great beyond");
+the leak's hyperparameters are set once for every block and region ("rather than them meaning
+different things per block"), chosen on 5810@major with its edge closed for a 500 m median trip and
+90% of the leak at buildings, then frozen; one metric everywhere, the per-block runs taking the
+same leaks with their street ring as the boundary, RUNTIME switching at the consolidated pass.
+
+**Two constants** (gap_exits.InternalLeak(open_m, foot_m), named `L[o<open_m>][b<foot_m>]`). The
+open ground leaks sigma / open_m^2 per m^2 of it (live at baseline), and each building's
+destinations sigma / foot_m^2 per m^2 of its footprint, on the cells where its homes inject, as
+they inject (LeakSite.foot: System.Pc @ each building's footprint area). A person is a fixed area
+of footprint (area population), so the building constant is a leak per person whatever the block;
+it is per m^2 of footprint, not per unit of AreaPopulation's weights, which each block normalises
+to mean 1. Either length may be infinite (none of that leak). Neither is a total matched to a
+region: (s, lam) made the building leak per person depend on the region's open area over its
+population, which the owner ruled out. A number in the name is spelt `:g` or, where that would
+round it, by its repr, so every name parses back to its float (gap_exits.num). The exits code is
+unchanged (a03a092b); the per-block metric too (`cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a`, 28
+constants).
+
+**The edge** (gap_exits.Edge, a fourth Strategy of the exits): `OpenEdge` (the street's faces
+ground, as the per-block metric has them) or `ClosedEdge` (`E0`: every street face's conductance to
+ground 0, so every trip ends at a leak). A closed edge's leaks lie where the open edge's street
+reaches (Model.leak_site's live cells are the open edge's reach, its ground cells among them), so
+the leak is the same constants on the same ground either way.
+
+**The migration, again.** Each of the region test's (s, lam) is exactly one pair of constants on
+5810@major with the barriers (region_leaks.region_test_leak): at s 0 open_m = lam (`L500s0` is
+`Lo500`), at s 1 foot_m = lam sqrt(F / A), A = 5,944,597 m^2 the open ground live at baseline and F
+= 437,058 m^2 the footprint injected there (REF_OPEN_M2, REF_FOOT_M2), so `L250s1`, `L500s1`,
+`L1000s1` are `Lb67.78731902755004`, `Lb135.57463805510008`, `Lb271.14927611020016`, and `L500s0S3`
+is `Lo500S3`. The runs' and baselines' metric columns and the summaries' metric fields are
+rewritten (the labels kept: they name how the region test set them); re-scored on the region,
+L500s0's baseline is bit for bit the stored one, L500s1's and L250s1's within 5.0e-12 (P_{1/2},0;
+P_0 2.1e-13, J_2,0 4.2e-13, every home's escape time within 3.5e-11, the leak's total 4.4e-16): the
+same leak to floating point. The open-edge calibration's refusals (the section's first half) are
+records, set apart: region_rows/calib_open/ and summary_calib_open.csv, read by no code.
+
+**The closed reference and the constants** (`calibrate <share> 500 <start> <procs>`;
+ROWS/calib/T500b<percent>.parquet, summary_calib.csv). 5810@major with the barriers and its edge
+closed: every trip ends at a leak (inside 1.000 at every step). The two lengths scale together, the
+share at buildings fixed by them on the reference: foot_m^-2 F = share / (1 - share) open_m^-2 A,
+with A 5,944,597 m^2 of open ground live at baseline and F 437,058 m^2 of footprint injected there
+(the same as the open edge's: the closed edge's leaks lie where the open edge's street reaches), so
+the scale is the total's lam (sigma A / scale^2) and open_m = scale / sqrt(1 - share), foot_m =
+scale sqrt(F / (share A)), each rounded to whole metres (region_leaks.pair_of: the frozen constants
+are the evaluated ones). The search: the limit first (scale 10^6 m: 853 m at 90%, so 500 m is
+within reach), then secant steps in log-log and bisection in log scale to a median within TRIP_TOL
+of 500 m, the same draws at every step. Well posed (closed_check, at each pair's constants): the
+closed baseline's live cells form one component, with a leak (none without), the 6,733,820 cells
+the open edge's reach holds, the same 36 homes walled in.
+
+The sample's size, sized at this reference: a first pass at 2,000 draws (1,570 homes) found the
+constants below with a median 499.3 m, but the bootstrap's sd there was 4.5 m (0.9%; 95% 490.6 --
+508.4), larger than at the open edge's limit (0.34%): with every trip internal, the homes' own
+medians spread more. At a 1% tolerance a sample that does not matter would need about 15,000 draws;
+the tolerance is 2% (10 m) and the sample 4,000 draws (TRIP_N), the sd then about a third of the
+tolerance.
+
+The constants (2,000 resamples of the 4,000 draws, 2,774 homes; each step about 28 minutes on three
+processes, 80 on one):
+
+    pair     at buildings  open_m  foot_m  median (m)  sd (m), 95%          steps: scale, median
+    central  0.8999        6,214   562     499.5       3.2, 493.2 -- 505.9  1965 499.5
+    75%      0.7499        3,608   565     500.1       3.0, 494.2 -- 506.1  1965 527.3, 1863 510.1,
+                                                                            1804 500.1
+    100%     1             inf     552     492.2       3.3, 485.9 -- 498.7  1965 482.3, 2037 492.2
+
+(each after the limit, scale 10^6 m: 853.2, 949.8 and 798.7 m; the central pair's first pass at
+2,000 draws: 1,581/143 m at scale 500, 169.2 m; 4,671/422 m at 1,477, 416.2 m; 5,825/526 m at
+1,842, 479.6 m; 6,214/562 m at 1,965, 499.3 m; the 4,000 draws, started there, kept it). The scale
+for 500 m is 1.8 -- 2.0 km at every share; the buildings' length hardly moves (552 -- 565 m) and
+what the share changes is the open ground's (3.6 km at 75%, 6.2 km at 90%, none at 100%): a
+person's destinations leak as sigma / (562 m)^2 per m^2 of footprint, about 120 times the open
+ground's per m^2 at 90% (the open ground being 13.6 times the footprints' area there, its 10% of
+the leak).
+
+Frozen in region_leaks.CALIBRATED (the configurations `T500b90`, `T500b75`, `T500b100`,
+`T500b90S3`): the central `Lo6214b562`, the 75% `Lo3608b565`, the 100% `Lb552`. The 100% pair
+stopped at 492.2 m, inside the 2% but 1.6% short, its bootstrap's interval not reaching 500; a
+further step was not taken.
+
+**One metric everywhere: the 13 tuning blocks** (region_leaks `blocks`, on cores, no
+re-optimization; region_rows/summary_blocks.csv). Each block under the per-block metric and under
+it with the central constants (`cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a+xLo6214b562va03a092b`:
+the block's street ring the edge, open; no barriers), the stored SIMP-default and cheap-preset
+clearings (relax_rows; the cheap preset's, the translucent search's,
+gap_rows/runtime/preset/gpu/cheap@e0.05) re-scored under each; the per-block metric's scores of
+them are the stored ones within 7.1e-12. As the controller expected, on a block nearly all the
+current still leaves by the street ring: the leaks drain 0.26 -- 2.8% of it at baseline (5810 2.8%,
+20269 1.7%, 30848 1.2%, the others under 0.8%), a typical home's share leaking inside 0.2 -- 2.9%
+(median over 300 homes), its own building's destination 0.00 -- 0.03% (the largest home 1.6%, on
+30848). The baselines fall by P_0 0.4 -- 4.5%, P_{1/2},0 0.6 -- 6.4%, J_2,0 1.0 -- 9.3% (5810 and
+30848, the deepest, the most). Lens A falls a little and evenly: SIMP's L_P by a median 0.0020
+(0.0008 -- 0.0091), the cheap preset's 0.0020 (0.0008 -- 0.011), P_{1/2} and J_2 alike; the leaky
+metric keeps 96.6 -- 99.4% of each clearing's L_P (median 99.2%). The presets' order is unchanged
+on every block and lens (SIMP ahead on 11 of 13 on L_P, 9 on L_{P_1/2}, 10 on L_J2, under either
+metric). So the switch moves the blocks' levels by a percent or two and decides nothing among the
+presets [the methods' order beyond the presets inferred, not measured].
+
+**The switch** (not made here; the consolidated pass's start, which re-scores every block): RUNTIME
+becomes `cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a+xLo6214b562va03a092b`, the per-block metric with
+the central constants (an exits code of a03a092b; the code's digest 34d40e8a until then), and a
+region's runs add their barriers (`+xB8c3Lo6214b562va03a092b` on 5810@major). The per-block
+metric's name and digest stay as they are in this task.
+
+**The runs** (5810@major, the barriers, the edge open; SIMP's default and the cheap preset at area
+D 0.05, free first, optimizing P; tesla2's V100s, the mesh already on the node: runs lc-runs90,
+lc-runs100, lc-runs75b). Of the eight, five ran: the central pair's both presets, the boost's both,
+the 100% pair's SIMP. The rest were cut at the 6 GPU-h cap: the leak's runs took longer than the
+region test's (SIMP's optimizer 1,543 s on the central pair, 3,114 s on the 100% pair, as the
+region test's building-only H500 took 2,106 s against bar's 1,358; the host's work on tesla2,
+shared with other jobs at 8 CPUs each, slower too [inferred]), so the 100% pair's cheap preset was
+stopped at 1.76 GPU-h to let the 75% pair's SIMP run, which reached the cap at 0.72 GPU-h before
+finishing (in SIMP's second continuation stage); the 75% pair's cheap preset and prior never ran.
+The 75% pair is measured at baseline only (below). Every run frees the 36 walled-in homes first (D
+0.0013) and leaves none.
+
+    config      preset  L_P     L_P1/2  L_J2    cleared  t (s)   wall (s)
+    T500b90     simp    0.2438  0.2448  0.2391  707      1,543   1,766
+    T500b90     cheap   0.2291  0.2282  0.2234  524      1,948   2,179
+    T500b100    simp    0.2426  0.2436  0.2379  711      3,114   3,861
+    T500b90S3   simp    0.2421  0.2383  0.2331  682      1,524   1,809
+    T500b90S3   cheap   0.2280  0.2233  0.2191  495      1,894   2,175
+    (bar        simp    0.3105  0.3177  0.3120  753      1,358   1,583)
+    (L500s0     simp    0.2207  0.2242  0.2177  730      1,463   1,691)
+    (L500s1     simp    0.0843  0.0741  0.0688  653      2,106   2,538)
+
+**The baselines** (region_rows/summary_baseline.csv, summary_absorb.csv; P_0 in the area
+population's units; the leaks' share of the current at baseline; a typical home's share leaking
+inside and at its own building, over 300 homes: the median, the population-weighted mean and the
+largest):
+
+    config      P_0        P_1/2,0    J_2,0      leaks   inside: median,  own building: median,
+                                                     drain   pop.-weighted    pop.-weighted, max
+    bar         1.76e+07   3.53e+07   3.96e+10   0       --               --
+    T500b90     1.27e+07   2.43e+07   1.99e+10   0.176   0.20, 0.13       0.00018, 0.0020, 0.0045
+    T500b75     1.26e+07   2.41e+07   1.97e+10   0.180   0.21, 0.13       0.00018, 0.0020, 0.0045
+    T500b100    1.26e+07   2.41e+07   1.97e+10   0.178   0.20, 0.13       0.00019, 0.0020, 0.0047
+    T500b90S3   1.00e+07   1.83e+07   1.21e+10   0.139   0.16, 0.10       0.00015, 0.0016, 0.0037
+    L500s0      9.68e+06   1.88e+07   1.17e+10   0.371   0.41, 0.31       0
+    L500s1      2.60e+06   3.74e+06   6.90e+08   0.608   0.78, 0.46       0.0026, 0.029, 0.067
+
+At a 500 m median trip on the closed reference the leaks are weak with the edge open: they drain
+18% of the current (a typical home's 20%), P_0 28% below bar's, where U500 drained 37% and H500
+61%. The three shares are near-identical at baseline (P_0 within 0.6%, the leaks' share 17.6 --
+18.0%): with the trip length fixed, where the destinations lie barely moves the region's flow.
+Self-absorption is negligible: a typical home's own building takes 0.02% of its current, the
+largest 0.45% (H500's 6.7%), the pop-weighted 0.2%.
+
+**Formal against deep informal homes** (the region test's definitions; median escape time, 90th
+percentile, formal / deep): T500b90 1,604 (2,179) against 662 (1,580), 2.4; T500b75 and T500b100
+alike (2.4); T500b90S3 1,243 against 564, 2.2; bar 2.7, L500s0 2.6, L500s1 1.4, per block 0.017.
+With the leaks this weak a formal home stays 2.4 times as deep as a deep informal one: the edge
+decides.
+
+**What gets cleared** (summary_cleared.csv; 5810's share of the cleared population, the formal
+grid's; Jaccard with bar's): T500b90 SIMP 0.17, 0.83, 0.85; cheap 0.21, 0.78, 0.64; T500b100 SIMP
+0.17, 0.83, 0.85; T500b90S3 SIMP 0.20, 0.80, 0.54; cheap 0.27, 0.72, 0.45 (bar's own 0.11, 0.89;
+L500s0's 0.11, 0.89; L500s1's 0.27, 0.72). The central pair's clearing is mostly bar's (Jaccard
+0.85 SIMP, 0.64 cheap; with L500s0's 0.78, 0.67, with L1000s1's 0.69, 0.58, with L500s1's 0.43,
+0.36), a little more in 5810 (17% against 11%). **How much s matters**: the 90% and 100% pairs'
+SIMP clearings share 0.98 (702 in common of 716), and each scores within 0.0001 of the other's own
+under the other's model (T500b100's under T500b90 0.2439 against its own 0.2438; T500b90's under
+T500b100 0.2426, the same as T500b100's own): at a fixed 500 m trip the share at buildings changes
+nothing a clearing does, between 90 and 100%; 75% was not run, and its baseline is between theirs.
+
+**Cross-scores** (summary_cross.csv; L_P, each clearing under each model, SIMP's):
+
+    clearing of   under: bar     L500s0  L500s1  L1000s1  T500b90  T500b100  T500b90S3
+    bar                  0.3105  0.2188  0.0705  0.1512   0.2451   0.2438    0.2333
+    L500s0               0.3090  0.2207  0.0728  0.1527   0.2448   0.2435    0.2348
+    L500s1               0.2681  0.1937  0.0843  0.1493   0.2188   0.2179    0.2297
+    L1000s1              0.2990  0.2138  0.0811  0.1573   0.2408   0.2397    0.2393
+    T500b90              0.3070  0.2175  0.0742  0.1533   0.2438   0.2426    0.2347
+    T500b100             0.3071  0.2176  0.0741  0.1532   0.2439   --        0.2347
+    T500b90S3            0.2932  0.2084  0.0767  0.1508   0.2344   0.2333    0.2421
+
+(the cheap preset's alike.) bar's, U500's and the central pair's clearings are near-interchangeable
+under one another's models (within 0.0035), as bar's and the uniform leak's were in the region
+test; under the central pair's model bar's SIMP clearing scores 0.2451, a little above the central
+pair's own SIMP (0.2438): SIMP's run-to-run spread is that large here. H500's loses 0.025 there.
+SIMP leads the cheap preset under each of the new configurations (+0.015 and +0.014 L_P), their
+clearings overlapping at Jaccard 0.40 and 0.42.
+
+**The induced corridors' loop index** (summary_loops.csv; loops of the induced corridors at q 0.9,
+SIMP's and the cheap preset's; at q 0.8): T500b90 9, 10 (54, 42); T500b100 10 (54); T500b90S3 12,
+10 (56, 41); bar 10, 11 (39, 23); L500s0 18, 12 (82, 66); L500s1 26, 22 (69, 70). With a weak leak
+the corridors a clearing induces are about bar's at q 0.9 and somewhat more interconnected at q
+0.8.
+
+**The boost's verdict** (StreetBoost 3x on the OSM ways, with the central constants): it changes
+what gets cleared moderately and what a clearing is worth little. Jaccard with and without it 0.58
+(SIMP) and 0.52 (cheap), about the two presets' own overlap (0.40, 0.42); each clearing loses
+0.0074 -- 0.0094 of L_P under the other's model (T500b90S3's SIMP under T500b90 0.2344 against its
+own model's 0.2421 and T500b90's own 0.2438; T500b90's under the boost 0.2347 against T500b90S3's
+own 0.2421; the cheap preset's 0.0041 and 0.0069), 3 -- 4% of Lens A. With the boost the clearing
+moves a little into 5810 (20% of it against 17%), the leaks drain less (14% against 18%: the
+streets carry more to the edge) and a formal home's depth falls 22% (2.2x a deep home's against
+2.4x). Lens A is nearly the same (0.2421 against 0.2438).
+
+**Maps** (region_rows/maps/<config>_<preset>.png: the flow after against the no-buildings prior,
+the change from the baseline, the change on 5810): T500b90_simp, T500b90_cheap, T500b100_simp,
+T500b90S3_simp, T500b90S3_cheap. The 75% pair has none (no run, no prior).
+
+**The guards, at the final code** (each passes and fails under its fault; on a core here): new
+`closed-edge` (TRIP_BLOCK closed, the open ground's leak at 60 m: one live component, with a leak;
+the cells live and the homes walled in the open edge's; the street's drainage 0 and the leaks' the
+injection within 3.0e-13; the pooled median trip 69.26 m against the method of images with the
+images added, 69.18 m, +1.1e-3, every trip inside; fault `edge-open`, ClosedEdge.mesh leaving the
+edge open: the street drains 22% and the median -2.1e-2); `leak-fold` on the constants (19570 at
+lam 50 m: the region test's s 0, 1 and 0.75 as constants on the block, bit for bit at s 0, 2.4e-16
+and 3.1e-16 at s 1 and 0.75 against the two formulas, the oracle within 1.6e-16, the operator
+5.8e-17; fault `lengths-swapped`, the open ground's length on the footprints and theirs on open
+ground: 0.43 -- 3.8 off); `leak-scale` (the open ground's 60 m alone, and 84.9 m with the home's
+own 4 m^2 footprint leaking at 2 m, which drains 38% of its current: spread 2.6% and 2.1%, level
++2.1e-3 and +7.5e-4; fault `per-cell`); `leak-assembly`, `enclosure`, `leak-gradient` and `flux` at
+the three pairs of LEAK_PAIRS (open ground only, footprints only, both) as before (1.2e-16, P
+1.0e-11; 1 and 6 walled in; 3.3e-5; 5.0e-11); `trip-calibration` (the scale's search, unchanged
+numbers); `exits-identity` (46 names of 46 configurations and presets distinct and parsing back, 46
+stored names their labels', the per-block metric's 28 constants digesting to 34d40e8a; faults
+`in-code`, 39 constants, `suffix-dropped`, 8 names for 46). The earlier guards, every one both ways
+at the final code (86 runs, 4.4 h of core time, one or two at once): gap_clear_check baseline,
+weights, reach, gradient (19570, 38136: within 3.5e-5), free, identity, convex, pattern, constants,
+roads, flux, barriers, loop-index; gap_check conform, delaunay, apertures, filtration, free;
+gap_flow_check angle, shift, channel, field, law, closed; pweight_check identity, total,
+displacement, gradient, weights; free_roads_check free-roads (20269, 18895). Two first runs on
+blocks outside a guard's own (the gradient guard on 20269: up to 5.6e-4 against its 1e-4;
+free-roads on 23597: its road for home 272 does not free it) fail identically at 72cabeac, before
+this work: not regressions. No device guard was run: the factorization and the solves are unchanged
+(gap_factor untouched), Model only computes its leak site and mesh differently. mypy --strict clean
+on gap_exits, gap_maps, region_leaks; gap_clear and gap_clear_check as before (32 and 10 errors);
+`ruff check .` passes; tests/test_clearings.py: 36 pass.
+
+**Compute.** GPU: 6.00 GPU-h of the 6 (sacct): the mesh check on tesla2 0.004 (the barrier mesh was
+there: 3 s to load); the central pair's and the boost's four runs and two priors 2.38; the 100%
+pair's SIMP and prior 1.14, its cheap preset 1.76 (stopped); the 75% pair's SIMP 0.72 (stopped at
+the cap). CPU here, single-threaded, at most 8 processes, then 4: the closed reference's
+calibrations (the central pair at 2,000 draws 4.2 CPU-h, at 4,000 2.8; the 75% and 100% pairs 5.4
+and 3.9), the per-block check 0.4, the region's baselines, scores and cross-scores about 3, the
+migration's re-scores 0.3, the guards about 5.3: about 25 CPU-h [inferred from the steps' times],
+beside the refusal's 16.

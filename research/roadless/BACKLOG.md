@@ -367,8 +367,23 @@ items up front"), in the order proposed:
    and one metric everywhere: per-block runs take the same leaks (their street ring the boundary),
    RUNTIME's metric switching at the consolidated pass's start, which re-scores every block. Next:
    the constants, the region's runs (s 0.75, 0.9, 1 equivalents and the boost, both presets) and
-   a per-block check of how much the leaks move the 13 tuning blocks. For the site: present both
-   families, powers of the escape time (J_p) and priority-weighted P, under established names.
+   a per-block check of how much the leaks move the 13 tuning blocks. **Done (2026-10-16)** (NOTES,
+   "The region's leaks", its second half): InternalLeak(open_m, foot_m) (`L[o<m>][b<m>]`: sigma /
+   open_m^2 per m^2 of open ground, sigma / foot_m^2 per m^2 of footprint, a person a fixed area of
+   it; the edge a Strategy, ClosedEdge `E0` the reference); the region test's (s, lam) migrated to
+   their constants on 5810@major (to floating point). Chosen on the closed reference (4,000 draws,
+   the median within 2%, bootstrap sd 3 m): the central pair `Lo6214b562` (499.5 m), 75%
+   `Lo3608b565` (500.1 m), 100% `Lb552` (492.2 m). With the edge open the leaks are weak: they
+   drain 18% of the current (a typical home 20%), P_0 28% under bar's, a formal home still 2.4x as
+   deep as a deep informal one; the clearing is mostly bar's (Jaccard 0.85), Lens A 0.244 (SIMP)
+   and 0.229 (cheap); 90% and 100% at buildings clear the same (Jaccard 0.98, each within 0.0001
+   under the other); the boost moves the clearing (Jaccard 0.52 -- 0.58), not its worth (3 -- 4%
+   under the other's model). Five of the eight runs at the 6 GPU-h cap (the 100% cheap preset and
+   the 75% pair cut). Per block (the 13, on cores): the leaks drain 0.3 -- 2.8%, P_0 falls 0.4 --
+   4.5%, Lens A by 0.0008 -- 0.011, the presets' order unchanged on every block and lens. The
+   switch (at the consolidated pass): RUNTIME `...+v34d40e8a+xLo6214b562va03a092b`. For the site:
+   present both families, powers of the escape time (J_p) and priority-weighted P, under
+   established names.
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights
