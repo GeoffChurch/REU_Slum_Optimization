@@ -32,10 +32,11 @@ enclosed (B (i) of the answer: the population share it leaves walled in,
 gap_clear.Model.enclosed_left). fw, .m, .g and .G are not built for held buildings: a block whose
 free stage holds any raises.
 
-plan: fw<FW iterations, 0 = start SIMP from uniform x>.q<final q>.i<OC updates per q>.t<solve
-tolerance while optimizing>, e.g. fw40.q3.i20.t1e-05 (the first 220 runs) or fw0.q5.i10.t0.001;
-the optional suffixes are Plan's (.e .b .k[s] .r[l] .p .w .m .g .G .u). (The raster's coarse
-plans, `.c` and `.C`, and its grids, `.h`, `.a` and `.g<d0>x<smax>...`, went with it.)
+plan: fw<FW iterations, 0 = start SIMP from uniform x>.q<final q>.i<OC updates per q>, e.g.
+fw0.q3.i10; the optional suffixes are Plan's (.e .b .k[s] .r[l] .p .w .m .g .G .u). (The raster's
+coarse plans, `.c` and `.C`, its grids, `.h`, `.a` and `.g<d0>x<smax>...`, and its solve
+tolerance `.t<rtol>` went with it: every solve on the complex is direct. The raster's rows keep
+their names, `.t` and all: records, read by no code; NOTES, "The consolidated pass".)
 """
 from __future__ import annotations
 
@@ -302,9 +303,7 @@ DEFAULT_UPDATE = OC()
 class Plan(NamedTuple):
     """How a block is solved: `fw` Frank-Wolfe iterations from x = 0 (0: start SIMP from the
     uniform x = D, no bound), SIMP continuation q = 1.5, 2, ... `qmax` with up to `iters`
-    optimality-criteria updates each, `rtol` the raster's solve tolerance while optimizing (the
-    complex solves directly: it moves nothing there, and stays in the name the rows carry),
-    closed buildings conducting `eps` while optimizing (named only when not the tension's),
+    optimality-criteria updates each, closed buildings conducting `eps` while optimizing (named only when not the tension's),
     and projected (Relaxation.proj) with beta from `b0` doubling each stage up to `bmax`,
     extra stages at qmax until it gets there (b0 0: no projection, not named); `keep` > 0:
     the answer is the best exact-scored rounding of the iterates every `keep` updates (0: the
@@ -333,7 +332,6 @@ class Plan(NamedTuple):
     fw: int
     qmax: float
     iters: int
-    rtol: float
     eps: float = EPS
     b0: float = 0.0
     bmax: float = 0.0
@@ -355,7 +353,7 @@ class Plan(NamedTuple):
 
     @property
     def name(self) -> str:
-        return (f"fw{self.fw}.q{self.qmax:g}.i{self.iters}.t{self.rtol:g}"
+        return (f"fw{self.fw}.q{self.qmax:g}.i{self.iters}"
                 + (f".e{self.eps:g}" if self.eps != EPS else "")
                 + (f".b{self.b0:g}-{self.bmax:g}" if self.b0 > 0 else "")
                 + (f".k{self.keep}" if self.keep > 0 else "")
@@ -388,11 +386,11 @@ class Plan(NamedTuple):
         return tuple(out)
 
 
-SIMP_DEFAULT = "fw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2"     # SIMP's default (plan_of's spec)
+SIMP_DEFAULT = "fw0.q3.i10.e0.0001.k1s1e-06.p256w8x2"     # SIMP's default (plan_of's spec)
 
 
 def plan_of(spec: str) -> Plan:
-    m = re.fullmatch(r"fw(?P<fw>\d+)\.q(?P<q>[0-9.]+)\.i(?P<i>\d+)\.t(?P<t>[0-9.e-]+?)"
+    m = re.fullmatch(r"fw(?P<fw>\d+)\.q(?P<q>[0-9.]+)\.i(?P<i>\d+)"
                      r"(?:\.e(?P<e>[0-9.e-]+?))?(?:\.b(?P<b0>[0-9.]+)-(?P<bmax>[0-9.]+))?"
                      r"(?:\.k(?P<k>\d+)(?:s(?P<ks>[0-9.e-]+))?)?(?:\.r(?P<r>\d+)(?:l(?P<rl>\d+))?)?"
                      r"(?:\.(?P<pset>p|P|pP)(?P<p>\d+)w(?P<pw>\d+)(?P<px>x2)?(?P<pe>E?))?"
@@ -406,7 +404,7 @@ def plan_of(spec: str) -> Plan:
     update: Update = (OC(float(g["oc"]), float(g["ocm"])) if g["oc"] is not None
                       else MMA(float(g["mma"])) if g["mma"] is not None
                       else DEFAULT_UPDATE)
-    return Plan(fw=int(g["fw"]), qmax=float(g["q"]), iters=int(g["i"]), rtol=float(g["t"]),
+    return Plan(fw=int(g["fw"]), qmax=float(g["q"]), iters=int(g["i"]),
                 eps=EPS if g["e"] is None else float(g["e"]),
                 b0=0.0 if g["b0"] is None else float(g["b0"]),
                 bmax=0.0 if g["bmax"] is None else float(g["bmax"]),

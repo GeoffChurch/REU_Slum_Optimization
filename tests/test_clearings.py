@@ -347,7 +347,7 @@ def test_merging_keeps_what_the_sources_lost_adds_what_is_new_and_flags_an_overw
 # ------------------------------------------------------------------ the sources: this code's metric
 
 RUNTIME = exporter.metrics.RUNTIME         # this code's complex metric (its digest this code's)
-PLAN = "fw0.q3.i10.t0.001.e0.0001.k1s1e-06"
+PLAN = "fw0.q3.i10.e0.0001.k1s1e-06"
 RUN_DIR = f"relax_rows/{RUNTIME}/{PLAN}/D0.05"
 
 

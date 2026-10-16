@@ -54,7 +54,7 @@ import road_rescore as rr  # noqa: E402
 
 # ------------------------------------------------------------------ the run's configuration
 # Everything that can change a number is here, and named in the rows (the run's identity).
-PLAN = relax.plan_of("fw0.q3.i10.t0.001.e0.0001.k1s1e-06")    # SIMP base: the presets' base plan
+PLAN = relax.plan_of("fw0.q3.i10.e0.0001.k1s1e-06")    # SIMP base: the presets' base plan
 BUDGET = relax.D_LENS          # area D 0.05 (one SIMP run is one budget: D 0.10 would be a second)
 METRIC = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())  # the CPU's
 FW_ITERS = 40                  # the bound's Frank-Wolfe iterations (as relax220_p1's fw40)

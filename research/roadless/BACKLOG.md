@@ -5,7 +5,7 @@ delete them when shown dominated. Status tags: **prioritized** (the owner wants 
 **queued**, **running**, **idea**, **owner's call**, **blocked**.
 
 Baselines (NOTES.md, "Large blocks" and "Lens A at D 0.05"): greedy `S0.01cat` /
-`S0.005cat` and SIMP + eps-scored incumbent `fw0.q3.i10.t0.001.e0.0001.k1s1e-06`, both J_2,
+`S0.005cat` and SIMP + eps-scored incumbent `fw0.q3.i10.e0.0001.k1s1e-06`, both J_2,
 uni conductance, Lens A at D 0.05 (`D_LENS`; owner 2026-10-03, 0.10 saturates under sightline),
 and Lens B from nested runs.
 

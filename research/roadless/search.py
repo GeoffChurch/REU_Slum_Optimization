@@ -41,7 +41,7 @@ GP3xS0.01catr0.005m8; FL<same>c<cap on the conditional adds' scorings>, e.g.
 FL3xS0.01catr0.005m8c100; SW<grow>-<grow>-...x<greedy picker>r<share>[m<shortlist>]
 .P<tries>w<width>[x2][E] (the polish's, as polish_greedy.py's), e.g.
 SW3-1.5-1.2xS0.01catr0.005m8.P64w8; SIMP<relax plan>+<any of those>, e.g.
-SIMPfw0.q3.i10.t0.001.e0.0001.k1s1e-06.p256w8x2+SW1.2xS0.01catr0.005m8.P64w8 (SIMP's default,
+SIMPfw0.q3.i10.e0.0001.k1s1e-06.p256w8x2+SW1.2xS0.01catr0.005m8.P64w8 (SIMP's default,
 then a 1.2x swing and the polish). Rows in clear.rows_dir(<spec>D<d_max>, ...), e.g.
 clear_rows_FL3xS0.01catr0.005m8c100D0.05_p1_<metric>: d_max sets the grow and the rows.
 
