@@ -449,6 +449,11 @@ can be done after we've done the entire website/README/examples revamp"):
   rows whose terms all vanish beside the street (NOTES, "Exits as leaks: the region model on the
   complex (5810@major)", its last list). Any block with such rows would raise in the pass. Fix
   the stopping test, with a guard on 7283 and a fault.
+- **Before that pass, two guards that fail off their own blocks** (found 2026-10-16, NOTES "The
+  region's leaks", its guards; both the same at 72cabeac): `gradient` on 20269 is up to 5.6e-4 off
+  central differences against its 1e-4 tolerance, and `free-roads` on 23597 leaves home 272
+  walled in by its own road. Find whether each is the code or the guard's tolerance or premise,
+  before the pass leans on either.
 - **The stored clearings made durable**: each clearing's core (preset, block, cleared building
   ids, D, Lens A, enclosed share) committed; rows no longer overwritten in place. Done 2026-10-13
   (NOTES, "The stored clearings, committed"): `research/roadless/clearings/`, 151 runs on 303
