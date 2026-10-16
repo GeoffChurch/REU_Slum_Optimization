@@ -31,8 +31,9 @@ walled in at baseline, cheapest per unit of population, within the budget, held 
 its roundings and the polish, which search with the rest of the budget; where no home is walled in
 nothing is held. one's rows add free_D (the free stage's D), free_cleared (its buildings) and
 enclosed (B (i) of the answer: the population share it leaves walled in,
-gap_clear.Model.enclosed_left). fw, .m, .g and .G are not built for held buildings: a block whose
-free stage holds any raises.
+gap_clear.Model.enclosed_left). A greedy's seed or track (.g, .G) starts from the held buildings
+as polish_greedy's greedy does (since the consolidated pass), its polish never moving them. fw and
+.m are not built for held buildings: a block whose free stage holds any raises.
 
 plan: fw<FW iterations, 0 = start SIMP from uniform x>.q<final q>.i<OC updates per q>, e.g.
 fw0.q3.i10; the optional suffixes are Plan's (.e .b .k[s] .r[l] .p .w .m .g .G .u). (The raster's
@@ -576,10 +577,9 @@ def one(bid: str, power: float, metric: gap_clear.ComplexMetric, plan: Plan, bud
     # B's first stage: the crossings that free the enclosed homes, held at 1 through SIMP (xlo),
     # the incumbent's roundings (first) and its polish (not movable); none enclosed, none held
     held = c.free_first(budget=budget, held=np.zeros(c.n, dtype=bool))
-    if held.any() and (plan.fw > 0 or plan.starts > 1 or plan.seed or plan.track):
+    if held.any() and (plan.fw > 0 or plan.starts > 1):
         raise NotImplementedError(f"{bid}: the free stage holds {int(held.sum())} buildings, and "
-                                  f"fw, .m, .g and .G are not built for held buildings: "
-                                  f"{plan.name}")
+                                  f"fw and .m are not built for held buildings: {plan.name}")
     xlo = np.where(held, 1.0, XMIN)
     out = dict(block=bid, n=c.n, power=power, demand=demand.name, plan=plan.name,
                along=metric.name, device=metric.device)
@@ -611,13 +611,18 @@ def one(bid: str, power: float, metric: gap_clear.ComplexMetric, plan: Plan, bud
                          f"{plan.name}")
     r_greedy = None
     if plan.seed or plan.track:
+        # the greedy free first too (as polish_greedy.run): from the free stage's buildings, its
+        # picks while they fit the rest of the budget; none held, the greedy from nothing
         spec = plan.seed or plan.track
         rnd = search.greedy_round(spec)
-        s = search.SearchState.start(c, power=power, score=search.Score(*c.baseline(power)),
-                                     world=search.EXACT)
+        c.removed[:] = held
+        start = (search.Score(*c.exact(held, power)) if held.any()
+                 else search.Score(*c.baseline(power)))
+        s = search.SearchState.start(c, power=power, score=start, world=search.EXACT)
         search.greedy(rnd, budget)(s, search.Silent())
         c.removed[:] = False
-        r_greedy = cut_to_budget(s.order, c.cost, budget)
+        r_greedy = np.maximum(cut_to_budget(s.order, c.cost, budget - float(c.cost[held].sum())),
+                              held.astype(float))
         if plan.seed:
             inc.consider(r_greedy, f"the greedy {plan.seed}")
         log(f"  the greedy {spec}: {time.time() - t0:.0f}s")
@@ -635,7 +640,8 @@ def one(bid: str, power: float, metric: gap_clear.ComplexMetric, plan: Plan, bud
             inc.polish(xs, plan.polish, plan.pwidth, everything, plan.polish_pairs,
                        scoring=plan.polish_scoring, log=log)
     if plan.track:
-        inc_g = Incumbent(rel, budget, 1, samples=0, sample_in=(), score_eps=plan.kscore)
+        inc_g = Incumbent(rel, budget, 1, samples=0, sample_in=(), first=held.astype(float),
+                          score_eps=plan.kscore)
         inc_g.consider(r_greedy, f"the greedy {plan.track}, the second track")
         gated = plan.track_gate >= 0 and inc_g.J > inc.J * (1 + plan.track_gate / 100)
         if gated:
