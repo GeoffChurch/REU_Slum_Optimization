@@ -14,6 +14,8 @@ complex (decision (2)).
     uv run python $S prefixes <rows> <lineup,> <scratch> <procs> <ids,>
     uv run python $S cx <rows> <scratch> <metric> <cpu|gpu> <id> <items,> [--replace]
     uv run python $S cxreport <rows> <lineup,> <metric> <cpu|gpu>
+    uv run python $S lineup-one <scratch> <id> <method> [--replace]   # propose, cut, score
+    uv run python $S lineup-score <scratch> <id> <methods,> [--replace]   # score only
 
 ON THE COMPLEX (phase 2b; NOTES, "The complex as the runtime: the ports and the cross-checks"):
 `cx` scores the area prefixes on the gap complex's metric (<metric>, refused unless it is one:
@@ -706,6 +708,38 @@ def cx(rows: Path, scratch: Path, metric: gcl.ComplexMetric, bid: str, items: li
             cx_network(rows, scratch, metric, b, item, replace=replace)
 
 
+# ------------------------------------------------------------------ the lineup, one (block, method)
+
+def lineup_one(scratch: Path, bid: str, name: str, *, replace: bool) -> None:
+    """One (block, method) of the research lineup end to end in this process (a cluster `cpu`
+    task): its network proposed by lineup_arms' method (propose, through the derive cache), its
+    canonical prefixes (prefixes_one), and its area prefixes scored on the complex under RUNTIME
+    on a core (cx_network), every row under lineup_rows()."""
+    import metrics
+    _check_single_threaded()
+    rows = lineup_rows()
+    propose(rows, scratch, bid, name, lineup_arms()[name], False)
+    if not net_path(scratch, bid, name, False).exists():
+        raise SystemExit(f"{bid} {name}: no network (its proposal row says why)")
+    [b] = common.build_blocks([bid])
+    _BLOCKS[bid] = b
+    if prefixes_one(PrefixJob(rows, scratch, bid, name)) is not None:
+        raise SystemExit(f"{bid} {name}: its prefixes failed")
+    metric = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.factorization_of("cpu"))
+    cx_network(rows, scratch, metric, b, name, replace=replace)
+
+
+def lineup_score(scratch: Path, bid: str, names: list[str], *, replace: bool) -> None:
+    """The lineup's networks of `bid` already proposed and cut (consolidated `reuse-networks`),
+    scored on the complex under RUNTIME on a core (cx_network)."""
+    import metrics
+    _check_single_threaded()
+    [b] = common.build_blocks([bid])
+    metric = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.factorization_of("cpu"))
+    for name in names:
+        cx_network(lineup_rows(), scratch, metric, b, name, replace=replace)
+
+
 # ------------------------------------------------------------------ report
 
 SHORT = {"clearance": "clear", "clearance_looped": "clear_loop", "cycle_native": "cycle",
@@ -870,6 +904,14 @@ if __name__ == "__main__":
         cx(Path(a[1]), Path(a[2]),
            gcl.complex_of(a[3], factorization=gap_factor.factorization_of(a[4])), a[5],
            a[6].split(","), scoring=search.polish_scoring_of(polish), replace=again)
+    elif cmd == "lineup-one":
+        if len(a) != 4:
+            raise SystemExit("lineup-one <scratch> <id> <method> [--replace]")
+        lineup_one(Path(a[1]), common.ids_of(a[2])[0], a[3], replace=again)
+    elif cmd == "lineup-score":
+        if len(a) != 4:
+            raise SystemExit("lineup-score <scratch> <id> <methods,> [--replace]")
+        lineup_score(Path(a[1]), common.ids_of(a[2])[0], a[3].split(","), replace=again)
     elif cmd == "cxreport":
         if len(a) != 5:
             raise SystemExit("cxreport <rows> <lineup,> <metric> <cpu|gpu>")
