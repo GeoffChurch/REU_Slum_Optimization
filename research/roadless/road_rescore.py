@@ -79,7 +79,7 @@ from reblock.budget import road_corridor  # noqa: E402
 if TYPE_CHECKING:
     from shapely.geometry.base import BaseGeometry
 
-    from reblock.contracts import Block
+    from reblock.contracts import Block, Method
 
 ROADLESS = common.REPO / "research" / "roadless"
 
@@ -205,21 +205,24 @@ ARTERIAL = "greedy_arterial_access_displacement"
 ARTERIAL_MAX_ROADS = 300
 
 
-def lineup_arms() -> dict:
+def lineup_arms() -> dict[str, Method]:
     """The research lineup's methods (above), by name."""
     import free_roads
+    from reblock.methods.arterial.reblocker import GreedyArterialReblocker
     from reblock.methods.clearance import ClearanceReblocker
     from reblock.methods.cycle_native import CycleNativeReblocker
     from reblock.methods.loop_closure import LoopClosureRefiner
     from reblock.methods.resistance_lp import ResistanceLPReblocker
     free = free_roads.lineup_free()
-    out = {}
+    out: dict[str, Method] = {}
     for name, m in _arms().items():
-        if isinstance(m, LoopClosureRefiner):
+        if isinstance(m, LoopClosureRefiner):     # clearance_looped: the stage in its tree
+            assert isinstance(m.base, ClearanceReblocker), name
             m = dataclasses.replace(m, base=dataclasses.replace(m.base, free_first=free))
         elif isinstance(m, CycleNativeReblocker | ResistanceLPReblocker | ClearanceReblocker):
             m = dataclasses.replace(m, free_first=free)
         if name == ARTERIAL:
+            assert isinstance(m, GreedyArterialReblocker), name
             m = dataclasses.replace(m, max_roads=ARTERIAL_MAX_ROADS)
         out[name] = m
     return out
