@@ -9,3 +9,6 @@ export PYTHONDONTWRITEBYTECODE=1
 # the complex's fixed meshes cached on the node's own disk (gap_clear.CACHE): a block's tasks
 # share it, and the shared home's quota does not hold them
 export GAP_CACHE="${TMPDIR:-/tmp}/gap_cache_$USER"
+# reblock's derive cache (reblock.derive_graph: the road methods' proposals and their substrates)
+# on the node's own disk too: the shared home is near its quota
+export REBLOCK_CACHE_DIR="${TMPDIR:-/tmp}/reblock_derive_$USER"

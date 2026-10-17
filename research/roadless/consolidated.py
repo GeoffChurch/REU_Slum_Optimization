@@ -12,6 +12,7 @@ polish_greedy.py, search.py, road_rescore.py), keyed by the metric's name.
     uv run python $S features <ids,|@file|store> <procs>   # what meets each block: ROWS/features
     uv run python $S baselines <id> <parts,>     # a block's baselines under the switch's parts
     uv run python $S presets <id> <cpu|gpu> <default,hard,cheap,cheap005> [--replace]
+    uv run python $S reuse-networks <scratch>    # the lineup's networks nothing changes
     uv run python $S report                      # ROWS/summary_*.csv
 
 `features`: per block (the store's 303: clearings.Store's blocks), its OSM features (attrs["osm"])
@@ -42,6 +43,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely
@@ -265,6 +267,59 @@ def presets(bid: str, device: str, names: list[str], *, replace: bool) -> None:
     clearings.write_once(pd.DataFrame([timing]), onecard_path(bid, device), replace=replace)
 
 
+# ------------------------------------------------------------------ the road lineup's reuse
+
+STORED_ROADS = HERE / "road_rows"           # item 4's networks (HoldNothing) and their rows
+REUSED = ("clearance", "clearance_looped", "cycle_native", "cycle_native_betweenness_contrast",
+          "resistance_lp", "euclidean_grid")   # every method but the arterial (its cap changed)
+
+
+def walled_under_runtime(bid: str) -> int:
+    """The homes RUNTIME walls in on `bid` at baseline (the survey's `runtime` row)."""
+    return int(pd.read_parquet(baseline_path(bid, "runtime")).walled.iloc[0])
+
+
+def reuse_networks(scratch: Path) -> None:
+    """The lineup's networks (road_rescore.lineup_arms) on the blocks of item 4's run where RUNTIME
+    walls no home in: its free-first stage holds nothing there, and with nothing held a method
+    runs as with HoldNothing (the hold-nothing guard; reblock's road methods unchanged since item
+    4's run, 2026-10-10/11, but for the price and free-first plumbing, float for float under
+    Opaque and HoldNothing), so each network of REUSED is item 4's, copied to the lineup's
+    scratch with its canonical order, its prefixes' rows and its proposal row (`status` saying
+    so). The arterial is proposed anew (its cap)."""
+    import road_rescore as rr
+    rows = rr.lineup_rows()
+    done = 0
+    for d in sorted((STORED_ROADS / "scratch" / "networks").iterdir()):
+        bid = d.name
+        if walled_under_runtime(bid):
+            continue
+        for name in REUSED:
+            src = rr.net_path(STORED_ROADS / "scratch", bid, name, False)
+            row = rr.proposal_row(STORED_ROADS, bid, name, False)
+            out = rr.net_path(scratch, bid, name, False)
+            if not (src.exists() and row.exists()):
+                raise SystemExit(f"{bid} {name}: item 4's network or its row is missing")
+            if out.exists():
+                continue
+            out.parent.mkdir(parents=True, exist_ok=True)
+            rr.write_parquet(gpd.read_parquet(src), out)
+            # its canonical order and prefixes too: a function of the network and the block
+            rr.write_parquet(gpd.read_parquet(rr.ordered_path(STORED_ROADS / "scratch", bid, name)),
+                             rr.ordered_path(scratch, bid, name))
+            pre = rr.prefix_dir(rows) / f"{bid}__{name}.parquet"
+            pre.parent.mkdir(parents=True, exist_ok=True)
+            stored = rr.prefix_dir(STORED_ROADS) / f"{bid}__{name}.parquet"
+            rr.write_parquet(pd.read_parquet(stored), pre)
+            r = pd.read_parquet(row).assign(
+                status="reused: item 4's HoldNothing network (RUNTIME walls no home in)")
+            dest = rr.proposal_row(rows, bid, name, False)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            rr.write_parquet(r, dest)
+            done += 1
+    print(f"{done} networks reused into {scratch}", flush=True)
+
+
 # ------------------------------------------------------------------ report
 
 TUNING = ("ZAF.9.3.1_1_1558", "ZAF.9.3.1_1_18895", "ZAF.9.3.1_1_20269", "ZAF.9.3.1_1_20543",
@@ -339,6 +394,8 @@ def main(argv: list[str]) -> None:
         features(ids_arg(argv[1]), int(argv[2]))
     elif cmd == "presets" and len(argv) == 4 and argv[2] in ("cpu", "gpu"):
         presets(common.ids_of(argv[1])[0], argv[2], argv[3].split(","), replace=again)
+    elif cmd == "reuse-networks" and len(argv) == 2:
+        reuse_networks(Path(argv[1]))
     elif cmd == "report" and len(argv) == 1:
         report()
     elif cmd == "baselines" and len(argv) == 3:
