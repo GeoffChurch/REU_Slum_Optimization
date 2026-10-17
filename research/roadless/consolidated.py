@@ -535,25 +535,27 @@ def lineup_report() -> None:
                                   best_enc=float(best.enclosed), simp_val=float(d[x]),
                                   simp_enc=float(d.enclosed), di=di, dii=dii,
                                   ahead=bool(di < 0 or (di == 0 and dii > 0))))
-        tp = pd.DataFrame(price)
+        tp = pd.DataFrame(price, columns=["block", "lens", "best", "best_val", "best_enc",
+                                          "simp_val", "simp_enc", "di", "dii", "ahead"])
         tp.to_csv(out / "summary_lineup_price.csv", index=False)
-        for x in LENSES:
+        for x in LENSES if len(tp) else ():
             q = tp[tp.lens == x]
             tie = q[q.di == 0]
             print(f"  {x}: SIMP's default ahead of the best road on {int(q.ahead.sum())} of "
                   f"{len(q)}; where (i) ties ({len(tie)}) by a median {tie.dii.median():+.4f}; "
                   f"the best road: " + ", ".join(f"{k} {v}" for k, v in
                                                  q.best.value_counts().items()))
-        vs = []
-        for mth, gm in at[at.reach].groupby("method"):
+        vs: list[dict[str, object]] = []
+        for mth, gm in at[at.reach & at.block.isin(dflt.index)].groupby("method"):
             gi = gm.set_index("block")
             for x in LENSES:
                 d = (gi[x] - dflt[x].reindex(gi.index)).dropna()
                 vs.append(dict(method=mth, lens=x, n=len(d), median=float(d.median()),
                                ahead_of_simp=int((d > 0).sum())))
-        print("\nEACH METHOD MINUS SIMP'S DEFAULT at D 0.05\n"
-              + pd.DataFrame(vs).pivot_table(index="method", columns="lens",
-                                             values="median").round(4).to_string())
+        if vs:
+            print("\nEACH METHOD MINUS SIMP'S DEFAULT at D 0.05\n"
+                  + pd.DataFrame(vs).pivot_table(index="method", columns="lens",
+                                                 values="median").round(4).to_string())
         held = []
         for f in sorted((root / "scratch" / "networks").glob("*/*.parquet")):
             if f.name.endswith(".ordered.parquet"):

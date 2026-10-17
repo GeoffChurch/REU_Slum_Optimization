@@ -252,7 +252,8 @@ class FreeEnclosed:
         now, now_key = Displaced(by_area=0.0, by_count=0.0), 0.0
         left = ~reach0.live
         routed: set[int] = set()            # the homes the last round found a road for
-        failed: dict[int, set[int]] = {}    # per home, the ends of its roads the test refused
+        failed: dict[int, set[int]] = {}    # per home, the targets whose road the test refused
+        tries: dict[int, int] = {}          # ... and how many of its roads it refused
         unfreed: set[int] = set()           # ... the homes FREE_TRIES of whose roads it refused
         while left.any():
             sources = np.unique(np.concatenate([seeds, *[np.asarray(r.nodes) for r in held]]))
@@ -261,32 +262,34 @@ class FreeEnclosed:
                 break
             dist, pred = dijkstra(g.matrix, indices=sources, min_only=True,
                                   return_predecessors=True)[:2]
-            best: tuple[int, HeldRoad, Displaced, float] | None = None
+            best: tuple[int, HeldRoad, int, Displaced, float] | None = None
             key = np.inf
             routed = set()
             for h in np.flatnonzero(left):
                 if int(h) in unfreed:
                     continue
-                road = _cheapest(graph, g, targets[int(h)], dist, pred, is_seed, street,
-                                 skip=failed.get(int(h), set()))
-                if road is None:
+                got = _cheapest(graph, g, targets[int(h)], dist, pred, is_seed, street,
+                                skip=failed.get(int(h), set()))
+                if got is None:
                     continue
+                road, target = got
                 routed.add(int(h))
                 after, after_key = displaced([*held, road])
                 k = (after_key - now_key) / w[h]
                 if after.by_area <= self.budget and after.by_count <= self.budget and k < key:
-                    best, key = (int(h), road, after, after_key), k
+                    best, key = (int(h), road, target, after, after_key), k
             if best is None:
                 break
-            h, road, after, after_key = best
+            h, road, target, after, after_key = best
             held.append(road)
             freed = _Reach.of(geo, metric, carve=geo.local(road_corridor(frame(held)))).live
             if not freed[h]:
                 # the targets are the metric's reach read off the graph, near a barrier not
                 # always its test: the road dropped, the home tries its next target
                 held.pop()
-                failed.setdefault(h, set()).add(road.nodes[-1])
-                if len(failed[h]) >= FREE_TRIES:
+                failed.setdefault(h, set()).add(target)
+                tries[h] = tries.get(h, 0) + 1
+                if tries[h] >= FREE_TRIES:
                     unfreed.add(h)
                 print(f"{bid} free roads: the road for home {h} ({len(road.nodes)} nodes, "
                       f"{road.geometry.length:.1f} m) does not free it by the metric's test: "
@@ -308,7 +311,7 @@ class FreeEnclosed:
         plan = Plan(block_id=bid, enclosed=tuple(int(h) for h in enclosed), steps=tuple(steps),
                     unreachable=unreachable, over_budget=over,
                     unfreed=tuple(sorted(h for h in unfreed if left[h])),
-                    refused=sum(len(v) for v in failed.values()), D_area=now.by_area,
+                    refused=sum(tries.values()), D_area=now.by_area,
                     D_count=now.by_count,
                     share_before=float(area_w[~reach0.live].sum() / area_w.sum()),
                     share_after=float(area_w[left].sum() / area_w.sum()))
@@ -400,11 +403,12 @@ def _targets(geo: gc.Geometry, r: _Reach, graph: RoutingGraph, g: _Graph,
 
 def _cheapest(graph: RoutingGraph, g: _Graph, t: _Targets, dist: NDArray[np.float64],
               pred: NDArray[np.int32], is_seed: NDArray[np.bool_], street: BaseGeometry, *,
-              skip: set[int]) -> HeldRoad | None:
-    """The cheapest road to a target in this round's Dijkstra (`dist`, `pred`): to a target node,
-    or through a target edge to its far end; street end first, with the stub to the street where
-    it starts at a street node (as the methods' roads end), none ending on a node of `skip` (the
-    home's roads the metric's test refused). None if no target is reachable."""
+              skip: set[int]) -> tuple[HeldRoad, int] | None:
+    """The cheapest road to a target in this round's Dijkstra (`dist`, `pred`) and the node it
+    ends on: to a target node, or through a target edge to its far end; street end first, with
+    the stub to the street where it starts at a street node (as the methods' roads end), none
+    ending on a node of `skip` (the home's targets whose road the metric's test refused). None if
+    no target is reachable."""
     cand = [(float(dist[v]), int(v), -1) for v in t.nodes]
     for e in t.edges:
         a, b, we = int(g.ui[e]), int(g.uj[e]), float(g.weight[e])
@@ -424,7 +428,8 @@ def _cheapest(graph: RoutingGraph, g: _Graph, t: _Targets, dist: NDArray[np.floa
             coords.insert(0, (float(sp.x), float(sp.y)))
         coords = [c for i, c in enumerate(coords) if i == 0 or c != coords[i - 1]]
         if len(coords) >= 2:     # a street node exactly on the street, alone, makes no line
-            return HeldRoad(geometry=LineString(coords), nodes=tuple(int(k) for k in path))
+            return (HeldRoad(geometry=LineString(coords), nodes=tuple(int(k) for k in path)),
+                    far if far >= 0 else end)
     return None
 
 

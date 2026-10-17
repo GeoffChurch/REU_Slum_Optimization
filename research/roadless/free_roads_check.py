@@ -210,16 +210,18 @@ def _through_barriers(routing: Callable[..., object]) -> Callable[..., object]:
     return anyway
 
 
-def _one_short(cheapest: Callable[..., HeldRoad | None]) -> Callable[..., HeldRoad | None]:
+def _one_short(cheapest: Callable[..., tuple[HeldRoad, int] | None]
+               ) -> Callable[..., tuple[HeldRoad, int] | None]:
     """free_roads._cheapest with every road it returns one segment short (fault `one-short`)."""
-    def short(*args: object, **kw: object) -> HeldRoad | None:
-        road = cheapest(*args, **kw)
-        if road is None or len(road.nodes) < 2:
-            return road
+    def short(*args: object, **kw: object) -> tuple[HeldRoad, int] | None:
+        got = cheapest(*args, **kw)
+        if got is None:
+            return got
+        road, target = got
         coords = list(road.geometry.coords)
-        if len(coords) <= 2:
-            return road
-        return HeldRoad(geometry=LineString(coords[:-1]), nodes=road.nodes[:-1])
+        if len(road.nodes) < 2 or len(coords) <= 2:
+            return got
+        return HeldRoad(geometry=LineString(coords[:-1]), nodes=road.nodes[:-1]), target
     return short
 
 
