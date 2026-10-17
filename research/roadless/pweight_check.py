@@ -35,8 +35,9 @@ the solve injects the priority demand (lam = u is then not J's adjoint).
 
 `weights` (phase 2b): P_{1/2}'s weight of every home (gap_clear.Model.inj_q over the population)
 against a direct computation from the baseline's escape times, solved afresh (the baseline's
-operator assembled from the passages, gap_clear_check._operator, and solved directly; each home's
-escape time its points' injection-weighted mean potential): a_i = u0_i^(1/2) / mean_w(u0^(1/2))
+operator assembled from the passages, gap_clear_check._operator, with the runtime's internal leak
+from its definition, gap_clear_check._leak_oracle, and solved directly; each home's escape time
+its points' injection-weighted mean potential): a_i = u0_i^(1/2) / mean_w(u0^(1/2))
 over the homes with demand, within WEIGHT_TOL relative. Fault `swap-time`: one home's weight made
 from another's escape time (the most populous home takes the least populous one's).
 """
@@ -54,6 +55,7 @@ sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
 import gap_clear_check as gcc  # noqa: E402
+import metrics  # noqa: E402
 import pweight  # noqa: E402
 
 Q_TOTAL = (0.5, 1.0, 2.0)
@@ -169,14 +171,19 @@ def gradient(ids: list[str]) -> list[str]:
 
 
 def weights(ids: list[str]) -> list[str]:
+    import scipy.sparse as sp
     from scipy.sparse.linalg import spsolve
 
     import gap_clear_check
+    if pweight.METRIC.exits.leak != metrics.LEAK:
+        raise SystemExit(f"pweight's metric leaks {pweight.METRIC.exits.leak}, the oracle "
+                         f"{metrics.LEAK}")
     bad = []
     for bid in ids:
         m = _model(bid, POP)
         st = m.state(np.zeros(m.n))
         A, cells = gap_clear_check._operator(st)
+        A = (A + sp.diags(gap_clear_check._leak_oracle(m, metrics.LEAK)[cells])).tocsr()
         rhs = m._rhs(st, m.pop)
         u = np.zeros(st.sys.n)
         u[cells] = spsolve(A.tocsc(), rhs[cells])
