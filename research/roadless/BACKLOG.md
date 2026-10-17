@@ -628,7 +628,12 @@ Not pursued, with what would change that:
   many-arm), so it fails (2) and (3), not (3) alone; over nine rates it fails (1) and (2), its
   counts moving more than those margins. Would come back with: the owner's ruling on whether
   counts this close (1 to 4 in 2,600 runs) should decide now that asks are free; no target or
-  price is left to build for it. epireplay.py is pinned at 674dba4 (502dec65).
+  price is left to build for it. epireplay.py is pinned at 674dba4 (502dec65). epistemetry
+  452052c acts on the fourth replay's notes 2, 4 and 5: `AdoptKeepAskByStake` takes a required
+  `uses` (FUTURE) and carries its price (`target.price`, sum_r w_r r; its values `uses` times
+  larger, so realized losses compare on that scale); every rule and target is `Recordable`, with
+  `stats.records.revive` its inverse (records stored at 674dba4 migrate before `revive` reads
+  them); the replay's types compare by value. The pin moves only with a next replay.
 - **Adaptive block selection** (first look done, NOTES "Which blocks tell methods apart": collapses dominate; screen = gated sentinel + random sample; picking 'discriminating' blocks beyond the sentinel misleads. Remaining value: sequential sample size; wiki `pages/methods/adaptive-benchmark-items.md`).
   Fit a factor model to the method x block matrix of paired differences (axes like "opens
   gated pockets", "spreads in dense bands"); for a new variant run first the blocks with the
