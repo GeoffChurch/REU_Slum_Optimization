@@ -607,6 +607,8 @@ Expected: an issue URL each, recorded in BACKLOG (Task 9 Step 2, or a commit `re
 
 ## Execution notes for the controller
 
+- **Wait for GeoffChurch/epistemetry #1-#4** (owner 2026-10-17): the live driver, a recordable ValueOfMoreUnits, Decision records and per-unit covariates on the Design. Execution starts at the epistemetry commit that lands them; Tasks 3, 5 and 7 are re-cut to use them before dispatch (no `decide`, `decision_record`/`decision_of` or hand-assembled identity in reblock), and the pin target moves from 452052c to that commit.
+- Ruling 2 accepted by the owner (2026-10-17): epistemetry joins the research group and requires-python rises to >=3.12 on research/roadless.
 - Start only once the consolidated pass's agent has returned and `git status` shows no edits of theirs to consolidated.py, NOTES.md, BACKLOG.md or consolidated_rows/.
 - Task 4's run takes about 3 h in the background. Task 5's code can be written meanwhile; its guard does not depend on Task 4's output. Task 6 needs Task 4's CSV, and Task 8 needs every task before it.
 - Stop points that need the owner: a difference in Task 4 that is not a rounding tie; a phase-5 call or stop outside Task 7 Step 3's expectations; Ruling 3 (the second preset) and Ruling 6 (the replays' data) if the owner overrules them; Task 10 entirely.
