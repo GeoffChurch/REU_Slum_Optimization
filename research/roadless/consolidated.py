@@ -12,6 +12,7 @@ polish_greedy.py, search.py, road_rescore.py), keyed by the metric's name.
     uv run python $S features <ids,|@file|store> <procs>   # what meets each block: ROWS/features
     uv run python $S baselines <id> <parts,>     # a block's baselines under the switch's parts
     uv run python $S presets <id> <cpu|gpu> <default,hard,cheap,cheap005> [--replace]
+    uv run python $S lenses <id> [--replace]      # every preset clearing's lenses, on a core
     uv run python $S reuse-networks <scratch>    # the lineup's networks nothing changes
     uv run python $S report                      # ROWS/summary_*.csv
 
@@ -267,6 +268,42 @@ def presets(bid: str, device: str, names: list[str], *, replace: bool) -> None:
     clearings.write_once(pd.DataFrame([timing]), onecard_path(bid, device), replace=replace)
 
 
+# ------------------------------------------------------------------ every clearing's lenses
+
+def lenses_path(bid: str) -> Path:
+    return ROWS / "lenses" / metrics.RUNTIME / f"{bid}.parquet"
+
+
+def lenses(bid: str, *, replace: bool) -> None:
+    """Every preset clearing of `bid` under RUNTIME (the lineup's rows on either device: items_of's
+    paths), each scored on a core under RUNTIME on P, P_{1/2} and J_2 (Lens A at its D) with B (i),
+    as road_rescore's rows are (`_lens_row`), the baseline's first: the presets' lenses and the
+    price of roads' clearings. Rows ROWS/lenses/<metric>/<id>.parquet."""
+    import road_rescore as rr
+    out = lenses_path(bid)
+    clearings.check_new(out, replace=replace)
+    [b] = common.build_blocks([bid])
+    m = metrics.metric_of(metrics.RUNTIME, device="cpu").clearing(b, demand=POP)
+    rows = [dict(preset="baseline", device="", run="", n_cleared=0, D=0.0, stored_perm=np.nan,
+                 **rr._lens_row(m, m.base))]
+    for device in ("gpu", "cpu"):
+        for k, item in items_of(bid, device).items():
+            if not item.path.exists():
+                continue
+            r = pd.read_parquet(item.path).iloc[0]
+            simp = "simp_cleared" in r.index
+            ids = np.asarray(r["simp_cleared"] if simp else r["cleared"], dtype=np.int64)
+            x = np.zeros(m.n, dtype=bool)
+            x[ids] = True
+            rows.append(dict(preset=k, device=device, run=item.name, n_cleared=int(x.sum()),
+                             D=float(m.cost[x].sum()),
+                             stored_perm=float(r["simp_perm"] if simp else r["perm"]),
+                             **rr._lens_row(m, m.lenses(x))))
+    clearings.write_once(pd.DataFrame(rows).assign(block=bid, metric=metrics.RUNTIME),
+                         out, replace=replace)
+    print(f"{bid}: {len(rows) - 1} clearings scored", flush=True)
+
+
 # ------------------------------------------------------------------ the road lineup's reuse
 
 STORED_ROADS = HERE / "road_rows"           # item 4's networks (HoldNothing) and their rows
@@ -394,6 +431,8 @@ def main(argv: list[str]) -> None:
         features(ids_arg(argv[1]), int(argv[2]))
     elif cmd == "presets" and len(argv) == 4 and argv[2] in ("cpu", "gpu"):
         presets(common.ids_of(argv[1])[0], argv[2], argv[3].split(","), replace=again)
+    elif cmd == "lenses" and len(argv) == 2:
+        lenses(common.ids_of(argv[1])[0], replace=again)
     elif cmd == "reuse-networks" and len(argv) == 2:
         reuse_networks(Path(argv[1]))
     elif cmd == "report" and len(argv) == 1:
