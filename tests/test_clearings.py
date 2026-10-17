@@ -407,7 +407,7 @@ def test_only_this_codes_metric_is_a_source(tmp_path: Path) -> None:
         d = root / "relax_rows" / metric / PLAN / "D0.05"
         d.mkdir(parents=True)
         simp_row("blk", [3], along=metric, enclosed=0.0).to_parquet(d / "blk_p1.parquet")
-    [src] = exporter.SimpFamily().sources(root)
+    [src] = exporter.SimpFamily(store="relax_rows").sources(root)
     assert src.settings.run == f"{RUN_DIR}.p1" and src.settings.along == RUNTIME
     assert sorted(exporter.records(root)) == sorted(
         f"relax_rows/{m}" for m in ("uni", "uni+apwfs", "cx+shy0.5+s0.125r1b1+R0.5g4x2q4",
@@ -490,7 +490,7 @@ def test_a_row_must_state_what_it_leaves_walled_in(tmp_path: Path) -> None:
     (rows / RUN_DIR).mkdir(parents=True)
 
     def source_of(file: Path) -> Any:
-        [src] = exporter.SimpFamily().sources(rows)
+        [src] = exporter.SimpFamily(store="relax_rows").sources(rows)
         assert src.files == (file,)
         return src
 
