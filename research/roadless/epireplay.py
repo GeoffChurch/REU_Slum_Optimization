@@ -1383,7 +1383,7 @@ def report() -> None:
         print("  " + rule(sel, veto=veto, candidate=cand, against=against))
     print("\nthe sensitivity, run by run: nine rates against five (orders whose calls, blocks "
           "differ):")
-    raw = rows.set_index(["plan", "veto", "order", "policy"])
+    raw = rows.set_index(["plan", "veto", "order", "policy"]).sort_index()
     moved_calls = moved_blocks = 0
     for p in pairwise():
         for veto in (False, True):

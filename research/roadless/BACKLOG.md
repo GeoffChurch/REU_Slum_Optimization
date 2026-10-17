@@ -605,9 +605,10 @@ Not pursued, with what would change that:
 
 ## Experiment design
 
-- **Pruning by epistemetry's decision layer** (owner 2026-10-14: "Yes"; replayed 2026-10-15 and
-  twice 2026-10-16, NOTES "Pruning by epistemetry: a replay against seqscreen" and "Pruning by
-  epistemetry, again: step-wise re-decision and per-arm screens", with its "A price per arm"):
+- **Pruning by epistemetry's decision layer** (owner 2026-10-14: "Yes"; replayed 2026-10-15,
+  twice 2026-10-16 and 2026-10-17, NOTES "Pruning by epistemetry: a replay against seqscreen",
+  "Pruning by epistemetry, again: step-wise re-decision and per-arm screens", with its "A price
+  per arm", and "Pruning by epistemetry: the realized loss as the target"):
   **seqscreen stays** for the consolidated pass. The first replay (c1784af) failed the amended rule
   (loss below at every rate, no more wrong calls, no more asks) in both veto settings; the owner
   approved the two changes it named and epistemetry built them (bbe2163 `step`, 64aae7f per-arm
@@ -619,12 +620,15 @@ Not pursued, with what would change that:
   279). At 3a3b9a3 (the feedback built, owner 2026-10-16) each arm priced by its own stake: the
   many-arm screen is its pairwise step-1 screens summed and fails as they do (203.3 against 174.3
   and 522.4 against 521.3 at the middle and top, 317 asks against 279); a per-arm price was not
-  the gap. Would come back with: a linear-loss target over the bracket priced in the owner's
-  units, and a price on asks.
-  epireplay.py stays pinned at 3a3b9a3; epistemetry 046675b (the replay's four API notes built:
-  `Truth.of`, `Judgement`, `Decision`'s readings, `Run.order`) changes the API it calls, so the
-  pin moves with the next replay, when the linear-loss target lands (it waits on two numbers
-  from the owner, asked through epistemetry's maintainer).
+  the gap. At 674dba4 (`AdoptKeepAskByStake`, the realized loss as the target, priced at
+  PRICE_RATE / FUTURE with no stake; asks queued at no cost, owner 2026-10-16) the screen is
+  seqscreen's stop nearly run for run (the same blocks in 1,152 of 1,300 pairwise runs, the same
+  call in 1,286): its loss is below seqscreen's at every rate, pairwise and many-arm, but it makes
+  67 wrong calls against 66 and 284 asks against 280 pairwise (69 and 282 against 67 and 279
+  many-arm), so it fails (2) and (3), not (3) alone; over nine rates it fails (1) and (2), its
+  counts moving more than those margins. Would come back with: the owner's ruling on whether
+  counts this close (1 to 4 in 2,600 runs) should decide now that asks are free; no target or
+  price is left to build for it. epireplay.py is pinned at 674dba4 (502dec65).
 - **Adaptive block selection** (first look done, NOTES "Which blocks tell methods apart": collapses dominate; screen = gated sentinel + random sample; picking 'discriminating' blocks beyond the sentinel misleads. Remaining value: sequential sample size; wiki `pages/methods/adaptive-benchmark-items.md`).
   Fit a factor model to the method x block matrix of paired differences (axes like "opens
   gated pockets", "spreads in dense bands"); for a new variant run first the blocks with the

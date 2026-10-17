@@ -6351,6 +6351,202 @@ Compute: here, single-threaded, at most 4 processes: the run 4.1 h on 4 workers 
 pairwise step-1 migration most of it), the shared price's 5 jobs 2.0 h, the guard runs 0.1 -- 0.8
 h each. Rows (git-ignored): epireplay3.parquet, epireplay3_screens.parquet and epireplay3_jobs/.
 
+### Pruning by epistemetry: the realized loss as the target (owner 2026-10-16; BACKLOG, "Pruning by epistemetry's decision layer")
+
+The third replay (above, "A price per arm") kept seqscreen and named what would still have to
+change: a linear-loss target over the rate bracket, priced in the owner's units, and a price on
+asks. GeoffChurch/epistemetry built the first, 674dba4's `AdoptKeepAskByStake(rates, weights)`,
+on 046675b's API (`Truth.of`, a policy's `Judgement`, `Decision`'s readings, `Run.order`), and
+the owner decided the second (2026-10-16): asks are queued and cost 0; an ask records the
+question, leaves the default as it is, and is answered later, at the owner's true rate, from the
+screen's means. The replay ran again before the consolidated pass's pruning step, under the same
+rule, pinned at 674dba4 through an ephemeral overlay as before.
+
+**The rule, as fixed** (the first replay's, amended): adopt epistemetry for the consolidated
+pass's pruning only if (1) its median realized loss is below seqscreen's at every rate tested
+(per rate, the sum over the designs of each one's median over orders), (2) it makes no more wrong
+calls in all and (3) no more asks in all; pairwise in both veto settings, and a many-arm screen
+counted against the pairwise screens it replaces. Realized loss, wrong calls (AsksApart) and
+asks as before; an ask is answered at the judged rate from the screen's own means, as the owner
+decided. Asks costing 0 changes how the new target weighs asking, not (3).
+
+**The target.** At rate r a wrong call on an arm loses |gain - r x extra|; at each rate point
+the call is the one the posterior means favour, ASK where the points disagree, and the risk is
+that call's expected loss, summed over arms and averaged over the points. Its value is in Lens
+A, so the stop's price is sum_r w_r r / FUTURE per GPU-second, one price for every arm with no
+stake (`OwnStake` and `SharedStake` stay for the 0-1 target): over seqscreen's five geometric
+rates, equally weighted, PRICE_RATE / FUTURE = 1.01e-8, the price seqscreen's stop uses. In the
+layer's terms it is seqscreen's own stop: the same loss over the same points at the same price.
+What still differs is how the value is drawn: the finite-population bootstrap of the design's
+blocks (seqscreen: a Polya urn's posterior mean after k more blocks), the extra GPU-seconds
+uncertain jointly with the gain (seqscreen plugs in their mean), and the Monte Carlo (4,000
+outer and 200 inner draws, against 4,000 paths).
+
+**The migration.** epireplay.py moved to 674dba4 (502dec65) with no reader of 3a3b9a3's API. The
+truth is one per design and veto setting, seqscreen's call over the bracket on all the blocks
+(`Truth.of` the wrapped seqscreen), handed to every replay; each row's order is the one its run
+carries (`Run.order`); each decision keeps each judged arm's rule and reading, which the guards
+read instead of rebuilding a `Seen`. The target is a Strategy (`ZeroOne`, the third replay's
+AdoptKeepAsk at the own or the shared stake; `ByStake`), its rates, weights and price in each
+row's identity. At 674dba4 the third replay's runs reproduce exactly (blocks, calls,
+GPU-seconds, and wrong calls, asks and truth): 2,600 of 2,600 pairwise step-1 runs and 500 of 500
+many-arm runs at each price. Its tables stand; they are the 0-1 rows below.
+
+**The test.** On the frozen designs and their 100 orders, every policy on each order, all judged
+against the one truth: seqscreen unchanged, as a Policy; the 0-1 rows (b), reproduced; (c)
+ValueOfMoreUnits with `AdoptKeepAskByStake` over BRACKET, equally weighted, matched to seqscreen
+as in the third replay (FinitePopulation, floor 15, the ratio cost model, step 1, both veto
+settings pairwise, none many-arm), priced at PRICE_RATE / FUTURE, pairwise and many-arm (one
+screen over a design's variants, each arm stopping on its own value, against seqscreen once per
+variant, summed); (d) the same target over nine rates evenly spaced in log rate across RATES,
+equally weighted, priced at their mean over FUTURE (9.66e-9, 4.5% below), pairwise. Every
+policy's and target's own call on the whole design is the truth (131 of 131 jobs): no target
+changes the test.
+
+Per design, without the veto (C1m4/p64's veto line beside; the veto changes nothing else); blocks
+and cost are medians over the 100 orders (the longest run in parentheses), wrong calls and asks
+counts in them; many-arm in block-arm runs, seqscreen once per variant summed, its whole calls
+per variant (A adopt, k keep, ? ask):
+
+    design         all    seqscreen             0-1, own price           realized loss
+                          blocks cost  wr  ask  blocks    cost  wr  ask  blocks     cost  wr  ask
+    p64/base       adopt  15     0.33   0    0  15 (15)   0.33   0    0  15 (15)    0.33   0    0
+    x2/base        adopt  15     0.41   0    0  15 (15)   0.41   0    0  15 (15)    0.41   0    0
+    both/base      adopt  15     0.34   0    0  15 (24)   0.34   0    0  15 (18)    0.34   0    0
+    both/p64       keep   15     0.34   0    0  15 (43)   0.34   0    7  15 (35)    0.34   0    2
+    r2/base        ask    20     0.43   2   98  15 (30)   0.35   2   98  17.5 (27)  0.40   2   98
+    x2/p64         ask    15     0.44  35   65  15 (34)   0.46  19   81  15 (20)    0.43  36   64
+    pPg/p256       keep   15     0.34   0   30  15 (36)   0.35   0   33  15 (22)    0.34   0   33
+    GS/p256        ask    15.5   0.36  28   72  17 (44)   0.38  16   84  16 (26)    0.36  28   72
+    cheapx2/cheap  adopt  15     0.43   1   15  15 (32)   0.45   0   15  15 (26)    0.43   1   15
+    p256/cheap     adopt  15     0.42   0    0  15 (15)   0.42   0    0  15 (15)    0.42   0    0
+    g005/g01       adopt  15     0.34   0    0  15 (15)   0.34   0    0  15 (15)    0.34   0    0
+    cheap/g01      adopt  15     0.43   0    0  15 (30)   0.47   0    0  15 (24)    0.43   0    0
+    C1m4/p64       keep   12     1.00   0    0  12 (12)   1.00   0    0  12 (12)    1.00   0    0
+      with the veto       5      0.48   0    0  5 (12)    0.48   0    0  5 (12)     0.48   0    0
+    4/base         ?AAA   64     0.46   3   97  61 (74)   0.44   2   98  62.5 (75)  0.44   3   97
+    2/p64          ?k     33     0.44  35   65  40.5 (68) 0.55  19   86  31.5 (45)  0.43  37   65
+    2/p256         k?     31     0.35  28  102  36 (76)   0.40  16  117  32 (41)    0.35  28  105
+    2/cheap        AA     30     0.42   1   15  30 (47)   0.43   0   15  30 (41)    0.42   1   15
+    2/g01          AA     30     0.45   0    0  30 (44)   0.49   0    1  30 (40)    0.45   0    0
+
+    the rule        realized loss (1e-6) at 2e-6, 6.2e-6, 1.9e-5   wrong  asks  cost
+    no veto  seqscreen                57.3   178.2   538.9          66   280  0.431
+             0-1, own price           60.2   183.0   532.1          37   318  0.433
+             realized loss            57.0   174.7   533.7          67   284  0.428
+             realized loss, 9 rates   57.9   177.0   538.6          75   273  0.429
+    veto     seqscreen                53.5   166.3   502.0          66   280  0.391
+             0-1, own price           56.3   171.0   495.2          37   318  0.393
+             realized loss            53.1   162.7   496.8          67   284  0.388
+             realized loss, 9 rates   54.0   165.0   501.7          75   273  0.389
+    many-arm seqscreen x arms        132.8   174.3   521.3          67   279  0.424
+             0-1, own price           66.6   203.3   522.4          37   317  0.463
+             0-1, shared price        66.9   204.5   526.1          36   315  0.464
+             realized loss           132.4   170.1   504.0          69   282  0.419
+
+**Decision: keep seqscreen, pairwise and many-arm.** The realized loss fails (2) and (3), not
+(3) alone:
+- Pairwise, in both settings: (1) holds, its loss below seqscreen's at every rate (no veto 57.0,
+  174.7 and 533.7 against 57.3, 178.2 and 538.9; veto 53.1, 162.7 and 496.8 against 53.5, 166.3
+  and 502.0); (2) fails, 67 wrong calls against 66; (3) fails, 284 asks against 280.
+- Many-arm: (1) holds (132.4, 170.1 and 504.0 against 132.8, 174.3 and 521.3); (2) fails, 69
+  wrong calls against 67; (3) fails, 282 asks against 279.
+So the owner's decision that asks cost 0 does not decide it: with (3) set aside it would still
+fail (2), by one wrong call in 2,600 pairwise runs and two in 500 many-arm runs.
+
+Where they differ:
+- **Seqscreen's stop, nearly run for run.** In each setting its pairwise runs stop where
+  seqscreen's do in 1,152 of 1,300 and make its call in 1,286; it stops earlier in 113 (the
+  near-ties and the clear keeps: r2/base 47, x2/p64 26, both/p64 17, pPg/p256 15) and later in 35
+  (GS/p256 18). Many-arm, each arm observes the blocks its pairwise seqscreen screen does in 47 to
+  100 of 100 orders (r2 in 4/base 47, x2 in 2/p64 72, the rest 74 or more) and makes its call in
+  92 to 100. The 0-1 target's gap on the three near-ties at the bracket's bottom and middle is
+  gone: GS/p256 5.4 and 15.5 against seqscreen's 5.1 and 15.4 (0-1: 7.3 and 22.8), x2/p64 5.1
+  and 15.8 against 5.2 and 16.1, pPg/p256 3.5 and 10.4 against 3.5 and 10.5; r2/base, where the
+  0-1 target settled the ask at the floor, sits between (7.8 and 24.7, seqscreen 8.4 and 28.0).
+- **Its counts are seqscreen's within a few, on the near-ties.** Its 67 wrong calls are
+  seqscreen's kind, definite calls where the whole design asks (x2/p64 36 against 35, GS/p256 28,
+  r2/base 2, cheapx2/cheap 1); the 0-1 target's trade of wrong calls for asks (37 and 318) went
+  with its 0-1 risk. Its four more asks are keeps it turned into asks where it stopped earlier on
+  a clear keep (both/p64 2 against 0, pPg/p256 33 against 30), less one on x2/p64 (64 against
+  65): an ask is free to the target, so on a call that turns on the bracket's bottom it stops and
+  queues the question, as its builder said it would. Many-arm the same: 2/p64 37 wrong calls
+  against 35, 2/p256 105 asks against 102, 4/base, 2/cheap and 2/g01 equal.
+- **Cost.** 0.428 of the arms' GPU-seconds against 0.431 pairwise, 0.419 against 0.424 many-arm;
+  the loss margins are 0.3, 3.5 and 5.2e-6 pairwise and 0.4, 4.2 and 17.3e-6 many-arm.
+- **The call at a stop.** The posterior means' call at each point, from 4,000 draws, is the
+  posterior mean's over the bracket at every stop of every policy.
+
+**The sensitivity** (d). Nine rates instead of five, priced at their mean, move the calls in 15
+runs a setting (x2/p64 7, pPg/p256 3, cheapx2/cheap 3, both/p64 1, GS/p256 1) and the blocks in
+172 of 1,300 (r2/base 67, GS/p256 42, x2/p64 25, pPg/p256 15, cheapx2/cheap 12, both/p64 8). The
+decision does not move, but which criteria fail does: its loss is above seqscreen's at the
+bracket's bottom (57.9 against 57.3; veto 54.0 against 53.5) and below at the middle and top,
+with 75 wrong calls (x2/p64 43) and 273 asks (x2/p64 57), so it fails (1) and (2) and holds (3).
+The five-point counts are therefore not robust: moving the points within the same bracket trades
+8 wrong calls for 11 asks on the near-ties, more than the margins the rule decides on.
+
+**What remains** (inferred). The target now carries seqscreen's loss and price, and the two
+screens agree but for a few near-tie runs; what separates them under the rule is counts of 1 to 4
+in 2,600 pairwise runs (2 to 3 in 500 many-arm), smaller than the sensitivity's own movement.
+Neither a target nor a price is left to build for this comparison: whether counts this close
+should decide, now that asks are queued at no cost, is the owner's call on the rule. Until then
+seqscreen stays, and adopting the layer would buy only the per-arm screen's bookkeeping, at the
+price of a dependency.
+
+Guards, each failing under its fault (`guards none` runs all, `guards <fault>` the one it
+breaks, `guard <guard>` one without its fault):
+- migration: the third replay's runs at 674dba4, 2,600 of 2,600 pairwise and 500 of 500
+  many-arm at each price; x2/p64's first 20 orders and 2/p64's first 10 run now, 30 of 30; every
+  own price in the record the arm's own, 4,198 of 4,198. Fault (the 0-1 target priced as the
+  realized loss is, its stake left out): x2/p64 2 of 20 (3 calls changed), 2/p64 0 of 10 (3
+  calls changed), 0 of 371 prices the arm's own, FAIL.
+- target as used: at all 6,514 judged decisions of (c)'s runs (4,908 pairwise, 1,606 many-arm;
+  7,271 arm judgements) the recorded price is PRICE_RATE / FUTURE with no margin, and from the
+  posterior's draws the risk recomputed outside epistemetry (each point's posterior-mean call,
+  E|gain - r x extra| where it is wrong, averaged over the five rates in Lens A per GPU-second,
+  summed over arms) is the target's own within 3.7e-15 relative, its call too; and the same on 54
+  decisions run now. Faults: the rates in Lens A per GPU-hour, 0 of 15 prices and 1 of 15 risks,
+  FAIL; the weights not normalized, refused by epistemetry at construction, FAIL.
+- wrapper: 2,608 of 2,608. Fault (the wrapper's floor 14): 725 of 2,608, FAIL.
+- degenerate: every epistemetry policy (the 0-1 target, the realized loss over five and nine
+  rates), both settings, stops at 15 with "keep" in 100 of 100 orders. Fault (the floor 1): 0 of
+  100, every run at 1 block, FAIL.
+- per-arm drop, from `Run.decisions`, both targets: the vetoed arm in 100 of 100 orders; an arm
+  paid for fewer blocks than its screen ran in 278, 355 and 226 of the 500 many-arm runs at the
+  own price, the shared price and the realized loss (391, 504 and 355 arms dropped on value), each
+  live at no later decision, its prefix kept, charged so, and every judged arm's verdict,
+  re-derived from its recorded rule and reading, its take. Fault (`KeepAll`, no veto): 0 of 100
+  and 0 of 10, the verdicts not the takes, FAIL.
+- same orders and one truth: all 13,100 runs on their design's orders (the order each run
+  carries); every policy's and target's own truth the one truth, 131 of 131 jobs; every run scored
+  against it. Fault (one run handed a reshuffled order): that run flagged, FAIL.
+
+**Feedback for epistemetry** (for its author):
+- `AdoptKeepAskByStake` does what it says, measured: at 6,514 decisions its risk is the realized
+  loss recomputed outside the layer to rounding, and weights not summing to 1 are refused.
+- The target does not carry its price: sum_r w_r r / FUTURE is the caller's to pair with it, so a
+  unit slip moves the two together unseen (rates per GPU-hour: the calls change and the price is
+  3,600 times; only an outside recomputation caught it). A price for a given horizon from the
+  target itself (`price(future=...)`), or the stop rule built from it, would keep them one.
+- Each point's call is the mean of the `draws` Monte Carlo draws, not the belief's exact mean
+  (FinitePopulation's is the seen units' mean, its `moments`): on a near-tie it carries Monte
+  Carlo noise. Here it never differed from the exact mean's call at a stop.
+- `Truth` is not comparable (`eq=False`), so checking that every policy's and target's own
+  whole-design calls are one truth compares `calls` and `drop` by hand; every replay with more
+  than one target needs that check.
+- `StopRule.record()` has no inverse: to re-derive a stored run's verdicts the guards rebuild a
+  ValueOfInformation from its record. A `from_record` would close the ledger for runs kept on
+  disk.
+- `Run.order` and `Decision.arm_units`, rules and readings made the same-orders and per-arm
+  guards direct: no wrapper, no rebuilt `Seen`; the third replay's four notes are resolved.
+
+Compute: here, single-threaded, at most 4 processes: the jobs 52.2 worker-hours over 14.7 h (the
+0-1 rows 23.5, the realized loss 15.1, the sensitivity 13.4, seqscreen 0.2), the guards minutes
+each but for the migration fault (0.5 h) and the degenerate guard and its fault (1.5 and 1.9 h).
+Rows (git-ignored): epireplay4.parquet, epireplay4_screens.parquet and epireplay4_jobs/ (with the
+wrapper fault's floor-14 jobs); the runs' logs epireplay4_*.log.
+
 ### Exits as leaks: the region model on the complex (5810@major)
 
 BACKLOG 4, decision (4) (the brief: .superpowers/sdd/2026-10-13-region-leaks; the owner
