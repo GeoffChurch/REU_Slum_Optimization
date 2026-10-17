@@ -7,21 +7,26 @@ claim's routed one (TransparentSubstrate: the same nodes and edges); the claims 
 experiment's, so the plan is now held on the plan methods' own graphs.
 
     S=research/roadless/free_roads_check.py   # from the repo root, PYTHONPATH=., single-threaded
-    uv run python $S free-roads <ids,> [fault]   # fault: one-short
+    uv run python $S free-roads <ids,> [fault]   # faults: one-short, through-barriers
 
 `free-roads`, on blocks with homes walled in at baseline: FREE's plan (the stage as the
 transparency experiment configured it, the research lineup's, free_roads.lineup_free: area D
-FREE_BUDGET under both weightings, the runtime's metric) on the routing graph of each plan method's preset (PLAN_METHODS: compare_config's
-all_methods, common.arms(); clearance_looped's tree), the same roads on all; then the metric
+FREE_BUDGET under both weightings, the runtime's metric) on the routing graph of each plan
+method's preset (PLAN_METHODS: compare_config's all_methods, common.arms(); clearance_looped's
+tree), the same roads on all; then the metric
 itself (`_Oracle`: the gap complex's flow model, its reach on the fixed mesh with the roads carved,
 independent of the stage's own test on the complex rebuilt) finds the same walled-in homes, each
 held road frees its home (and every home its step says it frees) once the roads up to it are
 carved, what the roads leave walled in is the plan's share, and their true displacement under both
 weightings is the plan's and within its budget. Fault `one-short`: every held road one segment
 short (its last point dropped as the stage routes it): the stage itself raises, its road not
-freeing its home by the metric's test. Its blocks: 20269, 18895 and 23597 (1, 1 and 6 homes
-walled in on the complex; 23597's home 272 found the targets' reach missing the form's growth:
-NOTES, "Before the consolidated pass: three fixes").
+freeing its home by the metric's test (each road refused, every home left `unfreed`). Fault
+`through-barriers`: the routing graph keeps the edges that run into the metric's barriers
+(free_roads._routing given no obstacle): on 24240 the road for home 405 crosses its water and the
+test refuses it. On its blocks the stage frees every home with no road refused. Its blocks: 20269,
+18895, 23597 and 24240 (1, 1, 6 and 6 homes walled in under RUNTIME; 23597's home 272 found the
+targets' reach missing the form's growth: NOTES, "Before the consolidated pass: three fixes";
+24240's water and railway the barriers' routing: NOTES, "The consolidated pass").
 """
 from __future__ import annotations
 
@@ -167,6 +172,10 @@ def free_roads(ids: list[str]) -> list[str]:
         if not p.enclosed:
             bad.append(f"{bid}: no home walled in at baseline: not a block for this guard")
             continue
+        if p.refused or p.unfreed or p.unreachable or p.over_budget:
+            bad.append(f"{bid}: {p.refused} roads refused by the metric's test, unfreed "
+                       f"{list(p.unfreed)}, unreachable {list(p.unreachable)}, over the budget "
+                       f"{list(p.over_budget)}")
         roads = [s.road.geometry for s in p.steps]
 
         def frame(k: int) -> gpd.GeoDataFrame:
@@ -194,6 +203,13 @@ def free_roads(ids: list[str]) -> list[str]:
     return bad
 
 
+def _through_barriers(routing: Callable[..., object]) -> Callable[..., object]:
+    """free_roads._routing given no obstacle: every edge kept (fault `through-barriers`)."""
+    def anyway(*args: object) -> object:
+        return routing(*args[:-1], shapely.Polygon())
+    return anyway
+
+
 def _one_short(cheapest: Callable[..., HeldRoad | None]) -> Callable[..., HeldRoad | None]:
     """free_roads._cheapest with every road it returns one segment short (fault `one-short`)."""
     def short(*args: object, **kw: object) -> HeldRoad | None:
@@ -209,7 +225,9 @@ def _one_short(cheapest: Callable[..., HeldRoad | None]) -> Callable[..., HeldRo
 
 GUARDS: dict[str, Callable[[list[str]], list[str]]] = {"free-roads": free_roads}
 FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
-    "free-roads": {"one-short": lambda: _patched(fr, "_cheapest", _one_short(fr._cheapest))},
+    "free-roads": {"one-short": lambda: _patched(fr, "_cheapest", _one_short(fr._cheapest)),
+                   "through-barriers": lambda: _patched(fr, "_routing",
+                                                        _through_barriers(fr._routing))},
 }
 
 

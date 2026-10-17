@@ -15,6 +15,7 @@ polish_greedy.py, search.py, road_rescore.py), keyed by the metric's name.
     uv run python $S lenses <id> [--replace]      # every preset clearing's lenses, on a core
     uv run python $S reuse-networks <scratch>    # the lineup's networks nothing changes
     uv run python $S report                      # ROWS/summary_*.csv
+    uv run python $S lineup-report               # ROWS/summary_lineup_*.csv
 
 `features`: per block (the store's 303: clearings.Store's blocks), its OSM features (attrs["osm"])
 as the metric reads them: the barriers' cut (gap_exits.OsmBarriers.parts within the block: its
@@ -424,6 +425,168 @@ def report() -> None:
             if "P0_all" in g))
 
 
+# ------------------------------------------------------------------ the lineup's report
+
+LENSES = ("L_P", "L_Pq", "L_J2")         # P the headline, P_{1/2} the equity view, J_2 the old
+PRESETS = ("default", "hard", "cheap", "cheap005")
+LINEUP_ROADS = ("clearance", "clearance_looped", "cycle_native",
+                "cycle_native_betweenness_contrast", "resistance_lp", "euclidean_grid",
+                "greedy_arterial_access_displacement")
+OLD = STORED_ROADS / "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a"      # item 4 on the complex
+OLD_ROWS = OLD / "cpu" / "area_D0.02-0.05-0.1-0.15-0.2"
+
+
+def b_rank(enc: Any, val: Any) -> Any:
+    """Ranks in B's order (road_rescore._b_rank): the least population walled in first, then the
+    larger lens; exact ties share a rank."""
+    e, v = np.asarray(enc, dtype=float), np.asarray(val, dtype=float)
+    ahead = (e[None, :] < e[:, None]) | ((e[None, :] == e[:, None]) & (v[None, :] > v[:, None]))
+    return 1.0 + ahead.sum(axis=1)
+
+
+def _roads_at(t: pd.DataFrame, budget: float) -> pd.DataFrame:
+    """The networks' area prefixes at `budget` (the prefix reaching it, or the whole network)."""
+    at = cast(pd.DataFrame, t[np.isclose(t.budget, budget)].copy())
+    at["reach"] = at.D_area >= budget - 1e-9
+    return at
+
+
+def lineup_report() -> None:
+    """The lineup under RUNTIME (the brief's item 14): ROWS/summary_lineup_*.csv, printed too."""
+    from scipy.stats import kendalltau
+
+    import road_rescore as rr
+    pd.set_option("display.width", 220)
+    feat = pd.read_csv(ROWS / "summary_features.csv").set_index("block")
+    lens = _read(ROWS / "lenses" / metrics.RUNTIME)
+    lens["size"] = lens.block.map(feat["size"])
+    pre = lens[lens.preset.isin(PRESETS)]
+    out = ROWS
+
+    # the presets on every block: Lens A and B per lens, the order, the time
+    rows = []
+    for key, g in pre.groupby(["size", "preset"]):
+        sz, k = cast(tuple[str, str], key)
+        rows.append(dict(size=sz, preset=k, blocks=len(g), **{
+            f"{x}_{f}": float(getattr(g[x], f)()) for x in LENSES for f in ("mean", "median")},
+            enclosed_blocks=int((g.enclosed > 0).sum())))
+    t1 = pd.DataFrame(rows)
+    t1.to_csv(out / "summary_lineup_presets.csv", index=False)
+    print("THE PRESETS (Lens A at area D 0.05 under RUNTIME, per lens)\n" + t1.round(4).to_string())
+    pairs = []
+    wide = {x: pre.pivot_table(index="block", columns="preset", values=x) for x in (*LENSES,
+                                                                                  "enclosed")}
+    for a, b in (("hard", "default"), ("cheap", "default"), ("cheap005", "cheap")):
+        for x in LENSES:
+            if a not in wide[x] or b not in wide[x]:
+                continue
+            d = (wide[x][a] - wide[x][b]).dropna()
+            sizes = feat["size"].reindex(d.index)
+            for name, dd in (("all", d), *((s_, d[sizes == s_])
+                                          for s_ in sorted(sizes.unique()))):
+                if len(dd):
+                    pairs.append(dict(pair=f"{a}-{b}", lens=x, blocks=name, n=len(dd),
+                                      mean=float(dd.mean()), median=float(dd.median()),
+                                      ahead=int((dd > 1e-12).sum()),
+                                      behind=int((dd < -1e-12).sum())))
+    t2 = pd.DataFrame(pairs)
+    t2.to_csv(out / "summary_lineup_pairs.csv", index=False)
+    print("\nTHE PRESETS PAIRED (a - b per block)\n" + t2.round(4).to_string())
+    order = []
+    for bid, g in pre[pre.preset.isin(("default", "hard", "cheap"))].groupby("block"):
+        for x in LENSES:
+            rk = b_rank(g.enclosed, g[x])
+            for k, r in zip(g.preset, rk, strict=True):
+                order.append(dict(block=bid, lens=x, preset=k, rank=float(r)))
+    to = pd.DataFrame(order)
+    first = to[to["rank"] == 1].groupby(["lens", "preset"]).size().unstack(fill_value=0)
+    print("\nFIRST IN B'S ORDER among default, hard, cheap (blocks; ties count for each)\n"
+          + first.to_string())
+    one = _read(ROWS / "onecard" / metrics.RUNTIME / "gpu")
+    cpu = _read(ROWS / "onecard" / metrics.RUNTIME / "cpu")
+    tim = pd.concat([one.assign(device="gpu"), cpu.assign(device="cpu")], ignore_index=True)
+    tim["size"] = tim.block.map(feat["size"])
+    tim.to_csv(out / "summary_lineup_onecard.csv", index=False)
+    print("\nTIME PER BLOCK (s; the presets one after another with their setup, one device)\n"
+          + tim.groupby(["size", "device"])[[str(c) for c in tim.columns
+                                              if str(c).startswith("wall")]]
+          .median().round(0).to_string())
+
+    # the road methods under free first
+    root = rr.lineup_rows()
+    cx = _read(root / metrics.RUNTIME / "cpu" / "area_D0.02-0.05-0.1-0.15-0.2")
+    if len(cx):
+        at = _roads_at(cx, 0.05)
+        at["size"] = at.block.map(feat["size"])
+        med = at[at.reach].groupby("method")[list(LENSES)].median()
+        print("\nTHE ROAD METHODS at area D 0.05 (medians over the blocks they reach it on)\n"
+              + med.round(4).to_string())
+        price = []
+        dflt = pre[pre.preset == "default"].set_index("block")
+        for bid, g in at[at.reach].groupby("block"):
+            if bid not in dflt.index:
+                continue
+            d = dflt.loc[bid]
+            for x in LENSES:
+                rk = b_rank(g.enclosed, g[x])
+                best = g.iloc[int(np.argmin(rk))]
+                di, dii = float(d.enclosed) - float(best.enclosed), float(d[x]) - float(best[x])
+                price.append(dict(block=bid, lens=x, best=best.method, best_val=float(best[x]),
+                                  best_enc=float(best.enclosed), simp_val=float(d[x]),
+                                  simp_enc=float(d.enclosed), di=di, dii=dii,
+                                  ahead=bool(di < 0 or (di == 0 and dii > 0))))
+        tp = pd.DataFrame(price)
+        tp.to_csv(out / "summary_lineup_price.csv", index=False)
+        for x in LENSES:
+            q = tp[tp.lens == x]
+            tie = q[q.di == 0]
+            print(f"  {x}: SIMP's default ahead of the best road on {int(q.ahead.sum())} of "
+                  f"{len(q)}; where (i) ties ({len(tie)}) by a median {tie.dii.median():+.4f}; "
+                  f"the best road: " + ", ".join(f"{k} {v}" for k, v in
+                                                 q.best.value_counts().items()))
+        vs = []
+        for mth, gm in at[at.reach].groupby("method"):
+            gi = gm.set_index("block")
+            for x in LENSES:
+                d = (gi[x] - dflt[x].reindex(gi.index)).dropna()
+                vs.append(dict(method=mth, lens=x, n=len(d), median=float(d.median()),
+                               ahead_of_simp=int((d > 0).sum())))
+        print("\nEACH METHOD MINUS SIMP'S DEFAULT at D 0.05\n"
+              + pd.DataFrame(vs).pivot_table(index="method", columns="lens",
+                                             values="median").round(4).to_string())
+        held = []
+        for f in sorted((root / "scratch" / "networks").glob("*/*.parquet")):
+            if f.name.endswith(".ordered.parquet"):
+                continue
+            net = gpd.read_parquet(f)
+            held.append(dict(block=f.parent.name, method=f.stem,
+                             held=int(net["held"].sum()) if "held" in net.columns else 0))
+        th = pd.DataFrame(held)
+        th.to_csv(out / "summary_lineup_held.csv", index=False)
+        print("\nFREE FIRST: blocks where a method holds roads first\n"
+              + th[th.held > 0].groupby("method").block.nunique().to_string())
+        # the order's change: tau against item 4's order under the per-block metric
+        old = pd.concat([pd.read_parquet(f) for f in sorted(OLD_ROWS.glob("*__*.parquet"))
+                         if not f.name.endswith(("__plain.parquet", "__homes.parquet"))])
+        old_at = _roads_at(old, 0.05)
+        tau = []
+        for bid, g in at[at.reach].groupby("block"):
+            o = old_at[(old_at.block == bid) & old_at.reach].set_index("method")
+            n = g.set_index("method")
+            common_m = sorted(set(o.index) & set(n.index))
+            if len(common_m) < 3:
+                continue
+            for x in LENSES:
+                r_old = b_rank(o.loc[common_m, "enclosed"], o.loc[common_m, x])
+                r_new = b_rank(n.loc[common_m, "enclosed"], n.loc[common_m, x])
+                tau.append(dict(block=bid, lens=x, methods=len(common_m),
+                                tau=float(kendalltau(r_old, r_new).statistic)))
+        tt = pd.DataFrame(tau)
+        tt.to_csv(out / "summary_lineup_tau.csv", index=False)
+        print("\nTHE ORDER OF THE ROAD METHODS against item 4's (the per-block metric), Kendall "
+              "tau per block\n" + tt.groupby("lens").tau.describe().round(3).to_string())
+
+
 def main(argv: list[str]) -> None:
     argv, again = clearings.replace_flag(argv)
     cmd = argv[0] if argv else ""
@@ -437,6 +600,8 @@ def main(argv: list[str]) -> None:
         reuse_networks(Path(argv[1]))
     elif cmd == "report" and len(argv) == 1:
         report()
+    elif cmd == "lineup-report" and len(argv) == 1:
+        lineup_report()
     elif cmd == "baselines" and len(argv) == 3:
         parts = argv[2].split(",")
         if not set(parts) <= set(PARTS):

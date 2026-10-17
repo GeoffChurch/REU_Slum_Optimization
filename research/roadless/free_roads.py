@@ -21,7 +21,9 @@ What it does, per block:
    2), so only its ground that deep inside is open (23597's home 272: a corridor 0.80 m from it,
    its open ground 1.05 m, outside the 1 m ring; NOTES, "Before the consolidated pass: three
    fixes"). The road is the cheapest path to a target node, or through a target edge to its far
-   end, in one Dijkstra a round.
+   end, in one Dijkstra a round, on the graph less every edge that runs into the metric's
+   barriers (railways and water, open only at their crossings: a road across a stream frees
+   nothing, the stream not a footprint; NOTES, "The consolidated pass").
 3. The route's cost is DISPLACEMENT, not length: an edge weighs the population share its own
    corridor displaces (`population`'s weights, the share of each footprint the buffered edge
    covers), plus `length_tie` per metre so that among equal displacements the shorter road wins
@@ -97,6 +99,11 @@ FREE_MARGIN_M = 0.05     # a target within half the road's width less the form's
                          # the buffer's polygon falls inside its circle by under 0.005 m at a 3.5 m
                          # radius
 FREE_LENGTH_TIE = 1e-12  # per metre on every edge: among equal displacements the shorter road
+OBSTACLE_EDGE_M = 0.5    # a routing edge running deeper than this into a barrier is no edge (m:
+                         # one along its edge, the street beside a railway, stays)
+FREE_TRIES = 8           # a home whose this many roads (each to another target) each fail the
+                         # metric's test is left walled in, `unfreed` (the targets near a barrier:
+                         # 30796's home 3674, 45876's home 543)
 
 
 class Population(Protocol):
@@ -128,7 +135,8 @@ class Displaced(NamedTuple):
 
 class Plan(NamedTuple):
     """A block's free-first stage: the homes enclosed at baseline, the held roads in order, the
-    homes left enclosed (no reachable target, or out of the budget), the held roads' true
+    homes left enclosed (no reachable target, out of the budget, or FREE_TRIES roads that each
+    failed the metric's test; `refused` the roads the test refused), the held roads' true
     displacement and the population share enclosed before and after (area-weighted)."""
 
     block_id: str
@@ -136,6 +144,8 @@ class Plan(NamedTuple):
     steps: tuple[Step, ...]
     unreachable: tuple[int, ...]
     over_budget: tuple[int, ...]
+    unfreed: tuple[int, ...]
+    refused: int
     D_area: float
     D_count: float
     share_before: float
@@ -144,13 +154,15 @@ class Plan(NamedTuple):
 
 class _Graph(NamedTuple):
     """The method's routing graph as this stage routes on it: one entry per undirected edge (the
-    COO's rows < cols), each edge's displacement weight, and the symmetric matrix of them."""
+    COO's rows < cols), each edge's displacement weight, the symmetric matrix of them, and per
+    node whether it lies inside the metric's barriers (`blocked`: no road starts or ends there)."""
 
     ui: NDArray[np.int64]
     uj: NDArray[np.int64]
     segs: NDArray[np.object_]
     weight: NDArray[np.float64]
     matrix: csr_matrix
+    blocked: NDArray[np.bool_]
 
 
 class _Targets(NamedTuple):
@@ -208,15 +220,18 @@ class FreeEnclosed:
         enclosed = np.flatnonzero(~reach0.live)
         if not len(enclosed):
             return Plan(block_id=bid, enclosed=(), steps=(), unreachable=(), over_budget=(),
-                        D_area=0.0, D_count=0.0, share_before=0.0, share_after=0.0)
+                        unfreed=(), refused=0, D_area=0.0, D_count=0.0, share_before=0.0,
+                        share_after=0.0)
         w = self.population.weights(polys)                    # the key's and the route's
         area_w = common.AreaPopulation().weights(polys)         # the budget's two weightings
         count_w = common.CountPopulation().weights(polys)
-        g = _routing(block, graph, width_m, w, self.length_tie)
+        g = _routing(block, graph, width_m, w, self.length_tie,
+                     metric.exits.barriers.obstacle(block))
         reach = width_m / 2.0 - metric.form.grow - self.target_margin_m
         targets = _targets(geo, reach0, graph, g, enclosed, reach, metric.form.filtration_w)
         street = unary_union(list(block.streets.geometry))
-        seeds = np.flatnonzero(shapely.dwithin(shapely.points(graph.pts), street, graph.net_tol))
+        seeds = np.flatnonzero(shapely.dwithin(shapely.points(graph.pts), street, graph.net_tol)
+                               & ~g.blocked)
         is_seed = np.zeros(len(graph.pts), dtype=bool)
         is_seed[seeds] = True
 
@@ -237,6 +252,8 @@ class FreeEnclosed:
         now, now_key = Displaced(by_area=0.0, by_count=0.0), 0.0
         left = ~reach0.live
         routed: set[int] = set()            # the homes the last round found a road for
+        failed: dict[int, set[int]] = {}    # per home, the ends of its roads the test refused
+        unfreed: set[int] = set()           # ... the homes FREE_TRIES of whose roads it refused
         while left.any():
             sources = np.unique(np.concatenate([seeds, *[np.asarray(r.nodes) for r in held]]))
             if not len(sources):
@@ -248,7 +265,10 @@ class FreeEnclosed:
             key = np.inf
             routed = set()
             for h in np.flatnonzero(left):
-                road = _cheapest(graph, g, targets[int(h)], dist, pred, is_seed, street)
+                if int(h) in unfreed:
+                    continue
+                road = _cheapest(graph, g, targets[int(h)], dist, pred, is_seed, street,
+                                 skip=failed.get(int(h), set()))
                 if road is None:
                     continue
                 routed.add(int(h))
@@ -262,9 +282,16 @@ class FreeEnclosed:
             held.append(road)
             freed = _Reach.of(geo, metric, carve=geo.local(road_corridor(frame(held)))).live
             if not freed[h]:
-                raise RuntimeError(
-                    f"{bid}: the road held for home {h} ({len(road.nodes)} nodes, "
-                    f"{road.geometry.length:.1f} m) does not free it by the metric's test")
+                # the targets are the metric's reach read off the graph, near a barrier not
+                # always its test: the road dropped, the home tries its next target
+                held.pop()
+                failed.setdefault(h, set()).add(road.nodes[-1])
+                if len(failed[h]) >= FREE_TRIES:
+                    unfreed.add(h)
+                print(f"{bid} free roads: the road for home {h} ({len(road.nodes)} nodes, "
+                      f"{road.geometry.length:.1f} m) does not free it by the metric's test: "
+                      + ("left walled in" if h in unfreed else "its next target"), flush=True)
+                continue
             also = [int(j) for j in np.flatnonzero(left & freed) if j != h]
             steps.append(Step(home=h, road=road, D_area=after.by_area - now.by_area,
                               D_count=after.by_count - now.by_count,
@@ -275,17 +302,21 @@ class FreeEnclosed:
                   + (f", freeing {also} too" if also else ""), flush=True)
             now, now_key = after, after_key
             left &= ~freed
-        unreachable = tuple(int(h) for h in np.flatnonzero(left) if int(h) not in routed)
+        unreachable = tuple(int(h) for h in np.flatnonzero(left)
+                            if int(h) not in routed and int(h) not in unfreed)
         over = tuple(int(h) for h in np.flatnonzero(left) if int(h) in routed)
         plan = Plan(block_id=bid, enclosed=tuple(int(h) for h in enclosed), steps=tuple(steps),
-                    unreachable=unreachable, over_budget=over, D_area=now.by_area,
+                    unreachable=unreachable, over_budget=over,
+                    unfreed=tuple(sorted(h for h in unfreed if left[h])),
+                    refused=sum(len(v) for v in failed.values()), D_area=now.by_area,
                     D_count=now.by_count,
                     share_before=float(area_w[~reach0.live].sum() / area_w.sum()),
                     share_after=float(area_w[left].sum() / area_w.sum()))
         print(f"{bid} free roads: {len(enclosed) - int(left.sum())} of {len(enclosed)} enclosed "
               f"homes freed by {len(steps)} roads, D area {plan.D_area:.5f} count "
               f"{plan.D_count:.5f}; left enclosed: unreachable {list(unreachable)}, over the "
-              f"budget {list(over)}", flush=True)
+              f"budget {list(over)}, unfreed {list(plan.unfreed)} ({plan.refused} roads refused)",
+              flush=True)
         return plan
 
 
@@ -307,14 +338,25 @@ class _Reach(NamedTuple):
 
 
 def _routing(block: Block, graph: RoutingGraph, width_m: float, w: NDArray[np.float64],
-             length_tie: float) -> _Graph:
+             length_tie: float, obstacle: BaseGeometry) -> _Graph:
     """Each undirected edge weighs the `w`-weighted share its own corridor displaces (the
     footprint share the edge buffered by width_m / 2 covers, as Extents.displacement measures a
-    corridor) plus `length_tie` per metre."""
+    corridor) plus `length_tie` per metre; an edge that runs into the metric's barriers
+    (`obstacle`, the block's CRS: deeper than OBSTACLE_EDGE_M inside it) is no edge and a node
+    inside them no seed or target, a road crossing a railway or water only at its crossings
+    (1182's home 180: its road across a stream freed nothing, the stream not a footprint; 30848's
+    home 1506: a road of one street node inside the railway's strip)."""
     mask = graph.rows < graph.cols
     ui, uj = graph.rows[mask], graph.cols[mask]
     segs = np.asarray(shapely.linestrings(np.stack([graph.pts[ui], graph.pts[uj]], axis=1)),
                       dtype=object)
+    blocked = np.zeros(len(graph.pts), dtype=bool)
+    if not shapely.is_empty(obstacle):
+        core = shapely.buffer(obstacle, -OBSTACLE_EDGE_M)
+        shapely.prepare(core)
+        open_ = ~np.asarray(shapely.intersects(core, segs))
+        ui, uj, segs = ui[open_], uj[open_], segs[open_]
+        blocked = np.asarray(shapely.contains(core, shapely.points(graph.pts)))
     bufs = np.asarray(gpd.GeoSeries(segs).buffer(width_m / 2.0), dtype=object)
     outlines = np.asarray(block.buildings.outlines, dtype=object)
     area = np.asarray(shapely.area(outlines), dtype=np.float64)
@@ -328,7 +370,7 @@ def _routing(block: Block, graph: RoutingGraph, width_m: float, w: NDArray[np.fl
     n = len(graph.pts)
     matrix = csr_matrix((np.concatenate([weight, weight]),
                          (np.concatenate([ui, uj]), np.concatenate([uj, ui]))), shape=(n, n))
-    return _Graph(ui=ui, uj=uj, segs=segs, weight=weight, matrix=matrix)
+    return _Graph(ui=ui, uj=uj, segs=segs, weight=weight, matrix=matrix, blocked=blocked)
 
 
 def _targets(geo: gc.Geometry, r: _Reach, graph: RoutingGraph, g: _Graph,
@@ -351,22 +393,25 @@ def _targets(geo: gc.Geometry, r: _Reach, graph: RoutingGraph, g: _Graph,
         region = geo.utm(region)
         shapely.prepare(region)
         out[int(h)] = _Targets(
-            nodes=np.flatnonzero(shapely.dwithin(region, nodes, reach)),
+            nodes=np.flatnonzero(shapely.dwithin(region, nodes, reach) & ~g.blocked),
             edges=np.flatnonzero(shapely.dwithin(region, g.segs, reach)).astype(np.intp))
     return out
 
 
 def _cheapest(graph: RoutingGraph, g: _Graph, t: _Targets, dist: NDArray[np.float64],
-              pred: NDArray[np.int32], is_seed: NDArray[np.bool_], street: BaseGeometry
-              ) -> HeldRoad | None:
+              pred: NDArray[np.int32], is_seed: NDArray[np.bool_], street: BaseGeometry, *,
+              skip: set[int]) -> HeldRoad | None:
     """The cheapest road to a target in this round's Dijkstra (`dist`, `pred`): to a target node,
     or through a target edge to its far end; street end first, with the stub to the street where
-    it starts at a street node (as the methods' roads end). None if no target is reachable."""
+    it starts at a street node (as the methods' roads end), none ending on a node of `skip` (the
+    home's roads the metric's test refused). None if no target is reachable."""
     cand = [(float(dist[v]), int(v), -1) for v in t.nodes]
     for e in t.edges:
         a, b, we = int(g.ui[e]), int(g.uj[e]), float(g.weight[e])
         cand += [(float(dist[a]) + we, a, b), (float(dist[b]) + we, b, a)]
     for _cost, end, far in sorted(c for c in cand if np.isfinite(c[0])):
+        if (far if far >= 0 else end) in skip:
+            continue
         path = [end]
         while pred[path[-1]] >= 0:
             path.append(int(pred[path[-1]]))

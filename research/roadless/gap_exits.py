@@ -201,13 +201,15 @@ class BarrierParts(NamedTuple):
 
 
 class Barriers(Protocol):
-    """Obstacles never cleared (module docstring): its name's part and the block its mesh is
-    built on."""
+    """Obstacles never cleared (module docstring): its name's part, the block its mesh is built
+    on, and what is cut from it (`obstacle`: nothing passes through it but at its gaps)."""
 
     @property
     def name(self) -> str: ...
 
     def block(self, block: Block) -> Block: ...
+
+    def obstacle(self, block: Block) -> Any: ...
 
 
 @dataclass(frozen=True)
@@ -218,6 +220,9 @@ class NoBarriers:
 
     def block(self, block: Block) -> Block:
         return block
+
+    def obstacle(self, block: Block) -> Any:
+        return shapely.Polygon()
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -268,6 +273,11 @@ class OsmBarriers:
                                                            dtype=object), self.cross_m / 2.0))
         return BarrierParts(barrier=shapely.difference(whole, gaps), strips=strips, areas=wet,
                             gaps=gaps, crossings=crossings)
+
+    def obstacle(self, block: Block) -> Any:
+        """What is cut from `block` (BarrierParts.barrier: the strips and areas less the
+        crossings' gaps), in its CRS."""
+        return self.parts(block).barrier
 
     def block(self, block: Block) -> Block:
         """`block` with its barriers cut out of its polygon (its streets as they are: no face of
