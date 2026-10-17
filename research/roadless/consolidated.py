@@ -16,6 +16,9 @@ polish_greedy.py, search.py, road_rescore.py), keyed by the metric's name.
     uv run python $S reuse-networks <scratch>    # the lineup's networks nothing changes
     uv run python $S report                      # ROWS/summary_*.csv
     uv run python $S lineup-report               # ROWS/summary_lineup_*.csv
+    uv run python $S screen <id> <variants,> [--replace]   # phase 5's screens on a block, on a card
+    uv run python $S screen-lenses <id> [--replace]        # their clearings' lenses, on a core
+    uv run python $S screen-report <wave>        # each screen's stop (seqscreen) and dominance
 
 `features`: per block (the store's 303: clearings.Store's blocks), its OSM features (attrs["osm"])
 as the metric reads them: the barriers' cut (gap_exits.OsmBarriers.parts within the block: its
@@ -28,6 +31,19 @@ the boost raises inside the block, not a street of its ring). Rows ROWS/features
 preset, and the cheap preset at S0.005cat), each free first at area D 0.05 optimizing P, its rows
 in relax_rows/ and polish_rows/ under the metric's name, and the run's one-card timing
 (ROWS/onecard/<metric>/<device>/<id>.parquet).
+
+`screen` (phase 5, pruning): the dominated variants on record that still exist on the complex
+(SCREENS), each in the default's company, run on a block one after another in this process on one
+card beside SIMP's default (re-run there: its time on the same card), each free first at area D
+0.05 optimizing P; rows ROWS/screen/<metric>/<variant>/<id>.parquet (a variant not built for the
+block's free stage, `.m`'s held buildings, a row marked unbuilt). `screen-lenses`: their
+clearings scored on a core as `lenses` scores the presets'. `screen-report`: the blocks run in
+seqscreen's order over its held-out blocks (seqscreen.blocks_of("held"), its ORDER_SEED), each
+variant against the default as seqscreen screens (stop_at, call: Lens A of P, the times on one
+card, the default's rows of the pass forecasting the blocks not run), and every axis the
+dominance rule reads: each lens's paired difference (L_P, L_{P_1/2}, L_J2: the mean, a 95%
+Bayesian-bootstrap interval, ahead / behind), B's order, the time and the GPU memory on one card;
+the next `<wave>` blocks of the order for the screens still running. ROWS/summary_screen.csv.
 
 `baselines`: a block's baseline (P0, P_{1/2},0, J_2,0, the homes walled in, the unknowns, the
 mesh's triangles and times) under each of PARTS, cumulative: `block` the per-block metric
@@ -303,6 +319,163 @@ def lenses(bid: str, *, replace: bool) -> None:
     clearings.write_once(pd.DataFrame(rows).assign(block=bid, metric=metrics.RUNTIME),
                          out, replace=replace)
     print(f"{bid}: {len(rows) - 1} clearings scored", flush=True)
+
+
+# ------------------------------------------------------------------ phase 5: the screens
+
+SCREENS = {   # variant -> the plan's suffix on SIMP's default ("": the default itself)
+    "default": "",
+    "r2l2": ".r2l2",        # late random roundings (BACKLOG, "Sturdier gate capture")
+    "pP": ".pP",            # the polish over the undecided, then over every building
+    "seed": ".gS0.01cat",   # the greedy's clearing offered to the incumbent first
+    "m2": ".m2",            # a second SIMP start (BACKLOG, "Multiple starts")
+    "mma": ".umma0.2",      # MMA's update (BACKLOG, "Damped OC or MMA")
+    "doc": ".uoc0.3m0.2",   # damped OC (eta 0.3)
+}
+
+
+def screen_plan(variant: str) -> Any:
+    """SCREENS' plan for `variant`: the option spliced into SIMP's default where plan_of's
+    grammar places it (the samples and the polish phases inside, the rest after)."""
+    import relax
+    base, suffix = relax.SIMP_DEFAULT, SCREENS[variant]
+    if suffix in (".r2l2", ".pP"):
+        head, polish = base.rsplit(".p", 1)
+        spec = head + suffix + (".p" if suffix == ".r2l2" else "") + polish
+    else:
+        spec = base + suffix
+    plan = relax.plan_of(spec)
+    assert plan.name == spec, (plan.name, spec)
+    return plan
+
+
+def screen_path(variant: str, bid: str) -> Path:
+    return ROWS / "screen" / metrics.RUNTIME / variant / f"{bid}.parquet"
+
+
+def screen(bid: str, variants: list[str], *, replace: bool) -> None:
+    """Phase 5's screens on `bid`: each of `variants` (SCREENS) in turn in this process, on one
+    card, each row written once with the host, the wall time and the GPU's peak."""
+    import relax
+    unknown = sorted(set(variants) - set(SCREENS))
+    if unknown:
+        raise SystemExit(f"unknown variants {unknown}: {sorted(SCREENS)}")
+    for v in variants:
+        clearings.check_new(screen_path(v, bid), replace=replace)
+    metric = metrics.metric_of(metrics.RUNTIME, device="gpu")
+    for v in variants:
+        plan = screen_plan(v)
+        t0 = time.time()
+        row: dict[str, object]
+        with gap_calib.GpuPeak() as peak:
+            try:
+                row = relax.one(bid, POWER, metric, plan, BUDGET, demand=POP)
+                row.update(built=True)
+            except NotImplementedError as e:    # `.m`: not built for the free stage's holds
+                print(f"{bid} {v}: {e}", flush=True)
+                row = dict(block=bid, plan=plan.name, built=False)
+        row.update(variant=v, host=socket.gethostname(), gpu_gb=peak.peak,
+                   wall=time.time() - t0)
+        clearings.write_once(pd.DataFrame([row]), screen_path(v, bid), replace=replace)
+        print(f"{bid} {v} ({plan.name}): {row['wall']:.0f}s, GPU {peak.peak:.1f} GB",
+              flush=True)
+
+
+def screen_lenses_path(bid: str) -> Path:
+    return ROWS / "screen_lenses" / metrics.RUNTIME / f"{bid}.parquet"
+
+
+def screen_lenses(bid: str, *, replace: bool) -> None:
+    """Every screen clearing of `bid` scored on a core under RUNTIME, as `lenses` scores the
+    presets'. Rows ROWS/screen_lenses/<metric>/<id>.parquet."""
+    import road_rescore as rr
+    out = screen_lenses_path(bid)
+    clearings.check_new(out, replace=replace)
+    [b] = common.build_blocks([bid])
+    m = metrics.metric_of(metrics.RUNTIME, device="cpu").clearing(b, demand=POP)
+    rows = []
+    for v in SCREENS:
+        if not screen_path(v, bid).exists():
+            continue
+        r = pd.read_parquet(screen_path(v, bid)).iloc[0]
+        if not r["built"]:
+            continue
+        x = np.zeros(m.n, dtype=bool)
+        x[np.asarray(r["simp_cleared"], dtype=np.int64)] = True
+        rows.append(dict(variant=v, n_cleared=int(x.sum()), D=float(m.cost[x].sum()),
+                         stored_perm=float(r["simp_perm"]), **rr._lens_row(m, m.lenses(x))))
+    clearings.write_once(pd.DataFrame(rows).assign(block=bid, metric=metrics.RUNTIME),
+                         out, replace=replace)
+    print(f"{bid}: {len(rows)} screen clearings scored", flush=True)
+
+
+def _bb_interval(d: np.ndarray, rng: np.random.Generator) -> tuple[float, float]:
+    """The 95% interval of the mean of `d` under the Bayesian bootstrap (seqscreen's posterior)."""
+    w = rng.dirichlet(np.ones(len(d)), size=4000)
+    lo, hi = np.quantile(w @ d, [0.025, 0.975])
+    return float(lo), float(hi)
+
+
+def screen_report(wave: int) -> None:
+    """Each screen's stop and call (seqscreen.stop_at over its held-out order) and its axes;
+    the blocks to run next. ROWS/summary_screen.csv."""
+    import relax
+    import seqscreen as sq
+    pd.set_option("display.width", 220)
+    held = sq.blocks_of("held")
+    order = [held[i] for i in np.random.default_rng(sq.ORDER_SEED).permutation(len(held))]
+    rows = {v: _read(ROWS / "screen" / metrics.RUNTIME / v).set_index("block")
+            for v in SCREENS if (ROWS / "screen" / metrics.RUNTIME / v).is_dir()}
+    lens = _read(ROWS / "screen_lenses" / metrics.RUNTIME)
+    pass_t = _read(relax.rows_of(relax.plan_of(relax.SIMP_DEFAULT), metrics.RUNTIME, BUDGET)
+                   ).set_index("block").t
+    a = rows["default"]
+    rates = np.geomspace(*sq.RATES, sq.RATE_POINTS)
+    out, running = [], []
+    for v, b in rows.items():
+        if v == "default":
+            continue
+        run = [k for k in order if k in b.index and k in a.index]
+        if [k for k in order if k in b.index] != run or run != order[:len(run)]:
+            raise SystemExit(f"{v}: rows off the screen's order")
+        built = [k for k in run if bool(b.built[k])]
+        rest = [k for k in order[len(run):]]
+        s = sq.Screen((b.simp_perm[built] - a.simp_perm[built]).to_numpy(dtype=float),
+                      b.t[built].to_numpy(dtype=float),
+                      np.concatenate([a.t[built].to_numpy(dtype=float),
+                                      pass_t.reindex(rest).fillna(pass_t.median()).to_numpy()]))
+        stop = sq.stop_at(s, rates=rates, future=sq.FUTURE, floor=sq.MIN_BLOCKS,
+                          rng=np.random.default_rng([sq.ORDER_SEED, 0])) if len(built) else None
+        n = stop.n if stop is not None else len(built)
+        on = built[:n]
+        row: dict[str, object] = dict(
+            variant=v, plan=screen_plan(v).name, run=len(run), built=len(built), used=n,
+            stop="" if stop is None else stop.why, call="" if stop is None else stop.call,
+            time_ratio=float(b.t[on].sum() / a.t[on].sum()) if n else np.nan,
+            gpu_gb_ratio=float((b.gpu_gb[on] / a.gpu_gb[on]).max()) if n else np.nan)
+        if stop is None:
+            running.append(v)
+        rng = np.random.default_rng(1)
+        la = lens[lens.variant == "default"].set_index("block")
+        lb = lens[lens.variant == v].set_index("block")
+        both = [k for k in on if k in la.index and k in lb.index]
+        row["scored"] = len(both)
+        for x in LENSES:
+            d = (lb[x][both] - la[x][both]).to_numpy(dtype=float)
+            lo, hi = _bb_interval(d, rng) if len(d) else (np.nan, np.nan)
+            row.update({f"{x}_mean": float(d.mean()) if len(d) else np.nan, f"{x}_lo": lo,
+                        f"{x}_hi": hi, f"{x}_ahead": int((d > 1e-9).sum()),
+                        f"{x}_behind": int((d < -1e-9).sum())})
+        rb = [b_rank(np.array([la.enclosed[k], lb.enclosed[k]]),
+                     np.array([la.L_P[k], lb.L_P[k]])) for k in both]
+        row.update(B_ahead=sum(int(r[1] < r[0]) for r in rb),
+                   B_behind=sum(int(r[1] > r[0]) for r in rb))
+        out.append(row)
+    t = pd.DataFrame(out)
+    t.to_csv(ROWS / "summary_screen.csv", index=False)
+    print(t.round(5).T.to_string())
+    nxt = [k for k in order if k not in a.index][:wave] if running else []
+    print(f"\nrunning: {running}; next blocks: {','.join(nxt)}")
 
 
 # ------------------------------------------------------------------ the road lineup's reuse
@@ -604,6 +777,12 @@ def main(argv: list[str]) -> None:
         report()
     elif cmd == "lineup-report" and len(argv) == 1:
         lineup_report()
+    elif cmd == "screen" and len(argv) == 3:
+        screen(common.ids_of(argv[1])[0], argv[2].split(","), replace=again)
+    elif cmd == "screen-lenses" and len(argv) == 2:
+        screen_lenses(common.ids_of(argv[1])[0], replace=again)
+    elif cmd == "screen-report" and len(argv) == 2:
+        screen_report(int(argv[1]))
     elif cmd == "baselines" and len(argv) == 3:
         parts = argv[2].split(",")
         if not set(parts) <= set(PARTS):
