@@ -565,6 +565,12 @@ def simp(rel: gap_clear.Relaxation, x0: np.ndarray, budget: float,
     return x
 
 
+def built_for_holds(plan: Plan) -> bool:
+    """Whether `plan` runs where free first holds buildings: a Frank-Wolfe start and `.m`'s
+    starts are not built for held buildings (one raises NotImplementedError there)."""
+    return plan.fw == 0 and plan.starts <= 1
+
+
 def one(bid: str, power: float, metric: gap_clear.ComplexMetric, plan: Plan, budget: float, *,
         demand: common.Demand) -> dict:
     """SIMP at one budget on `bid` under `metric`, J_power under `demand` (common.Demand: J_1 is
@@ -577,7 +583,7 @@ def one(bid: str, power: float, metric: gap_clear.ComplexMetric, plan: Plan, bud
     # B's first stage: the crossings that free the enclosed homes, held at 1 through SIMP (xlo),
     # the incumbent's roundings (first) and its polish (not movable); none enclosed, none held
     held = c.free_first(budget=budget, held=np.zeros(c.n, dtype=bool))
-    if held.any() and (plan.fw > 0 or plan.starts > 1):
+    if held.any() and not built_for_holds(plan):
         raise NotImplementedError(f"{bid}: the free stage holds {int(held.sum())} buildings, and "
                                   f"fw and .m are not built for held buildings: {plan.name}")
     xlo = np.where(held, 1.0, XMIN)

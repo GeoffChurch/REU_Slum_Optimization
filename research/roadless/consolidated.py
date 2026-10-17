@@ -41,10 +41,13 @@ buildings, writes none). `screen-lenses`: their
 clearings scored on a core as `lenses` scores the presets'. `screen-report`: the blocks run in
 seqscreen's order over its held-out blocks (seqscreen.blocks_of("held"), its ORDER_SEED), each
 variant against the default as seqscreen screens (stop_at, call: Lens A of P, the times on one
-card, the default's rows of the pass forecasting the blocks not run), and every axis the
-dominance rule reads: each lens's paired difference (L_P, L_{P_1/2}, L_J2: the mean, a 95%
-Bayesian-bootstrap interval, ahead / behind), B's order, the time and the GPU memory on one card;
-the next `<wave>` blocks of the order for the screens still running. ROWS/summary_screen.csv.
+card, the default's rows of the pass forecasting the blocks not run; `.m` screened over the
+blocks free first holds nothing on, relax.built_for_holds), and every axis the dominance rule
+reads: each lens's paired difference (L_P, L_{P_1/2}, L_J2: the mean, a 95% Bayesian-bootstrap
+interval, ahead / behind), B's order, the time on one card (the ratio's geometric mean and its
+interval); the next `<wave>` blocks of each screen still running. (The GPU's memory in use, the
+rows' gpu_gb, counts the pool earlier runs in the process left: not an axis.)
+ROWS/summary_screen.csv.
 
 `baselines`: a block's baseline (P0, P_{1/2},0, J_2,0, the homes walled in, the unknowns, the
 mesh's triangles and times) under each of PARTS, cumulative: `block` the per-block metric
@@ -420,7 +423,7 @@ def _bb_interval(d: np.ndarray, rng: np.random.Generator) -> tuple[float, float]
 
 def screen_report(wave: int) -> None:
     """Each screen's stop and call (seqscreen.stop_at over its held-out order) and its axes;
-    the blocks to run next. ROWS/summary_screen.csv."""
+    each running screen's next `wave` blocks. ROWS/summary_screen.csv."""
     import relax
     import seqscreen as sq
     pd.set_option("display.width", 220)
@@ -428,41 +431,42 @@ def screen_report(wave: int) -> None:
     order = [held[i] for i in np.random.default_rng(sq.ORDER_SEED).permutation(len(held))]
     rows = {v: _read(screen_path(v, "x").parent).set_index("block") for v in SCREENS}
     lens = _read(ROWS / "screen_lenses" / metrics.RUNTIME)
-    pass_t = _read(relax.rows_of(relax.plan_of(relax.SIMP_DEFAULT), metrics.RUNTIME, BUDGET)
-                   ).set_index("block").t
+    la = lens[lens.variant == "default"].set_index("block")
+    passed = _read(relax.rows_of(relax.plan_of(relax.SIMP_DEFAULT), metrics.RUNTIME, BUDGET)
+                   ).set_index("block")
+    holds = {k: len(passed.free_cleared[k]) > 0 for k in order}     # free first's, the pass's
     a = rows["default"]
     rates = np.geomspace(*sq.RATES, sq.RATE_POINTS)
-    out, running = [], []
+    out, nxt = [], {}
     for v, b in rows.items():
         if v == "default":
             continue
-        # the blocks run, in the order: the default's; the variant's where it is built (`.m`: where
-        # free first holds nothing)
-        run = order[:len(a)]
-        if set(a.index) != set(run):
-            raise SystemExit("default: rows off the screen's order")
-        built = [k for k in run if k in b.index]
-        missing = [k for k in run if k not in b.index and (v != "m2" or not len(a.free_cleared[k]))]
-        if missing or not set(b.index) <= set(run):
-            raise SystemExit(f"{v}: rows missing on {missing} or off the screen's order")
-        rest = order[len(run):]
+        # the variant's order: seqscreen's over the blocks it is built for (relax.built_for_holds:
+        # `.m` not where free first holds buildings); its rows a prefix of it, the default's on each
+        mine = [k for k in order if relax.built_for_holds(screen_plan(v)) or not holds[k]]
+        built = mine[:len(b)]
+        if set(b.index) != set(built) or not set(built) <= set(a.index):
+            raise SystemExit(f"{v}: rows off its order, or without the default's beside them")
+        rest = mine[len(built):]
         s = sq.Screen((b.simp_perm[built] - a.simp_perm[built]).to_numpy(dtype=float),
                       b.t[built].to_numpy(dtype=float),
                       np.concatenate([a.t[built].to_numpy(dtype=float),
-                                      pass_t.reindex(rest).fillna(pass_t.median()).to_numpy()]))
+                                      passed.t.reindex(rest).to_numpy(dtype=float)]))
         stop = sq.stop_at(s, rates=rates, future=sq.FUTURE, floor=sq.MIN_BLOCKS,
-                          rng=np.random.default_rng([sq.ORDER_SEED, 0])) if len(built) else None
+                          rng=np.random.default_rng([sq.ORDER_SEED, 0]))
         n = stop.n if stop is not None else len(built)
         on = built[:n]
+        ratio = np.log((b.t[on] / a.t[on]).to_numpy(dtype=float))
+        lo_t, hi_t = _bb_interval(ratio, np.random.default_rng(2))
         row: dict[str, object] = dict(
-            variant=v, plan=screen_plan(v).name, run=len(run), built=len(built), used=n,
+            variant=v, plan=screen_plan(v).name, eligible=len(mine), run=len(built), used=n,
             stop="" if stop is None else stop.why, call="" if stop is None else stop.call,
-            time_ratio=float(b.t[on].sum() / a.t[on].sum()) if n else np.nan,
-            gpu_gb_ratio=float((b.gpu_gb[on] / a.gpu_gb[on]).max()) if n else np.nan)
+            time_ratio=float(b.t[on].sum() / a.t[on].sum()),
+            time_geo=float(np.exp(ratio.mean())), time_lo=float(np.exp(lo_t)),
+            time_hi=float(np.exp(hi_t)), slower=int((ratio > 0).sum()))
         if stop is None:
-            running.append(v)
+            nxt[v] = rest[:wave]
         rng = np.random.default_rng(1)
-        la = lens[lens.variant == "default"].set_index("block")
         lb = lens[lens.variant == v].set_index("block")
         both = [k for k in on if k in la.index and k in lb.index]
         row["scored"] = len(both)
@@ -480,8 +484,8 @@ def screen_report(wave: int) -> None:
     t = pd.DataFrame(out)
     t.to_csv(ROWS / "summary_screen.csv", index=False)
     print(t.round(5).T.to_string())
-    nxt = [k for k in order if k not in a.index][:wave] if running else []
-    print(f"\nrunning: {running}; next blocks: {','.join(nxt)}")
+    for v, ks in nxt.items():
+        print(f"{v} runs on: next {','.join(ks)}")
 
 
 # ------------------------------------------------------------------ the road lineup's reuse
