@@ -17,7 +17,8 @@ and reads one file into core rows:
 
     SimpFamily       relax_rows/<metric>/<plan>/D<budget>/<block>_p<power>.parquet: SIMP's clearing
                      (simp_cleared; run <dir>.p<power>) and, in the Frank-Wolfe plans' rows, the
-                     rounding of the relaxation (cleared; run <dir>.p<power>.fw)
+                     rounding of the relaxation (cleared; run <dir>.p<power>.fw); the same in
+                     screen_rows/ (phase 5's screens, consolidated `screen`)
     PolishFamily     polish_rows/<metric>/<picker>.P<tries>w<width>[x2][E]/D<budget>/..._p<power>
     GreedyFamily     clear_rows_<spec>_p<power>_<metric>/<block>.parquet (clear.rows_dir): the
                      searches that write the greedy's format (nested rows `cleared`, or a whole
@@ -85,6 +86,10 @@ EXCLUDED: Mapping[str, str] = {
     "insulator_rows": "scenario scores of the insulator world; the clearings it scored are "
                       "insulator_rows/walls_clearings.parquet, a record (RECORD_PARQUETS)",
     "road_rows": "road networks and their scores (BACKLOG 4), no clearing",
+    "consolidated_rows": "the consolidated pass's scores (consolidated.py: what meets each block, "
+                         "the baselines, every clearing's lenses, the one-card timing, the "
+                         "summaries), no clearing: its presets' clearings are relax_rows' and "
+                         "polish_rows', its screens' screen_rows'",
     "transparency_rows": "road networks and their scores (BACKLOG 5), no clearing",
     "res_rows": "mesh-resolution rescoring of stored clearings: scores only",
     "rows_h0.5_ell3_K8": "the 220-block study's road-network scores, no clearing",
@@ -306,15 +311,19 @@ def _by_power(d: Path) -> dict[str, list[Path]]:
 
 @dataclass(frozen=True)
 class SimpFamily:
+    """relax.one's rows in `store`: relax_rows (relax.py's, the presets'), or screen_rows
+    (consolidated `screen`: phase 5's screens, SIMP's default re-run beside each variant)."""
+    store: str
+
     def sources(self, root: Path) -> list[Source]:
         out: list[Source] = []
-        for md in _metric_dirs(root, "relax_rows"):
+        for md in _metric_dirs(root, self.store):
             along, search = split_along(md.name)
             for d in sorted(md.glob("*/D*")):
                 rel = d.relative_to(root).as_posix()
-                m = re.fullmatch(rf"relax_rows/[^/]+/(?P<plan>[^/]+)/D(?P<budget>{NUM})", rel)
+                m = re.fullmatch(rf"{self.store}/[^/]+/(?P<plan>[^/]+)/D(?P<budget>{NUM})", rel)
                 if m is None:
-                    raise ValueError(f"{rel}: not relax_rows/<metric>/<plan>/D<budget>")
+                    raise ValueError(f"{rel}: not {self.store}/<metric>/<plan>/D<budget>")
                 for power, files in _by_power(d).items():
                     base = Settings(run=f"{rel}.p{power}", family="simp", mode="whole",
                                     spec=m["plan"], power=float(power), demand="w",
@@ -629,11 +638,11 @@ def _record(path: str) -> bool:
     return len(parts) < 2 or not this_code(parts[1])
 
 
-FAMILIES: tuple[Family, ...] = (SimpFamily(), PolishFamily(), GreedyFamily(), PweightFamily(),
-                                RegionFamily())
+FAMILIES: tuple[Family, ...] = (SimpFamily(store="relax_rows"), SimpFamily(store="screen_rows"),
+                                PolishFamily(), GreedyFamily(), PweightFamily(), RegionFamily())
 
 
-ROOTS = ("relax_rows", "polish_rows", "pweight_rows")
+ROOTS = ("relax_rows", "screen_rows", "polish_rows", "pweight_rows")
 CLUSTER_RUNS = HERE.parent.parent / ".cluster_submit" / "runs"      # the repo root's launcher dir
 
 

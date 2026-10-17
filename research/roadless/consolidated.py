@@ -35,8 +35,9 @@ in relax_rows/ and polish_rows/ under the metric's name, and the run's one-card 
 `screen` (phase 5, pruning): the dominated variants on record that still exist on the complex
 (SCREENS), each in the default's company, run on a block one after another in this process on one
 card beside SIMP's default (re-run there: its time on the same card), each free first at area D
-0.05 optimizing P; rows ROWS/screen/<metric>/<variant>/<id>.parquet (a variant not built for the
-block's free stage, `.m`'s held buildings, a row marked unbuilt). `screen-lenses`: their
+0.05 optimizing P; rows screen_rows/<metric>/<plan>/D0.05/<id>_p1.parquet, relax_rows' layout
+(exported to the store; a variant not built for the block's free stage, `.m` where free first holds
+buildings, writes none). `screen-lenses`: their
 clearings scored on a core as `lenses` scores the presets'. `screen-report`: the blocks run in
 seqscreen's order over its held-out blocks (seqscreen.blocks_of("held"), its ORDER_SEED), each
 variant against the default as seqscreen screens (stop_at, call: Lens A of P, the times on one
@@ -350,12 +351,17 @@ def screen_plan(variant: str) -> Any:
 
 
 def screen_path(variant: str, bid: str) -> Path:
-    return ROWS / "screen" / metrics.RUNTIME / variant / f"{bid}.parquet"
+    """`variant`'s row on `bid`: relax_rows' layout under screen_rows/ (SIMP's default re-run here
+    would otherwise meet the pass's own row)."""
+    plan = str(screen_plan(variant).name)
+    return (HERE / "screen_rows" / metrics.RUNTIME / plan / f"D{BUDGET:g}"
+            / f"{bid}_p{POWER:g}.parquet")
 
 
 def screen(bid: str, variants: list[str], *, replace: bool) -> None:
     """Phase 5's screens on `bid`: each of `variants` (SCREENS) in turn in this process, on one
-    card, each row written once with the host, the wall time and the GPU's peak."""
+    card, each row written once with the device, the host, the wall time and the peak memory (as
+    `presets` writes the presets')."""
     import relax
     unknown = sorted(set(variants) - set(SCREENS))
     if unknown:
@@ -366,19 +372,17 @@ def screen(bid: str, variants: list[str], *, replace: bool) -> None:
     for v in variants:
         plan = screen_plan(v)
         t0 = time.time()
-        row: dict[str, object]
         with gap_calib.GpuPeak() as peak:
             try:
                 row = relax.one(bid, POWER, metric, plan, BUDGET, demand=POP)
-                row.update(built=True)
             except NotImplementedError as e:    # `.m`: not built for the free stage's holds
                 print(f"{bid} {v}: {e}", flush=True)
-                row = dict(block=bid, plan=plan.name, built=False)
-        row.update(variant=v, host=socket.gethostname(), gpu_gb=peak.peak,
-                   wall=time.time() - t0)
+                continue
+        wall = time.time() - t0
+        row.update(device="gpu", host=socket.gethostname(), peak_rss_gb=gap_calib.peak_gb(),
+                   gpu_gb=peak.peak, wall=wall)
         clearings.write_once(pd.DataFrame([row]), screen_path(v, bid), replace=replace)
-        print(f"{bid} {v} ({plan.name}): {row['wall']:.0f}s, GPU {peak.peak:.1f} GB",
-              flush=True)
+        print(f"{bid} {v} ({plan.name}): {wall:.0f}s, GPU {peak.peak:.1f} GB", flush=True)
 
 
 def screen_lenses_path(bid: str) -> Path:
@@ -398,8 +402,6 @@ def screen_lenses(bid: str, *, replace: bool) -> None:
         if not screen_path(v, bid).exists():
             continue
         r = pd.read_parquet(screen_path(v, bid)).iloc[0]
-        if not r["built"]:
-            continue
         x = np.zeros(m.n, dtype=bool)
         x[np.asarray(r["simp_cleared"], dtype=np.int64)] = True
         rows.append(dict(variant=v, n_cleared=int(x.sum()), D=float(m.cost[x].sum()),
@@ -424,8 +426,7 @@ def screen_report(wave: int) -> None:
     pd.set_option("display.width", 220)
     held = sq.blocks_of("held")
     order = [held[i] for i in np.random.default_rng(sq.ORDER_SEED).permutation(len(held))]
-    rows = {v: _read(ROWS / "screen" / metrics.RUNTIME / v).set_index("block")
-            for v in SCREENS if (ROWS / "screen" / metrics.RUNTIME / v).is_dir()}
+    rows = {v: _read(screen_path(v, "x").parent).set_index("block") for v in SCREENS}
     lens = _read(ROWS / "screen_lenses" / metrics.RUNTIME)
     pass_t = _read(relax.rows_of(relax.plan_of(relax.SIMP_DEFAULT), metrics.RUNTIME, BUDGET)
                    ).set_index("block").t
@@ -435,11 +436,16 @@ def screen_report(wave: int) -> None:
     for v, b in rows.items():
         if v == "default":
             continue
-        run = [k for k in order if k in b.index and k in a.index]
-        if [k for k in order if k in b.index] != run or run != order[:len(run)]:
-            raise SystemExit(f"{v}: rows off the screen's order")
-        built = [k for k in run if bool(b.built[k])]
-        rest = [k for k in order[len(run):]]
+        # the blocks run, in the order: the default's; the variant's where it is built (`.m`: where
+        # free first holds nothing)
+        run = order[:len(a)]
+        if set(a.index) != set(run):
+            raise SystemExit("default: rows off the screen's order")
+        built = [k for k in run if k in b.index]
+        missing = [k for k in run if k not in b.index and (v != "m2" or not len(a.free_cleared[k]))]
+        if missing or not set(b.index) <= set(run):
+            raise SystemExit(f"{v}: rows missing on {missing} or off the screen's order")
+        rest = order[len(run):]
         s = sq.Screen((b.simp_perm[built] - a.simp_perm[built]).to_numpy(dtype=float),
                       b.t[built].to_numpy(dtype=float),
                       np.concatenate([a.t[built].to_numpy(dtype=float),
