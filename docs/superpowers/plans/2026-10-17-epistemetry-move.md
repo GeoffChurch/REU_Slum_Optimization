@@ -580,11 +580,11 @@ Paths: `research/roadless/NOTES.md research/roadless/BACKLOG.md`
 
 ### Task 10: Feedback for epistemetry (needs the owner's yes)
 
-Nothing here is filed without the owner's explicit yes, item by item. Show the owner the list; file what they approve.
+**Filed 2026-10-17 at the owner's word ("Add all the items on GitHub as issues, including the three pieces as feature requests"):** items 1-9 below are GeoffChurch/epistemetry #1 (live driver), #2 (ValueOfMoreUnits Recordable), #3 (Decision records), #4 (cost-model covariates), #5 (NamedTuple revive, bug), #6 (stop priced from its target), #7 (kw_only), #8 (flat record namespace), #9 (Python floor, question). Item 10 is filed only if Task 4 finds a rounding tie. If epistemetry lands #1, #2, #3 or #4 before execution, the matching parts of Tasks 3, 5 and 7 use them instead of reblock's own code (Screening's hand-assembled identity, `decide`, `decision_record`/`decision_of`, RatioToBase's held data); the guards stay.
 
 **Files:** none in the repo (BACKLOG gets the issue numbers in Task 9 Step 2, or a follow-up commit).
 
-- [ ] **Step 1: Ask the owner which to file**
+- [x] **Step 1: Ask the owner which to file** (all, 2026-10-17)
 
 The issues, each with the reblock case behind it:
 1. **A live driver for a replayed policy.** reblock's consolidated screens decide on blocks run so far, so screening.Screening.decide re-implements `replay`'s loop (the floor step, the per-unit veto, the step bookkeeping, the final call). Only reblock's `live` guard ties the two. A driver that advances as units arrive, with `replay` built on it, would make a live screen and its replay one loop, as `StopRule.met_reading` already makes a rule one.
@@ -598,7 +598,7 @@ The issues, each with the reblock case behind it:
 9. **Python floor** (minor). `requires-python >=3.12` made reblock's research branch raise its floor from 3.11. epistemetry uses no 3.12-only syntax at 452052c (checked); lower it, or say why 3.12.
 10. Only if Task 4 found one: the rounding tie (a stop that moved under the rescaling by `uses`), with its design, order and margin.
 
-- [ ] **Step 2: File the approved ones**
+- [x] **Step 2: File the approved ones** (#1-#9)
 
 Run, per approved item: `gh issue create --repo GeoffChurch/epistemetry --title "<title>" --body "<body: the case, reblock's commit that shows it, what would resolve it>"`
 Expected: an issue URL each, recorded in BACKLOG (Task 9 Step 2, or a commit `research: roadless -- BACKLOG: the epistemetry issues filed (#a, #b, ...)`).
