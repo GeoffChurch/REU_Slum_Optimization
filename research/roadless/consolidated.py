@@ -728,17 +728,55 @@ def lineup_report() -> None:
                   f"{len(q)}; where (i) ties ({len(tie)}) by a median {tie.dii.median():+.4f}; "
                   f"the best road: " + ", ".join(f"{k} {v}" for k, v in
                                                  q.best.value_counts().items()))
-        vs: list[dict[str, object]] = []
-        for mth, gm in at[at.reach & at.block.isin(dflt.index)].groupby("method"):
-            gi = gm.set_index("block")
-            for x in LENSES:
-                d = (gi[x] - dflt[x].reindex(gi.index)).dropna()
-                vs.append(dict(method=mth, lens=x, n=len(d), median=float(d.median()),
-                               ahead_of_simp=int((d > 0).sum())))
-        if vs:
-            print("\nEACH METHOD MINUS SIMP'S DEFAULT at D 0.05\n"
-                  + pd.DataFrame(vs).pivot_table(index="method", columns="lens",
-                                                 values="median").round(4).to_string())
+        tp["size"] = tp.block.map(feat["size"])
+        spread: list[dict[str, object]] = []
+        for key, q in tp[tp.di == 0].groupby(["lens", "size"]):
+            x, sz = cast(tuple[str, str], key)
+            share = q.best_val / q.simp_val
+            spread.append(dict(lens=x, size=sz, ties=len(q), median=float(q.dii.median()),
+                               p10=float(q.dii.quantile(0.1)), p90=float(q.dii.quantile(0.9)),
+                               min=float(q.dii.min()), max=float(q.dii.max()),
+                               share=float(share.median()), share_p10=float(share.quantile(0.1)),
+                               share_p90=float(share.quantile(0.9))))
+        if spread:
+            print("\nWHERE (i) TIES: SIMP's default minus the best road, and the best road's "
+                  "share of SIMP's lens (median, p10, p90)\n"
+                  + pd.DataFrame(spread).round(4).to_string())
+        # each method on the large and the oversized blocks: its rows, the blocks it reaches
+        # D 0.05 on, its lenses there and against SIMP's default, its whole network's D, and the
+        # wall of the networks proposed in this pass (the reused blocks' are item 4's)
+        full_d = cx[cx.full.astype(bool)].pivot_table(index="block", columns="method",
+                                                      values="D_area")
+        prop = _read(root / "proposals")
+        wall = prop[prop.status == "ok"].pivot_table(index="block", columns="method",
+                                                     values="wall_s")
+        full_d, wall = full_d.reindex(columns=LINEUP_ROADS), wall.reindex(columns=LINEUP_ROADS)
+        roads: list[dict[str, object]] = []
+        for mth, gm in at.groupby("method"):
+            for sz in ("all", "large", "oversized"):
+                gs = cast(pd.DataFrame, gm if sz == "all" else gm[gm["size"] == sz])
+                r = gs[gs.reach].set_index("block")
+                row: dict[str, object] = dict(
+                    method=mth, size=sz, rows=len(gs), reach=len(r),
+                    network_D=float(full_d[mth].reindex(gs.block).median()),
+                    wall_h=float(wall[mth].reindex(gs.block).median() / 3600),
+                    wall_h_max=float(wall[mth].reindex(gs.block).max() / 3600))
+                for x in LENSES:
+                    d = (r[x] - dflt[x].reindex(r.index)).dropna()
+                    row[x] = float(r[x].median())
+                    row[f"{x}_simp"] = float(d.median())
+                    row[f"{x}_ahead"] = int((d > 0).sum())
+                roads.append(row)
+        tr = pd.DataFrame(roads)
+        tr.to_csv(out / "summary_lineup_roads.csv", index=False)
+        print("\nEACH METHOD at area D 0.05 by size: rows, blocks reaching D 0.05, the medians "
+              "there, minus SIMP's default (_simp) and the blocks ahead of it (_ahead); the whole "
+              "network's D and the proposals' wall in this pass (h)\n" + tr.round(4).to_string())
+        big = feat.index[feat["size"].isin(("large", "oversized"))]
+        have = set(zip(cx.block, cx.method, strict=True))
+        miss = [(b, m) for b in big for m in LINEUP_ROADS if (b, m) not in have]
+        print(f"\nNOT SCORED: {len(miss)} of {len(big) * len(LINEUP_ROADS)} (block, method)\n"
+              + "\n".join(f"  {b} {m}" for b, m in miss))
         held = []
         for f in sorted((root / "scratch" / "networks").glob("*/*.parquet")):
             if f.name.endswith(".ordered.parquet"):
