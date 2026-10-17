@@ -523,7 +523,7 @@ Expected: the imports succeed; every guard passes and fails under each of its fa
 Subject: `research: roadless -- seqscreen.py and epireplay.py deleted (the owner's decision of 2026-10-17, to dogfood epistemetry; the replays tie seqscreen within noise, it is not dominated), with screening_migration.py, the move's one reader of 674dba4's records; no reader of either remains; every guard passes both ways after the deletion`
 Paths: `research/roadless/seqscreen.py research/roadless/epireplay.py research/roadless/screening_migration.py`
 
-- [ ] **Step 5: Only if the owner says "delete" to Ruling 6**
+- [ ] **Step 5: Delete the replays' data (the owner said "delete" to Ruling 6, 2026-10-17)**
 
 Run: `ls -d research/roadless/epireplay*.parquet research/roadless/epireplay*_jobs research/roadless/epireplay4_*.log research/roadless/screening_migration_jobs`, check the list holds nothing else, then `rm -r` exactly those paths. They are git-ignored: nothing to commit.
 
@@ -608,6 +608,8 @@ Expected: an issue URL each, recorded in BACKLOG (Task 9 Step 2, or a commit `re
 ## Execution notes for the controller
 
 - **Wait for GeoffChurch/epistemetry #1-#4** (owner 2026-10-17): the live driver, a recordable ValueOfMoreUnits, Decision records and per-unit covariates on the Design. Execution starts at the epistemetry commit that lands them; Tasks 3, 5 and 7 are re-cut to use them before dispatch (no `decide`, `decision_record`/`decision_of` or hand-assembled identity in reblock), and the pin target moves from 452052c to that commit.
+- Ruling 3 accepted by the owner (2026-10-17): `fewest-wrong` stays as the second preset (37 wrong calls against 67).
+- Ruling 6 overruled by the owner (2026-10-17): **delete** the replays' data after the move; Task 8 Step 5 runs (after Task 4's comparison has read epireplay4.parquet).
 - Ruling 2 accepted by the owner (2026-10-17): epistemetry joins the research group and requires-python rises to >=3.12 on research/roadless.
 - Start only once the consolidated pass's agent has returned and `git status` shows no edits of theirs to consolidated.py, NOTES.md, BACKLOG.md or consolidated_rows/.
 - Task 4's run takes about 3 h in the background. Task 5's code can be written meanwhile; its guard does not depend on Task 4's output. Task 6 needs Task 4's CSV, and Task 8 needs every task before it.
