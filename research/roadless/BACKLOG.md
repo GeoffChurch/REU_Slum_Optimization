@@ -4,22 +4,36 @@ A living list: add ideas, strike them when tried (the result goes to NOTES.md, w
 delete them when shown dominated. Status tags: **prioritized** (the owner wants it done),
 **queued**, **running**, **idea**, **owner's call**, **blocked**.
 
-Baselines (NOTES.md, "Large blocks" and "Lens A at D 0.05"): greedy `S0.01cat` /
-`S0.005cat` and SIMP + eps-scored incumbent `fw0.q3.i10.e0.0001.k1s1e-06`, both J_2,
-uni conductance, Lens A at D 0.05 (`D_LENS`; owner 2026-10-03, 0.10 saturates under sightline),
-and Lens B from nested runs.
+Baselines (NOTES.md, "The consolidated pass: every block under the final metric"): every block of
+the store (220 small, 60 large, 22 oversized) and 5810@major under RUNTIME, the one metric: the shy
+distance at w 0.5 m on the gap complex, the railways and water as barriers (open at real
+crossings), the leaks' central constants, 10x on the drivable streets, the edge open (a block's
+street ring its exit):
+
+    cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a+xB8c3Lo6214b562S10hliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedva03a092b
+
+The presets below, each free first and optimizing P, are scored on P, P_{1/2} and J_2: Lens A at
+area D 0.05 (`D_LENS`) and Lens B (B's order: the people left walled in first, then the lens).
 
 ## Status of the leads (owner 2026-10-06: "leave no stone unturned. Every lead should be followed")
 
-Presets now (NOTES, 2026-10-05 -- 06; D 0.05, J_2, uni):
-- **Default: `.p256w8x2`** -- SIMP base + the undecided-set polish with pair moves. The 13 +0.0097
-  at 1.26x, the 46 held out +0.004 vs base (ahead 89%, never behind).
+Presets now (NOTES, "The consolidated pass: every block under the final metric"; every block under
+RUNTIME, free first, optimizing P at area D 0.05; Lens A of P, mean over the blocks):
+- **Default: `.p256w8x2`** -- SIMP base + the undecided-set polish with pair moves. L_P 0.4253 (220
+  small), 0.3549 (60 large), 0.1663 (22 oversized); a large block's four presets with setup 488 s
+  on one card (median), the default's share 239 s with the setup.
 - **Hard blocks: `.p256w8x2.GS0.01cate1`** -- plus the greedy as a second polished track, polished
-  only when its raw clearing is within 1% of SIMP's polished one. The 13 +0.0119 at 1.21x the
-  default (the greedy unscored); identical to the default on all 46 held out.
-- **Cheap: greedy + polish** (polish_greedy.py, P64w8) -- against SIMP base, the 13 -0.004 at
-  0.81x, the 46 -0.015; against the default, the 46 -0.0185 [-0.022, -0.015] (never ahead) at
-  0.53x its time on one card.
+  only when its raw clearing is within 1% of SIMP's polished one (its greedy now frees first). The
+  default but on 15 of 302 blocks (13 small), never behind on L_P: +0.0005 mean; 107 s a large
+  block after the default.
+- **Cheap: greedy + polish** (polish_greedy.py, translucent at eps 0.05, P64w8) -- -0.0088 L_P
+  against the default over the 302 (-0.0097 large, ahead on 1 of 60; -0.0046 oversized; ahead on 50
+  of 220 small) at 69 s a large block. With S0.005cat's batch (`cheap005`) +0.0018 on the large
+  blocks (ahead on 38 of 60) at 73 s: both on the frontier, the owner's call (Open, the
+  consolidated pass's question (3)).
+
+**Next** (owner 2026-10-13): the site, README and examples revamp; then the vulnerability score
+with vehicle access (Owner's decisions, below).
 
 Closed (measured, NOTES): multi-rounding `.r<n>` (held out +0.001 at 2x; late `.r2l2` the same at
 1.58x); coarse-to-fine `.c0.75` (keeps gates at 0.85x, but with the polish dominated); coarse
@@ -28,11 +42,16 @@ multi-start `.C<h>.m<k>` and fine `.m<k>` (neither faster nor better); the two-p
 instead); greedy screening width `S0.01catw4` (+0.0006, marginal); pairs after the greedy (+0.0005,
 marginal); resolution (res-check: h 0.75 within 0.01 on 35 of 59, h 1.0 understates gated blocks by
 up to 0.31); sequential stopping (seqscreen.py: by the value of more blocks, 15 -- 24 of 46).
+Re-screened under P in the consolidated pass, each against SIMP's default on one card (Owner's
+decisions, "In that pass, prune"): `.r2l2`, `.pP` (+0.00001 L_P at 1.12x), the seed `.g` (the
+default's clearing on all 15 at 1.25x), `.m2`, MMA and damped OC; none deleted.
 
 Also closed: the oversized blocks (the 17 over 1.4 km^2 and 53556), base and default at the
 metric's resolution through local coarsening (`.a5x8`; 4287 `.a5x32`, 63612 `.a2.5x8`; NOTES, "The
 oversized blocks at the metric's resolution"); 19593 and 6498 on the H100; 14401, 7851 and 32841's
 default at a5x8. Every one of the 82 large blocks has the default at h 0.5 near its buildings.
+Under RUNTIME (the consolidated pass) every block, the 22 oversized among them, has the three
+presets on the complex's one fixed mesh, one card a block.
 
 Also closed: wider polish rounds (w16 = w8 at 1.28x) and late sampling on top of the hard-block
 preset (+0.0001 at 1.33x); the greedy's unused scoring skipped (the preset 1.30x -> 1.21x).
@@ -103,7 +122,12 @@ items up front"), in the order proposed:
    0.003 of Lens A, and both presets now lead the best road on all 12. Not free-first yet: the
    composite mesh (free_first raises there; the a5x8 clearings predate B), the plain greedy
    (clear.greedy_block, the track), and the stored rows on the other blocks with enclosed homes (21
-   small ones among the 40 checked; the oversized).
+   small ones among the 40 checked; the oversized). **Closed (the consolidated pass)**: the
+   composite went with the raster; the plain greedy frees first (relax.one's greedy track and seed,
+   and the cheap preset's own greedy clearing within the budget, polish_greedy); the presets re-ran
+   free first on all 302 blocks under RUNTIME, the small blocks' rows with them. Free first leaves
+   homes walled in on 6 blocks (4 large, 2 oversized: beyond the stage's reach within the budget),
+   the same for every preset.
 4. **Evaluation** (discussion): (a) the roadless cost and benefit thought through (population as
    footprint area, J_2, the budget D); (b) a Galois connection between clearings and road
    networks over a fixed road universe: L(network) = the buildings it displaces, R(clearing) =
@@ -181,7 +205,8 @@ items up front"), in the order proposed:
    principled alternative changes no decision: B_r keeps U's method order (tau 1.00 on P), moves
    the flow only a little onto lanes U's flow already uses (no new corridors at r up to 1.5 m), and
    SIMP under it gains nothing over U's clearing on its own lens. The variants stay selectable
-   (pruning in the consolidated pass). **The grid fix: done** (owner 2026-10-13, "LGTM"; NOTES,
+   (pruning in the consolidated pass; closed there: B_r, D_s and sightline went with the raster, so
+   the complex has none to prune). **The grid fix: done** (owner 2026-10-13, "LGTM"; NOTES,
    "The grid fix: steps that conduct by their open width"): a step conducting by the share of its
    width open from cell centre to cell centre, read on the sub-samples; the candidate, Fws
    (`uni+apwfs`), traces an axis-aligned step across its face and lets a split cell conduct
@@ -398,7 +423,9 @@ items up front"), in the order proposed:
    (`Lo6214b562`) and the barriers: RUNTIME switches to it at the consolidated pass's start, every
    block re-scored under it. The objective stays as it is; the price per displaced person is
    written down under "Coverage and model". For the site: present both families, powers of the
-   escape time (J_p) and priority-weighted P, under established names.
+   escape time (J_p) and priority-weighted P, under established names. **Done (the consolidated
+   pass)**: RUNTIME switched to it (the name in this file's head; what it moves: NOTES, the pass's
+   phase 2), every block re-scored under it.
 5. **Transparency for the road methods** (Looped Tree/Network, Greedy Arterial): discounted
    collision penalties for more demolition and better end-state networks. Judged after 4, at
    equal displacement (a shift of the frontier, not a move along it, which the cost weights
@@ -455,9 +482,31 @@ can be done after we've done the entire website/README/examples revamp"):
   composite and the small blocks' stored rows (item 3), and the measurement gaps (one-card timing
   of the whole lineup with setup, S0.005cat's real clearing with the polish, the sightline
   lineup) run once, in one consolidated pass under the final metric (item 4's decisions).
+  **Done (the consolidated pass, 2026-10-16 -- 17; NOTES, "The consolidated pass: every block under
+  the final metric")**: RUNTIME switched (this file's head) and every block re-scored under it: the
+  three presets free first on all 302 blocks, the small blocks' rows among them (Presets now,
+  above); free first for the plain greedy (item 3); the road methods under free first on the 82
+  large blocks, the oversized ones and the arterial at 300 roads among them (items 4 and 5); the
+  measurement gaps: the one-card timing with setup (a large block's four presets 488 s, median;
+  consolidated_rows/summary_lineup_onecard.csv), S0.005cat's real clearing with the polish
+  (`cheap005`: +0.0018 L_P over the cheap preset on the 60 large blocks, ahead on 38, at 73 s
+  against 69 s: on the frontier, the owner's question (3) under Open), the sightline lineup closed
+  (sightline went with the raster).
 - **In that pass, prune the dominated variants**: the speed-quality review's 17 (2026-10-12),
   dominance re-checked under P first, each to the wiki's dead-end record; the add/remove
   search's next rows go with them.
+  **Done (the same NOTES, phase 5)**: none deleted. The six of the 17 with code of their own on the
+  complex were screened under P, each in the default's company against SIMP's default re-run on one
+  card, on seqscreen's held-out order (6.3 GPU-h): `.r2l2` +0.00013 L_P (20 blocks, seqscreen's
+  "ask"), `.pP` +0.00001, the seed `.g` and `.m2` the default's clearing on every block (at 1.25x
+  and 1.64x its time), MMA -0.00017 (ahead on 6 of 15), damped OC -0.00068 (behind on all 15, at
+  the default's time: 1.01x [0.94, 1.09]). The rule (gone only if beaten on every axis and tied on
+  none) deletes none: `.r2l2`, `.pP` and MMA are ahead on some block, and the seed, `.m2` and
+  damped OC each tie on one axis. The other eleven have no code of their own on the complex: values
+  of kept parameters (`.r2`, `.p64w8`, `.p256w16x2`, `.k2`), gone with the raster (`.c1`, `.c0.75`,
+  `.C`), search.py's configurations (floating search, grow-then-prune, swings from the greedy) or
+  never ahead on P by construction (the ungated two-track). The add/remove search's next rows:
+  closed unbuilt (New methods, below). Three questions for the owner (Open, below).
 - **Before that pass, the refined solve's false stall**: ZAF.9.1.4_1_7283 (22 homes, under the
   source's floor, so never run before the region test) raises "refinement stalled at a backward
   error of 1.0" though its solution is a direct spsolve's: the componentwise backward error of
@@ -480,8 +529,10 @@ can be done after we've done the entire website/README/examples revamp"):
   (NOTES, "The stored clearings, committed"): `research/roadless/clearings/`, 151 runs on 303
   blocks, 3.5 MB in git, read through `clearings.py`, which refuses a block whose footprints no
   longer match their fingerprint; the 12 blocks' pre-B rows the free-first runs overwrote were
-  recovered from run road-b's shipped inputs (`D0.05.p2@road-b`). Still to do: the optimizers'
-  no-overwrite guard (in the consolidated pass). The scripts that wrote rows without naming their
+  recovered from run road-b's shipped inputs (`D0.05.p2@road-b`). The optimizers' no-overwrite
+  guard: done in the consolidated pass (41a03622: clearings.write_once and check_new refuse a
+  finished identity, `--replace` names a deliberate replacement; guard clearings_check `overwrite`,
+  fault `no-check`). The scripts that wrote rows without naming their
   metric (study.py, rescore.py, tails.py, the atlas's and fft's exports) went with the raster
   (phase 3), and the exporter reads only this code's metric: the old rows cannot mix with the
   new. The re-export after the priority-weighted P run is done (2026-10-13: its four runs
@@ -503,7 +554,20 @@ can be done after we've done the entire website/README/examples revamp"):
 Open:
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
-  owner's answer moves an end of the bracket to that screen's break-even rate. None is live.
+  owner's answer moves an end of the bracket to that screen's break-even rate. One is live,
+  `.r2l2`'s (the next item, (2)).
+- **The consolidated pass's three questions** (the owner's call; NOTES, "The consolidated pass:
+  every block under the final metric", phase 5 and the presets):
+  - (1) Delete the seed `.g`, `.m2` and damped OC on the weaker reading of the rule? Each is beaten
+    on every axis but a tie: the seed and `.m2` give the default's clearing on every block (at
+    1.25x and 1.64x its time), damped OC trails on every lens at the default's time (1.01x [0.94,
+    1.09]). The rule as written (beaten on every axis, tied on none) keeps them.
+  - (2) Adopt `.r2l2` into the default (seqscreen's "ask")? +0.00013 Lens A of P on 20 blocks
+    (0.04% of the default's mean; ahead on 2, never behind) for 1.19x its GPU time, 17 s a block. A
+    yes puts RATES' top at its break-even, 7.9e-6 Lens A per GPU-second, a no its bottom.
+  - (3) Take S0.005cat into the cheap preset (`cheap005`)? +0.0018 L_P on the 60 large blocks
+    (ahead on 38, behind on 22) at 73 s against 69 s a block on one card; +0.0007 on the 220 small
+    (41 / 38) at 17 s against 14 s. Both are on the frontier.
 
 Not pursued, with what would change that:
 - *A Galerkin coarse model*: closed, the raster's (its AMG level; every solve on the complex is
@@ -551,7 +615,13 @@ Not pursued, with what would change that:
   the factorization's, NOTES "The complex as the runtime"; wiki
   `pages/reblock/raster-escape-time-metric-retired.md`).
 - **Damped OC or MMA** (done 2026-10-04, null; NOTES). Damped OC ties or trails slightly on the
-  13 (median -0.0005 / -0.0001), and MMA collapses on 22422. Both stay selectable (`.u`).
+  13 (median -0.0005 / -0.0001), and MMA collapses on 22422. Both stay selectable (`.u`). Under P
+  (the consolidated pass, phase 5: 15 held-out blocks each, in the default's company, against
+  SIMP's default re-run on one card): MMA (`.umma0.2`) -0.00017 L_P (ahead on 6, by up to +0.001,
+  behind on 8; -0.00085 L_{P_1/2}, -0.00050 L_J2) at 1.04x [0.99, 1.08] the time; damped OC
+  (`.uoc0.3m0.2`) -0.00068 [-0.00098, -0.00044] (behind on all 15) at 1.01x [0.94, 1.09]. Both
+  kept: MMA is ahead on some block, damped OC ties on time; deleting damped OC on the weaker
+  reading is the owner's question (Open, (1)).
 - **Sturdier gate capture** (from that null). On a gated block SIMP's answer is one lucky
   iterate's rounding: `.k2` and MMA each lost 22422 by perturbing the iterate sequence.
   - Several roundings per iterate (done, `.r<n>`, NOTES "SIMP multi-rounding"): `.r2` on the 13
@@ -559,7 +629,10 @@ Not pursued, with what would change that:
     never behind, 2x the time: selectable for hard blocks, not a default. It partly rescues
     `.k2`'s and MMA's lost gate (0.55, not 0.78).
   - Cheaper `.r` (done): the winners come from the last two stages' random roundings, so
-    `.r2l2` samples only there (1.58x, same gains as `.r2`).
+    `.r2l2` samples only there (1.58x, same gains as `.r2`). Under P (the consolidated pass, phase
+    5): `.r2l2` +0.00013 L_P [+0.00001, +0.00046] on 20 held-out blocks (ahead on 2, never behind;
+    +0.0025 on 44602), -0.00031 L_{P_1/2}, -0.00005 L_J2, at 1.24x [1.19, 1.30] the default's time
+    a block on one card; seqscreen's call "ask" (Open, (2)).
   - Undecided-set polish (done, `.p<tries>w<width>`; NOTES "Late sampling and the polish"), and
     what followed it, all done: the larger cap `.p256w8`, the pair moves `x2` (together the
     default `.p256w8x2`), and the same polish on the greedy's clearing (the hard-block preset's
@@ -567,6 +640,10 @@ Not pursued, with what would change that:
 - **Multiple starts** (closed, NOTES "Multi-start on coarse grids"). A Frank-Wolfe start (fw5)
   lands where the uniform start does; a second, random start (`.p64w8.m2`) never beat the uniform
   one (identical on 12 of 13, 2.12x); coarse multi-start `.C<h>.m<k>` neither faster nor better.
+  Under P (the consolidated pass, phase 5): `.m2` in the default's company gives the default's
+  clearing on all 15 held-out blocks it is built for (not where free first holds buildings,
+  relax.built_for_holds) at 1.64x [1.59, 1.69] the time; kept (a tie on quality), its deletion on
+  the weaker reading the owner's question (Open, (1)).
 - **Projection** (measured, kept selectable: `.b8-32` wins some gated blocks, loses some
   controls; not needed against collapses once the incumbent is on).
 - **SIMP + incumbent under the sightline metric**: closed, sightline deleted with the raster (its
@@ -584,9 +661,12 @@ Not pursued, with what would change that:
   "Floating search at the cheap preset's budget") it is dominated by SIMP's default (-0.011 on
   15 held-out blocks at about 10x the time) and by swings (below); its niche is the whole curve
   in one run. Next rows, two new parts each (spec, "What the two new rows need"): a
-  substitute-aware restore (a restore ranking that keeps the Tension, a restore-direction
-  diverse builder) and screened adds (an add-direction refiner, a builder that reads the
-  refined order). Wiki `pages/methods/plus-l-take-away-r.md`.
+  substitute-aware restore (a restore ranking that keeps the Tension, a restore-direction diverse
+  builder) and screened adds (an add-direction refiner, a builder that reads the refined order):
+  **closed unbuilt** (owner 2026-10-13, in the consolidated pass): the wiki's dead-end entry,
+  `pages/methods/plus-l-take-away-r.md` ("Dead end: the two planned next rows, dropped unbuilt"),
+  with what would reopen them (the whole curve in one run at better quality than the greedy's, or a
+  block class where the relaxation is weak, like 30796).
 - **Swing schedules** (owner 2026-10-09; tested 2026-10-10, NOTES "Swing schedules at the
   cheap preset's budget" and "Swings as SIMP's finisher"). Several grow-then-prune swings past
   the budget, each smaller, then the polish (search.py
@@ -707,3 +787,20 @@ Not pursued, with what would change that:
   is its own class).
 - **GPU sizing recalibrated**: closed, the raster's sizing (GB_PER_MILLION) went with it; `--gb`
   sizes every card (wiki `pages/reblock/raster-escape-time-metric-retired.md`).
+- **pyamg is read by no code** (since 2c4f57d0, the consolidated pass: it was fft_homog's solver;
+  gap_flow, cluster and clearings_check only name it in comments). It stays in the `gpu` group;
+  removing it is a dependency change, the owner's call.
+- **cluster_submit chains a GPU run behind every live run** (seen with cp-dev in the consolidated
+  pass): when the live runs' GPU sum is already over the project's budget, a new GPU run is chained
+  after every live run, CPU runs among them, so it waits on runs that hold no GPU. The fix is
+  GeoffChurch/cluster_submit's.
+- **Carved meshes refused as not Delaunay** (found in the consolidated pass; NOTES, "The
+  consolidated pass: every block under the final metric"): two of the road lineup's networks could
+  not be scored, 39240's cycle_desire (2 passages) and 64070's resistance_lp (1): "passages with
+  their centres in the wrong order: the mesh is not Delaunay". On 39240 three vertices of the
+  corridors' cut lie within 0.3 mm, and a sliver of 9e-8 m^2 with edges of 0.1 and 12 mm, inside
+  one face, is above the flat test's 1.5e-8 at that edge (FLAT_REL L^2); conformity splits only
+  face boundaries. Deterministic, a defect of the carving: snap the cut's vertices within a
+  tolerance, or conform a constrained edge inside a face, then score the two. gap_clear's source is
+  not in the metric's name (its digest is of constants), so a fix there must leave every other mesh
+  as it is, or the name must move.

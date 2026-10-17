@@ -7624,3 +7624,273 @@ here, single-threaded, at most 8 processes: the 7283 diagnosis and the no-change
 (about 0.4 CPU-h), the gradient sweep (9 runs, about 3), the stage before and after on the 39
 (about 3.5), the guards (6.4, 20269's `gradient` pass among them) and the first runs at HEAD (about
 1): about 15 CPU-h [inferred from the runs' times].
+
+### The consolidated pass: every block under the final metric
+
+BACKLOG 4 and the owner's decisions of 2026-10-13 -- 16 (the brief:
+.superpowers/sdd/2026-10-16-consolidated-pass). RUNTIME is now the one metric for every block and
+region:
+
+    cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a+xB8c3Lo6214b562S10hliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedva03a092b
+
+the per-block metric (the shy distance at w 0.5 m on the gap complex, its 28 constants digesting to
+34d40e8a, the name every per-block row keeps) with the region model's exits, each spelt in the name
+and read back by gap_exits.exits_of: the railways and water as barriers 8 m wide, open at real
+crossings 3 m wide (`B8c3`); the edge open, a block's street ring its exit; the leaks' central
+constants (`Lo6214b562`); 10x on the drivable streets (`S10h<classes>`). It is the region test's
+T500b90D10, so the region's two runs under it are RUNTIME's. Plan names lost their `.t<rtol>`:
+SIMP's default is `fw0.q3.i10.e0.0001.k1s1e-06.p256w8x2`.
+
+**Phase 1: what changes no score.**
+- relax.Plan's `.t<rtol>` dropped (the raster's solve tolerance; every solve on the complex is
+  direct). Every stored run on the complex migrated (a scratch script): the rows' directories
+  (relax_rows/<cx metric>/<plan>, gap_rows/simp*), the `plan` column of every complex SIMP row (369
+  files and directories), the complex runs' ids in road_rows, cross_rows and the committed store
+  (clearings/: two runs' files and their index lines). The store reads back identically (all 157
+  runs' tables equal, the two complex runs under their new ids; a re-export of the migrated rows
+  into a copy of the store reproduces every run). The raster's runs keep their names, `.t` and all:
+  records, where `t` was a real setting (relax_rows/uni/fw0.q3.i20.t0.001 and .t1e-05 differ only
+  in it). plan_of refuses a `.t`.
+- The optimizers' no-overwrite guard: clearings.write_once writes a run's rows whole and only once
+  (a hard link into place: atomic, failing if a row stands), clearings.check_new refuses a finished
+  identity before any work; a row's path is its identity (block, preset or method, the metric's
+  full name, budget, the plan's seeds); `--replace` names a deliberate replacement. Every optimizer
+  writer goes through it: relax.py (its silent skip of finished blocks gone), polish_greedy, search
+  (its skip gone), gap_calib `preset`, region_leaks `run`, pweight `task`, road_rescore `cx`. Guard
+  clearings_check `overwrite` (on 38136, SIMP and the greedy + polish each refused on a second run
+  with the first row's bytes kept, replaced under `--replace`; fault `no-check`: both second runs
+  write over the first) and a unit test (the same fault).
+- Every writer keyed by its metric. Already: relax, polish_greedy, search, pweight, road_rescore
+  `cx`. Fixed: gap_calib (gap_rows/runtime/<METRIC's name>/, its rows moved under the per-block
+  metric's), region_leaks (its runs under ROWS/runs/<label>/<preset>/<metric>/, all 23 moved, each
+  row's metric checked; `members`, `blocks` and the leave-one-out pinned to the per-block metric,
+  region_leaks.per_block, which the switch would otherwise have changed under them). Found on the
+  way: the region test's migrations had left relax.one's `along` at the old names (U1000, H500, the
+  3x boost without its classes) on 7 SIMP rows (migrated to their metric), and the exporter raised
+  on region_rows since the region test (its runs are now a family, clearings_export.RegionFamily;
+  the 23 region runs committed, 248 KB).
+- The finished studies' code that read no raster code deleted: fft_homog's solver and two-scale
+  code and every driver (29 modules), perm_floor, atlas/nbhd, the region page's style and vectors.
+  Nothing imported them; their numbers and committed summaries stay. Tracked Python under
+  research/roadless: 71 modules and 22,192 lines to 39 and 18,774. pyamg is now read by no code
+  (fft_homog's solver): its removal, a dependency change, is left for the owner.
+- BACKLOG's raster-era entries closed, each with a pointer to the wiki's
+  `pages/reblock/raster-escape-time-metric-retired.md`: the composite and goal meshes, local
+  coarsening, sightline (it went with the raster: item 3's follow-ups and SIMP under it), the cheap
+  preset on the composite, coarse-to-fine, the Galerkin coarse model, the greedy's sweep kernel and
+  speed, SIMP's memory, the restore screen's iterative solve, the raster's GPU sizing. Kept,
+  applying on the complex: the add/remove search and swings, `.b`, `.u`, `.w`, `.r`, the greedy's
+  width and batch, the price per displaced person, adaptive block selection, the epistemetry lead,
+  the rate bracket, the CPU runs.
+- No score moved: on the 13 tuning blocks the per-block metric's baselines (P0, P_{1/2},0, J_2,0)
+  and the stored SIMP default's lenses (L_P, L_{P_1/2}, L_J2, B (i)) equal road_rows' stored values
+  bit for bit (every difference 0.0).
+
+**Phase 2: the switch.**
+- Every block carries its OSM features (Block.attrs["osm"]) where blocks are built:
+  common.build_blocks (so every bank common.write_bank pickles carries them: a cluster node needs
+  no extract) and common.member_blocks. One read of the country's extract serves them all
+  (regions.Extract: the features whose envelope meets the kblock source's bounds grown by 10 km,
+  read once and cached beside the extract, keyed by the file, the CRS, the box and EXTRACT_REV;
+  each block's features a query of it, about 1 s). The per-face read (a 36 s scan a call) is gone;
+  on 5810@major the cache gave its 551 ways, 66 nodes and 228 areas identical to it. Then the
+  features no reader reads were dropped at the read (lines with no highway, railway or waterway
+  tag, points with no railway tag, areas that are not water: the province's and the city's
+  boundaries met every block and filled a 280-block bank to 420 MB): the barriers and the boosted
+  triangles on 3934, 5618, 21016 and 46841 are as before.
+- RUNTIME switched in metrics.py (above): PER_BLOCK, the per-block metric unchanged, and EXITS
+  (BARRIERS, LEAK, BOOST, DRIVE_CLASSES), each spelt in the name, so no digest moved: the exits
+  code stays a03a092b and every stored region row keeps its name; region_leaks takes them from
+  metrics (one copy). gap_clear_check's guards of the complex's core check the per-block metric
+  (their oracles, the rebuild among them, have no exits).
+- Three defects the switch exposed, fixed: (i) a block no barrier meets was returned by a
+  difference with nothing (its rings reordered: another mesh key, a mesh the leak-only metric's
+  only to floating point), now as it is; (ii) a railway crossing node no way passes through
+  (38366's two: the extract has the track alone) raised, and now opens a crossing straight across
+  the track at the node, 8 m either side; (iii) a block's local frame is its polygon's lower
+  bounds, which a cut at the block's edge moves (3934's railway along its south-west edge), but the
+  cut mesh was built on atoms in the uncut frame, the footprints shifted (found by
+  Model.free_first's check: the complex and the flow model walled in different homes);
+  ComplexMetric.fixed now moves the atoms into the cut frame (Carving.shifted). No stored result
+  moved: 5810@major's cut keeps its frame, and FreeEnclosed now routes on the cut block too.
+- The guards of the switch (gap_clear_check; each passes and fails under each fault): new
+  `no-features` (19570 with its own features less every drivable way and barrier feature, as no
+  real block reads: every kblock has a drivable street on its ring): RUNTIME's baseline, every
+  home's escape time and the walled-in homes equal the leak-only metric's bit for bit (0.0); fault
+  `neighbour-features` (the touching kblock that shares the most drivable street: its features)
+  moves P0 3.7%, a home's escape time 91%. `barriers` on real blocks (3934, a railway on its edge;
+  5618, a pond on 21% of it): no triangle in the cut under RUNTIME (10,091 and 8,132 under the leak
+  alone), the cache key not the uncut block's, the name carrying B8c3, the atoms on the footprints
+  in the cut frame, the complex's walled-in homes the flow model's; faults `features-dropped`,
+  `unshifted` (besides `not-inserted`, `gap-closed`); the synthetic block's crossing node without
+  its path still opens the north-west. `street-boost` on a real block (21016: all 11,986 triangles
+  near its drivable way boosted, none of the 6,189 near only a footway or path; passages 10x and
+  1x; fault `classes-dropped`). `exits-identity`: RUNTIME is the per-block metric with
+  metrics.EXITS, read back, and the region's T500b90D10.
+- What the switch touches (consolidated `features` and `baselines`, the store's 302 blocks on the
+  cluster's cores, about 42 core-h; consolidated_rows/summary_features.csv, summary_switch.csv).
+  Every block has a drivable way on its ring (none lacks one), and inside it on 106 of the 220
+  small blocks and all 82 large. A barrier meets 54 blocks (2 small, 30 large, 21 of the 22
+  oversized, 5810@major), cutting a median 1.7% of a large block (at most 12.1%, 6316), 0.3% of an
+  oversized one, 8.3% and 20.6% of 3934 and 5618. Each part's move of the baseline, relative to the
+  part before it (median [min, max] over the 302):
+
+      part           P0                          P_{1/2},0                   J_2,0
+      the leak       -0.8% [-9.0, -0.07]         -1.1% [-17.7, -0.07]        -1.8% [-21.8, -0.14]
+      + barriers     0 [0, +273%] (53 blocks)    0 [-6.8, +601%]             0 [0, +1,724%]
+      + the boost    -12.9% [-60.1, 0]           -4.4% [-60.9, +33.6]        -17.8% [-82.9, 0]
+      all            -11.2% [-60.5, +265%]       -4.5% [-64.0, +316%]        -18.1% [-83.3, +896%]
+
+by size P0 -8.5% (small), -15.1% (large), -19.0% (oversized); on the 13 tuning blocks -19.9%
+[-42.8, +77.6] (18895's water, 30848's railway and 5810's take it up: a railway or a stream on a
+block's edge closes that edge as an exit). The barriers move P0 by more than 10% on 22 blocks and
+wall in 189 more homes on 10 (30848: 23 to 117); RUNTIME walls in 792 homes on 121 blocks (the
+per-block metric 603 on 118). The boost lowers P0 by over 10% on 164 of the 302: the 3 m strip
+along a drivable ring street conducts 10x, and its triangles sit next to the street's faces.
+
+**Phase 3: the lineup and its cost** (the workspace's lineup.md). Every result-changing item
+BACKLOG deferred to the pass, on the complex: the three presets, free first, on every block (the
+default, the hard-block preset, whose greedy track now frees first too, and the cheap preset), on
+the 82 large blocks one card a block and on the 220 small ones a core a block (each device's
+polish, phase 2a's: the same clearings); free first for the plain greedy (the hard-block track, and
+the cheap preset's own greedy clearing); the oversized blocks with the rest (one fixed mesh a
+block, 4.2 -- 8.6M triangles); the road methods with free first their default
+(road_rescore.lineup_arms: FreeEnclosed under RUNTIME in place of HoldNothing, resistance_lp
+included, the arterial's cap 300 roads in the lineup's config only), on the 82; the measurement
+gaps (one-card timing with setup: consolidated `presets` records it; S0.005cat's real clearing with
+the polish: `cheap005`; the sightline lineup: closed, sightline went with the raster); the small
+blocks' rows (the presets on the 220). Every preset optimizes P; nothing in the lineup optimizes
+J_2 (pweight's J2 arm is that study's comparison; seqscreen reads its rows at power 2, POWER, to be
+read at power 1 for the pass's screens). Every clearing and network scored on P, P_{1/2} and J_2,
+Lens A at D 0.05 and Lens B, on cores.
+
+The estimate, from the last runs' timings on the complex (a five-block GPU pilot: 7851, 5810,
+30848, 63612, 4287 at 0.18, 0.74, 0.89, 1.61 and about 1.1 GPU-h for the four presets with their
+setup on one card; four small blocks' presets on a core here, 0.5 -- 0.64 s a building; the
+survey's meshes; item 4's road timings on the 60; the road pilot, cycle_desire with free first on
+9712 3,444 s): about 34 GPU-h (the presets on the 82, GPU-seconds 81 + 3.85e-4 x the mesh's
+triangles, fitted on the pilot) and at most 2,700 core-h (central about 1,650: the arterial at 300
+roads and cycle_desire on the oversized blocks bounded by their tasks' 23.5 h wall limit, a block
+not done within it reported). Within the caps (40 GPU-h, 3,000 core-h): on to the runs. The lines
+to cut first, were the owner to cut: the arterial on the 22 oversized blocks, cycle_desire on the
+five over 20 km^2 (150 -- 520 GB each), `cheap005` on the oversized blocks (dropped from their
+runs, about 10% of their GPU line).
+
+**Phase 4: the runs.** Every preset on every block under RUNTIME (consolidated `presets`: the large
+and oversized blocks on one card each, cp-pilot-gpu and cp-presets-large / -oversized, 20.5 GPU-h;
+the 220 small ones on a core each, cp-presets-small-r1, 12.5 core-h), every clearing scored on a
+core (consolidated `lenses`); the store gained the 8 runs (clearings/, beside the old ones). The
+cards were what the queue gave, a block's presets on one: V100 (49 tasks of the pass's GPU runs),
+RTX 8000 (48), H100 (15). Lens A at area D 0.05 (mean; median), and the presets paired:
+
+    L_P          small (220)       large (60)        oversized (22)
+    default      0.4253; 0.4156    0.3549; 0.3628    0.1663; 0.1446
+    hard         0.4259; 0.4156    0.3551; 0.3628    0.1664; 0.1453
+    cheap        0.4163; 0.4069    0.3452; 0.3562    0.1617; 0.1415
+    cheap005     0.4170; 0.4079    0.3470; 0.3571    (3 blocks)
+
+    a - b, the 302     L_P: mean, median (ahead / behind)  L_{P_1/2}           L_J2
+    hard - default     +0.0005, 0 (15 / 0)                  +0.0007 (12 / 3)    +0.0007 (12 / 3)
+    cheap - default    -0.0088, -0.0064 (51 / 245)          -0.0078 (66 / 230)  -0.0079 (54 / 242)
+    cheap005 - cheap   the 60 large +0.0018, +0.0006 (38 / 22); the 220 small +0.0007, 0 (41 / 38)
+
+The hard-block preset is the default but where its greedy track wins (15 blocks, 13 of them small,
+never behind on L_P; behind on P_{1/2} and J_2 on 3, by what P bought). The cheap preset trails the
+default by 0.0088 L_P (0.0097 on the large blocks, ahead of it on 1 of 60; 0.0046 on the oversized,
+on none), and is ahead on 50 of the 220 small blocks. In B's order (the least walled in first, then
+the lens; ties count for each) the hard-block preset is first on 257 blocks, the default on 245,
+the cheap preset on 52 (L_P). Free first leaves homes walled in on 6 blocks (4 large, 2 oversized:
+beyond the free stage's reach within the budget), the same for every preset. Time per block
+(median; the four presets one after another in one process with their setup, the first preset
+carrying the block's mesh): large on a card 239 s for the default (setup in), 107 s the hard-block
+preset, 69 s cheap, 73 s cheap005, 488 s the four; oversized 863, 280, 157, 226, 1,287 s; small on
+a core 55, 60, 14, 17, 146 s.
+
+The measurement gaps. One-card timing with setup: above
+(consolidated_rows/summary_lineup_onecard.csv). S0.005cat's real clearing with the polish
+(`cheap005`): on the 60 large blocks +0.0018 L_P over the cheap preset (median +0.0006, ahead on
+38, behind on 22), +0.0030 L_{P_1/2}, +0.0030 L_J2, at 73 s against 69 s; on the 220 small blocks
++0.0007 (41 / 38) at 17 s against 14 s. The record's interpolated +0.0046 (44 blocks, J_2, the
+raster) is +0.0018 as a real clearing polished under P: both are on the frontier (the finer batch
+better, slower), and whether the cheap preset takes it is the owner's call. The sightline lineup:
+closed (sightline went with the raster, phase 3).
+
+**The road methods under free first.** To fill: the lineup's runs are on the cluster (road_rescore
+`lineup-one`, the 82 large blocks x 7 methods).
+
+(Roads: two networks could not be scored: the carved mesh is refused as not Delaunay, 39240's
+cycle_desire (2 passages) and 64070's resistance_lp (1). On 39240 three vertices of the corridors'
+cut lie within 0.3 mm (62.2045, 67.711; 62.2046, 67.711; 62.2049, 67.7111 in the block's frame),
+and a sliver of 9e-8 m^2 with edges of 0.1 and 12 mm, inside one face, is above the flat test's
+1.5e-8 at that edge (FLAT_REL L^2), so its neighbour's centres come out in the wrong order;
+conformity splits only face boundaries. A defect of the carving, for after the pass: snap the cut's
+vertices within a tolerance, or conform a constrained edge inside a face, then score the two.)
+
+**Phase 5: pruning.** The speed-quality review of 2026-10-12 (a read of the record for the owner's
+question on SIMP, the greedies and the cheap preset; its report in the session, not in NOTES)
+listed 17 variants beaten on quality and time under J_2 on the raster: `.r2`, `.r2l2` alone,
+`.p64w8`, `.pP`, `.p256w16x2`, seeding `.g`, the ungated two-track, `.c1`, `.k2`, MMA, damped OC,
+`.m2`, `.C`, `.p256w8.c0.75`, floating search, grow-then-prune and swings from the greedy. On the
+complex: `.c1`, `.c0.75` and `.C` went with the raster; `.r2`, `.p64w8`, `.p256w16x2` and `.k2` are
+values of kept parameters (the roundings in every stage, which `.r2l2` restricts to the last two;
+the polish's cap and width; the incumbent's stride), no code of their own and no preset selects
+them; floating search, grow-then-prune and swings from the greedy are configurations of search.py
+(floating search's niche, the whole curve in one run, is not what a one-budget screen measures;
+grow-then-prune is its faster, weaker sibling on that curve; a swing from the greedy is the
+finisher's code from another start); the ungated two-track keeps the better of SIMP's polished
+answer and the greedy's polished track, so the gated one (the hard-block preset) is never ahead of
+it on P by construction. The six with code of their own were screened under P, each in the
+default's company, against SIMP's default re-run beside it on one card (consolidated `screen`; rows
+screen_rows/, in the store): on seqscreen's held-out order, 15 blocks, then as its stop said
+(cp-screen-w1, -w2a, -w2b: 6.3 GPU-h). Paired against the default (variant - default; Lens A at
+area D 0.05 under RUNTIME; the time per block on one card, the ratio's geometric mean with its 95%
+Bayesian-bootstrap interval; ahead / behind by more than 1e-9):
+
+    variant                blocks  stop     L_P                L_{P_1/2}          L_J2
+    .r2l2 (late roundings)     20  ask      +0.00013 (2 / 0)   -0.00031 (1 / 1)   -0.00005 (1 / 1)
+    .pP (two-phase polish)     15  keep     +0.00001 (1 / 0)   -0.00005 (0 / 1)   +0.00004 (1 / 0)
+    .gS0.01cat (the seed)      15  keep      0 (0 / 0)          0 (0 / 0)          0 (0 / 0)
+    .m2 (a second start)       15* keep      0 (0 / 0)          0 (0 / 0)          0 (0 / 0)
+    .umma0.2 (MMA)             15  keep     -0.00017 (6 / 8)   -0.00085 (5 / 9)   -0.00050 (7 / 7)
+    .uoc0.3m0.2 (damped OC)    15  keep     -0.00068 (0 / 15)  -0.00066 (7 / 8)   -0.00063 (6 / 9)
+
+    time on one card (variant / default)   .r2l2 1.24 [1.19, 1.30]   .pP 1.12 [1.09, 1.15]
+                                           seed 1.25 [1.21, 1.29]    .m2 1.64 [1.59, 1.69]
+                                           MMA 1.04 [0.99, 1.08]     damped 1.01 [0.94, 1.09]
+
+(Every stop settled but `.m2`'s, which ran out: `.m2` is not built where free first holds
+buildings, relax.built_for_holds, so its screen ran on the 15 of the 46 held-out blocks where it
+holds nothing, all of them.) The rule (a variant goes only if another beats it on every axis a user
+could care about and ties on none; absent numbers it stays) deletes none: `.r2l2`, `.pP` and MMA
+are ahead of the default on some block (`.r2l2` by +0.0025 on 44602, MMA by up to +0.001 on 6 of
+15); the seed and `.m2` give the default's clearing on every block (a tie on every lens, at 1.25x
+and 1.64x the time); damped OC trails on every lens's mean (L_P on all 15: -0.00068 [-0.00098,
+-0.00044]) at the default's time (a tie: 0.94 -- 1.09). The GPU's memory is not an axis here: the
+rows' gpu_gb is the device's memory in use, which counts the pool the runs before it in the process
+left (the default always ran first). Three are beaten on everything the rule reads but a tie: the
+seed and `.m2` (quality) and damped OC (time); deleting them is the owner's call on a weaker
+reading of the rule. `.r2l2`'s screen settled at 20 blocks on "ask": is +0.00013 Lens A of P (0.04%
+of the default's mean) worth 1.19x its GPU time (17 s a block)? A yes puts RATES' top at its
+break-even, 7.9e-6 Lens A per GPU-second, a no its bottom.
+
+**The guards on the final code.** Every guard both ways here on cores (96 runs, 10.6 process-h at
+68057a29; gap_clear_check's `identity` and `roads` again at 892f4ecd, road_rescore's last change):
+gap_clear_check's 24 guards on cores (55 runs with their faults), gap_check 5 (11), gap_flow_check
+6 (12), pweight_check 5 (10), free_roads_check `free-roads` (with `one-short` and
+`through-barriers`), clearings_check `overwrite` (`no-check`), cluster_check `ids` (`no-check`) and
+`cpu`: each passes, and fails under each of its faults. The device guards (`device`,
+`device-roads`) both ways on a card on 20269 and 18895 (cp-dev2 at 68057a29): cuDSS against SuperLU
+within 1e-10 of the largest everywhere, the fault `perturb` caught (0.6 -- 0.97). The sweep found
+one guard failing without its fault: pweight_check `weights`, its oracle with no leak while
+pweight's metric (RUNTIME) now leaks (up to 9.9e-3 off); the oracle now adds the runtime's internal
+leak from its definition (gap_clear_check._leak_oracle): within 2.2e-11, the fault `swap-time`
+still caught. And the free-roads guard's `one-short` fault never ended under the retrying stage
+(the shortened road's end was not its target, so the same road came back): the retries are keyed by
+the target and counted, no network changed (2d5df972; five networks of 30796 and 23597 proposed
+again at HEAD, identical WKB for WKB to the runs'). pytest tests/test_clearings.py: 37 pass. mypy
+--strict: clean on every clean module the pass touched (atlas, clearings, clearings_check,
+clearings_export, consolidated, free_roads, free_roads_check, gap_exits, metrics, polish_greedy,
+region_leaks, search, tests/test_clearings.py); the others hold their errors at the pass's start
+(common 12, gap_calib 8, gap_clear 32, gap_clear_check 10, pweight 4, pweight_check 6, regions 5,
+relax 11, road_rescore 18) but gap_complex (25 against 24: origin_of's untyped block, left so, its
+source in the free stage's identity). ruff check: clean.
