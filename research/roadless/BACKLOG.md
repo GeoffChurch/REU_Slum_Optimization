@@ -598,9 +598,9 @@ Not pursued, with what would change that:
   gives today on the same node and bank block (NOTES, "The arterial: an incremental gain, a cap
   that holds, a displacement budget"). Next: re-run lineup-one at the exact checkout 0f4be69e on
   ai05 for a few commits; resolved when either side's first commit is explained.
-- **The arterial's next speed items**: with the incremental gain (1.0 -- 2.0 ms at S 0, under 1 ms
-  after) a candidate's cost is the snap (~3 ms) and the displacement cost (~4.6 ms at S 0); the
-  ranking grows with the candidates (PerLineFallback's anchors).
+- **The arterial's next speed items**: with the incremental gain (1.0 -- 2.0 ms at S 0, 0.25 --
+  1.1 ms after) a candidate's cost is the snap (~3 ms) and the displacement cost (~4.6 ms at S 0);
+  the ranking grows with the candidates (PerLineFallback's anchors).
 
 ## How we run experiments
 

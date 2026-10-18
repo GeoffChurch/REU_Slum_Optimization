@@ -7955,7 +7955,7 @@ and 0.82 h, against the stored 32.3 h.) Every run stopped on max_displacement (n
 Median step 8.8 -- 18.6 s (cur02, anchors up to 304) against 8.4 -- 15.3 s (cap02, 128).
 
 **Destroyed area runs far above the scored area D** (the plan's Ruling 1, measured): the stop at
-0.20 destroyed sits at scored area D 0.040 -- 0.072 (cur02) and 0.018 -- 0.067 (cap02), 3 -- 11x
+0.20 destroyed sits at scored area D 0.026 -- 0.072 (cur02) and 0.018 -- 0.067 (cap02), 3 -- 11x
 below; the scored budgets 0.10, 0.15 and 0.20 are unreached on every block, 0.05 on four of six
 (20269, 39240, 8480, 38616), and 0.02 on 8480 under cap02. The stored whole networks show the same
 gap (6310: 0.854 destroyed against 0.448 scored). Lens A at 0.05 and 0.10 cannot be read off the
