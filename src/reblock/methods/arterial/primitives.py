@@ -165,16 +165,3 @@ def _explode(merged: BaseGeometry | None, crs: CRS, width_m: float) -> GeoDataFr
 def _planarize(lines: list[LineString], crs: CRS, width_m: float) -> GeoDataFrame:
     """unary_union the lines (nodes crossings), explode to LineStrings, one row each."""
     return _explode(_merge(lines), crs, width_m)
-
-
-def _union_with(base_merged: BaseGeometry | None, real: LineString) -> BaseGeometry:
-    """Incremental planarize: node `real` against the already-merged `base_merged` (or just
-    `real` alone if there is no base yet) instead of re-unioning the whole committed list. Matches
-    `_StepContext.score_candidate`'s road-graph merge exactly (`budget.py`) -- bit-exact for
-    BUILDABLE trials, which meet the committed/street network only at shared boundary-graph
-    vertices, so this incremental two-stage union nodes identically to a one-shot union of the
-    full list. It is NOT bit-exact for aspirational free chords crossing a committed edge at a
-    float interior point ("Bug 2" -- see `_StepContext`'s docstring), so callers must gate this
-    on `realizer.snaps` and use the full `_planarize(committed + [real], ...)` for a
-    non-snapping realizer."""
-    return unary_union([base_merged, real]) if base_merged is not None else unary_union([real])

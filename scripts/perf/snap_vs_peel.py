@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import cast
 
 import numpy as np
+from shapely import STRtree
+from shapely.ops import unary_union
 
 from reblock.budget import access_burden
 from reblock.contracts import Block
@@ -98,7 +100,8 @@ def main() -> None:
     base_burden = access_burden(parcel_access_layers(
         adjacency, None, unreached=past_every_parcel))
     t_peel0 = time.perf_counter() - t0
-    scorer = _AccessBlock(adjacency, base_burden)     # what `Access().for_block` builds
+    scorer = _AccessBlock(adjacency, base_burden,      # what `Access().for_block` builds
+                          STRtree(list(block.parcels.geometry)))
 
     print(f"  ONCE PER BLOCK      parcel_adjacency {t_adj:8.2f} s")
     print(f"                      boundary graph   {t_graph:8.2f} s  "
@@ -126,8 +129,7 @@ def main() -> None:
     for real in reals:
         if real is None or real.length == 0:
             continue
-        from reblock.methods.arterial.primitives import _union_with
-        trial = _explode(_union_with(None, real), block.crs, 2.0 * HALF_W)
+        trial = _explode(unary_union([real]), block.crs, 2.0 * HALF_W)
         t0 = time.perf_counter()
         scorer.value(trial)
         peel_t.append(time.perf_counter() - t0)
