@@ -166,8 +166,11 @@ items up front"), in the order proposed:
    medians +0.47 -- +0.80), resistance_lp leads all three, and in B's order SIMP's default, free
    first on the 12 with enclosed homes (item 3), is ahead of the best road on all 60 (by a median
    +0.152 where (i) ties, on 55, at least +0.047; on (i) on the other 5). Open: the 23
-   oversized blocks (cycle_desire's cost and memory go with area) and the arterial (its
-   `max_roads: 60` keeps it short of Lens A).
+   oversized blocks (cycle_desire's cost and memory go with area) and the arterial (its road cap
+   kept it short of Lens A; since 2026-10-18 its budget is `max_displacement: 0.20` of footprint
+   area destroyed, which stops it at scored area D 0.02 -- 0.07 on six lineup blocks, short of
+   Lens A again: NOTES, "The arterial: an incremental gain, a cap that holds, a displacement
+   budget").
    **The metric decisions** (owner 2026-10-12, walking through four: the escape-time functional,
    the population, the conductance, the exits). (1) **P as the headline** ("leaning toward P with
    J_2 as a side report"): one solve, monotone, convex in the clearing (a certified bound), the
@@ -486,7 +489,8 @@ can be done after we've done the entire website/README/examples revamp"):
   the final metric")**: RUNTIME switched (this file's head) and every block re-scored under it: the
   three presets free first on all 302 blocks, the small blocks' rows among them (Presets now,
   above); free first for the plain greedy (item 3); the road methods under free first on the 82
-  large blocks, the oversized ones and the arterial at 300 roads among them (items 4 and 5); the
+  large blocks, the oversized ones and the arterial at 300 roads among them (items 4 and 5; the
+  arterial's rows to be re-proposed at its displacement budget, Task 7 of the arterial plan); the
   measurement gaps: the one-card timing with setup (a large block's four presets 488 s, median;
   consolidated_rows/summary_lineup_onecard.csv), S0.005cat's real clearing with the polish
   (`cheap005`: +0.0018 L_P over the cheap preset on the 60 large blocks, ahead on 38, at 73 s
@@ -574,6 +578,29 @@ Not pursued, with what would change that:
   direct; wiki `pages/reblock/raster-escape-time-metric-retired.md`).
 - *The greedy's sweep kernel*: closed, the raster's GPU sweep (the complex's greedy sweeps on the
   host, clear.Catchment; wiki `pages/reblock/raster-escape-time-metric-retired.md`).
+
+## The arterial (road method)
+
+- **The arterial's budget against the scored D** (owner's call, 2026-10-18 study): at
+  `max_displacement: 0.20` of footprint area destroyed (a touched building counted whole) the
+  arterial stops at scored area D 0.02 -- 0.07 on six lineup blocks, so Lens A (0.05, 0.10) is
+  unreached on most. Either the scored D follows the destroyed-area definition, or the arterial's
+  budget rises (the six blocks' whole networks reach 0.59 -- 0.90 destroyed); a re-run of
+  arterial_study.py's arms at the chosen budget decides it. Task 7 (the lineup's migration) waits
+  on this answer too.
+- **A HardCap that keeps committed-road junctions** (idea): HardCap's samples replace the vertex
+  family once the cap binds, and it trailed PerLineFallback at D 0.05 on 6310 (-0.061 L_P) while
+  ahead on 40144. Keeping the committed roads' endpoints among the capped anchors (continuations
+  for free) could put it on the quality frontier while keeping its flat step; tried by a third arm
+  in arterial_study.py.
+- **The stored arterial networks are not reproduced** (open): lineup-caf14fa2's arterial networks
+  (run cp-roads2-arterial-large, 0f4be69e, ai05) differ from the first commit from what that code
+  gives today on the same node and bank block (NOTES, "The arterial: an incremental gain, a cap
+  that holds, a displacement budget"). Next: re-run lineup-one at the exact checkout 0f4be69e on
+  ai05 for a few commits; resolved when either side's first commit is explained.
+- **The arterial's next speed items**: with the incremental gain (1.0 -- 2.0 ms at S 0, under 1 ms
+  after) a candidate's cost is the snap (~3 ms) and the displacement cost (~4.6 ms at S 0); the
+  ranking grows with the candidates (PerLineFallback's anchors).
 
 ## How we run experiments
 

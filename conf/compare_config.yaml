@@ -116,6 +116,31 @@ all_methods:
     road_width_m: 7.0
     workers: 16
     engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512, threads: 8}
+  # Two operating points of the street-priced access arterial, one per anchor sampler (anchors.py),
+  # from the six-block study of 2026-10-18 (research/roadless/NOTES.md, "The arterial: an
+  # incremental gain, a cap that holds, a displacement budget"; arterial_rows/summary_*.csv): neither
+  # dominates the other.
+  #   greedy_arterial_access_displacement (above), QUALITY-FIRST: PerLineFallback(32, 128), whose
+  #     "cap" admits one extra anchor per network line (up to 304 anchors on the study's blocks).
+  #     Ahead of HardCap at area D 0.05 on 6310 (+0.06 L_P); gives up per-step time, which grows
+  #     with the network (median step 8.8-18.6 s against 8.4-15.3 s).
+  #   greedy_arterial_access_displacement_fast (here), SPEED-FIRST: HardCap(32, 128), at most 128
+  #     anchors on any network, a flat per-step cost: 0.74-0.80x the wall on the two largest blocks
+  #     (8480, 38616). Gives up the vertex family once the cap binds, so it can need more commits to
+  #     the same budget (2.0x the wall on 39240) and trailed at D 0.05 on 6310 (ahead on 40144).
+  # The repulsion twin keeps the quality-first sampler (the matched pair moves together).
+  greedy_arterial_access_displacement_fast:
+    _target_: reblock.methods.arterial.GreedyArterialReblocker
+    realizer: {_target_: reblock.methods.arterial.SnapToBoundary, lam: 2.0}
+    objective: {_target_: reblock.methods.arterial.Access}
+    cost: {_target_: reblock.methods.arterial.Displacement}
+    max_roads: 1000
+    anchors: {_target_: reblock.methods.arterial.HardCap, n: 32, max_anchors: 128}
+    max_displacement: 0.20
+    top_k: 8
+    road_width_m: 7.0
+    workers: 16
+    engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512, threads: 8}
   greedy_arterial_aspirational:
     _target_: reblock.methods.arterial.GreedyArterialReblocker
     realizer: {_target_: reblock.methods.arterial.IdealChord}

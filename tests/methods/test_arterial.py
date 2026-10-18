@@ -26,6 +26,7 @@ from reblock.methods.arterial import (
     Displacement,
     GreedyArterialReblocker,
     Grow,
+    HardCap,
     Length,
     PerLineFallback,
     Repulsion,
@@ -547,6 +548,15 @@ def test_access_config_uses_shortlist_engine_and_capped_anchors() -> None:
             road_width_m=DEFAULT_ROAD_WIDTH_M, max_roads=1000, anchors=PerLineFallback(32, 128),
             top_k=8, workers=16,
             engine=ShortlistEngine(k=512, threads=8), max_displacement=0.20).identity, name
+
+    # The speed-first twin of the displacement preset differs only in its sampler (HardCap, a cap
+    # that holds): pinned whole, so the two operating points cannot drift apart elsewhere.
+    fast = methods["greedy_arterial_access_displacement_fast"]
+    assert isinstance(fast, GreedyArterialReblocker)
+    shipped = methods["greedy_arterial_access_displacement"]
+    assert isinstance(shipped, GreedyArterialReblocker)
+    assert fast.anchors == HardCap(32, 128)
+    assert fast.identity == replace(shipped, anchors=HardCap(32, 128)).identity
 
     # Negative direction: the cap and ShortlistEngine are access-only. "Tidying" either onto a
     # directness method later (greedy_arterial_buildable is already pinned to engine=LazyEngine(),

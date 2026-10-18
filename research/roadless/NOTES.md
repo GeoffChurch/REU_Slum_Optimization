@@ -7894,3 +7894,98 @@ region_leaks, search, tests/test_clearings.py); the others hold their errors at 
 (common 12, gap_calib 8, gap_clear 32, gap_clear_check 10, pweight 4, pweight_check 6, regions 5,
 relax 11, road_rescore 18) but gap_complex (25 against 24: origin_of's untyped block, left so, its
 source in the free stage's identity). ruff check: clean.
+
+### The arterial: an incremental gain, a cap that holds, a displacement budget (2026-10-18)
+
+The plan (docs/superpowers/plans/2026-10-18-arterial-speed-and-budget.md; branch
+research/arterial-speed, Tasks 1 -- 6) took the lineup's arterial
+(greedy_arterial_access_displacement) from a road-count budget that never bound for the method (55
+of 62 lineup networks at 300 commits ended with every parcel at depth 1, a median 54 road km/km2)
+to a displacement budget, and made a step cheaper first.
+
+**Before** (arterial_rows/before/: the brief's microbench on 20269): one step grew from 10 s with
+nothing committed to 51 s at 607 segments; the exact evaluation of the 512 shortlisted candidates
+was 8.8 of the 10.4 s at S 0, the access gain alone (a full re-peel per candidate) 9 -- 51 ms of
+the 17 -- 54 ms each.
+
+**The incremental gain** (Task 1, objectives._AccessStep): a snapped road's gain lowered from the
+step's own peel (a breadth-first relaxation from the parcels it fronts, exact integer burdens) with
+liveness one dwithin test against the step's seed (streets and committed roads, every committed
+road live, asserted). Exact: every realized candidate of three greedy steps on 1808, DJI.1_2_602
+and five fixture blocks equals the re-peel (==), and the guard arterial_check.py gain on 20269 and
+38616 at 0/50/150/300 stored segments found 0 mismatches in 4,096 shortlisted candidates; the
+faults always-live, no-min and streets-only each fail it. The gain is 1.0 -- 2.0 ms per candidate
+at S 0 and 0.25 -- 1.1 ms after, against 7.7 -- 40 ms for the re-peel. The same 40 commits as
+before on 20269, 6310 and 39240 (120 of 120, WKB for WKB), the steps' total time 455 -> 182 s, 608
+-> 224 s, 491 -> 187 s (2.5 -- 2.9x: snap, ~3 ms, and the displacement cost, ~4.6 ms, now dominate
+a candidate).
+
+**The sampler** (Task 2, anchors.py): AnchorSampler as a Strategy, Uncapped (the old max_anchors:
+0), PerLineFallback (the old capped sampler, moved unchanged) and HardCap (at most max_anchors
+samples at one global arc-length stride). On 20269's stored network at 0/150/300/450/607 segments
+PerLineFallback(32, 128) gives 112, 229, 323, 409, 525 anchors (its cap restarts on every line),
+HardCap(32, 128) 112, 128, 128, 128, 128 (guard arterial_check.py anchors, fault per-line).
+
+**The stop** (Task 3, stop.py): a required keyword-only max_displacement; the greedy stops before
+the step that would start with the committed roads' destroyed footprint share at or past it (a
+touched building counted whole, the owner's definition of 2026-10-18), the crossing road kept, so a
+stopped run is a commit prefix of a longer one; every proposal records why it stopped
+(max_displacement, no_gain or max_roads). Every arterial preset at 0.20; the access pair's
+max_roads 1000 a safety cap; road_rescore's ARTERIAL_MAX_ROADS deleted and the lineup's rows root
+hashes the arterial's whole identity. Under the destroyed-area share a budget of 1.0 binds once
+every building is touched (1808's ten do), so 'no budget' is math.inf at the engine. The directness
+presets take 0.20 too: on a block as small as 1808 it binds after one road.
+
+**The study** (Tasks 4 -- 5, arterial_study.py; orion, cluster run arterial-study-b, 12 single-CPU
+tasks, all passed, 19 min wall, 1.7 task-h with scoring; rows arterial_rows/study untracked,
+summaries arterial_rows/summary_{runs,lenses,prefixes}.csv). cur02 = PerLineFallback(32, 128),
+cap02 = HardCap(32, 128), both at 0.20 destroyed and 1000 roads:
+
+    block      km2   stored h  cur02 s  cap02 s  commits  scored D_area at the stop
+    6310       0.084   4.04      257      283     23 / 28  0.072 / 0.067
+    20269      0.103   2.81      143      126     16 / 14  0.044 / 0.046
+    40144      0.153   4.29      242      285     19 / 24  0.055 / 0.053
+    39240      0.208   2.98       84      168      9 / 20  0.040 / 0.046
+    8480       0.387   5.46      726      579     50 / 62  0.026 / 0.018
+    38616      0.461  12.69      847      625     41 / 41  0.043 / 0.040
+
+(Proposal walls; the tasks with prefixes and complex scoring took 3.6 -- 17.3 min. Task 5's commit
+subject says 0.95 h and 0.83 h; the proposal walls sum to 0.64 h and 0.57 h, the tasks to 0.89 h
+and 0.82 h, against the stored 32.3 h.) Every run stopped on max_displacement (no max_roads stop).
+Median step 8.8 -- 18.6 s (cur02, anchors up to 304) against 8.4 -- 15.3 s (cap02, 128).
+
+**Destroyed area runs far above the scored area D** (the plan's Ruling 1, measured): the stop at
+0.20 destroyed sits at scored area D 0.040 -- 0.072 (cur02) and 0.018 -- 0.067 (cap02), 3 -- 11x
+below; the scored budgets 0.10, 0.15 and 0.20 are unreached on every block, 0.05 on four of six
+(20269, 39240, 8480, 38616), and 0.02 on 8480 under cap02. The stored whole networks show the same
+gap (6310: 0.854 destroyed against 0.448 scored). Lens A at 0.05 and 0.10 cannot be read off the
+arterial at this budget: the owner's call whether the scored D follows the destroyed-area
+definition or the arterial's budget rises.
+
+**Verdict** (the plan's Ruling 7): neither sampler dominates. cap02's wall is 0.74 -- 2.00x cur02's
+(faster on 20269, 8480, 38616; slower on 6310, 40144 and 39240, where it needs more commits to the
+same budget); at D 0.05 only 6310 and 40144 reach the budget in both arms, cap02 behind on 6310
+(L_P -0.061) and ahead on 40144 (+0.024), median -0.019 L_P, -0.012 L_Pq, -0.015 L_J2; no block
+reaches 0.10. Both stay: greedy_arterial_access_displacement keeps PerLineFallback (quality-first)
+and greedy_arterial_access_displacement_fast takes HardCap (speed-first: a flat per-step cost,
+ahead on the two largest blocks); the repulsion twin keeps the quality-first sampler.
+
+**The baseline is not reproduced.** The fidelity checks fail: cur02's network lies 1.7 -- 8.7 km
+outside the stored lineup network (lineup-caf14fa2), from the first commit, so the prefix movement
+(summary_prefixes.csv: symmetric differences 0.5 -- 3.7 of the baseline prefix's length) and the
+lens deltas measure the stored network against a fresh one, not the stop. The stored networks came
+from run cp-roads2-arterial-large at 0f4be69e on ai05 (quadro2), whose code, lock and conf match
+18044cbb; today this host, orion and a probe on ai05 itself (3 commits on 20269 and 6310) agree
+commit for commit with each other and with the pre-change tree, and none gives the baseline's first
+commit (on 20269 the step-0 leader leads by 9% and none of the top 12 candidates lies in the
+baseline). Checked and not the cause: the run's own bank block (identical parcels, streets and
+footprints), dependency versions, the derive path, the shortlist's ties at its cut, the checkout's
+editable install. Open; Task 7 re-proposes the lineup's arterial in any case.
+
+**The migration** (Task 7, owner-gated): re-proposing the arterial on the lineup's 62 blocks at the
+default preset. Against the stored walls (612.6 h for 62 networks at 300 commits) the study's
+proposal walls are 0.8 -- 3.7% (median 1.7%): 5 -- 23 task-h of proposal (central ~10), plus the
+scoring the stored rows took (8.1 h of complex and prefixes, its largest task 2,609 s at up to 64
+GB): ~13 -- 31 task-h, central ~18. The fit in area alone (0.01 + 0.59 h per km2) would give 128
+task-h, driven by the oversized blocks (up to 51.7 km2) that the six blocks (0.08 -- 0.46 km2) do
+not cover: those are the uncertain part.
