@@ -102,11 +102,11 @@ Claude-Session: https://claude.ai/code/session_01RoNpoEMZ1kz2hogCsAsmXJ" -- <pat
 11. **GeoffChurch/epistemetry #10** (a replay charges a step unit by unit; a live parallel wave pays the whole step).
     It does not bite the adoption test of Task 4: both sides are replays charged unit by unit, and both presets share the floor's step, so neither the comparison nor Ruling 3's ranking can move by it.
     It bites the forecast of a live screen's cost where a veto falls inside a multi-unit step, which with step 1 is only the floor's first step (C1m4/p64 under the veto: about 6 blocks charged where a 12-block floor wave pays 12).
-    Task 4 measures the gap on its runs (`wave_cost` beside `cost`) and Task 9 reports it, and comments it on #10 with the owner's yes.
+    Task 4 measures the gap on its runs (`wave_cost` beside `cost`) and Task 9 reports it, and comments it on #10 (the owner's yes, 2026-10-18).
 
-**Questions for the owner:**
-1. At a pin move whose random streams differ, re-derive the finished phase-5 screens afresh (this plan, Ruling 10: one derivation, checked by the `screens` guard) or keep their ledgers across the pin as epistemetry's spec §5.3 prefers (a guard branch that skips the fresh check for a ledger made at an older pin)?
-2. Post Task 4's `wave_cost` measurement as a comment on GeoffChurch/epistemetry #10 (Task 9 Step 4)?
+**The owner's answers (2026-10-18):**
+1. At a pin move whose random streams differ, the finished phase-5 screens are re-derived afresh (Ruling 10), with no guard branch for ledgers made at an older pin.
+2. Task 9 Step 4 posts Task 4's `wave_cost` measurement as a comment on GeoffChurch/epistemetry #10.
 
 ## Review Focus
 
@@ -661,7 +661,7 @@ Candidates:
 Use the `wiki` skill, `wiki search --lex "<question>"` from `~/wiki` first, and add to the page found rather than open a new one.
 Nothing learned: nothing written.
 
-- [ ] **Step 4: Comment on GeoffChurch/epistemetry #10, with the owner's yes (question 2)**
+- [ ] **Step 4: Comment on GeoffChurch/epistemetry #10 (the owner's yes, 2026-10-18)**
 
 Run: `gh issue comment 10 --repo GeoffChurch/epistemetry --body "<Task 4's wave_cost measurement: the share of runs and the cost fraction under-charged, per preset, all runs and C1m4/p64 under the veto; step 1 past a 15-block floor; reblock's commit>"`.
 
@@ -697,4 +697,4 @@ The rounding-tie issue once held for Task 4 is moot: Task 4 no longer compares a
 - Task 4's run takes about 2.5 h in the background.
   Task 5's code can be written meanwhile; its guard does not depend on Task 4's output.
   Task 6 needs Task 4's CSV, and Task 8 needs every task before it.
-- Stop points that need the owner: Task 4's exact or equivalence checks failing, or its shift test rejecting; a phase-5 call or stop outside Task 7 Step 3's expectations; the questions under Rulings (a pin move's re-derivation, the comment on #10).
+- Stop points that need the owner: Task 4's exact or equivalence checks failing, or its shift test rejecting; a phase-5 call or stop outside Task 7 Step 3's expectations.
