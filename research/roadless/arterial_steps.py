@@ -1,7 +1,7 @@
 """The arterial's greedy timed step by step, and two such logs compared commit for commit.
 
     S=research/roadless/arterial_steps.py   # from a tree's root, PYTHONPATH=., single-threaded
-    uv run python $S steps <out> <ids,> <max_roads>   # the lineup's arterial, capped at max_roads
+    uv run python $S steps <out> <ids,> <max_roads>   # the lineup's arterial, max_roads commits
     uv run python $S compare <dir_a> <dir_b> <ids,>  # the commits and step times of two logs
 
 `StepLog` patches the engine module's documented instrument seams (`engines._candidate_chords`
@@ -9,17 +9,19 @@ and `engines._best_candidate`, which the greedy loop looks up in that namespace)
 row per step: the step (the commits before it), the time at its end and its length, the anchors
 and candidates it enumerated, whether it committed, the committed road's WKB, and the two highest
 gains among the candidates it scored. `steps` proposes the lineup's arterial
-(`road_rescore.lineup_arms()[ARTERIAL]`) with `max_roads` replaced, writing
-<out>/steps_<id>.parquet after every step, so a killed run keeps its rows.
+(`road_rescore.lineup_arms()[ARTERIAL]`) with `max_roads` replaced and no displacement budget
+(NoBudget: the preset's own budget would cut a before/after run short of its `max_roads`
+commits), writing <out>/steps_<id>.parquet after every step, so a killed run keeps its rows.
 
 `common` and `road_rescore` are imported from research/roadless relative to the WORKING
 directory, and `reblock` from that tree's environment, so this one file times either tree: the
 before/after comparison of the incremental access gain runs it from a base tree and from the
 worktree.
 
-`compare`: per block, how many leading steps commit the same road (WKB, exactly), the first step
-that does not (with both logs' top-two gains there), and the median and total ratio of step time
-(b over a) over the steps both logs share.
+`compare`: per block, how many steps commit the same road (WKB, exactly), the first step that
+does not (with both logs' top-two gains there), and the median and total ratio of step time (b over
+a). Two logs of one block must have the same length: compare refuses unequal logs rather than
+compare a prefix (a run cut short would otherwise read as agreeing).
 """
 from __future__ import annotations
 
@@ -42,6 +44,7 @@ import road_rescore  # noqa: E402
 
 from reblock.methods.arterial import engines  # noqa: E402
 from reblock.methods.arterial.reblocker import GreedyArterialReblocker  # noqa: E402
+from reblock.methods.arterial.stop import NoBudget  # noqa: E402
 
 
 class StepRow(NamedTuple):
@@ -110,7 +113,7 @@ def steps(out: Path, ids: list[str], max_roads: int) -> None:
     out.mkdir(parents=True, exist_ok=True)
     preset = road_rescore.lineup_arms()[road_rescore.ARTERIAL]
     assert isinstance(preset, GreedyArterialReblocker)
-    method = dataclasses.replace(preset, max_roads=max_roads)
+    method = dataclasses.replace(preset, max_roads=max_roads, budget=NoBudget())
     print(method, flush=True)
     for b in common.build_blocks(ids):
         path = out / f"steps_{b.block_id}.parquet"
@@ -127,19 +130,23 @@ def steps(out: Path, ids: list[str], max_roads: int) -> None:
 
 
 def compare(dir_a: Path, dir_b: Path, ids: list[str]) -> None:
-    for bid in ids:
-        a = pd.read_parquet(dir_a / f"steps_{bid}.parquet")
-        b = pd.read_parquet(dir_b / f"steps_{bid}.parquet")
-        n = min(len(a), len(b))
+    logs = {bid: (pd.read_parquet(dir_a / f"steps_{bid}.parquet"),
+                  pd.read_parquet(dir_b / f"steps_{bid}.parquet")) for bid in ids}
+    unequal = [f"{bid} ({len(a)} and {len(b)} steps)" for bid, (a, b) in logs.items()
+               if len(a) != len(b)]
+    if unequal:
+        raise SystemExit(f"compare refuses logs of unequal length: {', '.join(unequal)}")
+    for bid, (a, b) in logs.items():
+        n = len(a)
         same = 0
         while same < n and a.commit_wkb.iloc[same] == b.commit_wkb.iloc[same]:
             same += 1
-        ratio = b.step_s.iloc[:n].to_numpy() / a.step_s.iloc[:n].to_numpy()
-        print(f"{bid}: {same} of {n} shared steps commit the same road "
+        ratio = b.step_s.to_numpy() / a.step_s.to_numpy()
+        print(f"{bid}: {same} of {n} steps commit the same road "
               f"({int(a.committed.sum())} and {int(b.committed.sum())} commits); step time b/a "
               f"median {float(np.median(ratio)):.3f}, total "
-              f"{b.step_s.iloc[:n].sum() / a.step_s.iloc[:n].sum():.3f} "
-              f"({a.step_s.iloc[:n].sum():.0f} s -> {b.step_s.iloc[:n].sum():.0f} s)", flush=True)
+              f"{b.step_s.sum() / a.step_s.sum():.3f} "
+              f"({a.step_s.sum():.0f} s -> {b.step_s.sum():.0f} s)", flush=True)
         if same < n:
             ra, rb = a.iloc[same], b.iloc[same]
             print(f"  first difference at step {same}: a's top gains {ra.gain1!r}, "
