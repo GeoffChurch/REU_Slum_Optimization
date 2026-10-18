@@ -197,7 +197,8 @@ def main() -> None:
         GreedyArterialReblocker(realizer=SnapToBoundary(lam=2.0), objective=Access(),
                                 cost=Displacement(), workers=8, max_roads=MAX_ROADS,
                                 anchors=Uncapped(32), top_k=8,
-                                road_width_m=DEFAULT_ROAD_WIDTH_M, engine=ExactEngine()).propose(b)
+                                road_width_m=DEFAULT_ROAD_WIDTH_M, engine=ExactEngine(),
+                                max_displacement=1.0).propose(b)
         by_block[b.block_id] = list(_ROWS)
     OUT.write_text(json.dumps(by_block, indent=1))
 

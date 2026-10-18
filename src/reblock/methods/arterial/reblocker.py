@@ -1,5 +1,6 @@
 """GreedyArterialReblocker: greedily insert the single straight arterial with the best
-objective gain per meter, one at a time, until a road budget runs out. How a candidate chord
+objective gain per meter, one at a time, until the displacement budget is reached, the road cap
+binds, or nothing gains (stop.py). How a candidate chord
 becomes a road is an injected `ChordRealizer` -- SnapToBoundary (snapped to the parcel-boundary
 graph; the shippable navigability method) or IdealChord (ideal chords; a diagnostic isolating the
 effect of frontage-snapping, NOT a universal directness ceiling -- see the design doc's correction
@@ -14,7 +15,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Hashable
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 
 from reblock.contracts import Block, Proposal
 from reblock.derive_graph import config_identity
@@ -54,6 +55,17 @@ class GreedyArterialReblocker:
     # LazyEngine (CELF lazy-greedy, valid only for submodular objectives). Injected rather than
     # selected by lazy/candidate_policy/rescore_every flags, matching `realizer` above.
     engine: ArterialEngine
+    _: KW_ONLY
+    # The budget: the greedy stops before the step that would start with the committed roads'
+    # destroyed footprint share (a touched building counted whole) at or past this, the crossing
+    # road kept. `max_roads` is the other stop; the reason is in every proposal's params. See
+    # stop.py.
+    max_displacement: float
+
+    def __post_init__(self) -> None:
+        if not 0.0 < self.max_displacement <= 1.0:
+            raise ValueError(f"max_displacement is a share of footprint area in (0, 1], got "
+                             f"{self.max_displacement}")
 
     @property
     def identity(self) -> Hashable | None:
@@ -63,10 +75,12 @@ class GreedyArterialReblocker:
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior
-        roads = self.engine.run(
+        run = self.engine.run(
             block, objective=self.objective, cost=self.cost, realizer=self.realizer,
             anchors=self.anchors, top_k=self.top_k, max_roads=self.max_roads,
-            half_width_m=self.road_width_m / 2.0, workers=self.workers)
+            max_displacement=self.max_displacement, half_width_m=self.road_width_m / 2.0,
+            workers=self.workers)
+        roads = run.roads
         realizer_name = type(self.realizer).__name__
         objective_name, cost_name = type(self.objective).__name__, type(self.cost).__name__
         # `proposal_id` names render files, so it tells apart every configuration `identity` does
@@ -81,4 +95,5 @@ class GreedyArterialReblocker:
             params={"segments": len(roads), "realizer": realizer_name,
                     "objective": objective_name,
                     "cost": cost_name, "road_width_m": self.road_width_m,
-                    "engine": type(self.engine).__name__})
+                    "engine": type(self.engine).__name__, "commits": run.commits,
+                    "stop": run.stop, "max_displacement": self.max_displacement})

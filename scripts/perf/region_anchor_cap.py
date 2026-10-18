@@ -30,6 +30,7 @@ rewritten after each arm for the same reason.
 from __future__ import annotations
 
 import json
+import math
 import time
 from pathlib import Path
 from typing import TypedDict
@@ -114,7 +115,7 @@ def main() -> None:
                                   top_k=8,
                                   anchors=_sampler(cap),
                                   selector=FirstOrder(SHORTLIST, threads=THREADS),
-                                  on_step=tick)
+                                  on_step=tick, max_displacement=math.inf).roads
         dt = time.perf_counter() - t0
         if roads is None or len(roads) == 0:
             print("    no roads -- skipped", flush=True)

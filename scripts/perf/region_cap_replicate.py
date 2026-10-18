@@ -38,6 +38,7 @@ and a kill should cost the expensive arm rather than the whole matrix.
 from __future__ import annotations
 
 import json
+import math
 import time
 from pathlib import Path
 
@@ -131,7 +132,7 @@ def main() -> None:
                                   anchors=_sampler(cap),
                                   
                                       selector=FirstOrder(SHORTLIST, threads=THREADS),
-                                      on_step=tick)
+                                      on_step=tick, max_displacement=math.inf).roads
             dt = time.perf_counter() - t0
             if roads is None or len(roads) == 0:
                 print(f"    [r{ri} {label}] no roads -- skipped", flush=True)

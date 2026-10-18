@@ -48,7 +48,7 @@ def main() -> None:
                                     cost=Displacement(), workers=16,
                                     anchors=PerLineFallback(32, ma),
                                     top_k=8, max_roads=15, road_width_m=DEFAULT_ROAD_WIDTH_M,
-                                    engine=ExactEngine())
+                                    engine=ExactEngine(), max_displacement=1.0)
         t = time.monotonic()
         r = m.propose(blk).roads
         el = time.monotonic() - t

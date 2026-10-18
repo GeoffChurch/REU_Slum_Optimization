@@ -28,6 +28,7 @@ all_methods:
     cost: {_target_: reblock.methods.arterial.Length}
     max_roads: 15
     anchors: {_target_: reblock.methods.arterial.Uncapped, n: 32}
+    max_displacement: 0.20
     top_k: 8
     road_width_m: 7.0
     workers: 16
@@ -39,6 +40,7 @@ all_methods:
     cost: {_target_: reblock.methods.arterial.Repulsion}
     max_roads: 15
     anchors: {_target_: reblock.methods.arterial.Uncapped, n: 32}
+    max_displacement: 0.20
     top_k: 8
     road_width_m: 7.0
     workers: 16
@@ -79,28 +81,25 @@ all_methods:
   # measurement behind it is objective=access. It is now `PerLineFallback`'s cap, which does not
   # hold on a network of many lines: its anchor counts reach 112 to 525 over 0 to 607 committed
   # segments on ZAF.9.3.1_1_20269 (`HardCap` is the sampler whose cap holds; anchors.py).
-  # max_roads 60, NOT 15 -- the same rule that puts resistance_lp/cycle_native at
-  # max_displacement 0.20: a method's own cap must sit clear of the Lens A budget, or the cap binds
-  # before the lens does and the reported number is the cap rather than the method. At 15 this pair
-  # terminated at 0.5-2.6% displacement in every settlement region -- graded at its own cap
-  # everywhere, and short of P*=0.60 in 3 of 6 regions, so its apparent command of the
-  # low-displacement corner was measured over a very short curve. Swept on capetown/depth_density
-  # (2,690 parcels, cold) before choosing:
-  #   max_roads=15   52 segs  2838 m  disp=0.0238  perm=0.6352  136.2s
-  #   max_roads=30  113 segs  4318 m  disp=0.0528  perm=0.7567  313.2s  (2.3x)
-  #   max_roads=60  215 segs  6928 m  disp=0.1078  perm=0.8443  777.6s  (5.7x)
-  # 60 is the first value that clears the 10% Lens A budget. It is NOT free: cost is superlinear
-  # (~1.4 exponent) and this is already the slowest method in the lineup -- the ~330x
-  # ShortlistEngine + anchor-cap work is what made 15 affordable at region scale, and this spends
-  # that headroom. BOTH variants move together: they are a matched pair differing only in `cost`,
-  # so a difference in budget would make the one comparison they exist for meaningless.
+  # The budget is `max_displacement: 0.20`, the footprint area destroyed (a touched building
+  # counted whole: stop.py), checked before each commit with the crossing road kept -- the same
+  # 0.20 that puts resistance_lp/cycle_native clear of the Lens A budget, so the lens binds before
+  # the method's own stop does. `max_roads: 1000` is a SAFETY CAP expected never to bind; every
+  # proposal records why it stopped (params["stop"]: max_displacement, no_gain or max_roads), so a
+  # bind is seen. History: a road cap was the budget here (15, then 60, then the research lineup's
+  # 300), and it graded the cap rather than the method -- at 60 this pair reached area D only 0.011
+  # to 0.044 on large blocks -- while 55 of 62 lineup networks at 300 ended with every parcel at
+  # depth 1, at a median 54 road km/km2. BOTH variants move together: they are a matched pair
+  # differing only in `cost`, so a difference in budget would make the one comparison they exist
+  # for meaningless.
   greedy_arterial_access_repulsion:
     _target_: reblock.methods.arterial.GreedyArterialReblocker
     realizer: {_target_: reblock.methods.arterial.SnapToBoundary, lam: 2.0}
     objective: {_target_: reblock.methods.arterial.Access}
     cost: {_target_: reblock.methods.arterial.Repulsion}
-    max_roads: 60
+    max_roads: 1000
     anchors: {_target_: reblock.methods.arterial.PerLineFallback, n: 32, max_anchors: 128}
+    max_displacement: 0.20
     top_k: 8
     road_width_m: 7.0
     workers: 16
@@ -110,8 +109,9 @@ all_methods:
     realizer: {_target_: reblock.methods.arterial.SnapToBoundary, lam: 2.0}
     objective: {_target_: reblock.methods.arterial.Access}
     cost: {_target_: reblock.methods.arterial.Displacement}
-    max_roads: 60
+    max_roads: 1000
     anchors: {_target_: reblock.methods.arterial.PerLineFallback, n: 32, max_anchors: 128}
+    max_displacement: 0.20
     top_k: 8
     road_width_m: 7.0
     workers: 16
@@ -123,6 +123,7 @@ all_methods:
     cost: {_target_: reblock.methods.arterial.Length}
     max_roads: 15
     anchors: {_target_: reblock.methods.arterial.Uncapped, n: 32}
+    max_displacement: 0.20
     top_k: 8
     road_width_m: 7.0
     workers: 16
@@ -134,6 +135,7 @@ all_methods:
     cost: {_target_: reblock.methods.arterial.Displacement}
     max_roads: 15
     anchors: {_target_: reblock.methods.arterial.Uncapped, n: 32}
+    max_displacement: 0.20
     top_k: 8
     road_width_m: 7.0
     workers: 16

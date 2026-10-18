@@ -22,6 +22,7 @@ tables are read side by side.
 from __future__ import annotations
 
 import json
+import math
 import time
 from pathlib import Path
 
@@ -77,7 +78,7 @@ def main() -> None:
                                   cost=Displacement(),
                                   half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
                                   max_roads=MAX_ROADS, selector=FirstOrder(k, threads=1),
-                                  anchors=Uncapped(32), top_k=8)
+                                  anchors=Uncapped(32), top_k=8, max_displacement=math.inf).roads
             dt = time.perf_counter() - t0
             if r is None or len(r) == 0:
                 continue

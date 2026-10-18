@@ -196,19 +196,18 @@ def _arms() -> dict:
 # The research lineup (the consolidated pass; BACKLOG 5's TODO, owner 2026-10-12 "leave a TODO"):
 # every method that holds roads first holds free_roads.lineup_free() (FreeEnclosed under RUNTIME)
 # in place of HoldNothing (clearance, clearance_looped's tree, cycle_native, cycle_desire,
-# resistance_lp; the grid and the arterial hold no stage), and the arterial's road cap lifted from
-# its preset's 60 to ARTERIAL_MAX_ROADS so it reaches the Lens A budget (at 60 it reached area D
-# 0.011 -- 0.044 on the sentinel's 9712, 22422 and 5810: NOTES, "Re-scoring the road methods: the
-# large-block sentinel"). Its rows' root carries this identity (lineup_rows), so no row of another
-# lineup or metric reads as its own.
+# resistance_lp; the grid and the arterial hold no stage). The arterial runs as its preset says:
+# its budget is the preset's max_displacement (0.20 of footprint area destroyed), its max_roads a
+# safety cap (the lineup once lifted the preset's 60 to 300 so it reached the Lens A budget: at 60
+# it reached area D 0.011 -- 0.044 on the sentinel's 9712, 22422 and 5810; NOTES, "Re-scoring the
+# road methods: the large-block sentinel"). Its rows' root carries the stage's and the arterial's
+# identities (lineup_rows), so no row of another lineup, metric or arterial reads as its own.
 ARTERIAL = "greedy_arterial_access_displacement"
-ARTERIAL_MAX_ROADS = 300
 
 
 def lineup_arms() -> dict[str, Method]:
     """The research lineup's methods (above), by name."""
     import free_roads
-    from reblock.methods.arterial.reblocker import GreedyArterialReblocker
     from reblock.methods.clearance import ClearanceReblocker
     from reblock.methods.cycle_native import CycleNativeReblocker
     from reblock.methods.loop_closure import LoopClosureRefiner
@@ -221,20 +220,18 @@ def lineup_arms() -> dict[str, Method]:
             m = dataclasses.replace(m, base=dataclasses.replace(m.base, free_first=free))
         elif isinstance(m, CycleNativeReblocker | ResistanceLPReblocker | ClearanceReblocker):
             m = dataclasses.replace(m, free_first=free)
-        if name == ARTERIAL:
-            assert isinstance(m, GreedyArterialReblocker), name
-            m = dataclasses.replace(m, max_roads=ARTERIAL_MAX_ROADS)
         out[name] = m
     return out
 
 
 def lineup_rows() -> Path:
     """The research lineup's rows root: road_rows/lineup-<digest of its free-first stage's
-    identity (the metric's name in it) and the arterial's cap>."""
+    identity (the metric's name in it) and the arterial's whole identity>. The root changes
+    whenever the arterial's identity does (its sampler, budget or cap): its networks change."""
     import hashlib
 
     import free_roads
-    ident = repr((free_roads.lineup_free().identity, ARTERIAL_MAX_ROADS))
+    ident = repr((free_roads.lineup_free().identity, lineup_arms()[ARTERIAL].identity))
     return ROADLESS / "road_rows" / f"lineup-{hashlib.sha256(ident.encode()).hexdigest()[:8]}"
 
 
@@ -242,7 +239,7 @@ def _lineup_root(rows: Path) -> Path:
     """`rows` if it is the research lineup's root (lineup_rows), else a refusal: proposals and
     prefixes are made by the lineup's arms only, under its identity."""
     if rows.resolve() != lineup_rows().resolve():
-        raise SystemExit(f"{rows}: the lineup's rows are {lineup_rows()} (its stage and cap)")
+        raise SystemExit(f"{rows}: the lineup's rows are {lineup_rows()} (its stage and arterial)")
     return rows
 
 

@@ -55,10 +55,12 @@ from reblock.methods.arterial.realize import (
     SnapToBoundary,
 )
 from reblock.methods.arterial.reblocker import GreedyArterialReblocker
+from reblock.methods.arterial.stop import DisplacementMeter, GreedyRun, Stop
 
 __all__ = ["Access", "AnchorIdentity", "AnchorSampler", "ArterialCost", "ArterialEngine",
            "ArterialObjective", "CandidatePolicySpec", "ChordRealizer", "CostIdentity",
-           "Directness", "Displacement", "Efficiency", "EngineIdentity", "ExactEngine",
-           "Faithful", "Fixed", "GreedyArterialReblocker", "Grow", "HardCap", "IdealChord",
-           "LazyEngine", "Length", "ObjectiveIdentity", "PerLineFallback", "RealizerIdentity",
-           "Repulsion", "ShortlistEngine", "ShortlistIdentity", "SnapToBoundary", "Uncapped"]
+           "Directness", "Displacement", "DisplacementMeter", "Efficiency", "EngineIdentity",
+           "ExactEngine", "Faithful", "Fixed", "GreedyArterialReblocker", "GreedyRun", "Grow",
+           "HardCap", "IdealChord", "LazyEngine", "Length", "ObjectiveIdentity",
+           "PerLineFallback", "RealizerIdentity", "Repulsion", "ShortlistEngine",
+           "ShortlistIdentity", "SnapToBoundary", "Stop", "Uncapped"]

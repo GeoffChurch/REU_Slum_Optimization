@@ -35,6 +35,7 @@ which is the thing tier 2 exists to avoid.
 from __future__ import annotations
 
 import json
+import math
 import time
 from pathlib import Path
 from typing import Literal, TypedDict
@@ -113,7 +114,8 @@ def main() -> None:
                                   max_roads=MAX_ROADS, top_k=8,
                                   anchors=_sampler(cap),
                                   
-                                  selector=FirstOrder(K, threads=1), on_step=tick)
+                                  selector=FirstOrder(K, threads=1), on_step=tick,
+                                  max_displacement=math.inf).roads
             dt = time.perf_counter() - t0
             if r is None or len(r) == 0:
                 continue

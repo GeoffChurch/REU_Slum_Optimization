@@ -2,6 +2,7 @@
 1e-9. This is the correctness safety net for the arterial frozen-context perf refactor: every task
 that touches scoring must keep these green."""
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -161,14 +162,15 @@ def test_greedy_routes_aspirational_to_full_rederivation(monkeypatch: pytest.Mon
     roads_a1 = _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=IdealChord(), objective=Directness(), cost=Length(),
-                                          max_roads=2, workers=1, anchors=Uncapped(32), top_k=8)
+                                          max_roads=2, workers=1, anchors=Uncapped(32), top_k=8,
+                                          max_displacement=math.inf).roads
     assert calls["n"] == 0, "aspirational must NOT use the incremental scorer (Bug 2)"
 
     calls["n"] = 0
     _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(), max_roads=2,
-                               workers=1, anchors=Uncapped(32), top_k=8)
+                               workers=1, anchors=Uncapped(32), top_k=8, max_displacement=math.inf)
     assert calls["n"] > 0, "buildable must score candidates through the incremental scorer"
 
     # Aspirational proposed geometry is deterministic/unchanged across runs (it scores through the
@@ -176,5 +178,6 @@ def test_greedy_routes_aspirational_to_full_rederivation(monkeypatch: pytest.Mon
     roads_a2 = _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=IdealChord(), objective=Directness(), cost=Length(),
-                                          max_roads=2, workers=1, anchors=Uncapped(32), top_k=8)
+                                          max_roads=2, workers=1, anchors=Uncapped(32), top_k=8,
+                                          max_displacement=math.inf).roads
     assert [g.wkt for g in roads_a1.geometry] == [g.wkt for g in roads_a2.geometry]
