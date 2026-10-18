@@ -7,11 +7,19 @@ search strategies), reblocker (the public method). Re-exported here so
 `reblock.methods.arterial.GreedyArterialReblocker` (and the realizer/objective/cost/engine/policy
 types a config's `realizer:`/`objective:`/`cost:`/`engine:`/`policy:` block targets, e.g.
 `reblock.methods.arterial.SnapToBoundary`, `reblock.methods.arterial.Access`,
-`reblock.methods.arterial.Repulsion`, `reblock.methods.arterial.ShortlistEngine` and
-`reblock.methods.arterial.Grow`) keep resolving from config.
+`reblock.methods.arterial.Repulsion`, `reblock.methods.arterial.ShortlistEngine`,
+`reblock.methods.arterial.Grow` and the `anchors:` samplers, `reblock.methods.arterial.HardCap`
+and its siblings) keep resolving from config.
 """
 from __future__ import annotations
 
+from reblock.methods.arterial.anchors import (
+    AnchorIdentity,
+    AnchorSampler,
+    HardCap,
+    PerLineFallback,
+    Uncapped,
+)
 from reblock.methods.arterial.costs import (
     ArterialCost,
     CostIdentity,
@@ -48,9 +56,9 @@ from reblock.methods.arterial.realize import (
 )
 from reblock.methods.arterial.reblocker import GreedyArterialReblocker
 
-__all__ = ["Access", "ArterialCost", "ArterialEngine", "ArterialObjective",
-           "CandidatePolicySpec", "ChordRealizer", "CostIdentity", "Directness", "Displacement",
-           "Efficiency", "EngineIdentity", "ExactEngine", "Faithful", "Fixed",
-           "GreedyArterialReblocker", "Grow", "IdealChord", "LazyEngine", "Length",
-           "ObjectiveIdentity", "RealizerIdentity", "Repulsion", "ShortlistEngine",
-           "ShortlistIdentity", "SnapToBoundary"]
+__all__ = ["Access", "AnchorIdentity", "AnchorSampler", "ArterialCost", "ArterialEngine",
+           "ArterialObjective", "CandidatePolicySpec", "ChordRealizer", "CostIdentity",
+           "Directness", "Displacement", "Efficiency", "EngineIdentity", "ExactEngine",
+           "Faithful", "Fixed", "GreedyArterialReblocker", "Grow", "HardCap", "IdealChord",
+           "LazyEngine", "Length", "ObjectiveIdentity", "PerLineFallback", "RealizerIdentity",
+           "Repulsion", "ShortlistEngine", "ShortlistIdentity", "SnapToBoundary", "Uncapped"]

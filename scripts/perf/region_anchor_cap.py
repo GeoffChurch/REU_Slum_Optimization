@@ -44,6 +44,7 @@ from reblock.derive.access import (
 )
 from reblock.eval.access_burden import burden
 from reblock.methods.arterial import Access, Displacement, SnapToBoundary
+from reblock.methods.arterial.anchors import AnchorSampler, PerLineFallback, Uncapped
 from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.methods.arterial.shortlist import FirstOrder
 from reblock.permeability import (
@@ -73,6 +74,11 @@ class CapArm(TypedDict):
     cand: list[int]
     roads_wkt: list[str]
 
+
+
+def _sampler(cap: int) -> AnchorSampler:
+    """The arm's anchor sampler: this script's caps label uncapped as 0, as its records do."""
+    return PerLineFallback(32, cap) if cap else Uncapped(32)
 
 def main() -> None:
     block = region_block_cached()
@@ -105,7 +111,9 @@ def main() -> None:
         roads = _greedy_shortlist(block, realizer=SnapToBoundary(lam=2.0), objective=Access(),
                                   cost=Displacement(),
                                   half_width_m=half_w, workers=WORKERS, max_roads=MAX_ROADS,
-                                  max_anchors=cap, selector=FirstOrder(SHORTLIST, threads=THREADS),
+                                  top_k=8,
+                                  anchors=_sampler(cap),
+                                  selector=FirstOrder(SHORTLIST, threads=THREADS),
                                   on_step=tick)
         dt = time.perf_counter() - t0
         if roads is None or len(roads) == 0:

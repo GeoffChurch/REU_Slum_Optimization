@@ -31,8 +31,9 @@ from reblock.derive.access import (
     past_every_parcel,
 )
 from reblock.methods.arterial import Access, Displacement, SnapToBoundary
+from reblock.methods.arterial.anchors import Uncapped
 from reblock.methods.arterial.engines import _greedy_shortlist
-from reblock.methods.arterial.primitives import _anchor_points, _candidate_chords, _deep_targets
+from reblock.methods.arterial.primitives import _candidate_chords, _deep_targets
 from reblock.methods.arterial.shortlist import CHUNK, RANK_RADIUS, FirstOrder
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from scripts.perf.snap_vs_peel import region_block_cached
@@ -74,7 +75,7 @@ def main() -> int:
     btree = STRtree(list(block.building_geometries.geometry))
     depths = parcel_access_layers(adjacency, None, unreached=past_every_parcel)
     weights = depths.loc[block.parcels["parcel_id"]].to_numpy(dtype=float) ** 2 - 1.0
-    anchors = _anchor_points(list(block.streets.geometry), 32, 0)
+    anchors = Uncapped(32).points(list(block.streets.geometry))
     targets = _deep_targets(adjacency, None, 8)
     chords = _candidate_chords(anchors, targets)
     print(f"  step-0 candidates: {len(chords):,}\n")
@@ -105,7 +106,8 @@ def main() -> int:
     roads = _greedy_shortlist(block, realizer=SnapToBoundary(lam=2.0), objective=Access(),
                               cost=Displacement(),
                               half_width_m=half_w, workers=16, max_roads=MAX_ROADS,
-                              selector=FirstOrder(SHORTLIST, threads=THREADS), on_step=tick)
+                              selector=FirstOrder(SHORTLIST, threads=THREADS), on_step=tick,
+                              anchors=Uncapped(32), top_k=8)
     dt = time.perf_counter() - t0
     print(f"    {len(roads)} road rows, {float(roads.geometry.length.sum()):,.0f} m "
           f"in {dt / 60:.1f} min")

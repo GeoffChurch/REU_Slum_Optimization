@@ -38,6 +38,7 @@ from reblock.derive.access import (
 )
 from reblock.eval.access_burden import burden
 from reblock.methods.arterial import Access, Displacement, SnapToBoundary
+from reblock.methods.arterial.anchors import Uncapped
 from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.methods.arterial.shortlist import FirstOrder
 from reblock.permeability import (
@@ -75,7 +76,8 @@ def main() -> None:
             r = _greedy_shortlist(b, realizer=SnapToBoundary(lam=2.0), objective=Access(),
                                   cost=Displacement(),
                                   half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
-                                  max_roads=MAX_ROADS, selector=FirstOrder(k, threads=1))
+                                  max_roads=MAX_ROADS, selector=FirstOrder(k, threads=1),
+                                  anchors=Uncapped(32), top_k=8)
             dt = time.perf_counter() - t0
             if r is None or len(r) == 0:
                 continue

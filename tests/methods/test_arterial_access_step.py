@@ -37,8 +37,10 @@ from reblock.methods.arterial import (
     Access,
     Displacement,
     GreedyArterialReblocker,
+    PerLineFallback,
     ShortlistEngine,
     SnapToBoundary,
+    Uncapped,
     engines,
 )
 from reblock.methods.arterial.objectives import _AccessStep
@@ -71,7 +73,7 @@ def _block_602() -> Block:
 def _access_snap() -> GreedyArterialReblocker:
     return GreedyArterialReblocker(
         realizer=REALIZER, objective=Access(), cost=Displacement(),
-        n_anchors=32, max_anchors=128, top_k=8, max_roads=15, road_width_m=7.0, workers=1,
+        anchors=PerLineFallback(32, 128), top_k=8, max_roads=15, road_width_m=7.0, workers=1,
         engine=ShortlistEngine(k=512, threads=1))
 
 
@@ -122,8 +124,9 @@ def _mismatches(block: Block, steps: int) -> tuple[list[str], int, int]:
     the count of non-live candidates and the count with gain > 0."""
     with _recording() as (chords, commits):
         engines._greedy_arterials(block, realizer=REALIZER, objective=Access(),
-                                  cost=Displacement(), n_anchors=8, top_k=4, max_roads=steps,
-                                  half_width_m=HW, workers=1, max_anchors=0)
+                                  cost=Displacement(), anchors=Uncapped(8), top_k=4,
+                                  max_roads=steps,
+                                  half_width_m=HW, workers=1)
     scorer = Access().for_block(ParcelAdjacency.of(block, STREET_TOL))
     sg = _snap_graph(_boundary_graph(block.parcels))
     bad: list[str] = []

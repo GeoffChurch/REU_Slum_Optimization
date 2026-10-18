@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from reblock.contracts import Block, Proposal
 from reblock.derive_graph import config_identity
+from reblock.methods.arterial.anchors import AnchorSampler
 from reblock.methods.arterial.costs import ArterialCost
 from reblock.methods.arterial.engines import ArterialEngine
 from reblock.methods.arterial.objectives import ArterialObjective
@@ -34,7 +35,12 @@ class GreedyArterialReblocker:
     realizer: ChordRealizer
     # What a road gains -- Access, Efficiency or Directness (see objectives.py).
     objective: ArterialObjective
-    n_anchors: int
+    # Which network points the candidate chords join -- Uncapped (every vertex + n arc-length
+    # samples; the directness presets), PerLineFallback (that family, or ~max_anchors per-line
+    # samples when it does not fit: a cap that does not hold on a network of many lines) or
+    # HardCap (that family, or at most max_anchors samples at one stride: a cap that holds).
+    # See anchors.py.
+    anchors: AnchorSampler
     top_k: int
     max_roads: int
     # What a road is charged -- Length (per metre), Displacement (per home newly displaced) or
@@ -48,11 +54,6 @@ class GreedyArterialReblocker:
     # LazyEngine (CELF lazy-greedy, valid only for submodular objectives). Injected rather than
     # selected by lazy/candidate_policy/rescore_every flags, matching `realizer` above.
     engine: ArterialEngine
-    # A CAP, not a mode switch: 0 = uncapped (every network vertex + arc-length samples,
-    # byte-identical); >0 only ever REDUCES that uncapped anchor count, falling back to
-    # ~max_anchors arc-length samples when the uncapped set does not already fit -- see
-    # _anchor_points.
-    max_anchors: int
 
     @property
     def identity(self) -> Hashable | None:
@@ -64,9 +65,8 @@ class GreedyArterialReblocker:
         del prior
         roads = self.engine.run(
             block, objective=self.objective, cost=self.cost, realizer=self.realizer,
-            n_anchors=self.n_anchors, top_k=self.top_k, max_roads=self.max_roads,
-            half_width_m=self.road_width_m / 2.0, workers=self.workers,
-            max_anchors=self.max_anchors)
+            anchors=self.anchors, top_k=self.top_k, max_roads=self.max_roads,
+            half_width_m=self.road_width_m / 2.0, workers=self.workers)
         realizer_name = type(self.realizer).__name__
         objective_name, cost_name = type(self.objective).__name__, type(self.cost).__name__
         # `proposal_id` names render files, so it tells apart every configuration `identity` does

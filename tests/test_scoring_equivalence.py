@@ -14,6 +14,7 @@ from reblock.budget import (
     network_efficiency,
 )
 from reblock.methods.arterial import Directness, Length
+from reblock.methods.arterial.anchors import Uncapped
 from reblock.methods.arterial.engines import _greedy_arterials
 from reblock.methods.arterial.primitives import _planarize
 from reblock.methods.arterial.realize import IdealChord, SnapToBoundary
@@ -160,14 +161,14 @@ def test_greedy_routes_aspirational_to_full_rederivation(monkeypatch: pytest.Mon
     roads_a1 = _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=IdealChord(), objective=Directness(), cost=Length(),
-                                          max_roads=2, workers=1)
+                                          max_roads=2, workers=1, anchors=Uncapped(32), top_k=8)
     assert calls["n"] == 0, "aspirational must NOT use the incremental scorer (Bug 2)"
 
     calls["n"] = 0
     _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(), max_roads=2,
-                               workers=1)
+                               workers=1, anchors=Uncapped(32), top_k=8)
     assert calls["n"] > 0, "buildable must score candidates through the incremental scorer"
 
     # Aspirational proposed geometry is deterministic/unchanged across runs (it scores through the
@@ -175,5 +176,5 @@ def test_greedy_routes_aspirational_to_full_rederivation(monkeypatch: pytest.Mon
     roads_a2 = _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=IdealChord(), objective=Directness(), cost=Length(),
-                                          max_roads=2, workers=1)
+                                          max_roads=2, workers=1, anchors=Uncapped(32), top_k=8)
     assert [g.wkt for g in roads_a1.geometry] == [g.wkt for g in roads_a2.geometry]

@@ -21,6 +21,7 @@ from reblock.methods.arterial import (
     Length,
     Repulsion,
     SnapToBoundary,
+    Uncapped,
     engines,
 )
 from reblock.methods.arterial.primitives import _snap_graph
@@ -43,7 +44,7 @@ def test_objectives_and_costs_satisfy_their_protocols() -> None:
 def test_every_objective_and_cost_pair_has_its_own_cache_key() -> None:
     """Nine configurations, nine identities and nine proposal ids. A strategy that answered with
     another's identity would share that one's cached proposal and eval depths."""
-    methods = [replace(ARTERIAL, objective=o, cost=c, n_anchors=4, max_roads=1)
+    methods = [replace(ARTERIAL, objective=o, cost=c, anchors=Uncapped(4), max_roads=1)
                for o, c in product(OBJECTIVES, COSTS)]
     assert len({m.identity for m in methods}) == 9
     block = dataclasses.replace(_grid_block(3), source_content_hash="nine-keys")

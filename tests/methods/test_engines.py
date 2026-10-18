@@ -13,7 +13,9 @@ from reblock.methods.arterial import (
     GreedyArterialReblocker,
     IdealChord,
     Length,
+    PerLineFallback,
     SnapToBoundary,
+    Uncapped,
 )
 from reblock.methods.arterial.engines import (
     ArterialEngine,
@@ -32,8 +34,8 @@ from tests.methods.test_arterial import (  # reuse fast fixtures
 
 
 def _policy(spec, block):
-    return spec.build(ParcelAdjacency.of(block, STREET_TOL), list(block.streets.geometry), 6, 4,
-                      0)
+    return spec.build(ParcelAdjacency.of(block, STREET_TOL), list(block.streets.geometry),
+                      Uncapped(6), 4)
 
 
 def test_engines_are_their_own_identity_and_discriminate() -> None:
@@ -98,7 +100,7 @@ def test_lazy_fixed_and_faithful_run_and_differ_from_exact_is_ok():
     block = _grid_block(5)
     for spec in (Fixed(), Grow(), Faithful()):
         roads = replace(
-            ARTERIAL, objective=Directness(), n_anchors=6,
+            ARTERIAL, objective=Directness(), anchors=Uncapped(6),
             max_roads=4, engine=LazyEngine(policy=spec, rescore_every=0),
         ).propose(block).roads
         assert roads is not None
@@ -106,10 +108,10 @@ def test_lazy_fixed_and_faithful_run_and_differ_from_exact_is_ok():
     # rescore_every=1 with fixed equals a full-rescore greedy over that policy's
     # set: determinism
     a = replace(
-        ARTERIAL, n_anchors=6, max_roads=3,
+        ARTERIAL, anchors=Uncapped(6), max_roads=3,
         engine=LazyEngine(policy=Fixed(), rescore_every=1)).propose(block).roads
     b = replace(
-        ARTERIAL, n_anchors=6, max_roads=3,
+        ARTERIAL, anchors=Uncapped(6), max_roads=3,
         engine=LazyEngine(policy=Fixed(), rescore_every=1)).propose(block).roads
     assert a is not None and b is not None
     assert [g.wkt for g in a.geometry] == [g.wkt for g in b.geometry]
@@ -153,10 +155,10 @@ def test_lazy_faithful_rescore1_equals_exact(grid_n, n_anchors, max_roads):
         block = _grid_block(grid_n)
         exact = _greedy_arterials(
             block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-            realizer=realizer, objective=Directness(), cost=Length(), n_anchors=n_anchors,
-                                  max_roads=max_roads, workers=1)
+            realizer=realizer, objective=Directness(), cost=Length(), anchors=Uncapped(n_anchors),
+                                  max_roads=max_roads, workers=1, top_k=8)
         lazy = _greedy_arterials_lazy(block, realizer=realizer, objective=Directness(),
-                                      n_anchors=n_anchors,
+                                      anchors=Uncapped(n_anchors),
                                       top_k=8, max_roads=max_roads, cost=Length(),
                                       half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=1,
                                       policy_spec=Faithful(), rescore_every=1)
@@ -166,7 +168,7 @@ def test_lazy_faithful_rescore1_equals_exact(grid_n, n_anchors, max_roads):
 
 def test_faithful_policy_matches_arterial_candidate_set():
     # faithful's set after committing a road must equal arterial's own regeneration for that network
-    from reblock.methods.arterial.primitives import _anchor_points, _candidate_chords
+    from reblock.methods.arterial.primitives import _candidate_chords
     block = _grid_block(5)
     pol = _policy(Faithful(), block)
     base = pol.initial()
@@ -176,13 +178,13 @@ def test_faithful_policy_matches_arterial_candidate_set():
     live = (live - set(removed)) | {ls.wkt for ls in added}
     network = list(block.streets.geometry) + [road]
     # deep_targets change with roads; compare through-road structure via arterial's own generator
-    expect_roads = {ls.wkt for ls in _candidate_chords(_anchor_points(network, 6), [])}
+    expect_roads = {ls.wkt for ls in _candidate_chords(Uncapped(6).points(network), [])}
     assert expect_roads <= live
 
 
 def test_lazy_dispatch_and_determinism():
     block = _grid_block(5)
-    m = replace(ARTERIAL, objective=Directness(), n_anchors=6, max_roads=4,
+    m = replace(ARTERIAL, objective=Directness(), anchors=Uncapped(6), max_roads=4,
                 engine=LazyEngine(policy=Grow(), rescore_every=0))
     a = m.propose(block).roads
     b = m.propose(block).roads
@@ -191,13 +193,13 @@ def test_lazy_dispatch_and_determinism():
     assert len(a) > 0
 
 
-def test_lazy_grow_with_max_anchors_runs_end_to_end():
-    # max_anchors bounds anchor generation (see test_arterial.py's _anchor_points tests); this is
+def test_lazy_grow_with_capped_anchors_runs_end_to_end():
+    # A capped sampler bounds anchor generation (see test_arterial_anchors.py); this is
     # the end-to-end check that the cap threads through the lazy/grow path without breaking the
     # proposal shape.
     block = _grid_block(5)
     roads = replace(ARTERIAL, engine=LazyEngine(policy=Grow(), rescore_every=0),
-                              max_anchors=8, max_roads=3).propose(block).roads
+                              anchors=PerLineFallback(32, 8), max_roads=3).propose(block).roads
     assert roads is not None
     assert len(roads) >= 0
     assert "drain" in roads.columns
@@ -219,12 +221,12 @@ def test_lazy_far_fewer_scorings_than_exact(monkeypatch):
     monkeypatch.setattr(engines, "eval_candidate", counting)
     # exact
     calls["n"] = 0
-    replace(ARTERIAL, n_anchors=8, max_roads=4, workers=1).propose(block)
+    replace(ARTERIAL, anchors=Uncapped(8), max_roads=4, workers=1).propose(block)
     exact_calls = calls["n"]
     # lazy grow
     calls["n"] = 0
     replace(
-        ARTERIAL, n_anchors=8, max_roads=4, workers=1,
+        ARTERIAL, anchors=Uncapped(8), max_roads=4, workers=1,
         engine=LazyEngine(policy=Grow(), rescore_every=0)).propose(block)
     lazy_calls = calls["n"]
     # A lower bound, not just an upper one: without it, a future change that moves the lazy engine
@@ -240,7 +242,7 @@ def test_lazy_roads_carry_drain_column_like_exact():
     # and downstream consumers (e.g. rendering) read `drain`. Regression test for the schema
     # divergence where the lazy engine ended on `_explode(_merge(committed))` with no `drain`.
     block = _grid_block(5)
-    roads = replace(ARTERIAL, objective=Directness(), n_anchors=6,
+    roads = replace(ARTERIAL, objective=Directness(), anchors=Uncapped(6),
                               max_roads=4,
                               engine=LazyEngine(policy=Grow(),
                                                 rescore_every=0)).propose(block).roads
@@ -257,8 +259,8 @@ def test_lazy_quality_within_tolerance():
     from reblock.budget import network_efficiency
     block = _block_1808()
     exact = replace(
-        ARTERIAL, n_anchors=8, max_roads=4, workers=1).propose(block).roads
-    lazy = replace(ARTERIAL, n_anchors=8, max_roads=4, workers=1,
+        ARTERIAL, anchors=Uncapped(8), max_roads=4, workers=1).propose(block).roads
+    lazy = replace(ARTERIAL, anchors=Uncapped(8), max_roads=4, workers=1,
                              engine=LazyEngine(policy=Grow(),
                                                rescore_every=0)).propose(block).roads
     _e0, d_exact = network_efficiency(block, exact)

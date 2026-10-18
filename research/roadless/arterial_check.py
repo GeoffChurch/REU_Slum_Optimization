@@ -5,6 +5,7 @@ each of its faults.
     S=research/roadless/arterial_check.py   # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S gain <ids,> <baseline-root> [fault]   # faults: always-live, no-min,
                                                            #   streets-only
+    uv run python $S anchors <ids,> <baseline-root> [fault]  # faults: per-line
     uv run python $S both-ways <guards,> <ids,> <baseline-root>  # each guard, then each fault
 
 `gain`: the incremental access gain (objectives._AccessStep) against the full re-peel of the
@@ -23,6 +24,13 @@ Faults: `always-live` (`_AccessStep.live` always True: a road that reaches no st
 parcels), `no-min` (the relaxation's BFS assigns layer + 1 to every unvisited neighbour without
 comparing it to the base depth), `streets-only` (liveness tested against the streets' union only,
 committed roads ignored). Blocks: ZAF.9.3.1_1_20269 and ZAF.9.3.1_1_38616.
+
+`anchors`: the samplers on 20269's stored ordered network cut at S in ANCHOR_S (streets plus the
+first S segments): PerLineFallback(32, 128) gives the anchor counts the brief measured before
+the samplers were moved out of primitives.py (ANCHORS_BEFORE: 112, 229, 323, 409, 525, from
+arterial_rows/before/micro_20269.csv), so the move changed nothing, and HardCap(32, 128) gives
+at most 128, sorted and unique, at every S. Fault `per-line`: anchors._global_samples replaced by
+the per-line samples, so HardCap's cap fails to hold at S 607. Block: ZAF.9.3.1_1_20269.
 """
 from __future__ import annotations
 
@@ -54,10 +62,11 @@ from reblock.derive.access import (  # noqa: E402
     parcel_access_layers,
     past_every_parcel,
 )
+from reblock.methods.arterial import anchors as anchors_mod  # noqa: E402
 from reblock.methods.arterial import engines  # noqa: E402
+from reblock.methods.arterial.anchors import AnchorSampler, HardCap, PerLineFallback  # noqa: E402
 from reblock.methods.arterial.objectives import _AccessStep  # noqa: E402
 from reblock.methods.arterial.primitives import (  # noqa: E402
-    _anchor_points,
     _candidate_chords,
     _deep_targets,
     _explode,
@@ -71,6 +80,9 @@ from reblock.methods.boundary_graph import _boundary_graph  # noqa: E402
 STEPS_S = (0, 50, 150, 300)    # committed segments of the stored network at which `gain` looks
 KNIFE = 1e-9                   # m: a seeding difference this close to the tolerance is FP
 SHORTLIST = FirstOrder(512, threads=1)
+ANCHOR_S = (0, 150, 300, 450, 607)                       # `anchors`: the brief's S on 20269
+ANCHORS_BEFORE = {0: 112, 150: 229, 300: 323, 450: 409, 607: 525}   # micro_20269.csv
+CAPPED: tuple[AnchorSampler, AnchorSampler] = (PerLineFallback(32, 128), HardCap(32, 128))
 
 
 @contextmanager
@@ -105,8 +117,7 @@ def _shortlist(m: GreedyArterialReblocker, block: Block, adjacency: ParcelAdjace
     net = engines._step_network(committed, block, hw)
     curr = net.roads if committed else None
     network: list[BaseGeometry] = [*block.streets.geometry, *committed]
-    anchors = _anchor_points(network, m.n_anchors, m.max_anchors)
-    chords = _candidate_chords(anchors, _deep_targets(adjacency, curr, m.top_k))
+    chords = _candidate_chords(m.anchors.points(network), _deep_targets(adjacency, curr, m.top_k))
     depths = parcel_access_layers(adjacency, curr, unreached=past_every_parcel)
     return SHORTLIST.select(chords, RankContext(
         depths=depths.loc[block.parcels["parcel_id"]].to_numpy(dtype=float),
@@ -192,6 +203,32 @@ def gain(ids: list[str], root: Path) -> list[str]:
     return bad
 
 
+def anchors(ids: list[str], root: Path) -> list[str]:
+    """The guard `anchors` (the module's docstring): the failures, each named."""
+    road_rescore._check_single_threaded()
+    per_line, hard = CAPPED
+    assert isinstance(hard, HardCap)
+    bad: list[str] = []
+    blocks = {b.block_id: b for b in common.build_blocks(ids)}
+    for bid in ids:
+        ordered = _ordered(root, bid)
+        streets: list[BaseGeometry] = list(blocks[bid].streets.geometry)
+        for s in ANCHOR_S:
+            if s > len(ordered):
+                bad.append(f"{bid}: the stored network has {len(ordered)} segments, not {s}")
+                continue
+            network = [*streets, *ordered[:s]]
+            n_per, pts = len(per_line.points(network)), hard.points(network)
+            if bid == "ZAF.9.3.1_1_20269" and n_per != ANCHORS_BEFORE[s]:
+                bad.append(f"{bid} S {s}: PerLineFallback gives {n_per} anchors, the brief's "
+                           f"{ANCHORS_BEFORE[s]}")
+            if len(pts) > hard.max_anchors or pts != sorted(set(pts)):
+                bad.append(f"{bid} S {s}: HardCap gives {len(pts)} anchors (cap "
+                           f"{hard.max_anchors}), sorted and unique: {pts == sorted(set(pts))}")
+            print(f"{bid} S {s}: PerLineFallback {n_per}, HardCap {len(pts)}", flush=True)
+    return bad
+
+
 def _no_min(self: _AccessStep, seeds: NDArray[np.intp]) -> int:
     """Fault `no-min`: layer + 1 to every unvisited neighbour, never compared to the base depth."""
     depths = self.depths.copy()
@@ -243,11 +280,13 @@ def _always_live(self: _AccessStep, real: LineString) -> bool:
 
 
 Guard = Callable[[list[str], Path], list[str]]
-GUARDS: dict[str, Guard] = {"gain": gain}
+GUARDS: dict[str, Guard] = {"gain": gain, "anchors": anchors}
 FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "gain": {"always-live": lambda: _patched(_AccessStep, "live", _always_live),
              "no-min": lambda: _patched(_AccessStep, "relaxed_burden", _no_min),
              "streets-only": _streets_only},
+    "anchors": {"per-line": lambda: _patched(anchors_mod, "_global_samples",
+                                             anchors_mod._arclength_samples)},
 }
 
 

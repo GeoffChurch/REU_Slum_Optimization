@@ -33,7 +33,8 @@ from reblock.derive.access import (
     parcel_access_layers,
     past_every_parcel,
 )
-from reblock.methods.arterial.primitives import _anchor_points, _candidate_chords, _deep_targets
+from reblock.methods.arterial.anchors import Uncapped
+from reblock.methods.arterial.primitives import _candidate_chords, _deep_targets
 from scripts.perf.snap_vs_peel import region_block_cached
 
 CHUNK = 20_000          # chords per bulk query -- bounds the pair array, not the total work
@@ -65,7 +66,7 @@ def main() -> None:
           f"unreached {(order > n).sum():,}\n")
 
     t0 = time.perf_counter()
-    anchors = _anchor_points(list(block.streets.geometry), 32, 0)
+    anchors = Uncapped(32).points(list(block.streets.geometry))
     targets = _deep_targets(adjacency, None, 8)
     chords = _candidate_chords(anchors, targets)
     t_enum = time.perf_counter() - t0

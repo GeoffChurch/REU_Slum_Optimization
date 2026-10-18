@@ -48,6 +48,7 @@ from reblock.methods.arterial import (
     GreedyArterialReblocker,
     SnapToBoundary,
 )
+from reblock.methods.arterial.anchors import Uncapped
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     EgressContext,
@@ -99,9 +100,10 @@ def main() -> None:
         for rule in RULES:
             _RULE = rule
             m = GreedyArterialReblocker(realizer=SnapToBoundary(lam=2.0), objective=Access(),
-                                        cost=Displacement(), workers=8, max_roads=8, n_anchors=32,
+                                        cost=Displacement(), workers=8, max_roads=8,
+                                        anchors=Uncapped(32),
                                         top_k=8, road_width_m=DEFAULT_ROAD_WIDTH_M,
-                                        engine=ExactEngine(), max_anchors=0)
+                                        engine=ExactEngine())
             r = m.propose(b).roads
             if r is None or len(r) == 0:
                 continue

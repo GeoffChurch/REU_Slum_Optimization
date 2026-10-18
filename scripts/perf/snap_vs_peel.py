@@ -36,9 +36,9 @@ from reblock.derive.access import (
     parcel_access_layers,
     past_every_parcel,
 )
+from reblock.methods.arterial.anchors import Uncapped
 from reblock.methods.arterial.objectives import _AccessBlock
 from reblock.methods.arterial.primitives import (
-    _anchor_points,
     _candidate_chords,
     _deep_targets,
     _explode,
@@ -110,7 +110,7 @@ def main() -> None:
 
     # --- step 0 exactly as `_greedy_arterials` sets it up (committed empty) ---
     t0 = time.perf_counter()
-    anchors = _anchor_points(list(block.streets.geometry), 32, 0)
+    anchors = Uncapped(32).points(list(block.streets.geometry))
     targets = _deep_targets(adjacency, None, 8)
     candidates = _candidate_chords(anchors, targets)
     t_cand = time.perf_counter() - t0

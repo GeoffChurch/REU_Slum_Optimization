@@ -9,7 +9,6 @@ engine:
   _target_: reblock.methods.arterial.ExactEngine
 road_width_m: 7.0
 max_roads: 15
-n_anchors: 32
+anchors: {_target_: reblock.methods.arterial.Uncapped, n: 32}
 top_k: 8
 workers: 16
-max_anchors: 0           # 0 = uncapped (byte-identical); >0 caps anchors to ~max_anchors samples

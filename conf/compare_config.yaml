@@ -27,24 +27,22 @@ all_methods:
     objective: {_target_: reblock.methods.arterial.Directness}
     cost: {_target_: reblock.methods.arterial.Length}
     max_roads: 15
-    n_anchors: 32
+    anchors: {_target_: reblock.methods.arterial.Uncapped, n: 32}
     top_k: 8
     road_width_m: 7.0
     workers: 16
     engine: {_target_: reblock.methods.arterial.LazyEngine, policy: {_target_: reblock.methods.arterial.Grow}, rescore_every: 0}
-    max_anchors: 0
   greedy_arterial_repulsion:
     _target_: reblock.methods.arterial.GreedyArterialReblocker
     realizer: {_target_: reblock.methods.arterial.SnapToBoundary, lam: 2.0}
     objective: {_target_: reblock.methods.arterial.Directness}
     cost: {_target_: reblock.methods.arterial.Repulsion}
     max_roads: 15
-    n_anchors: 32
+    anchors: {_target_: reblock.methods.arterial.Uncapped, n: 32}
     top_k: 8
     road_width_m: 7.0
     workers: 16
     engine: {_target_: reblock.methods.arterial.LazyEngine, policy: {_target_: reblock.methods.arterial.Grow}, rescore_every: 0}
-    max_anchors: 0
   # aspirational (ideal straight chords, not snapped to frontages) is a DIAGNOSTIC -- it isolates
   # the effect of frontage-snapping, NOT a universal directness ceiling. directness/E measure
   # internal circulation (all-pairs, door-to-door incl. the walk-to-road legs); under that honest
@@ -74,11 +72,13 @@ all_methods:
   # in 4 of 6 -- an approximation for no speed. ShortlistEngine (tier 2: rank every candidate by a
   # cheap first-order estimate, score only the top k=512 exactly) is what makes access affordable
   # at region scale at all -- 11.6h unfinished -> ~80 min uncapped. `max_anchors: 128` (this pair
-  # ONLY; directness/CELF above stay uncapped at `max_anchors: 0`) stacks a further 7.6x median
+  # ONLY; directness/CELF above stay `Uncapped`) stacks a further 7.6x median
   # (2.5-12.2x, 6/6 regions, no detectable quality difference at matched displacement) -- ~330x
   # combined, 11.6h unfinished to ~10 min (notes/2026-08-11-max-anchors-is-a-region-scale-win.md).
   # The cap changes which candidates exist, so it changes directness outcomes too, and every
-  # measurement behind it is objective=access.
+  # measurement behind it is objective=access. It is now `PerLineFallback`'s cap, which does not
+  # hold on a network of many lines: its anchor counts reach 112 to 525 over 0 to 607 committed
+  # segments on ZAF.9.3.1_1_20269 (`HardCap` is the sampler whose cap holds; anchors.py).
   # max_roads 60, NOT 15 -- the same rule that puts resistance_lp/cycle_native at
   # max_displacement 0.20: a method's own cap must sit clear of the Lens A budget, or the cap binds
   # before the lens does and the reported number is the cap rather than the method. At 15 this pair
@@ -91,7 +91,7 @@ all_methods:
   #   max_roads=60  215 segs  6928 m  disp=0.1078  perm=0.8443  777.6s  (5.7x)
   # 60 is the first value that clears the 10% Lens A budget. It is NOT free: cost is superlinear
   # (~1.4 exponent) and this is already the slowest method in the lineup -- the ~330x
-  # ShortlistEngine + max_anchors work is what made 15 affordable at region scale, and this spends
+  # ShortlistEngine + anchor-cap work is what made 15 affordable at region scale, and this spends
   # that headroom. BOTH variants move together: they are a matched pair differing only in `cost`,
   # so a difference in budget would make the one comparison they exist for meaningless.
   greedy_arterial_access_repulsion:
@@ -100,48 +100,44 @@ all_methods:
     objective: {_target_: reblock.methods.arterial.Access}
     cost: {_target_: reblock.methods.arterial.Repulsion}
     max_roads: 60
-    n_anchors: 32
+    anchors: {_target_: reblock.methods.arterial.PerLineFallback, n: 32, max_anchors: 128}
     top_k: 8
     road_width_m: 7.0
     workers: 16
     engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512, threads: 8}
-    max_anchors: 128
   greedy_arterial_access_displacement:
     _target_: reblock.methods.arterial.GreedyArterialReblocker
     realizer: {_target_: reblock.methods.arterial.SnapToBoundary, lam: 2.0}
     objective: {_target_: reblock.methods.arterial.Access}
     cost: {_target_: reblock.methods.arterial.Displacement}
     max_roads: 60
-    n_anchors: 32
+    anchors: {_target_: reblock.methods.arterial.PerLineFallback, n: 32, max_anchors: 128}
     top_k: 8
     road_width_m: 7.0
     workers: 16
     engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512, threads: 8}
-    max_anchors: 128
   greedy_arterial_aspirational:
     _target_: reblock.methods.arterial.GreedyArterialReblocker
     realizer: {_target_: reblock.methods.arterial.IdealChord}
     objective: {_target_: reblock.methods.arterial.Directness}
     cost: {_target_: reblock.methods.arterial.Length}
     max_roads: 15
-    n_anchors: 32
+    anchors: {_target_: reblock.methods.arterial.Uncapped, n: 32}
     top_k: 8
     road_width_m: 7.0
     workers: 16
     engine: {_target_: reblock.methods.arterial.ExactEngine}
-    max_anchors: 0
   greedy_arterial_displacement:
     _target_: reblock.methods.arterial.GreedyArterialReblocker
     realizer: {_target_: reblock.methods.arterial.IdealChord}
     objective: {_target_: reblock.methods.arterial.Directness}
     cost: {_target_: reblock.methods.arterial.Displacement}
     max_roads: 15
-    n_anchors: 32
+    anchors: {_target_: reblock.methods.arterial.Uncapped, n: 32}
     top_k: 8
     road_width_m: 7.0
     workers: 16
     engine: {_target_: reblock.methods.arterial.ExactEngine}
-    max_anchors: 0
   clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400, road_width_m: 7.0, price: {_target_: reblock.transparency.Opaque}, free_first: {_target_: reblock.free_first.HoldNothing}}
   demand_greedy: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${desire_source}", substrate: "${substrate}", buffer_m: 3.0, eps: 0.1, gamma: 1.0, depth_target: 2, max_roads: 400, road_width_m: 7.0}
   # demand_greedy routed toward curvature-aware betweenness ridges (raw counts). Beats clearance on
