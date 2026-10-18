@@ -64,15 +64,16 @@ Claude-Session: https://claude.ai/code/session_01RoNpoEMZ1kz2hogCsAsmXJ" -- <pat
 
 ## Rulings (owner to check)
 
-1. **The budget is count-weighted displacement**, `Σ c_i / max(n_buildings, 1)` over the committed corridor, the quantity cycle_native's and resistance_lp's `max_displacement: 0.20` cap, so the lineup's three capped methods mean one thing by 0.2.
-   The lineup scores area-weighted prefixes, and the two differ: 39240's stored network has count D 0.512 and area D 0.338, so at count 0.2 its area D is near 0.13 and the 0.15 and 0.2 area budgets go unreached there, as they can for cycle_native and resistance_lp. Lens A (0.05) and the 220 study's 0.10 sit clear. Say "area" and Task 3's meter weights by footprint area instead.
+1. **The budget is the footprint area destroyed (owner 2026-10-18):** a building the committed corridor touches at all counts as wholly destroyed and costs its whole footprint area, so the share is `Σ_{i touched} area_i / Σ_i area_i`, where touched means `c_i > 0` in `block.buildings.displacement(road_corridor(roads))`, the overlap the lineup's own D uses.
+   It differs from the lineup's scored area D, `Σ c_i area_i / Σ area_i` with fractional `c_i`: destroyed area is never below it, so a run stopped at 0.2 can sit below the scored 0.2 (and perhaps 0.15) budget.
+   Task 5 reports, per block, the scored area D at the stop and the scored budgets left unreached, so the owner can decide whether the scored D should follow this definition.
 2. **The crossing road is kept:** the loop checks before each step and stops once the share is at least `max_displacement`, so a network overshoots by at most one road (~0.003 of D per commit on 20269) and every area budget it covers is a true prefix. cycle_native instead skips candidates that would cross; that would cost a displacement evaluation per shortlisted candidate here and leave the 0.2 budget always unreached.
 3. **`max_roads` stays, as a safety cap that should never bind**, with every run's stop reason recorded (`params["stop"]`: `max_displacement`, `no_gain` or `max_roads`) so a bind is seen, which cycle_native's `range(60)` was not. The directness presets keep it as their real budget (15). The access pair goes from 60 to 1000 commits, and road_rescore's `ARTERIAL_MAX_ROADS` override is deleted: the preset carries its own budget now. Task 5 flags any `max_roads` stop; the study's blocks show the commits a stop at 0.2 takes.
 4. **Three samplers, no sentinel.** `max_anchors: 0` meant "uncapped" (the directness presets). It becomes its own Strategy, `Uncapped(n)`, and both capped samplers require `max_anchors >= 1`. If the study deletes `PerLineFallback`, the uncapped presets are untouched by that deletion.
 5. **The lineup's rows root hashes the arterial's whole identity** (`repr((free_roads.lineup_free().identity, lineup_arms()[ARTERIAL].identity))`), not only `max_displacement`, since the sampler changes the networks too. Every lineup row then sits under an old root: Task 7 migrates them (the six other methods' rows moved, the arterial's re-proposed on the lineup's 62 blocks), after the consolidated pass returns and only on the owner's yes, with the task-hours Task 5 extrapolates.
-6. **The study runs on orion** (research/roadless/cluster.py `submit cpu`, every arm of a block on one node): 12 tasks, ~10 task-h, ~3 h wall. The local machine has no free slot. Say "local" and Task 5 runs it here, 2 processes once slots free, ~6 h wall.
+6. **The study runs on orion (owner 2026-10-18)** (research/roadless/cluster.py `submit cpu`, every arm of a block on one node): 12 tasks, ~10 task-h, ~3 h wall. The local machine has no free slot. Say "local" and Task 5 runs it here, 2 processes once slots free, ~6 h wall.
 7. **The dominance rule for the samplers:** `HardCap` dominates `PerLineFallback` only if it is faster on every block and its median paired difference (`HardCap - PerLineFallback`, over the blocks that reach the budget in both) is >= 0 for each of L_P, L_Pq and L_J2 at both area D 0.05 and 0.10 (road_rescore's REPORT_BUDGETS). `PerLineFallback` is dominated only if slower on every block and behind on all six medians. Otherwise both stay, as two named presets. With six blocks this is a coarse rule; say if you want another.
-8. **research/arterial-speed is pushed to origin as it goes** (GeoffChurch/REU_Slum_Optimization is public; research branches are already pushed there, research/group-steiner among them), so no commit lives only on this disk. It merges into research/roadless in Task 7.
+8. **research/arterial-speed is pushed to origin as it goes (owner 2026-10-18)** (GeoffChurch/REU_Slum_Optimization is public; research branches are already pushed there, research/group-steiner among them), so no commit lives only on this disk. It merges into research/roadless in Task 7.
 9. **The repulsion twin follows the displacement default:** `greedy_arterial_access_repulsion` gets the same sampler, `max_displacement` and `max_roads` as the displacement default (compare_config: "BOTH variants move together"). A speed-first twin of it is not made (unmeasured).
 
 ## Review Focus
@@ -239,7 +240,7 @@ Gates, then commit (`research: roadless -- the arterial's anchor sampler a Strat
 
 **Interfaces:**
 - Consumes: Task 2's `AnchorSampler`.
-- Produces: `DisplacementMeter` with `of(block: Block, half_width_m: float) -> DisplacementMeter` (classmethod), `add(real: LineString) -> None` (the road buffered by `half_width_m` into a `reblock.buildings.IncrementalOverlap`), `share() -> float` (`total() / max(len(block.building_geometries), 1)`, cycle_native's denominator).
+- Produces: `DisplacementMeter` with `of(block: Block, half_width_m: float) -> DisplacementMeter` (classmethod), `add(real: LineString) -> None` (the road buffered by `half_width_m` into a `reblock.buildings.IncrementalOverlap`), `share() -> float` (the footprint area of the buildings any committed road's corridor touches, over the block's total footprint area; 0.0 on a block with no buildings). The touched set is kept incrementally: a building STRtree query per committed road, a building added when its overlap with the corridor is positive, so a step costs only the buildings that road reaches.
 - Produces: `Stop = Literal["max_displacement", "no_gain", "max_roads"]`; `GreedyRun(NamedTuple)`: `roads: GeoDataFrame`, `commits: int`, `stop: Stop`.
 - Produces: every engine function and `ArterialEngine.run` take `max_displacement: float` and return `GreedyRun`; before each step a loop stops with `max_displacement` if `meter.share() >= max_displacement`, else with `max_roads` if `len(committed) >= max_roads`; a step with no improving candidate stops with `no_gain`; after each commit, `meter.add(real)`.
 - Produces: `GreedyArterialReblocker`: after its fields, `_: KW_ONLY` and `max_displacement: float`; `__post_init__` raises ValueError unless `0 < max_displacement <= 1`; `params` gain `"commits"`, `"stop"`, `"max_displacement"`.
@@ -248,7 +249,7 @@ Gates, then commit (`research: roadless -- the arterial's anchor sampler a Strat
 - [ ] **Step 1: Write the stop tests**
 
 In `tests/methods/test_arterial_stop.py` (Access + Displacement + SnapToBoundary on `_two_arm_block(...)` or another fixture block with buildings, `Uncapped(8)`, workers 1):
-- `test_meter_share_matches_budget_displacement`: after adding k committed roads, `meter.share()` equals `reblock.budget.displacement(block.buildings, _planarize(roads, crs, 2 * hw)) / max(len(block.building_geometries), 1)` within 1e-9.
+- `test_meter_share_matches_destroyed_area`: after adding k committed roads, `meter.share()` equals `(area * (c > 0)).sum() / area.sum()` within 1e-9, with `c = block.buildings.displacement(road_corridor(_planarize(roads, crs, 2 * hw)))` and `area` the buildings' footprint areas; and on a fixture where one road clips a corner of a large building, the share counts that building's whole area (the fractional share would count only the clipped part).
 - `test_displacement_stop_is_a_commit_prefix`: an unbounded run (`max_displacement=1.0`, `max_roads=6`) with `engines._best_candidate` wrapped to record each commit; with `d` set to the share after its third commit, a run at `max_displacement=d` returns `commits == 3`, `stop == "max_displacement"` and roads equal to `_planarize(commits[:3], ...)` (exact WKT), so the boundary `share == d` stops.
 - `test_displacement_stop_guard_sees_a_deaf_meter` (the fault): with `DisplacementMeter.add` patched to a no-op, the previous test's run does not stop at 3.
 - `test_stop_reasons`: `max_roads=2` on a block that would commit more gives `stop == "max_roads"`, commits 2; an unbounded run on a small block that saturates gives `"no_gain"`.
@@ -260,7 +261,7 @@ Run: `uv run pytest -n 0 --no-cov tests/methods/test_arterial_stop.py -v` (1 pro
 - [ ] **Step 2: Implement the meter and the stop**
 
 `stop.py` as in Interfaces; the three engine loops and the reblocker as in Interfaces (the lazy engine's loop too). `propose` reads `GreedyRun`'s fields by name.
-Conf: every arterial entry gains `max_displacement: 0.20`. The access pair's `max_roads: 60` becomes `max_roads: 1000`, its comment rewritten: `max_displacement` is the budget (count-weighted, as cycle_native's and resistance_lp's), `max_roads` a safety cap expected never to bind, the stop reason in every proposal's params. Directness presets keep `max_roads: 15` as their budget (0.20 cannot bind at 15 roads: they end at 0.5 to 2.6% displacement).
+Conf: every arterial entry gains `max_displacement: 0.20`. The access pair's `max_roads: 60` becomes `max_roads: 1000`, its comment rewritten: `max_displacement` is the budget (the footprint area destroyed, a touched building counted whole), `max_roads` a safety cap expected never to bind, the stop reason in every proposal's params. Directness presets keep `max_roads: 15` as their budget (0.20 cannot bind at 15 roads: they end at 0.5 to 2.6% displacement).
 Every test or script constructing the reblocker passes `max_displacement` (`1.0` where a test pins a road-count-limited output: displacement cannot exceed 1, so it never binds; say so in a comment). The pinned access WKT test uses `max_displacement=1.0`.
 road_rescore.py: delete `ARTERIAL_MAX_ROADS` and its `replace` in `lineup_arms` (the preset now carries its budget); `lineup_rows` as in Interfaces, its docstring saying the root changes whenever the arterial's identity does.
 
@@ -271,7 +272,7 @@ With the caller's go-ahead: the same files with `-k parallel` (seconds, up to 16
 
 - [ ] **Step 4: Gates and commit**
 
-Gates (road_rescore.py: `--select F,E9`, and its mypy error count not risen), then commit (`research: roadless -- the arterial stops at a required max_displacement (0.20, count-weighted, the crossing road kept) and records why it stopped; max_roads a safety cap at 1000 on the access pair; the lineup's rows root hashes the arterial's identity`) and push.
+Gates (road_rescore.py: `--select F,E9`, and its mypy error count not risen), then commit (`research: roadless -- the arterial stops at a required max_displacement (0.20 of footprint area destroyed, a touched building counted whole, the crossing road kept) and records why it stopped; max_roads a safety cap at 1000 on the access pair; the lineup's rows root hashes the arterial's identity`) and push.
 The lineup's rows now sit under an old root: nothing in this branch reads them until Task 7.
 
 ### Task 4: The study's runner and report
@@ -339,7 +340,7 @@ If the owner chose local (Ruling 6): the same `run` commands, 2 at a time once t
 
 Run: `PYTHONPATH=. uv run python research/roadless/arterial_study.py report research/roadless/arterial_rows/study $BASE <the six ids>` (1 process, ~2 min).
 Expected: both fidelity checks pass on every block (8480's `cur02` identical to the stored network); no `max_roads` stop (a `max_roads` stop is reported to the caller before anything else, as it means the safety cap binds).
-Record, for the NOTES: each arm's wall against the stored wall; the per-step curve; the verdict with its numbers; how far the `cur02` prefixes moved from the full networks' at each budget, and how many area budgets went unreached under the count-weighted stop (Ruling 1).
+Record, for the NOTES: each arm's wall against the stored wall; the per-step curve; the verdict with its numbers; how far the `cur02` prefixes moved from the full networks' at each budget, and the scored area D at each stop and how many scored budgets went unreached under the destroyed-area stop (Ruling 1).
 Extrapolate the migration (Task 7): fit wall against area (and buildings) over the six blocks for the arm the presets will use, and give the 62 lineup blocks' total task-hours, the oversized ones (up to 52 km²) named as the uncertain part.
 Commit the three summary CSVs (`research: roadless -- the arterial study on six blocks: cur02 <a> h and cap02 <b> h against the stored <c> h; <verdict>`) and push.
 
