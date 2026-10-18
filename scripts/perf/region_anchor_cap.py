@@ -30,7 +30,6 @@ rewritten after each arm for the same reason.
 from __future__ import annotations
 
 import json
-import math
 import time
 from pathlib import Path
 from typing import TypedDict
@@ -44,7 +43,7 @@ from reblock.derive.access import (
     past_every_parcel,
 )
 from reblock.eval.access_burden import burden
-from reblock.methods.arterial import Access, Displacement, SnapToBoundary
+from reblock.methods.arterial import Access, Displacement, NoBudget, SnapToBoundary
 from reblock.methods.arterial.anchors import AnchorSampler, PerLineFallback, Uncapped
 from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.methods.arterial.shortlist import FirstOrder
@@ -115,7 +114,7 @@ def main() -> None:
                                   top_k=8,
                                   anchors=_sampler(cap),
                                   selector=FirstOrder(SHORTLIST, threads=THREADS),
-                                  on_step=tick, max_displacement=math.inf).roads
+                                  on_step=tick, budget=NoBudget()).roads
         dt = time.perf_counter() - t0
         if roads is None or len(roads) == 0:
             print("    no roads -- skipped", flush=True)

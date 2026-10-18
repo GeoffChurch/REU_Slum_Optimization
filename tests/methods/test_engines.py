@@ -1,5 +1,4 @@
 import dataclasses
-import math
 from dataclasses import replace
 
 import geopandas as gpd
@@ -14,6 +13,7 @@ from reblock.methods.arterial import (
     GreedyArterialReblocker,
     IdealChord,
     Length,
+    NoBudget,
     PerLineFallback,
     SnapToBoundary,
     Uncapped,
@@ -158,13 +158,13 @@ def test_lazy_faithful_rescore1_equals_exact(grid_n, n_anchors, max_roads):
             block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
             realizer=realizer, objective=Directness(), cost=Length(), anchors=Uncapped(n_anchors),
                                   max_roads=max_roads, workers=1, top_k=8,
-                                  max_displacement=math.inf).roads
+                                  budget=NoBudget()).roads
         lazy = _greedy_arterials_lazy(block, realizer=realizer, objective=Directness(),
                                       anchors=Uncapped(n_anchors),
                                       top_k=8, max_roads=max_roads, cost=Length(),
                                       half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=1,
                                       policy_spec=Faithful(), rescore_every=1,
-                                      max_displacement=math.inf).roads
+                                      budget=NoBudget()).roads
         assert [g.wkt for g in exact.geometry] == [g.wkt for g in lazy.geometry], \
             (realizer, grid_n, n_anchors, max_roads)
 
@@ -213,7 +213,7 @@ def test_lazy_far_fewer_scorings_than_exact(monkeypatch):
     from scoring_fixtures import _block_1808
 
     from reblock.methods.arterial import engines
-    block = _block_1808()   # max_displacement=1.0 below: 1808's 0.20 budget is one road
+    block = _block_1808()
     calls = {"n": 0}
     real_eval = engines.eval_candidate
     def counting(chord):
@@ -224,13 +224,12 @@ def test_lazy_far_fewer_scorings_than_exact(monkeypatch):
     monkeypatch.setattr(engines, "eval_candidate", counting)
     # exact
     calls["n"] = 0
-    replace(ARTERIAL, anchors=Uncapped(8), max_roads=4, workers=1,
-            max_displacement=1.0).propose(block)
+    replace(ARTERIAL, anchors=Uncapped(8), max_roads=4, workers=1).propose(block)
     exact_calls = calls["n"]
     # lazy grow
     calls["n"] = 0
     replace(
-        ARTERIAL, anchors=Uncapped(8), max_roads=4, workers=1, max_displacement=1.0,
+        ARTERIAL, anchors=Uncapped(8), max_roads=4, workers=1,
         engine=LazyEngine(policy=Grow(), rescore_every=0)).propose(block)
     lazy_calls = calls["n"]
     # A lower bound, not just an upper one: without it, a future change that moves the lazy engine
@@ -262,10 +261,8 @@ def test_lazy_quality_within_tolerance():
 
     from reblock.budget import network_efficiency
     block = _block_1808()
-    exact = replace(
-        ARTERIAL, anchors=Uncapped(8), max_roads=4, workers=1,
-        max_displacement=1.0).propose(block).roads
-    lazy = replace(ARTERIAL, anchors=Uncapped(8), max_roads=4, workers=1, max_displacement=1.0,
+    exact = replace(ARTERIAL, anchors=Uncapped(8), max_roads=4, workers=1).propose(block).roads
+    lazy = replace(ARTERIAL, anchors=Uncapped(8), max_roads=4, workers=1,
                              engine=LazyEngine(policy=Grow(),
                                                rescore_every=0)).propose(block).roads
     _e0, d_exact = network_efficiency(block, exact)

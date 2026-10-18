@@ -1,6 +1,6 @@
 """GreedyArterialReblocker: greedily insert the single straight arterial with the best
-objective gain per meter, one at a time, until the displacement budget is reached, the road cap
-binds, or nothing gains (stop.py). How a candidate chord
+objective gain per meter, one at a time, until the injected displacement budget is reached, the
+road cap binds, or nothing gains (stop.py). How a candidate chord
 becomes a road is an injected `ChordRealizer` -- SnapToBoundary (snapped to the parcel-boundary
 graph; the shippable navigability method) or IdealChord (ideal chords; a diagnostic isolating the
 effect of frontage-snapping, NOT a universal directness ceiling -- see the design doc's correction
@@ -24,6 +24,7 @@ from reblock.methods.arterial.costs import ArterialCost
 from reblock.methods.arterial.engines import ArterialEngine
 from reblock.methods.arterial.objectives import ArterialObjective
 from reblock.methods.arterial.realize import ChordRealizer
+from reblock.methods.arterial.stop import DisplacementBudget
 from reblock.permeability import with_width
 
 
@@ -56,16 +57,12 @@ class GreedyArterialReblocker:
     # selected by lazy/candidate_policy/rescore_every flags, matching `realizer` above.
     engine: ArterialEngine
     _: KW_ONLY
-    # The budget: the greedy stops before the step that would start with the committed roads'
-    # destroyed footprint share (a touched building counted whole) at or past this, the crossing
-    # road kept. `max_roads` is the other stop; the reason is in every proposal's params. See
+    # The displacement budget, checked before each step with the crossing road kept -- NoBudget
+    # (the directness presets: max_roads is their budget), ScoredArea (the lineup's area D: the
+    # access presets) or DestroyedArea (a touched building counted whole). `max_roads` is the
+    # other stop; the reason and both shares at the stop are in every proposal's params. See
     # stop.py.
-    max_displacement: float
-
-    def __post_init__(self) -> None:
-        if not 0.0 < self.max_displacement <= 1.0:
-            raise ValueError(f"max_displacement is a share of footprint area in (0, 1], got "
-                             f"{self.max_displacement}")
+    budget: DisplacementBudget
 
     @property
     def identity(self) -> Hashable | None:
@@ -78,7 +75,7 @@ class GreedyArterialReblocker:
         run = self.engine.run(
             block, objective=self.objective, cost=self.cost, realizer=self.realizer,
             anchors=self.anchors, top_k=self.top_k, max_roads=self.max_roads,
-            max_displacement=self.max_displacement, half_width_m=self.road_width_m / 2.0,
+            budget=self.budget, half_width_m=self.road_width_m / 2.0,
             workers=self.workers)
         roads = run.roads
         realizer_name = type(self.realizer).__name__
@@ -96,4 +93,6 @@ class GreedyArterialReblocker:
                     "objective": objective_name,
                     "cost": cost_name, "road_width_m": self.road_width_m,
                     "engine": type(self.engine).__name__, "commits": run.commits,
-                    "stop": run.stop, "max_displacement": self.max_displacement})
+                    "stop": run.stop, "budget": repr(self.budget),
+                    "scored_area": run.shares.scored_area,
+                    "destroyed_area": run.shares.destroyed_area})

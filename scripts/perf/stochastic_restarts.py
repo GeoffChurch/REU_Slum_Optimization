@@ -31,7 +31,6 @@ signal is thrown away). The useful setting, if there is one, is in between.
 from __future__ import annotations
 
 import json
-import math
 import time
 from pathlib import Path
 
@@ -47,7 +46,7 @@ from reblock.derive.access import (
     past_every_parcel,
 )
 from reblock.eval.access_burden import burden
-from reblock.methods.arterial import Access, Displacement, SnapToBoundary
+from reblock.methods.arterial import Access, Displacement, NoBudget, SnapToBoundary
 from reblock.methods.arterial.anchors import Uncapped
 from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.methods.arterial.shortlist import CandidateSelector, FirstOrder
@@ -93,7 +92,7 @@ def main() -> None:
                                       half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
                                       max_roads=MAX_ROADS, selector=selector,
                                       anchors=Uncapped(32), top_k=8,
-                                      max_displacement=math.inf).roads
+                                      budget=NoBudget()).roads
             dt = time.perf_counter() - t0
             if roads is None or len(roads) == 0:
                 continue

@@ -3,30 +3,35 @@ run through the lineup's own scoring path, and the report that decides the prese
 
     S=research/roadless/arterial_study.py   # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S run <rows> <id> <arm> [--replace]   # one (block, arm), end to end
+    uv run python $S propose <rows> <id> <arm> [--replace]   # its proposal alone, unscored
     uv run python $S report <rows> <baseline-root> <ids,>
 
 ARMS: `cur02` (PerLineFallback(32, 128), today's sampler), `cap02` (HardCap(32, 128)), both at
-max_displacement 0.20 and max_roads 1000, and `smoke` (HardCap, 0.20, 5 roads: the runner's own
-check). An arm is the lineup's arterial (road_rescore.lineup_arms()[ARTERIAL]) with its sampler,
-budget and cap replaced (method_of); its network's name carries a digest of the method's identity
-(network_name), so rows of one configuration never read as another's.
+ScoredArea(share=0.20) (the lineup's area D) and max_roads 1000, and `smoke` (HardCap, the same
+budget, 5 roads: the runner's own check). An arm is the lineup's arterial
+(road_rescore.lineup_arms()[ARTERIAL]) with its sampler, budget and cap replaced (method_of); its
+network's name carries a digest of the method's identity (network_name), so rows of one
+configuration never read as another's.
 
 `run`: the block's proposal straight from the method (never the derive cache: a cache hit would
 carry no steps), timed (road_rescore.Sampler) and stepped (arterial_steps.StepLog, the steps
-written after every one to <rows>/steps/<id>__<net>.parquet); the network to
+written after every one to <rows>/steps/<id>__<net>.parquet.partial, a name cluster pulls do not
+match, and to <rows>/steps/<id>__<net>.parquet when the run ends); the network to
 <rows>/scratch/networks, a proposal row (wall, CPU, peak RSS, commits, stop, roads, host) to
 <rows>/proposals; then the lineup's canonical prefixes (road_rescore.prefixes_one) and their
 scores on the complex under RUNTIME on a core (road_rescore.cx_network). A proposal row that
 stands refuses the run unless --replace (clearings.check_new). The study's <rows> is
-research/roadless/arterial_rows/study (untracked).
+research/roadless/arterial_rows/study (untracked). `propose` is `run` without the scoring (a
+region-scale timing, whose scoring would cost more than the proposal).
 
 `report`: against the baseline (<baseline-root>, the lineup's rows: its proposal rows, prefixes,
 complex rows and ordered networks of greedy_arterial_access_displacement), writes to
 research/roadless/arterial_rows/:
 - summary_runs.csv: per block and network (baseline, each arm present) the wall, commits, roads,
-  stop, step time (median, p90, max), anchors and candidates (max), the destroyed share at the
-  end (area: the stop's own measure; count), the whole network's scored D (count, area), and the
-  fidelity checks of cur02 (below);
+  stop, budget, step time (median, p90, max), anchors and candidates (max), the destroyed share at
+  the end (area, count), the whole network's scored D (count, area), the run's own scored and
+  destroyed area shares at its stop and their differences from the same network scored afresh
+  (chk_scored, chk_destroyed: FP only), and the fidelity checks of cur02 (below);
 - summary_lenses.csv: per block, network and budget (each of BUDGETS and the whole network) the
   area prefix's m, D_area, reach, L_P, L_Pq, L_J2, enclosed, and each lens minus the baseline's;
 - summary_prefixes.csv: cur02 against the baseline (the same greedy, stopped earlier), per block
@@ -68,18 +73,19 @@ from reblock.budget import road_corridor  # noqa: E402
 from reblock.contracts import Block  # noqa: E402
 from reblock.methods.arterial.anchors import AnchorSampler, HardCap, PerLineFallback  # noqa: E402
 from reblock.methods.arterial.reblocker import GreedyArterialReblocker  # noqa: E402
+from reblock.methods.arterial.stop import DisplacementBudget, ScoredArea  # noqa: E402
 
 
 class Arm(NamedTuple):
     anchors: AnchorSampler
-    max_displacement: float
+    budget: DisplacementBudget
     max_roads: int
 
 
 ARMS: dict[str, Arm] = {
-    "cur02": Arm(PerLineFallback(32, 128), 0.20, 1000),
-    "cap02": Arm(HardCap(32, 128), 0.20, 1000),
-    "smoke": Arm(HardCap(32, 128), 0.20, 5),
+    "cur02": Arm(PerLineFallback(32, 128), ScoredArea(share=0.20), 1000),
+    "cap02": Arm(HardCap(32, 128), ScoredArea(share=0.20), 1000),
+    "smoke": Arm(HardCap(32, 128), ScoredArea(share=0.20), 5),
 }
 SAMPLERS = ("cur02", "cap02")               # the verdict's two arms, in Ruling 7's order (a, b)
 VERDICT_LENSES = ("L_P", "L_Pq", "L_J2")
@@ -92,7 +98,7 @@ OUT = HERE / "arterial_rows"
 def method_of(arm: Arm) -> GreedyArterialReblocker:
     preset = rr.lineup_arms()[rr.ARTERIAL]
     assert isinstance(preset, GreedyArterialReblocker)
-    return dataclasses.replace(preset, anchors=arm.anchors, max_displacement=arm.max_displacement,
+    return dataclasses.replace(preset, anchors=arm.anchors, budget=arm.budget,
                                max_roads=arm.max_roads)
 
 
@@ -112,6 +118,17 @@ def steps_path(rows: Path, bid: str, name: str) -> Path:
 
 def run(rows: Path, bid: str, arm_name: str, *, replace: bool) -> None:
     """One (block, arm) end to end (the module's docstring)."""
+    b, name = propose(rows, bid, arm_name, replace=replace)
+    scratch = rows / "scratch"
+    rr._BLOCKS[bid] = b
+    if rr.prefixes_one(rr.PrefixJob(rows, scratch, bid, name)) is not None:
+        raise SystemExit(f"{bid} {name}: its prefixes failed")
+    rr.cx_network(rows, scratch, _metric(), b, name, replace=replace)
+
+
+def propose(rows: Path, bid: str, arm_name: str, *, replace: bool) -> tuple[Block, str]:
+    """`run`'s proposal half alone (the network, its steps and its proposal row; no scoring):
+    the block and the network's name."""
     rr._check_single_threaded()
     method = method_of(ARMS[arm_name])
     name = network_name(arm_name, method)
@@ -122,14 +139,19 @@ def run(rows: Path, bid: str, arm_name: str, *, replace: bool) -> None:
     print(f"{bid} n={len(b.buildings)} {arm_name} as {name}: {method}", flush=True)
     sp = steps_path(rows, bid, name)
     sp.parent.mkdir(parents=True, exist_ok=True)
+    # Every step to a name no pull matches (cluster pulls take *.parquet and never replace a local
+    # file, so a log pulled mid-run would stay stale); the *.parquet once, when the run ends.
+    partial = sp.with_name(sp.name + ".partial")
 
     def sink(df: pd.DataFrame) -> None:
-        rr.write_parquet(df, sp)
+        rr.write_parquet(df, partial)
 
     progress = scratch / "progress" / f"{bid}__{name}.json"
     with rr.Sampler(progress, every=0.5, write_every=30.0) as s, \
             arterial_steps.StepLog(sink) as log:
         prop = method.propose(b)
+    rr.write_parquet(log.frame(), sp)
+    partial.unlink(missing_ok=True)
     roads = prop.roads
     assert roads is not None
     net = rr.net_path(scratch, bid, name, False)
@@ -137,17 +159,16 @@ def run(rows: Path, bid: str, arm_name: str, *, replace: bool) -> None:
     rr.write_parquet(roads, net)
     row = dict(block=bid, n=len(b.buildings), area_km2=b.boundary.area / 1e6, method=name,
                arm=arm_name, status="ok", wall_s=s.wall, cpu_s=s.cpu, peak_rss_gb=s.peak,
-               commits=prop.params["commits"], stop=prop.params["stop"], n_roads=len(roads),
+               commits=prop.params["commits"], stop=prop.params["stop"],
+               budget=prop.params["budget"], stop_scored_area=prop.params["scored_area"],
+               stop_destroyed_area=prop.params["destroyed_area"], n_roads=len(roads),
                road_m=float(roads.geometry.length.sum()), steps=len(log.rows),
                host=socket.gethostname())
     row_path.parent.mkdir(parents=True, exist_ok=True)
     rr.write_parquet(pd.DataFrame([row]), row_path)
     print(f"{bid} {name}: {row['commits']} commits ({row['stop']}), {len(roads)} roads, "
           f"{s.wall:.0f} s wall, peak RSS {s.peak:.2f} GB", flush=True)
-    rr._BLOCKS[bid] = b
-    if rr.prefixes_one(rr.PrefixJob(rows, scratch, bid, name)) is not None:
-        raise SystemExit(f"{bid} {name}: its prefixes failed")
-    rr.cx_network(rows, scratch, _metric(), b, name, replace=replace)
+    return b, name
 
 
 # ------------------------------------------------------------------ report
@@ -187,7 +208,14 @@ def _run_row(b: Block, src: Sources, net: str) -> dict[str, object]:
     if net == "baseline":
         r |= dict(commits=np.nan, stop="", host="")
     else:
-        r |= dict(commits=int(prop.commits), stop=str(prop.stop), host=str(prop.host))
+        # The run's own shares at its stop (the engine's incremental meter) beside the same
+        # network scored afresh (the prefixes' whole-network D_area, and _destroyed above): the
+        # two must agree to FP, which is the meter's check on real blocks.
+        r |= dict(commits=int(prop.commits), stop=str(prop.stop), host=str(prop.host),
+                  budget=str(prop.budget), stop_scored_area=float(prop.stop_scored_area),
+                  stop_destroyed_area=float(prop.stop_destroyed_area),
+                  chk_scored=abs(float(prop.stop_scored_area) - float(full.D_area)),
+                  chk_destroyed=abs(float(prop.stop_destroyed_area) - d_area))
         st = pd.read_parquet(steps_path(src.rows, bid, src.name))
         r |= dict(step_s_median=float(st.step_s.median()),
                   step_s_p90=float(st.step_s.quantile(0.9)), step_s_max=float(st.step_s.max()),
@@ -310,6 +338,9 @@ def report(rows: Path, base: Path, ids: list[str]) -> None:
     print(lenses.to_string(), flush=True)
     if prefix_rows:
         print(pd.DataFrame(prefix_rows).to_string(), flush=True)
+    arms = runs[runs.net != "baseline"]
+    print(f"meter against a fresh score: max |scored| {arms.chk_scored.max():.2e}, max "
+          f"|destroyed| {arms.chk_destroyed.max():.2e}", flush=True)
     for line in _verdict(runs, lenses):
         print(line, flush=True)
 
@@ -318,6 +349,8 @@ if __name__ == "__main__":
     a, again = clearings.replace_flag(sys.argv[1:])
     if len(a) == 4 and a[0] == "run":
         run(Path(a[1]), common.ids_of(a[2])[0], a[3], replace=again)
+    elif len(a) == 4 and a[0] == "propose":
+        propose(Path(a[1]), common.ids_of(a[2])[0], a[3], replace=again)
     elif len(a) == 4 and a[0] == "report" and not again:
         report(Path(a[1]), Path(a[2]), common.ids_of(a[3]))
     else:

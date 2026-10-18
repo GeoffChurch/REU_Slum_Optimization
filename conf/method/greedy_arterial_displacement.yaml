@@ -10,6 +10,7 @@ engine:
 road_width_m: 7.0
 max_roads: 15
 anchors: {_target_: reblock.methods.arterial.Uncapped, n: 32}
-max_displacement: 0.20
+# max_roads is the budget; no displacement budget (stop.py).
+budget: {_target_: reblock.methods.arterial.NoBudget}
 top_k: 8
 workers: 16

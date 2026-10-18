@@ -46,6 +46,7 @@ from reblock.methods.arterial import (
     Displacement,
     ExactEngine,
     GreedyArterialReblocker,
+    NoBudget,
     SnapToBoundary,
 )
 from reblock.methods.arterial.anchors import Uncapped
@@ -103,7 +104,7 @@ def main() -> None:
                                         cost=Displacement(), workers=8, max_roads=8,
                                         anchors=Uncapped(32),
                                         top_k=8, road_width_m=DEFAULT_ROAD_WIDTH_M,
-                                        engine=ExactEngine(), max_displacement=1.0)
+                                        engine=ExactEngine(), budget=NoBudget())
             r = m.propose(b).roads
             if r is None or len(r) == 0:
                 continue

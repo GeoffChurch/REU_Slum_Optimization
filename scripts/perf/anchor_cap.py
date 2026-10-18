@@ -35,7 +35,6 @@ which is the thing tier 2 exists to avoid.
 from __future__ import annotations
 
 import json
-import math
 import time
 from pathlib import Path
 from typing import Literal, TypedDict
@@ -52,7 +51,7 @@ from reblock.derive.access import (
     past_every_parcel,
 )
 from reblock.eval.access_burden import burden
-from reblock.methods.arterial import Access, Displacement, SnapToBoundary
+from reblock.methods.arterial import Access, Displacement, NoBudget, SnapToBoundary
 from reblock.methods.arterial.anchors import AnchorSampler, PerLineFallback, Uncapped
 from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.methods.arterial.shortlist import FirstOrder
@@ -82,10 +81,10 @@ class CapResult(TypedDict):
     cand: list[int]
 
 
-
 def _sampler(cap: int) -> AnchorSampler:
     """The arm's anchor sampler: this script's caps label uncapped as 0, as its records do."""
     return PerLineFallback(32, cap) if cap else Uncapped(32)
+
 
 def main() -> None:
     pools_ = donor_pool("donor_pool=capetown").pools()
@@ -113,9 +112,8 @@ def main() -> None:
                                   half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
                                   max_roads=MAX_ROADS, top_k=8,
                                   anchors=_sampler(cap),
-                                  
                                   selector=FirstOrder(K, threads=1), on_step=tick,
-                                  max_displacement=math.inf).roads
+                                  budget=NoBudget()).roads
             dt = time.perf_counter() - t0
             if r is None or len(r) == 0:
                 continue

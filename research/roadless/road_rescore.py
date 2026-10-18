@@ -197,7 +197,7 @@ def _arms() -> dict:
 # every method that holds roads first holds free_roads.lineup_free() (FreeEnclosed under RUNTIME)
 # in place of HoldNothing (clearance, clearance_looped's tree, cycle_native, cycle_desire,
 # resistance_lp; the grid and the arterial hold no stage). The arterial runs as its preset says:
-# its budget is the preset's max_displacement (0.20 of footprint area destroyed), its max_roads a
+# its budget is the preset's ScoredArea(share=0.20) (this lineup's own area D), its max_roads a
 # safety cap (the lineup once lifted the preset's 60 to 300 so it reached the Lens A budget: at 60
 # it reached area D 0.011 -- 0.044 on the sentinel's 9712, 22422 and 5810; NOTES, "Re-scoring the
 # road methods: the large-block sentinel"). Its rows' root carries the stage's and the arterial's

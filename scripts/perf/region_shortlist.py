@@ -16,7 +16,6 @@ Two things also get measured here because they set the floor once the peel is go
 """
 from __future__ import annotations
 
-import math
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -31,7 +30,7 @@ from reblock.derive.access import (
     parcel_access_layers,
     past_every_parcel,
 )
-from reblock.methods.arterial import Access, Displacement, SnapToBoundary
+from reblock.methods.arterial import Access, Displacement, NoBudget, SnapToBoundary
 from reblock.methods.arterial.anchors import Uncapped
 from reblock.methods.arterial.engines import _greedy_shortlist
 from reblock.methods.arterial.primitives import _candidate_chords, _deep_targets
@@ -108,7 +107,7 @@ def main() -> int:
                               cost=Displacement(),
                               half_width_m=half_w, workers=16, max_roads=MAX_ROADS,
                               selector=FirstOrder(SHORTLIST, threads=THREADS), on_step=tick,
-                              anchors=Uncapped(32), top_k=8, max_displacement=math.inf).roads
+                              anchors=Uncapped(32), top_k=8, budget=NoBudget()).roads
     dt = time.perf_counter() - t0
     print(f"    {len(roads)} road rows, {float(roads.geometry.length.sum()):,.0f} m "
           f"in {dt / 60:.1f} min")

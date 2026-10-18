@@ -56,7 +56,12 @@ from reblock.methods.arterial.scoring import (
 from reblock.methods.arterial.scoring import _best_candidate as _best_candidate
 from reblock.methods.arterial.scoring import eval_candidate as eval_candidate
 from reblock.methods.arterial.shortlist import CandidateSelector, FirstOrder, RankContext
-from reblock.methods.arterial.stop import DisplacementMeter, GreedyRun, Stop
+from reblock.methods.arterial.stop import (
+    DisplacementBudget,
+    FootprintMeter,
+    GreedyRun,
+    Stop,
+)
 from reblock.methods.boundary_graph import _boundary_graph
 
 
@@ -71,11 +76,11 @@ def _step_network(committed: list[LineString], block: Block,
 
 def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: ArterialObjective,
                       anchors: AnchorSampler, top_k: int, max_roads: int,
-                      max_displacement: float, cost: ArterialCost, half_width_m: float,
+                      budget: DisplacementBudget, cost: ArterialCost, half_width_m: float,
                       workers: int = 16) -> GreedyRun:
     """Greedily commit the straight arterial with the best objective gain per unit cost until the
-    committed roads' destroyed footprint share reaches `max_displacement` (checked before each
-    step, the crossing road kept: see stop.py), `max_roads` are placed, or no candidate improves
+    committed roads' displacement reaches the injected `budget` (checked before each step, the
+    crossing road kept: see stop.py), `max_roads` are placed, or no candidate improves
     -- the three `GreedyRun.stop` reasons. `realizer` turns each candidate chord into the
     road that is actually scored and committed (see `ChordRealizer`); `objective` says what a road
     gains and `cost` what it is charged (see `objectives.py`, `costs.py`). A beneficial candidate
@@ -99,10 +104,10 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: Arter
     streets: list[BaseGeometry] = list(block.streets.geometry)
     # ONE scorer per block (the objective's frozen per-block constants), shared by every step.
     scorer = objective.for_block(adjacency)
-    meter = DisplacementMeter.of(block, half_width_m)
+    meter = FootprintMeter.of(block, half_width_m)
 
     committed: list[LineString] = []                        # realized geometry, in commit order
-    while (stop := _stop_before_step(meter, max_displacement, len(committed), max_roads)) is None:
+    while (stop := _stop_before_step(meter, budget, len(committed), max_roads)) is None:
         network: list[BaseGeometry] = [*streets, *committed]
         points = anchors.points(network)
         net = _step_network(committed, block, half_width_m)
@@ -151,26 +156,27 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: Arter
         committed.append(best_real)
         meter.add(best_real)
 
-    return _finish(block, committed, half_width_m, stop)
+    return _finish(block, committed, half_width_m, stop, meter)
 
 
-def _stop_before_step(meter: DisplacementMeter, max_displacement: float, commits: int,
+def _stop_before_step(meter: FootprintMeter, budget: DisplacementBudget, commits: int,
                       max_roads: int) -> Stop | None:
     """Why the greedy stops before its next step, or None to take it: the budget first (a run that
     reaches it on its last allowed road says so), then the road cap."""
-    if meter.share() >= max_displacement:
-        return "max_displacement"
+    if budget.reached(meter.shares()):
+        return "budget"
     if commits >= max_roads:
         return "max_roads"
     return None
 
 
 def _finish(block: Block, committed: list[LineString], half_width_m: float,
-            stop: Stop) -> GreedyRun:
-    """The planarized roads with their drainage (an empty frame still carries `drain`)."""
+            stop: Stop, meter: FootprintMeter) -> GreedyRun:
+    """The planarized roads with their drainage (an empty frame still carries `drain`), and the
+    displacement shares at the stop."""
     roads = _planarize(committed, block.crs, 2.0 * half_width_m)
     roads["drain"] = road_drainage(block, roads) if len(roads) else []
-    return GreedyRun(roads=roads, commits=len(committed), stop=stop)
+    return GreedyRun(roads=roads, commits=len(committed), stop=stop, shares=meter.shares())
 
 
 def _score_all(chords: list[LineString], use_pool: bool, workers: int
@@ -199,7 +205,7 @@ def _iter_live(heap: list[tuple[float, str, str, LineString, int]], live: set[st
 
 def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer,
                            objective: ArterialObjective, anchors: AnchorSampler,
-                           top_k: int, max_roads: int, max_displacement: float,
+                           top_k: int, max_roads: int, budget: DisplacementBudget,
                            cost: ArterialCost, half_width_m: float,
                            workers: int = 16, policy_spec: CandidatePolicySpec,
                            rescore_every: int) -> GreedyRun:
@@ -214,7 +220,7 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer,
     streets = list(block.streets.geometry)
     scorer = objective.for_block(adjacency)
     policy = policy_spec.build(adjacency, streets, anchors, top_k)
-    meter = DisplacementMeter.of(block, half_width_m)
+    meter = FootprintMeter.of(block, half_width_m)
 
     committed: list[LineString] = []
     real_of: dict[str, BaseGeometry] = {}          # wkt(chord) -> realized geometry (snap-stable)
@@ -231,7 +237,7 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer,
     pending = policy.initial()
     use_pool = workers > 1
 
-    while (stop := _stop_before_step(meter, max_displacement, len(committed), max_roads)) is None:
+    while (stop := _stop_before_step(meter, budget, len(committed), max_roads)) is None:
         step = len(committed)
         assert scoring._STEP_STATE is None, (
             "eval_candidate's per-step state holder is not reentrant")
@@ -287,12 +293,12 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer,
             live.discard(k)
         pending = added
 
-    return _finish(block, committed, half_width_m, stop)
+    return _finish(block, committed, half_width_m, stop, meter)
 
 
 def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: ArterialObjective,
                       selector: CandidateSelector, anchors: AnchorSampler,
-                      top_k: int, max_roads: int, max_displacement: float,
+                      top_k: int, max_roads: int, budget: DisplacementBudget,
                       cost: ArterialCost, half_width_m: float,
                       workers: int = 16,
                       on_step: Callable[[int, int, int], None] | None = None) -> GreedyRun:
@@ -321,10 +327,10 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: Arter
     # Building CENTRES, at every tier: the shortlist counts centres within the corridor.
     building_tree = STRtree(shapely.points(block.buildings.xy))
     ids = block.parcels["parcel_id"]
-    meter = DisplacementMeter.of(block, half_width_m)
+    meter = FootprintMeter.of(block, half_width_m)
 
     committed: list[LineString] = []
-    while (stop := _stop_before_step(meter, max_displacement, len(committed), max_roads)) is None:
+    while (stop := _stop_before_step(meter, budget, len(committed), max_roads)) is None:
         network: list[BaseGeometry] = [*streets, *committed]
         points = anchors.points(network)
         net = _step_network(committed, block, half_width_m)
@@ -372,7 +378,7 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: Arter
         if on_step is not None:
             on_step(len(committed), n_cand, len(committed))
 
-    return _finish(block, committed, half_width_m, stop)
+    return _finish(block, committed, half_width_m, stop, meter)
 
 
 @runtime_checkable
@@ -388,7 +394,7 @@ class ArterialEngine(Protocol):
 
     def run(self, block: Block, *, objective: ArterialObjective, cost: ArterialCost,
             realizer: ChordRealizer, anchors: AnchorSampler, top_k: int, max_roads: int,
-            max_displacement: float, half_width_m: float, workers: int) -> GreedyRun: ...
+            budget: DisplacementBudget, half_width_m: float, workers: int) -> GreedyRun: ...
 
 
 @dataclass(frozen=True)
@@ -402,10 +408,10 @@ class ExactEngine:
 
     def run(self, block: Block, *, objective: ArterialObjective, cost: ArterialCost,
             realizer: ChordRealizer, anchors: AnchorSampler, top_k: int, max_roads: int,
-            max_displacement: float, half_width_m: float, workers: int) -> GreedyRun:
+            budget: DisplacementBudget, half_width_m: float, workers: int) -> GreedyRun:
         return _greedy_arterials(
             block, objective=objective, cost=cost, realizer=realizer, anchors=anchors,
-            top_k=top_k, max_roads=max_roads, max_displacement=max_displacement,
+            top_k=top_k, max_roads=max_roads, budget=budget,
             half_width_m=half_width_m, workers=workers)
 
 
@@ -431,10 +437,10 @@ class LazyEngine:
 
     def run(self, block: Block, *, objective: ArterialObjective, cost: ArterialCost,
             realizer: ChordRealizer, anchors: AnchorSampler, top_k: int, max_roads: int,
-            max_displacement: float, half_width_m: float, workers: int) -> GreedyRun:
+            budget: DisplacementBudget, half_width_m: float, workers: int) -> GreedyRun:
         return _greedy_arterials_lazy(
             block, objective=objective, cost=cost, realizer=realizer, anchors=anchors,
-            top_k=top_k, max_roads=max_roads, max_displacement=max_displacement,
+            top_k=top_k, max_roads=max_roads, budget=budget,
             half_width_m=half_width_m, workers=workers,
             policy_spec=self.policy, rescore_every=self.rescore_every)
 
@@ -464,10 +470,10 @@ class ShortlistEngine:
 
     def run(self, block: Block, *, objective: ArterialObjective, cost: ArterialCost,
             realizer: ChordRealizer, anchors: AnchorSampler, top_k: int, max_roads: int,
-            max_displacement: float, half_width_m: float, workers: int) -> GreedyRun:
+            budget: DisplacementBudget, half_width_m: float, workers: int) -> GreedyRun:
         return _greedy_shortlist(
             block, objective=objective, cost=cost, realizer=realizer, anchors=anchors,
-            top_k=top_k, max_roads=max_roads, max_displacement=max_displacement,
+            top_k=top_k, max_roads=max_roads, budget=budget,
             half_width_m=half_width_m, workers=workers,
             selector=FirstOrder(self.k, threads=self.threads))
 
