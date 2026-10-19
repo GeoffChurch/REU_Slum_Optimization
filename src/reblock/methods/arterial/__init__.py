@@ -9,8 +9,8 @@ types a config's `realizer:`/`objective:`/`cost:`/`engine:`/`policy:` block targ
 `reblock.methods.arterial.SnapToBoundary`, `reblock.methods.arterial.Access`,
 `reblock.methods.arterial.Repulsion`, `reblock.methods.arterial.ShortlistEngine`,
 `reblock.methods.arterial.Grow`, the `anchors:` samplers, `reblock.methods.arterial.HardCap`
-and its siblings, and the `budget:` Strategies, `reblock.methods.arterial.ScoredArea` and its
-siblings) keep resolving from config.
+and its siblings, and the `budget:` Strategies, `reblock.methods.arterial.Destroyed` and
+`reblock.methods.arterial.NoBudget`) keep resolving from config.
 """
 from __future__ import annotations
 
@@ -58,21 +58,20 @@ from reblock.methods.arterial.realize import (
 from reblock.methods.arterial.reblocker import GreedyArterialReblocker
 from reblock.methods.arterial.stop import (
     BudgetIdentity,
-    DestroyedArea,
+    BudgetMeter,
+    Destroyed,
+    DestroyedMeter,
     DisplacementBudget,
-    FootprintMeter,
     GreedyRun,
     NoBudget,
-    ScoredArea,
-    Shares,
     Stop,
 )
 
 __all__ = ["Access", "AnchorIdentity", "AnchorSampler", "ArterialCost", "ArterialEngine",
-           "ArterialObjective", "BudgetIdentity", "CandidatePolicySpec", "ChordRealizer",
-           "CostIdentity", "DestroyedArea", "Directness", "Displacement", "DisplacementBudget",
-           "Efficiency", "EngineIdentity", "ExactEngine", "Faithful", "Fixed", "FootprintMeter",
-           "GreedyArterialReblocker", "GreedyRun", "Grow", "HardCap", "IdealChord", "LazyEngine",
-           "Length", "NoBudget", "ObjectiveIdentity", "PerLineFallback", "RealizerIdentity",
-           "Repulsion", "ScoredArea", "Shares", "ShortlistEngine", "ShortlistIdentity",
-           "SnapToBoundary", "Stop", "Uncapped"]
+           "ArterialObjective", "BudgetIdentity", "BudgetMeter", "CandidatePolicySpec",
+           "ChordRealizer", "CostIdentity", "Destroyed", "DestroyedMeter", "Directness",
+           "Displacement", "DisplacementBudget", "Efficiency", "EngineIdentity", "ExactEngine",
+           "Faithful", "Fixed", "GreedyArterialReblocker", "GreedyRun", "Grow", "HardCap",
+           "IdealChord", "LazyEngine", "Length", "NoBudget", "ObjectiveIdentity",
+           "PerLineFallback", "RealizerIdentity", "Repulsion", "ShortlistEngine",
+           "ShortlistIdentity", "SnapToBoundary", "Stop", "Uncapped"]

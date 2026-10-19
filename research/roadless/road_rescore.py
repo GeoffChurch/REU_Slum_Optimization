@@ -75,6 +75,7 @@ import relax  # noqa: E402
 import search  # noqa: E402
 
 from reblock.budget import road_corridor  # noqa: E402
+from reblock.destroyed import RampedDestroyed  # noqa: E402
 
 if TYPE_CHECKING:
     from shapely.geometry.base import BaseGeometry
@@ -226,12 +227,15 @@ def lineup_arms() -> dict[str, Method]:
 
 def lineup_rows() -> Path:
     """The research lineup's rows root: road_rows/lineup-<digest of its free-first stage's
-    identity (the metric's name in it) and the arterial's whole identity>. The root changes
-    whenever the arterial's identity does (its sampler, budget or cap): its networks change."""
+    identity (the metric's name in it), the arterial's whole identity and the displacement measure
+    (common.MEASURE, its tau)>. The root changes whenever the arterial's identity does (its
+    sampler, budget or cap: its networks change) or the measure does (every prefix's cut and D
+    change), so no row of another measure reads as its own."""
     import hashlib
 
     import free_roads
-    ident = repr((free_roads.lineup_free().identity, lineup_arms()[ARTERIAL].identity))
+    ident = repr((free_roads.lineup_free().identity, lineup_arms()[ARTERIAL].identity,
+                  common.MEASURE.identity))
     return ROADLESS / "road_rows" / f"lineup-{hashlib.sha256(ident.encode()).hexdigest()[:8]}"
 
 
@@ -391,17 +395,17 @@ def propose_all(rows: Path, scratch: Path, procs: int, ids: list[str], methods: 
 POPS = ("count", "area")         # the two weightings the prefixes are cut by
 
 
-def prefix_len(block, ordered, target: float, w: np.ndarray) -> int:
+def prefix_len(block, ordered, target: float, w: np.ndarray, *, measure: RampedDestroyed) -> int:
     """common.prefix_to's length on roads already in canonical order (common.canonical_order once
     per network rather than once per budget): the shortest prefix whose `w`-weighted
     displacement reaches `target`, or all of them. Checked against common.prefix_to on every
     network (prefixes_one)."""
-    if common.displacement(block, ordered, w) < target:
+    if common.displacement(block, ordered, w, measure=measure) < target:
         return len(ordered)
     lo, hi = 0, len(ordered)
     while lo < hi:
         mid = (lo + hi) // 2
-        if common.displacement(block, ordered.iloc[:mid], w) >= target:
+        if common.displacement(block, ordered.iloc[:mid], w, measure=measure) >= target:
             hi = mid
         else:
             lo = mid + 1
@@ -446,11 +450,12 @@ def _prefixes_one(job: PrefixJob) -> None:
     polys = np.asarray(b.buildings.outlines)
     W = {pop: common.POPULATIONS[pop].weights(polys) for pop in POPS}
     lens = [dict(pop=pop, budget=np.nan if bud is None else bud, full=bud is None,
-                 m=len(ordered) if bud is None else prefix_len(b, ordered, bud, W[pop]))
+                 m=len(ordered) if bud is None else prefix_len(b, ordered, bud, W[pop],
+                                                                measure=common.MEASURE))
             for pop in POPS for bud in (*BUDGETS, None)]
     # the same prefixes as common.prefix_to (which orders afresh for each budget)
     for pop in POPS:
-        ref = common.prefix_to(b, roads, BUDGETS[1], W[pop])
+        ref = common.prefix_to(b, roads, BUDGETS[1], W[pop], measure=common.MEASURE)
         [m] = [r["m"] for r in lens if r["pop"] == pop and r["budget"] == BUDGETS[1]]
         if len(ref) != m or not ref.geometry.reset_index(drop=True).geom_equals_exact(
                 ordered.geometry.iloc[:m].reset_index(drop=True), tolerance=0.0).all():
@@ -463,8 +468,9 @@ def _prefixes_one(job: PrefixJob) -> None:
         ta = time.perf_counter()
         P_old = permeability(ctx, pre)               # (a), on every distinct prefix
         per_m[m] = dict(n_roads=m, road_m=float(pre.geometry.length.sum()),
-                        D_count=common.displacement(b, pre, W["count"]),
-                        D_area=common.displacement(b, pre, W["area"]), P_old=P_old,
+                        D_count=common.displacement(b, pre, W["count"], measure=common.MEASURE),
+                        D_area=common.displacement(b, pre, W["area"], measure=common.MEASURE),
+                        P_old=P_old,
                         t_P_old=time.perf_counter() - ta)
     prefix_rows = [dict(block=bid, n=len(polys), method=name, **r, **per_m[r["m"]]) for r in lens]
     out = prefix_dir(job.rows) / f"{bid}__{name}.parquet"

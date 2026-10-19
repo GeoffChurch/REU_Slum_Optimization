@@ -58,10 +58,9 @@ class GreedyArterialReblocker:
     engine: ArterialEngine
     _: KW_ONLY
     # The displacement budget, checked before each step with the crossing road kept -- NoBudget
-    # (the directness presets: max_roads is their budget), ScoredArea (the lineup's area D: the
-    # access presets) or DestroyedArea (a touched building counted whole). `max_roads` is the
-    # other stop; the reason and both shares at the stop are in every proposal's params. See
-    # stop.py.
+    # (the directness presets: max_roads is their budget) or Destroyed (the ramped destroyed-area
+    # D the research lineup scores: the access presets). `max_roads` is the other stop; the
+    # reason and the budget's share at the stop are in every proposal's params. See stop.py.
     budget: DisplacementBudget
 
     @property
@@ -94,5 +93,4 @@ class GreedyArterialReblocker:
                     "cost": cost_name, "road_width_m": self.road_width_m,
                     "engine": type(self.engine).__name__, "commits": run.commits,
                     "stop": run.stop, "budget": repr(self.budget),
-                    "scored_area": run.shares.scored_area,
-                    "destroyed_area": run.shares.destroyed_area})
+                    "displaced": run.displaced})

@@ -57,8 +57,8 @@ from reblock.methods.arterial.scoring import _best_candidate as _best_candidate
 from reblock.methods.arterial.scoring import eval_candidate as eval_candidate
 from reblock.methods.arterial.shortlist import CandidateSelector, FirstOrder, RankContext
 from reblock.methods.arterial.stop import (
+    BudgetMeter,
     DisplacementBudget,
-    FootprintMeter,
     GreedyRun,
     Stop,
 )
@@ -104,10 +104,10 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: Arter
     streets: list[BaseGeometry] = list(block.streets.geometry)
     # ONE scorer per block (the objective's frozen per-block constants), shared by every step.
     scorer = objective.for_block(adjacency)
-    meter = FootprintMeter.of(block, half_width_m)
+    meter = budget.start(block, half_width_m)
 
     committed: list[LineString] = []                        # realized geometry, in commit order
-    while (stop := _stop_before_step(meter, budget, len(committed), max_roads)) is None:
+    while (stop := _stop_before_step(meter, len(committed), max_roads)) is None:
         network: list[BaseGeometry] = [*streets, *committed]
         points = anchors.points(network)
         net = _step_network(committed, block, half_width_m)
@@ -159,11 +159,10 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: Arter
     return _finish(block, committed, half_width_m, stop, meter)
 
 
-def _stop_before_step(meter: FootprintMeter, budget: DisplacementBudget, commits: int,
-                      max_roads: int) -> Stop | None:
+def _stop_before_step(meter: BudgetMeter, commits: int, max_roads: int) -> Stop | None:
     """Why the greedy stops before its next step, or None to take it: the budget first (a run that
     reaches it on its last allowed road says so), then the road cap."""
-    if budget.reached(meter.shares()):
+    if meter.reached():
         return "budget"
     if commits >= max_roads:
         return "max_roads"
@@ -171,12 +170,12 @@ def _stop_before_step(meter: FootprintMeter, budget: DisplacementBudget, commits
 
 
 def _finish(block: Block, committed: list[LineString], half_width_m: float,
-            stop: Stop, meter: FootprintMeter) -> GreedyRun:
+            stop: Stop, meter: BudgetMeter) -> GreedyRun:
     """The planarized roads with their drainage (an empty frame still carries `drain`), and the
-    displacement shares at the stop."""
+    budget's share at the stop."""
     roads = _planarize(committed, block.crs, 2.0 * half_width_m)
     roads["drain"] = road_drainage(block, roads) if len(roads) else []
-    return GreedyRun(roads=roads, commits=len(committed), stop=stop, shares=meter.shares())
+    return GreedyRun(roads=roads, commits=len(committed), stop=stop, displaced=meter.share())
 
 
 def _score_all(chords: list[LineString], use_pool: bool, workers: int
@@ -220,7 +219,7 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer,
     streets = list(block.streets.geometry)
     scorer = objective.for_block(adjacency)
     policy = policy_spec.build(adjacency, streets, anchors, top_k)
-    meter = FootprintMeter.of(block, half_width_m)
+    meter = budget.start(block, half_width_m)
 
     committed: list[LineString] = []
     real_of: dict[str, BaseGeometry] = {}          # wkt(chord) -> realized geometry (snap-stable)
@@ -237,7 +236,7 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer,
     pending = policy.initial()
     use_pool = workers > 1
 
-    while (stop := _stop_before_step(meter, budget, len(committed), max_roads)) is None:
+    while (stop := _stop_before_step(meter, len(committed), max_roads)) is None:
         step = len(committed)
         assert scoring._STEP_STATE is None, (
             "eval_candidate's per-step state holder is not reentrant")
@@ -327,10 +326,10 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: Arter
     # Building CENTRES, at every tier: the shortlist counts centres within the corridor.
     building_tree = STRtree(shapely.points(block.buildings.xy))
     ids = block.parcels["parcel_id"]
-    meter = FootprintMeter.of(block, half_width_m)
+    meter = budget.start(block, half_width_m)
 
     committed: list[LineString] = []
-    while (stop := _stop_before_step(meter, budget, len(committed), max_roads)) is None:
+    while (stop := _stop_before_step(meter, len(committed), max_roads)) is None:
         network: list[BaseGeometry] = [*streets, *committed]
         points = anchors.points(network)
         net = _step_network(committed, block, half_width_m)

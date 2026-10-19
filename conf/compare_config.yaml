@@ -81,15 +81,14 @@ all_methods:
   # measurement behind it is objective=access. It is now `PerLineFallback`'s cap, which does not
   # hold on a network of many lines: its anchor counts reach 112 to 525 over 0 to 607 committed
   # segments on ZAF.9.3.1_1_20269 (`HardCap` is the sampler whose cap holds; anchors.py).
-  # The budget is `ScoredArea(share: 0.20)`, the research lineup's own scored area D (the share
-  # of each building's footprint the corridor covers, weighted by footprint area: stop.py),
-  # checked before each commit with the crossing road kept -- the same 0.20 that puts
+  # The budget is `Destroyed(share: 0.20, tau: 0.10)`: the ramped destroyed-area displacement the
+  # research lineup scores (owner 2026-10-18; reblock.destroyed: a building's destroyed portion is
+  # 1 - its largest standing piece over its area, ramped to min(1, X / tau), weighted by footprint
+  # area), checked before each commit with the crossing road kept -- the same 0.20 that puts
   # resistance_lp/cycle_native clear of the Lens A budget, so the lens binds before the method's
-  # own stop does. Not `DestroyedArea` (a touched building counted whole; selectable): at 0.20 it
-  # stopped the six-block study at scored D 0.018-0.072, short of the 0.05 and 0.10 lens budgets
-  # on most blocks (owner 2026-10-18; BACKLOG has the decision on one definition). `max_roads:
-  # 1000` is a SAFETY CAP expected never to bind; every proposal records why it stopped
-  # (params["stop"]: budget, no_gain or max_roads) and both shares at the stop, so a bind is
+  # own stop does (theirs is still the partial overlap until the methods' costs move: BACKLOG).
+  # `max_roads: 1000` is a SAFETY CAP expected never to bind; every proposal records why it
+  # stopped (params["stop"]: budget, no_gain or max_roads) and its D at the stop, so a bind is
   # seen. History: a road cap was the budget here (15, then 60, then the research lineup's
   # 300), and it graded the cap rather than the method -- at 60 this pair reached area D only 0.011
   # to 0.044 on large blocks -- while 55 of 62 lineup networks at 300 ended with every parcel at
@@ -103,7 +102,7 @@ all_methods:
     cost: {_target_: reblock.methods.arterial.Repulsion}
     max_roads: 1000
     anchors: {_target_: reblock.methods.arterial.PerLineFallback, n: 32, max_anchors: 128}
-    budget: {_target_: reblock.methods.arterial.ScoredArea, share: 0.20}
+    budget: {_target_: reblock.methods.arterial.Destroyed, share: 0.20, tau: 0.10}
     top_k: 8
     road_width_m: 7.0
     workers: 16
@@ -115,7 +114,7 @@ all_methods:
     cost: {_target_: reblock.methods.arterial.Displacement}
     max_roads: 1000
     anchors: {_target_: reblock.methods.arterial.PerLineFallback, n: 32, max_anchors: 128}
-    budget: {_target_: reblock.methods.arterial.ScoredArea, share: 0.20}
+    budget: {_target_: reblock.methods.arterial.Destroyed, share: 0.20, tau: 0.10}
     top_k: 8
     road_width_m: 7.0
     workers: 16
@@ -140,7 +139,7 @@ all_methods:
     cost: {_target_: reblock.methods.arterial.Displacement}
     max_roads: 1000
     anchors: {_target_: reblock.methods.arterial.HardCap, n: 32, max_anchors: 128}
-    budget: {_target_: reblock.methods.arterial.ScoredArea, share: 0.20}
+    budget: {_target_: reblock.methods.arterial.Destroyed, share: 0.20, tau: 0.10}
     top_k: 8
     road_width_m: 7.0
     workers: 16

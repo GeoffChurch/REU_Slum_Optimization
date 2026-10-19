@@ -7,11 +7,11 @@ run through the lineup's own scoring path, and the report that decides the prese
     uv run python $S report <rows> <baseline-root> <ids,>
 
 ARMS: `cur02` (PerLineFallback(32, 128), today's sampler), `cap02` (HardCap(32, 128)), both at
-ScoredArea(share=0.20) (the lineup's area D) and max_roads 1000, and `smoke` (HardCap, the same
-budget, 5 roads: the runner's own check). An arm is the lineup's arterial
-(road_rescore.lineup_arms()[ARTERIAL]) with its sampler, budget and cap replaced (method_of); its
-network's name carries a digest of the method's identity (network_name), so rows of one
-configuration never read as another's.
+Destroyed(share=0.20, tau=0.10) (the lineup's ramped destroyed-area D, common.MEASURE) and
+max_roads 1000, and `smoke` (HardCap, the same budget, 5 roads: the runner's own check). An arm
+is the lineup's arterial (road_rescore.lineup_arms()[ARTERIAL]) with its sampler, budget and cap
+replaced (method_of); its network's name carries a digest of the method's identity
+(network_name), so rows of one configuration never read as another's.
 
 `run`: the block's proposal straight from the method (never the derive cache: a cache hit would
 carry no steps), timed (road_rescore.Sampler) and stepped (arterial_steps.StepLog, the steps
@@ -28,10 +28,11 @@ region-scale timing, whose scoring would cost more than the proposal).
 complex rows and ordered networks of greedy_arterial_access_displacement), writes to
 research/roadless/arterial_rows/:
 - summary_runs.csv: per block and network (baseline, each arm present) the wall, commits, roads,
-  stop, budget, step time (median, p90, max), anchors and candidates (max), the destroyed share at
-  the end (area, count), the whole network's scored D (count, area), the run's own scored and
-  destroyed area shares at its stop and their differences from the same network scored afresh
-  (chk_scored, chk_destroyed: FP only), and the fidelity checks of cur02 (below);
+  stop, budget, step time (median, p90, max), anchors and candidates (max), the whole network's
+  D by area under three rules (partial overlap, the lineup's ramped destroyed area, touched
+  buildings counted whole: the gap between them), its scored D (count, area: ramped, from the
+  prefixes), the run's own D at its stop and its difference from the same network scored afresh
+  (chk_displaced: FP only), and the fidelity checks of cur02 (below);
 - summary_lenses.csv: per block, network and budget (each of BUDGETS and the whole network) the
   area prefix's m, D_area, reach, L_P, L_Pq, L_J2, enclosed, and each lens minus the baseline's;
 - summary_prefixes.csv: cur02 against the baseline (the same greedy, stopped earlier), per block
@@ -73,7 +74,7 @@ from reblock.budget import road_corridor  # noqa: E402
 from reblock.contracts import Block  # noqa: E402
 from reblock.methods.arterial.anchors import AnchorSampler, HardCap, PerLineFallback  # noqa: E402
 from reblock.methods.arterial.reblocker import GreedyArterialReblocker  # noqa: E402
-from reblock.methods.arterial.stop import DisplacementBudget, ScoredArea  # noqa: E402
+from reblock.methods.arterial.stop import Destroyed, DisplacementBudget  # noqa: E402
 
 
 class Arm(NamedTuple):
@@ -83,9 +84,9 @@ class Arm(NamedTuple):
 
 
 ARMS: dict[str, Arm] = {
-    "cur02": Arm(PerLineFallback(32, 128), ScoredArea(share=0.20), 1000),
-    "cap02": Arm(HardCap(32, 128), ScoredArea(share=0.20), 1000),
-    "smoke": Arm(HardCap(32, 128), ScoredArea(share=0.20), 5),
+    "cur02": Arm(PerLineFallback(32, 128), Destroyed(share=0.20, tau=common.MEASURE.tau), 1000),
+    "cap02": Arm(HardCap(32, 128), Destroyed(share=0.20, tau=common.MEASURE.tau), 1000),
+    "smoke": Arm(HardCap(32, 128), Destroyed(share=0.20, tau=common.MEASURE.tau), 5),
 }
 SAMPLERS = ("cur02", "cap02")               # the verdict's two arms, in Ruling 7's order (a, b)
 VERDICT_LENSES = ("L_P", "L_Pq", "L_J2")
@@ -160,8 +161,8 @@ def propose(rows: Path, bid: str, arm_name: str, *, replace: bool) -> tuple[Bloc
     row = dict(block=bid, n=len(b.buildings), area_km2=b.boundary.area / 1e6, method=name,
                arm=arm_name, status="ok", wall_s=s.wall, cpu_s=s.cpu, peak_rss_gb=s.peak,
                commits=prop.params["commits"], stop=prop.params["stop"],
-               budget=prop.params["budget"], stop_scored_area=prop.params["scored_area"],
-               stop_destroyed_area=prop.params["destroyed_area"], n_roads=len(roads),
+               budget=prop.params["budget"], displaced=prop.params["displaced"],
+               n_roads=len(roads),
                road_m=float(roads.geometry.length.sum()), steps=len(log.rows),
                host=socket.gethostname())
     row_path.parent.mkdir(parents=True, exist_ok=True)
@@ -183,13 +184,22 @@ def _arm_sources(rows: Path) -> dict[str, Sources]:
     return {a: Sources(rows, network_name(a, method_of(arm))) for a, arm in ARMS.items()}
 
 
-def _destroyed(b: Block, roads: gpd.GeoDataFrame) -> tuple[float, float]:
-    """The destroyed share of `roads` (a touched building counted whole) by area and by count."""
+class Gap(NamedTuple):
+    """One network's D by area under the three rules."""
+    partial: float          # the overlap fraction (the public package's, the lineup's before)
+    ramped: float           # common.MEASURE, the lineup's now
+    touched: float          # a building the corridor touches at all counted whole
+
+
+def _gap(b: Block, roads: gpd.GeoDataFrame) -> Gap:
     if not len(roads):
-        return 0.0, 0.0
-    c = b.buildings.displacement(road_corridor(roads))
+        return Gap(0.0, 0.0, 0.0)
+    corridor = road_corridor(roads)
+    c = b.buildings.displacement(corridor)
     area = np.asarray(b.buildings.outlines.area, dtype=np.float64)
-    return float((area * (c > 0)).sum() / area.sum()), float((c > 0).mean())
+    return Gap(partial=float((c * area).sum() / area.sum()),
+               ramped=common.MEASURE.share(b.buildings, corridor, area),
+               touched=float((area * (c > 0)).sum() / area.sum()))
 
 
 def _run_row(b: Block, src: Sources, net: str) -> dict[str, object]:
@@ -198,24 +208,23 @@ def _run_row(b: Block, src: Sources, net: str) -> dict[str, object]:
     roads = gpd.read_parquet(rr.net_path(src.rows / "scratch", bid, src.name, False))
     pre = pd.read_parquet(rr.prefix_dir(src.rows) / f"{bid}__{src.name}.parquet")
     full = pre[pre.full & (pre["pop"] == "area")].iloc[0]
-    d_area, d_count = _destroyed(b, roads)
+    gap = _gap(b, roads)
     r: dict[str, object] = dict(block=bid, area_km2=b.boundary.area / 1e6, net=net,
                                 wall_s=float(prop.wall_s), n_roads=len(roads),
                                 road_m=float(roads.geometry.length.sum()),
-                                destroyed_area=d_area, destroyed_count=d_count,
+                                D_partial=gap.partial, D_ramped=gap.ramped,
+                                D_touched=gap.touched,
                                 D_count=float(full.D_count), D_area=float(full.D_area),
                                 peak_rss_gb=float(prop.peak_rss_gb))
     if net == "baseline":
         r |= dict(commits=np.nan, stop="", host="")
     else:
-        # The run's own shares at its stop (the engine's incremental meter) beside the same
-        # network scored afresh (the prefixes' whole-network D_area, and _destroyed above): the
-        # two must agree to FP, which is the meter's check on real blocks.
+        # The run's own D at its stop (the engine's incremental meter) beside the same network
+        # scored afresh (the prefixes' whole-network D_area): the two must agree to FP, which is
+        # the meter's check on real blocks.
         r |= dict(commits=int(prop.commits), stop=str(prop.stop), host=str(prop.host),
-                  budget=str(prop.budget), stop_scored_area=float(prop.stop_scored_area),
-                  stop_destroyed_area=float(prop.stop_destroyed_area),
-                  chk_scored=abs(float(prop.stop_scored_area) - float(full.D_area)),
-                  chk_destroyed=abs(float(prop.stop_destroyed_area) - d_area))
+                  budget=str(prop.budget), displaced=float(prop.displaced),
+                  chk_displaced=abs(float(prop.displaced) - float(full.D_area)))
         st = pd.read_parquet(steps_path(src.rows, bid, src.name))
         r |= dict(step_s_median=float(st.step_s.median()),
                   step_s_p90=float(st.step_s.quantile(0.9)), step_s_max=float(st.step_s.max()),
@@ -339,8 +348,8 @@ def report(rows: Path, base: Path, ids: list[str]) -> None:
     if prefix_rows:
         print(pd.DataFrame(prefix_rows).to_string(), flush=True)
     arms = runs[runs.net != "baseline"]
-    print(f"meter against a fresh score: max |scored| {arms.chk_scored.max():.2e}, max "
-          f"|destroyed| {arms.chk_destroyed.max():.2e}", flush=True)
+    print(f"meter against a fresh score: max |D| difference {arms.chk_displaced.max():.2e}",
+          flush=True)
     for line in _verdict(runs, lenses):
         print(line, flush=True)
 

@@ -2,19 +2,14 @@
 its `max_roads` safety cap, or when no candidate gains -- and which of the three it was, so a cap
 that binds is seen.
 
-`FootprintMeter` keeps the committed corridor's overlap with every building incrementally
-(`reblock.buildings.IncrementalOverlap`, one road at a time) and reads two shares off it:
-
-- `scored_area`, the research lineup's area D: `sum_i c_i w_i / sum_i w_i`, with `c_i` the share
-  of building i's outline the corridor covers and `w_i` its footprint area (research/roadless
-  common.py's `displacement` under `AreaPopulation`, weights and all);
-- `destroyed_area`: `sum_{c_i > 0} a_i / sum_i a_i`, a touched building counted WHOLE (it is
-  destroyed). Never below `scored_area`, and measured at 3 -- 11x it on the lineup's blocks.
-
-The budget Strategy reads those shares and says whether the run has reached it: `NoBudget` (never:
-the directness presets, whose budget is `max_roads`), `ScoredArea(share=...)` (the access presets)
-or `DestroyedArea(share=...)` (kept selectable for the owner's later decision on the project's
-displacement definition). Every run records both shares at its stop, whichever budget it ran.
+The budget Strategy is `NoBudget` (never reached: the directness presets, whose budget is
+`max_roads`) or `Destroyed(share=..., tau=...)` (the access presets): the ramped destroyed-area
+displacement of the committed roads (reblock.destroyed: each building's destroyed portion X_i,
+ramped to min(1, X_i / tau), weighted by footprint area as research/roadless common.py's
+AreaPopulation weights it) at or past `share`. That is the research lineup's own area D, so the
+stop and the scored prefixes agree. `Destroyed`'s meter is incremental (IncrementalDestroyed: only
+the buildings a committed road touches are recomputed). Every run records its budget's share at
+the stop (None under NoBudget, which measures nothing).
 
 The engines check the budget BEFORE each step and keep the road that crosses it, so a stopped run
 is a commit prefix of a longer one and overshoots by at most one road.
@@ -31,76 +26,53 @@ from geopandas import GeoDataFrame
 from numpy.typing import NDArray
 from shapely.geometry import LineString
 
-from reblock.buildings import Extents, IncrementalOverlap
 from reblock.contracts import Block
+from reblock.destroyed import IncrementalDestroyed, RampedDestroyed
 
 Stop = Literal["budget", "no_gain", "max_roads"]
 
 
-class Shares(NamedTuple):
-    """The committed corridor's displacement, both ways (the module's docstring)."""
-    scored_area: float
-    destroyed_area: float
-
-
 class GreedyRun(NamedTuple):
     """An engine's result: the planarized roads, the greedy commits behind them, why it stopped,
-    and the displacement shares at the stop."""
+    and the budget's share at the stop (None under NoBudget)."""
     roads: GeoDataFrame
     commits: int
     stop: Stop
-    shares: Shares
+    displaced: float | None
 
 
-class FootprintMeter:
-    """The committed roads' displacement shares (the module's docstring), kept incrementally: each
-    committed road's corridor (the road buffered by the half-width, as the cost prices it) touches
-    only the buildings it reaches. A block with no buildings has both shares 0.0 forever."""
+@runtime_checkable
+class BudgetMeter(Protocol):
+    """One run's measure of its committed roads against its budget."""
 
-    def __init__(self, buildings: Extents, half_width_m: float) -> None:
-        self._half_width_m = half_width_m
-        self._overlap = IncrementalOverlap(buildings)
-        area = np.asarray(shapely.area(np.asarray(buildings.outlines.to_numpy(), dtype=object)),
-                          dtype=np.float64)
-        self._area: NDArray[np.float64] = area
-        self._area_total = float(area.sum())
-        # AreaPopulation's weights exactly (common.py): footprint area over its mean, every
-        # building 1 when no footprint has area (a block of coincident points).
-        mean = float(area.mean()) if len(area) else 0.0
-        self._w: NDArray[np.float64] = area / mean if mean > 0.0 else np.ones(len(area))
-        self._w_total = float(self._w.sum())
+    def add(self, real: LineString) -> None: ...
 
-    @classmethod
-    def of(cls, block: Block, half_width_m: float) -> FootprintMeter:
-        return cls(block.buildings, half_width_m)
+    def reached(self) -> bool: ...
 
-    def add(self, real: LineString) -> None:
-        """Commit `real`'s corridor."""
-        self._overlap.add(real.buffer(self._half_width_m))
-
-    def shares(self) -> Shares:
-        if self._w_total == 0.0:
-            return Shares(scored_area=0.0, destroyed_area=0.0)
-        c = self._overlap.c()
-        scored = float((c * self._w).sum() / self._w_total)
-        destroyed = (float((self._area * (c > 0.0)).sum() / self._area_total)
-                     if self._area_total > 0.0 else 0.0)
-        return Shares(scored_area=scored, destroyed_area=destroyed)
+    def share(self) -> float | None: ...
 
 
 @runtime_checkable
 class DisplacementBudget(Protocol):
-    """Whether the committed roads' displacement has reached the run's budget."""
+    """The run's displacement budget: a meter for one block's run."""
 
     @property
     def identity(self) -> BudgetIdentity: ...
 
-    def reached(self, shares: Shares) -> bool: ...
+    def start(self, block: Block, half_width_m: float) -> BudgetMeter: ...
 
 
-def _check_share(share: float) -> None:
-    if not (math.isfinite(share) and 0.0 < share <= 1.0):
-        raise ValueError(f"a displacement budget is a share in (0, 1], got {share}")
+class _Unmeasured:
+    """NoBudget's meter: measures nothing, never reached."""
+
+    def add(self, real: LineString) -> None:
+        pass
+
+    def reached(self) -> bool:
+        return False
+
+    def share(self) -> float | None:
+        return None
 
 
 @dataclass(frozen=True)
@@ -111,41 +83,63 @@ class NoBudget:
     def identity(self) -> BudgetIdentity:
         return self
 
-    def reached(self, shares: Shares) -> bool:
-        return False
+    def start(self, block: Block, half_width_m: float) -> BudgetMeter:
+        return _Unmeasured()
+
+
+class DestroyedMeter:
+    """The committed corridor's ramped destroyed-area D (the module's docstring), each committed
+    road buffered by the half-width, as the cost prices it. A block with no buildings has D 0.0."""
+
+    def __init__(self, budget: Destroyed, block: Block, half_width_m: float) -> None:
+        self._budget = budget
+        self._half_width_m = half_width_m
+        self._destroyed = IncrementalDestroyed(budget.measure, block.buildings)
+        area = np.asarray(shapely.area(np.asarray(block.buildings.outlines.to_numpy(),
+                                                  dtype=object)), dtype=np.float64)
+        # AreaPopulation's weights exactly (research/roadless common.py): footprint area over its
+        # mean, every building 1 when no footprint has area.
+        mean = float(area.mean()) if len(area) else 0.0
+        self._w: NDArray[np.float64] = area / mean if mean > 0.0 else np.ones(len(area))
+        self._w_total = float(self._w.sum())
+
+    def add(self, real: LineString) -> None:
+        self._destroyed.add(real.buffer(self._half_width_m))
+
+    def share(self) -> float:
+        if self._w_total == 0.0:
+            return 0.0
+        return float((self._destroyed.c() * self._w).sum() / self._w_total)
+
+    def reached(self) -> bool:
+        return self.share() >= self._budget.share
+
+
+def _check_share(name: str, value: float) -> None:
+    if not (math.isfinite(value) and 0.0 < value <= 1.0):
+        raise ValueError(f"{name} is a share in (0, 1], got {value}")
 
 
 @dataclass(frozen=True, kw_only=True)
-class ScoredArea:
-    """Reached once the lineup's scored area D is at or past `share`."""
+class Destroyed:
+    """Reached once the committed roads' ramped destroyed-area D (`tau`) is at or past `share`."""
     share: float
+    tau: float
 
     def __post_init__(self) -> None:
-        _check_share(self.share)
+        _check_share("share", self.share)
+        _check_share("tau", self.tau)
 
     @property
     def identity(self) -> BudgetIdentity:
         return self
 
-    def reached(self, shares: Shares) -> bool:
-        return shares.scored_area >= self.share
-
-
-@dataclass(frozen=True, kw_only=True)
-class DestroyedArea:
-    """Reached once the destroyed footprint share (a touched building counted whole) is at or
-    past `share`. On a block as small as 1808 (ten buildings) 0.20 binds after one road."""
-    share: float
-
-    def __post_init__(self) -> None:
-        _check_share(self.share)
-
     @property
-    def identity(self) -> BudgetIdentity:
-        return self
+    def measure(self) -> RampedDestroyed:
+        return RampedDestroyed(tau=self.tau)
 
-    def reached(self, shares: Shares) -> bool:
-        return shares.destroyed_area >= self.share
+    def start(self, block: Block, half_width_m: float) -> DestroyedMeter:
+        return DestroyedMeter(self, block, half_width_m)
 
 
-BudgetIdentity: TypeAlias = NoBudget | ScoredArea | DestroyedArea
+BudgetIdentity: TypeAlias = NoBudget | Destroyed

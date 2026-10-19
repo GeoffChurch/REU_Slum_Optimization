@@ -21,6 +21,7 @@ from reblock.derive.access import (
 )
 from reblock.methods.arterial import (
     Access,
+    Destroyed,
     Directness,
     Displacement,
     GreedyArterialReblocker,
@@ -30,7 +31,6 @@ from reblock.methods.arterial import (
     NoBudget,
     PerLineFallback,
     Repulsion,
-    ScoredArea,
     Uncapped,
     engines,
 )
@@ -529,15 +529,16 @@ def test_access_config_uses_shortlist_engine_and_capped_anchors() -> None:
         assert isinstance(m.engine, ShortlistEngine), name
         assert isinstance(m.realizer, SnapToBoundary), name
         assert m.anchors == PerLineFallback(32, 128), name
-        # The budget is ScoredArea(share=0.20), the lineup's area D; max_roads 1000 is a
-        # safety cap that should never bind (a road cap as the budget graded the cap rather than
-        # the method: 15, then 60, then the lineup's 300). Pinned here, like every other field on
-        # this identity, so the next change to it is deliberate rather than drift.
+        # The budget is Destroyed(share=0.20, tau=0.10), the lineup's ramped D; max_roads 1000
+        # is a safety cap that should never bind (a road cap as the budget graded the cap rather
+        # than the method: 15, then 60, then the lineup's 300). Pinned here, like every other
+        # field on this identity, so the next change to it is deliberate rather than drift.
         assert m.identity == GreedyArterialReblocker(
             realizer=SnapToBoundary(lam=2.0), objective=Access(), cost=cost,
             road_width_m=DEFAULT_ROAD_WIDTH_M, max_roads=1000, anchors=PerLineFallback(32, 128),
             top_k=8, workers=16,
-            engine=ShortlistEngine(k=512, threads=8), budget=ScoredArea(share=0.20)).identity, name
+            engine=ShortlistEngine(k=512, threads=8),
+            budget=Destroyed(share=0.20, tau=0.10)).identity, name
 
     # The speed-first twin of the displacement preset differs only in its sampler (HardCap, a cap
     # that holds): pinned whole, so the two operating points cannot drift apart elsewhere.

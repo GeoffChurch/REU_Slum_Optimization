@@ -6,6 +6,7 @@ each of its faults.
     uv run python $S gain <ids,> <baseline-root> [fault]   # faults: always-live, no-min,
                                                            #   streets-only
     uv run python $S anchors <ids,> <baseline-root> [fault]  # faults: per-line
+    uv run python $S meter <ids,> <baseline-root> [fault]  # faults: deaf, forgetful
     uv run python $S both-ways <guards,> <ids,> <baseline-root>  # each guard, then each fault
 
 `gain`: the incremental access gain (objectives._AccessStep) against the full re-peel of the
@@ -31,6 +32,15 @@ the samplers were moved out of primitives.py (ANCHORS_BEFORE: 112, 229, 323, 409
 arterial_rows/before/micro_20269.csv), so the move changed nothing, and HardCap(32, 128) gives
 at most 128, sorted and unique, at every S. Fault `per-line`: anchors._global_samples replaced by
 the per-line samples, so HardCap's cap fails to hold at S 607. Block: ZAF.9.3.1_1_20269.
+
+`meter`: the access presets' stop (stop.Destroyed's incremental meter, its tau common.MEASURE's)
+equals the lineup's scoring function (common.displacement under common.MEASURE, area weights) on
+the same roads: the stored ordered network's segments fed to the meter one at a time and its D
+read at S in METER_S (capped at the network's length), against the scoring function on the first
+S segments, within METER_TOL. Faults: `deaf` (IncrementalDestroyed.add a no-op) and `forgetful`
+(each piece replaces a building's covered region instead of joining it: shapely.union returns its
+second argument). Blocks: any with a stored arterial network (ZAF.9.3.1_1_20269,
+ZAF.9.3.1_1_38616).
 """
 from __future__ import annotations
 
@@ -62,6 +72,7 @@ from reblock.derive.access import (  # noqa: E402
     parcel_access_layers,
     past_every_parcel,
 )
+from reblock.destroyed import IncrementalDestroyed  # noqa: E402
 from reblock.methods.arterial import anchors as anchors_mod  # noqa: E402
 from reblock.methods.arterial import engines  # noqa: E402
 from reblock.methods.arterial.anchors import AnchorSampler, HardCap, PerLineFallback  # noqa: E402
@@ -75,6 +86,7 @@ from reblock.methods.arterial.primitives import (  # noqa: E402
 from reblock.methods.arterial.realize import ChordRealizer  # noqa: E402
 from reblock.methods.arterial.reblocker import GreedyArterialReblocker  # noqa: E402
 from reblock.methods.arterial.shortlist import FirstOrder, RankContext  # noqa: E402
+from reblock.methods.arterial.stop import Destroyed  # noqa: E402
 from reblock.methods.boundary_graph import _boundary_graph  # noqa: E402
 
 STEPS_S = (0, 50, 150, 300)    # committed segments of the stored network at which `gain` looks
@@ -83,6 +95,8 @@ SHORTLIST = FirstOrder(512, threads=1)
 ANCHOR_S = (0, 150, 300, 450, 607)                       # `anchors`: the brief's S on 20269
 ANCHORS_BEFORE = {0: 112, 150: 229, 300: 323, 450: 409, 607: 525}   # micro_20269.csv
 CAPPED: tuple[AnchorSampler, AnchorSampler] = (PerLineFallback(32, 128), HardCap(32, 128))
+METER_S = (1, 25, 100, 300)    # `meter`: segments of the stored network at which D is compared
+METER_TOL = 1e-9
 
 
 @contextmanager
@@ -229,6 +243,33 @@ def anchors(ids: list[str], root: Path) -> list[str]:
     return bad
 
 
+def meter(ids: list[str], root: Path) -> list[str]:
+    """The guard `meter` (the module's docstring): the failures, each named."""
+    road_rescore._check_single_threaded()
+    hw = _preset().road_width_m / 2.0
+    bad: list[str] = []
+    blocks = {b.block_id: b for b in common.build_blocks(ids)}
+    for bid in ids:
+        b = blocks[bid]
+        frame = gpd.read_parquet(road_rescore.ordered_path(root / "scratch", bid,
+                                                           road_rescore.ARTERIAL))
+        w = common.AreaPopulation().weights(np.asarray(b.buildings.outlines))
+        m = Destroyed(share=1.0, tau=common.MEASURE.tau).start(b, hw)
+        marks = sorted({min(s, len(frame)) for s in METER_S})
+        for k, road in enumerate(frame.geometry, start=1):
+            assert isinstance(road, LineString)
+            m.add(road)
+            if k not in marks:
+                continue
+            want = common.displacement(b, frame.iloc[:k], w, measure=common.MEASURE)
+            got = m.share()
+            print(f"{bid} S {k}: meter {got:.12f}, scoring {want:.12f}", flush=True)
+            if abs(got - want) > METER_TOL:
+                bad.append(f"{bid} S {k}: meter {got!r} against scoring {want!r}")
+                return bad
+    return bad
+
+
 def _no_min(self: _AccessStep, seeds: NDArray[np.intp]) -> int:
     """Fault `no-min`: layer + 1 to every unvisited neighbour, never compared to the base depth."""
     depths = self.depths.copy()
@@ -280,13 +321,15 @@ def _always_live(self: _AccessStep, real: LineString) -> bool:
 
 
 Guard = Callable[[list[str], Path], list[str]]
-GUARDS: dict[str, Guard] = {"gain": gain, "anchors": anchors}
+GUARDS: dict[str, Guard] = {"gain": gain, "anchors": anchors, "meter": meter}
 FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "gain": {"always-live": lambda: _patched(_AccessStep, "live", _always_live),
              "no-min": lambda: _patched(_AccessStep, "relaxed_burden", _no_min),
              "streets-only": _streets_only},
     "anchors": {"per-line": lambda: _patched(anchors_mod, "_global_samples",
                                              anchors_mod._arclength_samples)},
+    "meter": {"deaf": lambda: _patched(IncrementalDestroyed, "add", lambda self, piece: None),
+              "forgetful": lambda: _patched(shapely, "union", lambda a, b: b)},
 }
 
 
