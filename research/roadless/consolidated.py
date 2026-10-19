@@ -613,8 +613,11 @@ def report() -> None:
 LENSES = ("L_P", "L_Pq", "L_J2")         # P the headline, P_{1/2} the equity view, J_2 the old
 PRESETS = ("default", "hard", "cheap", "cheap005")
 LINEUP_ROADS = ("clearance", "clearance_looped", "cycle_native",
-                "cycle_native_betweenness_contrast", "resistance_lp", "euclidean_grid",
-                "greedy_arterial_access_displacement")
+                "cycle_native_betweenness_contrast", "resistance_lp", "euclidean_grid")
+# The old arterial (cap 300 roads, no displacement stop) is superseded (owner 2026-10-19) by
+# research/arterial-speed's arterial, re-proposed and re-scored by that branch's Task 7: its rows
+# under the lineup root are kept as a record, read by no comparison here.
+SUPERSEDED_ROADS = ("greedy_arterial_access_displacement",)
 OLD = STORED_ROADS / "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a"      # item 4 on the complex
 OLD_ROWS = OLD / "cpu" / "area_D0.02-0.05-0.1-0.15-0.2"
 
@@ -698,6 +701,9 @@ def lineup_report() -> None:
     # the road methods under free first
     root = rr.lineup_rows()
     cx = _read(root / metrics.RUNTIME / "cpu" / "area_D0.02-0.05-0.1-0.15-0.2")
+    if len(cx):
+        assert set(cx.method) <= {*LINEUP_ROADS, *SUPERSEDED_ROADS}, set(cx.method)
+        cx = cast(pd.DataFrame, cx[cx.method.isin(LINEUP_ROADS)])
     if len(cx):
         at = _roads_at(cx, 0.05)
         at["size"] = at.block.map(feat["size"])

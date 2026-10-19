@@ -33,7 +33,10 @@ RUNTIME, free first, optimizing P at area D 0.05; Lens A of P, mean over the blo
   consolidated pass's question (3)).
 
 **Next** (owner 2026-10-13): the site, README and examples revamp; then the vulnerability score
-with vehicle access (Owner's decisions, below).
+with vehicle access (Owner's decisions, below). Left from the consolidated pass: cycle_desire on
+the eight largest oversized blocks (still on orion: item 4), research/arterial-speed's Task 7 on
+the owner's go (the arterial re-proposed and every road method re-scored under the ramped
+destroyed area: item 4), and the owner's three questions (Open, below).
 
 Closed (measured, NOTES): multi-rounding `.r<n>` (held out +0.001 at 2x; late `.r2l2` the same at
 1.58x); coarse-to-fine `.c0.75` (keeps gates at 0.85x, but with the polish dominated); coarse
@@ -166,8 +169,19 @@ items up front"), in the order proposed:
    medians +0.47 -- +0.80), resistance_lp leads all three, and in B's order SIMP's default, free
    first on the 12 with enclosed homes (item 3), is ahead of the best road on all 60 (by a median
    +0.152 where (i) ties, on 55, at least +0.047; on (i) on the other 5). Open: the 23
-   oversized blocks (cycle_desire's cost and memory go with area) and the arterial (its
-   `max_roads: 60` keeps it short of Lens A).
+   oversized blocks (cycle_desire's cost and memory go with area) and the arterial (its `max_roads:
+   60` keeps it short of Lens A). **Closed (the consolidated pass; NOTES, "The consolidated pass:
+   every block under the final metric", the road methods)**: the 82 under RUNTIME with free first,
+   the oversized blocks with the rest (482 of the 492 block-and-method networks scored); SIMP's
+   default is ahead of the best road at D 0.05 on all 82 under every lens (where B (i) ties, by a
+   median +0.161 L_P on the large blocks and +0.077 on the oversized; the best road gets about half
+   of SIMP's L_P), resistance_lp the best road on 50, none ahead of SIMP's default on any block;
+   cycle_desire on the eight largest oversized blocks is still running on orion (jobs 79684, 79686,
+   79687; the workspace's followup.md). The arterial: superseded (owner 2026-10-19) by
+   research/arterial-speed's (an incremental exact gain, a stop at the ramped destroyed-area D
+   0.20, the lineup's scoring under that measure); that branch's Task 7 re-proposes it on every
+   lineup block and re-scores every road method's prefixes under the new D. The old arterial's rows
+   at 300 roads (70 of 82 blocks) stay as a record only.
    **The metric decisions** (owner 2026-10-12, walking through four: the escape-time functional,
    the population, the conductance, the exits). (1) **P as the headline** ("leaning toward P with
    J_2 as a side report"): one solve, monotone, convex in the clearing (a certified bound), the
@@ -473,7 +487,10 @@ items up front"), in the order proposed:
    **TODO** (owner 2026-10-12, "leave a TODO"): make free first the default for the road methods
    in the research lineup (free_roads.FreeEnclosed in place of reblock.free_first.HoldNothing in
    road_rescore's arms), as B's order implies, and re-score item 4's lineup with it. It changes a
-   network only on a block with homes enclosed at baseline (12 of the 60 large blocks).
+   network only on a block with homes enclosed at baseline (12 of the 60 large blocks). **Done (the
+   consolidated pass)**: road_rescore.lineup_arms takes free_roads.FreeEnclosed under RUNTIME as
+   the stage of clearance, clearance_looped, cycle_native, cycle_desire and resistance_lp; under
+   RUNTIME it holds roads on 42 of the 82 blocks (item 4's line above for the lineup's numbers).
 
 Owner's decisions on the other open items (2026-10-13: "Yes to everything, except vulnerability
 can be done after we've done the entire website/README/examples revamp"):
@@ -486,7 +503,7 @@ can be done after we've done the entire website/README/examples revamp"):
   the final metric")**: RUNTIME switched (this file's head) and every block re-scored under it: the
   three presets free first on all 302 blocks, the small blocks' rows among them (Presets now,
   above); free first for the plain greedy (item 3); the road methods under free first on the 82
-  large blocks, the oversized ones and the arterial at 300 roads among them (items 4 and 5); the
+  large blocks, the oversized ones among them, the arterial superseded (items 4 and 5); the
   measurement gaps: the one-card timing with setup (a large block's four presets 488 s, median;
   consolidated_rows/summary_lineup_onecard.csv), S0.005cat's real clearing with the polish
   (`cheap005`: +0.0018 L_P over the cheap preset on the 60 large blocks, ahead on 38, at 73 s

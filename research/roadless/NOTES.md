@@ -7815,8 +7815,61 @@ raster) is +0.0018 as a real clearing polished under P: both are on the frontier
 better, slower), and whether the cheap preset takes it is the owner's call. The sightline lineup:
 closed (sightline went with the raster, phase 3).
 
-**The road methods under free first.** To fill: the lineup's runs are on the cluster (road_rescore
-`lineup-one`, the 82 large blocks x 7 methods).
+**The road methods under free first.** road_rescore `lineup-one` on the cluster's cores, one task a
+block and method: the network proposed by road_rescore.lineup_arms (FreeEnclosed under RUNTIME the
+stage of clearance, clearance_looped, cycle_native, cycle_desire and resistance_lp; the grid holds
+none), its canonical prefixes, its area prefixes scored on the complex under RUNTIME on a core;
+rows under road_rows/lineup-caf14fa2, the digest of the stage's identity. The runs submitted before
+2d5df972 wrote lineup-e3b882f9 and were moved file for file (five networks of 30796 and 23597
+proposed again at HEAD were identical WKB for WKB); 30 of their rows, which the cancelled reused
+run finished on the cluster after the same identities were scored here, differed only in timings,
+host and peak memory and were dropped for the standing row. The 21 large blocks where RUNTIME walls
+no home in keep item 4's networks (HoldNothing), scored under RUNTIME. cycle_desire's cluster
+requests were sized from its measured peaks scaled by area (8.8 GB/km^2 through the origin over the
+16 tasks above 1 km^2, 4.5 -- 10.9 per task; 1.8 -- 3.5 h/km^2 on the oversized), and 7499's ran on
+a core here (14.9 h, 83 GB at 8.4 km^2). Scored: 482 of the 492 (block, method) of the 82 blocks
+and six methods (clearance, clearance_looped, cycle_native and the grid on all 82, resistance_lp on
+81, cycle_desire on 73). Not scored: the two carved meshes refused (below), and cycle_desire on the
+eight largest oversized blocks still on orion (62441, 62803, 63612: job 79684; 4287: 79686; 1182,
+472, 63818, 64070: 79687), which a follow-up adds (the workspace's followup.md).
+- Free first holds roads on 42 of the 82 blocks, for every stage method (cycle_desire on 41 of its
+  networks so far); elsewhere the networks are HoldNothing's.
+- At area D 0.05 (medians over the blocks each reaches it on; L_P, L_{P_1/2}, L_J2): resistance_lp
+  0.127, 0.139, 0.135 (81 blocks); cycle_desire 0.126, 0.143, 0.131 (67); cycle_native 0.117,
+  0.137, 0.130 (72); clearance 0.111, 0.130, 0.109 (65); clearance_looped 0.099, 0.112, 0.101 (82);
+  the grid 0.086, 0.100, 0.095 (82). clearance reaches D 0.05 on 9 of the 22 oversized blocks,
+  cycle_native on 13, cycle_desire on 9 of its 14; the rest on all.
+- Each against SIMP's default, paired on the blocks the method reaches D 0.05 on (median, L_P):
+  resistance_lp -0.136, clearance_looped -0.179, the grid -0.189, cycle_native -0.195, cycle_desire
+  -0.196, clearance -0.225. No road method is ahead of SIMP's default on any block under any lens.
+- The price of roads in B's order: SIMP's default is ahead of the best road network at D 0.05 on
+  all 82 blocks under every lens. B (i) ties on 79; on the other 3 (30796, 30848, 45876) the best
+  road leaves more of the population walled in (by 0.00005 -- 0.00046 of it). Where (i) ties SIMP's
+  default leads by a median +0.161 L_P on the 57 large blocks (p10 +0.081, p90 +0.242, at least
+  +0.049) and +0.077 on the 22 oversized (p10 +0.043, p90 +0.119, at least +0.034); the best road
+  gets a median 50% of SIMP's L_P on both (p10 40%, p90 64%). The best road under L_P:
+  resistance_lp on 50 blocks, cycle_native 13, clearance_looped 9, cycle_desire 7, the grid 2,
+  clearance 1 (under L_{P_1/2} resistance_lp 43, cycle_desire 12).
+- The oversized blocks: every lens drops with size (the roads' L_P medians 0.04 -- 0.07 on the
+  oversized against 0.11 -- 0.17 on the large), and SIMP's lead with it, still on every block;
+  resistance_lp comes closest there (-0.078 L_P against -0.187 on the large).
+- The switch's effect on the order (Kendall tau per block between the road methods' order in B's
+  order at D 0.05 under RUNTIME and item 4's under the per-block metric, on the 60 large blocks,
+  the methods both have): median +0.60 under L_P (IQR +0.33 -- +0.87), +0.60 under L_{P_1/2} (+0.20
+  -- +0.87), +0.47 under L_J2 (+0.20 -- +0.87), at least -0.73. The barriers, the boost and free
+  first reorder the methods on a block; resistance_lp leads before and after.
+- Cost (each network's proposal, median hours this pass): the grid 0.0, clearance 0.03,
+  clearance_looped 0.04, resistance_lp 0.05, cycle_native 0.08, cycle_desire 0.46 on the large
+  blocks and 10.9 on the oversized (17.9 h at most).
+  consolidated_rows/summary_lineup_{roads,price,held,tau}.csv.
+- **The arterial: superseded** (owner 2026-10-19). The lineup's old arterial (the access arterial
+  capped at 300 roads, no displacement stop) gives way to research/arterial-speed's (an incremental
+  exact gain, a stop at the ramped destroyed-area D 0.20, the lineup's scoring under that measure),
+  whose Task 7 re-proposes it on every lineup block and re-scores every road method's prefixes
+  under the new D. Its rows here are a record, read by no comparison
+  (consolidated.SUPERSEDED_ROADS): 70 of the 82 blocks scored (66 reaching D 0.05), a median 8.2 h
+  a proposal and 34.9 h at most; 17 of its tasks met the cluster's 23.5 h wall (8 oversized, 9
+  large) and were being re-run on cores here when the ruling came.
 
 (Roads: two networks could not be scored: the carved mesh is refused as not Delaunay, 39240's
 cycle_desire (2 passages) and 64070's resistance_lp (1). On 39240 three vertices of the corridors'
