@@ -81,8 +81,9 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Protocol
 
 import numpy as np
 import scipy.sparse as sp
@@ -121,6 +122,16 @@ BAND_TOL_M = LINE_SNAP_M    # a boundary edge whose midpoint lies this near the 
 
 # ------------------------------------------------------------------ the mesh
 
+def _by_face(qi: NDArray[np.int64], qb: NDArray[np.int64], n: int) -> list[tuple[int, ...]]:
+    """Per face 0 .. n - 1 its footprints, ascending: the pairs (face qi, footprint qb) of a tree
+    query grouped by one sort (a scan per face was quadratic: 136 s of a 238k-face carving's
+    _faces, 16 s grouped; NOTES, "Mesh speedups before the lineup's rerun")."""
+    o = np.lexsort((qb, qi))
+    qi, qb = qi[o], qb[o]
+    cuts = np.searchsorted(qi, np.arange(n + 1))
+    return [tuple(qb[cuts[k]:cuts[k + 1]].tolist()) for k in range(n)]
+
+
 def _faces(geo: gc.Geometry, spec: gc.Spec, grow: float
            ) -> tuple[NDArray[np.object_], NDArray[np.object_], NDArray[np.object_], Any]:
     """(the faces, densified, as polygons; per face its covering footprints; per face the
@@ -155,12 +166,12 @@ def _faces(geo: gc.Geometry, spec: gc.Spec, grow: float
     faces, rep = faces[inside_region], rep[inside_region]
     tree = shapely.STRtree(geo.polys)
     qi, qb = tree.query(rep, predicate="intersects")
-    cover = [tuple(sorted(qb[qi == k].tolist())) for k in range(len(faces))]
+    cover = _by_face(qi, qb, len(faces))
     if grow > 0:
         zi, zb = tree.query(rep, predicate="dwithin", distance=grow)
         dz = shapely.distance(rep[zi], geo.polys[zb])
         zi, zb = zi[dz < grow], zb[dz < grow]
-        zone = [tuple(sorted(zb[zi == k].tolist())) for k in range(len(faces))]
+        zone = _by_face(zi, zb, len(faces))
     else:
         zone = cover
     return (faces, np.array(cover + [()], dtype=object)[:-1],
@@ -796,7 +807,62 @@ def _polygons(g: Any) -> list[Any]:
 # ------------------------------------------------------------------ the fixed mesh, cached
 
 _CACHE_FORMAT = 2      # what a cached mesh's file holds (in its key; a storage detail, no score's):
-                       # 2 the baseline's grown complex beside the mesh
+                       # 2 the baseline's grown complex beside the plain mesh (a carved mesh's file
+                       # never held one that any code read: carved meshes are built in temporary
+                       # directories, and road scoring never frees first)
+
+
+def _baseline_arrays(geo: gc.Geometry, spec: gc.Spec, grow: float) -> dict[str, NDArray[Any]]:
+    """Free first's baseline complex's arrays (gap_complex.complex_arrays): the complex of `geo`
+    (the buildings) with every footprint standing, grown by `grow`."""
+    return gc.complex_arrays(gc.build(geo, spec, np.ones(len(geo.polys), dtype=bool), carve=None,
+                                      grow=grow))
+
+
+class Baseline(Protocol):
+    """Free first's baseline complex (gap_complex.free_first's cx0): the complex grown as the form
+    grows its footprints with every footprint standing, the buildings' whatever the mesh's atoms.
+    Which one a Fixed holds is settled where it is made (Fixed.of, Fixed._load)."""
+
+    def complex(self) -> gc.Complex:
+        """The complex."""
+        ...
+
+    def stored(self) -> dict[str, NDArray[Any]]:
+        """The arrays a mesh's file keeps of it (gap_complex.complex_arrays), by name."""
+        ...
+
+
+class StoredBaseline(NamedTuple):
+    """The plain mesh's baseline: built with it and kept in its file (its clearings free first,
+    and a cached mesh then never builds it)."""
+    arrays: dict[str, NDArray[Any]]
+    spec: gc.Spec
+
+    def complex(self) -> gc.Complex:
+        return gc.complex_of_arrays(self.arrays, self.spec)
+
+    def stored(self) -> dict[str, NDArray[Any]]:
+        return self.arrays
+
+
+class LazyBaseline:
+    """A carved mesh's baseline: built from the buildings (`geo`, never the atoms) on first use and
+    kept in memory only. Road scoring never frees first, and building it with every carving was
+    15-16% of a road mesh's time (NOTES, "Mesh speedups before the lineup's rerun")."""
+
+    def __init__(self, geo: gc.Geometry, spec: gc.Spec, grow: float) -> None:
+        self.geo, self.spec, self.grow = geo, spec, grow
+
+    @cached_property
+    def arrays(self) -> dict[str, NDArray[Any]]:
+        return _baseline_arrays(self.geo, self.spec, self.grow)
+
+    def complex(self) -> gc.Complex:
+        return gc.complex_of_arrays(self.arrays, self.spec)
+
+    def stored(self) -> dict[str, NDArray[Any]]:
+        return {}
 
 
 class Fixed(NamedTuple):
@@ -804,20 +870,16 @@ class Fixed(NamedTuple):
     footprints' atoms (`carving`: the buildings themselves, or a road network's pieces), the
     demand on the triangles reaching the street with every footprint standing (gap_flow.demand_on;
     per point its triangle `ptri`, -1 in the band), each home's ring (gap_flow.ring_of) and the
-    complex grown as the form grows its footprints with every footprint standing (`cx0`, its
-    arrays: gap_complex.complex_arrays), free first's baseline. The demand, the rings and cx0 are
-    the buildings', whatever the atoms."""
+    complex grown as the form grows its footprints with every footprint standing (`cx0`, free
+    first's baseline: the plain mesh's built with it and stored, a carved mesh's built on use).
+    The demand, the rings and cx0 are the buildings', whatever the atoms."""
     fm: FullMesh
     dem: gf.PointDemand
     ptri: NDArray[np.int64]
     ring: gf.Ring
-    cx0: dict[str, NDArray[Any]]
+    cx0: Baseline
     t_build: float
     carving: Carving
-
-    def complex0(self, spec: gc.Spec) -> gc.Complex:
-        """Free first's baseline complex (gap_complex.free_first's cx0)."""
-        return gc.complex_of_arrays(self.cx0, spec)
 
     @staticmethod
     def key(block, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width) -> str:
@@ -841,10 +903,10 @@ class Fixed(NamedTuple):
         corridors' digest beside the block's identity)."""
         tag = f"__c{carving.digest}" if carving.stops else ""
         path = cache / f"{block.block_id}{tag}__{cls.key(block, spec, fs, form)}.npz"
-        if path.exists():
-            return cls._load(path, carving)
-        t0 = time.time()
         geo = gc.geometry(block)
+        if path.exists():
+            return cls._load(path, carving, geo=geo, spec=spec, grow=form.grow)
+        t0 = time.time()
         atoms = geo._replace(polys=carving.polys)
         fm = full_mesh(atoms, spec, fs, form, box=lattice_box(geo, spec, form))
         cells = full_cells(fm, lumped=False)
@@ -862,8 +924,10 @@ class Fixed(NamedTuple):
         ptri = -np.ones(len(dem.xy), dtype=np.int64)
         ptri[:nin] = ids[np.arange(nin) // fs.quad]
         ring = gf.ring_of(geo, spec.ring_m, fm.xy, fm.tri, band_open)
-        cx0 = gc.complex_arrays(gc.build(geo, spec, np.ones(len(geo.polys), dtype=bool),
-                                         carve=None, grow=form.grow))
+        # free first's baseline: the plain mesh's built now and stored with it, a carved mesh's
+        # on use
+        cx0: Baseline = (LazyBaseline(geo, spec, form.grow) if carving.stops else
+                         StoredBaseline(arrays=_baseline_arrays(geo, spec, form.grow), spec=spec))
         fx = cls(fm=fm, dem=dem, ptri=ptri, ring=ring, cx0=cx0, t_build=time.time() - t0,
                  carving=carving)
         cls._store(fx, path)
@@ -889,14 +953,17 @@ class Fixed(NamedTuple):
             arrs[f"{name}_data"], arrs[f"{name}_indices"] = M.data, M.indices
             arrs[f"{name}_indptr"], arrs[f"{name}_shape"] = M.indptr, np.array(M.shape)
         arrs["ring_band"] = ring.band
-        arrs.update({f"cx_{name}": a for name, a in fx.cx0.items()})
+        arrs.update({f"cx_{name}": a for name, a in fx.cx0.stored().items()})
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f"{path.stem}.{os.getpid()}.tmp.npz")
         np.savez(tmp, **arrs)
         os.replace(tmp, path)
 
     @classmethod
-    def _load(cls, path: Path, carving: Carving) -> Fixed:
+    def _load(cls, path: Path, carving: Carving, *, geo: gc.Geometry, spec: gc.Spec,
+              grow: float) -> Fixed:
+        """The mesh `_store` kept at `path`, on `carving`'s atoms; a carved mesh's baseline
+        LazyBaseline(geo, spec, grow), as Fixed.of makes it."""
         z = np.load(path)
 
         def csr(name: str) -> sp.csr_matrix:
@@ -913,9 +980,14 @@ class Fixed(NamedTuple):
         if fm.fcov.shape[1] != carving.n:
             raise ValueError(f"{path.name}: a mesh of {fm.fcov.shape[1]} atoms, the carving has "
                              f"{carving.n}")
+        cx0: Baseline = LazyBaseline(geo, spec, grow)
+        if not carving.stops:
+            arrays = {name[3:]: z[name] for name in z.files if name.startswith("cx_")}
+            if not arrays:
+                raise ValueError(f"{path.name}: a plain mesh's file without its baseline complex")
+            cx0 = StoredBaseline(arrays=arrays, spec=spec)
         return cls(fm=fm, dem=dem, ptri=z["ptri"],
-                   ring=gf.Ring(tri=csr("ring_tri"), band=z["ring_band"]),
-                   cx0={name[3:]: z[name] for name in z.files if name.startswith("cx_")},
+                   ring=gf.Ring(tri=csr("ring_tri"), band=z["ring_band"]), cx0=cx0,
                    t_build=float(t_build), carving=carving)
 
 
@@ -1484,7 +1556,7 @@ class Model:
         reach: its walled-in homes at baseline, and those it leaves walled in."""
         fr = gc.free_first(self.geo, self.spec, w=self.form.filtration_w, grow=self.form.grow,
                            budget=budget, cost=self.cost_, pop=self.pop, held0=held,
-                           cx0=self.fx.complex0(self.spec))
+                           cx0=self.fx.cx0.complex())
         bid = self.block.block_id
         if not np.array_equal(fr.target, self.walled0):
             raise RuntimeError(f"{bid}: the complex walls in homes "
