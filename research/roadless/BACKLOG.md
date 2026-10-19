@@ -843,6 +843,30 @@ Not pursued, with what would change that:
   pass): when the live runs' GPU sum is already over the project's budget, a new GPU run is chained
   after every live run, CPU runs among them, so it waits on runs that hold no GPU. The fix is
   GeoffChurch/cluster_submit's.
+- **Carve every prefix and keep the road meshes** (owner's call; NOTES, "Mesh speedups before the
+  lineup's rerun"): one mesh per network with every prefix 1 .. M carved, kept on disk, so a
+  change of the displacement measure or the budgets (Task 7 is the second in a week) re-cuts the
+  prefixes and re-scores them as states without meshing again. The study (6310 resistance_lp,
+  1,299 prefixes against its 6 stops): the mesh 59 s against 56 s (1.73M triangles against 1.54M,
+  +12%), the model 6.7 s and a state about 1 s, but Carving.of 238 s against 1.1 s (each stop
+  rebuilds the tree and re-cuts every atom its corridor touches, so the carving grows with the
+  prefixes times the atoms). Kept, the lineup's 552 meshes are about 2.1 billion triangles, ~410
+  GB at the plain 6310 file's 192 B a triangle. On the frontier if Carving.of cuts each road's own
+  piece once (one tree, corridor k less corridor k - 1, as the arterial's IncrementalDestroyed
+  does), so that carving every prefix costs about one carving, and the disk is there: a re-cut is
+  then model + states (6310: ~11 s against ~55 s a network, ~5x) for one ~12% larger mesh build.
+- **One Delaunay of the linework in place of GEOS per face** (owner's call; NOTES, "Mesh speedups
+  before the lineup's rerun"): full_mesh triangulates each face with GEOS's constrained Delaunay,
+  8.8 s of the plain 6310 mesh's 43 s (754k triangles over 6,239 faces), then flips. qhull's
+  Delaunay of the same 387,603 distinct vertices takes 2.7 s (775k triangles), and 524 of the
+  393,305 linework segments (0.13%) are not among its edges, every one of them encroached (a
+  vertex inside its diametral circle; 6,030 are encroached in all). (The study's first count,
+  98.6% missing and 63 encroached, was two bugs of its bench: qhull's int32 simplices overflowed
+  the edge keys, and the encroachment test read the third-nearest vertex.) The saving is at most
+  ~6 s of a ~40 s road mesh (~15%) less the recovery. On the frontier if the 524 segments are
+  recovered (split, or their few faces meshed by GEOS as now), the faces read off the one
+  triangulation, and the result is the same constrained Delaunay mesh up to cocircular ties: any
+  other mesh moves every score and MESH_REV with it, which a ~15% saving does not pay for.
 - **Carved meshes refused as not Delaunay** (found in the consolidated pass; NOTES, "The
   consolidated pass: every block under the final metric"): two of the road lineup's networks could
   not be scored, 39240's cycle_desire (2 passages) and 64070's resistance_lp (1): "passages with
