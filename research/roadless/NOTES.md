@@ -7927,7 +7927,8 @@ of the default's mean) worth 1.19x its GPU time (17 s a block)? A yes puts RATES
 break-even, 7.9e-6 Lens A per GPU-second, a no its bottom.
 
 **The guards on the final code.** Every guard both ways here on cores (96 runs, 10.6 process-h at
-68057a29; gap_clear_check's `identity` and `roads` again at 892f4ecd, road_rescore's last change):
+68057a29; gap_clear_check's `identity` and `roads` again at 892f4ecd, road_rescore's last change;
+all 96 again at 170a2525, the pass's last code, 11.9 process-h, every one as expected):
 gap_clear_check's 24 guards on cores (55 runs with their faults), gap_check 5 (11), gap_flow_check
 6 (12), pweight_check 5 (10), free_roads_check `free-roads` (with `one-short` and
 `through-barriers`), clearings_check `overwrite` (`no-check`), cluster_check `ids` (`no-check`) and
@@ -7947,3 +7948,13 @@ region_leaks, search, tests/test_clearings.py); the others hold their errors at 
 (common 12, gap_calib 8, gap_clear 32, gap_clear_check 10, pweight 4, pweight_check 6, regions 5,
 relax 11, road_rescore 18) but gap_complex (25 against 24: origin_of's untyped block, left so, its
 source in the free stage's identity). ruff check: clean.
+
+**Compute.** GPU: 27.1 GPU-h of the 40 (the presets 20.5 with the pilot, the screens 6.3, the
+device guards 0.26). The cluster's cores (orion and quadro2; sacct, each task's wall, one core a
+task): 1,582 core-h by 2026-10-19 09:30 UTC, the road lineup 1,550 of it (the old arterial's runs
+1,081: cp-roads2-arterial-large's 726 and the 22 oversized arterials' 355 of cp-roads2-oversized's
+401), the presets on the small blocks 12.5, the survey 17.6, the lenses 1.7; cycle_desire's eight
+still on orion add at most about 790 (their walls) [inferred]. Here, single-threaded: the old
+arterial's re-runs 267 process-h (four finished in 14 -- 35 h each, eight killed at the owner's
+ruling after 3 -- 38 h), 7499's cycle_desire 14.9, the guards 10.6 and 11.9, the reused blocks' and
+the last lenses' scoring before them. Within the caps (40 GPU-h, 3,000 core-h).
