@@ -8094,3 +8094,76 @@ re-scoring. The arterial's re-proposal on its 62 lineup networks: the study's pr
 1.3 -- 6.4% of the stored (median 2.1%) against 612.6 h stored, so 8 -- 39 task-h, central ~13.
 Total ~96 task-h central (~91 -- 122), the oversized blocks (to 51.7 km2) the uncertain part as
 before.
+
+### Mesh speedups before the lineup's rerun (2026-10-19)
+
+Task 7 re-meshes every road network of the lineup (552 (block, network) tasks; in the stored rows
+of lineup-caf14fa2, 59.9 of 71.2 task-h are `t_mesh`). A profile of the road meshes (scratchpad
+study, 6310 and 20269) found two costs that change no score, both now gone (4014bc7f):
+
+- **The baseline complex on every carving.** Fixed.of built free first's baseline complex (cx0,
+  gc.build on the buildings) with every mesh, 15-16% of a road mesh's time, though only
+  Model.free_first reads it and road scoring never frees first. It is now a Strategy settled
+  where the mesh is made (gap_clear.Baseline): the plain mesh's StoredBaseline, built with it and
+  kept in its file as before (the cache format and every plain cache file unchanged), and a
+  carved mesh's LazyBaseline, built from the buildings on first use and never stored.
+- **A scan per face in _faces.** Each face's cover and zone were read by a scan of every query
+  pair (quadratic in the faces); now one sort groups them (gap_clear._by_face). On 6310's lineup
+  networks carved into one mesh at once (14,465 atoms, 238,125 faces) _faces takes 13.0 s
+  against 145.6 s, identical; on one network's carving (7k -- 26k faces) it was 1 -- 2 s.
+
+Both are bit-identical. On 6310's seven lineup networks (proof.py, the code before and after,
+one process each on rtx6000): every lens at all 40 stops, every array of every fixed mesh (by
+digest), P0, P_{1/2},0 and J_2,0, the baseline complex (carved, plain, plain read back) and free
+first's held set on a carved and on the plain mesh are identical. Guards (gap_clear_check.py,
+both ways on 6310): `faces` (the grouped lists against the scan's, verbatim, on the block plain
+and carved by a cross of two 6 m roads; fault `unsorted` fails it, 222 -- 2,317 lists apart) and
+`lazy-baseline` (a carved mesh builds no complex and stores none, and its baseline built on use
+equals the plain mesh's array for array; faults `atoms`, the baseline built on the carving's
+atoms, 17 arrays apart, and `eager`, built with the mesh, fail it).
+
+**Time, 6310 end to end** (carve + mesh + model + states, one network a process, rtx6000):
+
+    network                               triangles  mesh before/after s  total before/after s
+    resistance_lp                         1,540,260      56.0 / 51.0          69.1 / 64.1
+    clearance                             1,281,361      49.6 / 39.4          60.8 / 50.0
+    clearance_looped                      1,465,350      53.8 / 45.0          66.8 / 58.0
+    cycle_native                          1,413,181      51.4 / 41.7          61.6 / 51.8
+    cycle_native_betweenness_contrast     1,344,831      50.8 / 42.3          61.0 / 52.3
+    euclidean_grid                        1,290,275      50.3 / 39.9          61.8 / 50.8
+    greedy_arterial_access_displacement   1,543,234      59.7 / 46.8          73.7 / 60.1
+
+The meshes 9 -- 22% faster (17% over the seven), the networks 14.9% (454.7 -> 387.1 s); model and
+states unchanged (4 -- 7 s each). A carved model that does free first now pays the build there
+(11 -> 19 s on resistance_lp), which no road scoring does.
+
+**The nodes** (the same task, 6310 resistance_lp through `cx`, new code, one task alone on the
+node; mesh-node-orion and mesh-node-quadro2 at 85083830; both nodes' lenses equal rtx6000's
+exactly):
+
+    node             host     us / triangle  mesh s  model + states s  total s  peak GB
+    rtx6000 (local)  rtx6000      33.1         51.0      12.0             64.1     2.5
+    quadro2          ai05         52.2         80.4      23.8            106.1     2.5
+    orion            ai01         55.7         85.8      23.0            110.6     2.5
+
+Alone, quadro2 and orion are within 7% of each other and 1.6 -- 1.7x rtx6000. Packed, the stored
+lineup ran slower per triangle (median, small blocks: ai05 80, ai01 95, rtx6000 40; the large
+ones ai05 89, ai01 107, rtx6000 43): memory bandwidth shared by 30-odd tasks, worse on orion.
+Memory now (2026-10-19 15:30Z): quadro2 idle (64 CPUs, 385 GB, nothing allocated); orion 62 of 72
+CPUs idle but 1,204 of 1,545 GB allocated, to this project's own region jobs (79684_0..2 at 210
+GB, 79687_0 at 540 GB, 1-1.5 days into 2.5- and 6-day limits), so ~340 GB free. The heavy tasks:
+the six of 4287 at ~65 GB, 7499's at 79 GB, five more at 41 -- 49 GB, 95% of tasks under 40 GB
+(median 4.5 GB).
+
+**Recommendation for Task 7's re-scoring:** pin it to quadro2 (the faster CPU node, all its
+memory free: 4287's six tasks fit five at a time beside the small ones), with `--mem` per block
+from the stored peaks; orion only for a second run of other blocks once the region jobs release
+their memory (with ~340 GB free, 4287 alone would take all of it). rtx6000 is 1.6x faster again
+but holds no free slot.
+
+**Task 7, re-estimated:** the complex scoring, the stored 71.2 task-h at their hosts' packed
+rates, is ~70 task-h at quadro2's (ai01's 35.2 mesh-h at 1.2x its rate, rtx6000's 4.9 at 0.5x);
+less 16% of the meshing (the baseline complex; _faces' saving matters only on the largest
+carvings and is not counted) ~61 task-h. With the prefix stage (~10 task-h) and the arterial's
+re-proposal (8 -- 39, central ~13): ~84 task-h central (~79 -- 110), against ~96 (91 -- 122)
+before; about 3 -- 4 h of wall on quadro2's 32 cores, 4287's tasks (~40 min each) the long pole.
