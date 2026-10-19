@@ -556,6 +556,28 @@ can be done after we've done the entire website/README/examples revamp"):
   vehicle of width W reaches, over W (item 4, decision 3).
 
 Open:
+- **The public package's displacement, and the methods' internal costs, onto the ramped
+  destroyed area** (later: at the site revamp). The research lineup adopted the ramped destroyed
+  area on 2026-10-18 (owner: "now, before the full rerun"; NOTES, "The research lineup's
+  displacement: the ramped destroyed area"): X = 1 - the largest standing piece of a footprint over
+  its area, a building counted min(1, X / 0.10), in reblock.destroyed, which scores every road
+  network's D and prefix cuts (common.MEASURE) and stops the access arterial (Destroyed(0.20,
+  0.10)). Still on the partial overlap:
+  - the public package (reblock.buildings' displacement, reblock.budget: the site, README and
+    examples' frontier and lenses), which moves with the revamp, so the published figures move
+    once;
+  - the methods' own costs and caps: clearance, cycle_native and resistance_lp optimize the partial
+    overlap and stop at partial 0.20 (3 -- 5x below ramped 0.20, so their networks may end short
+    of the lineup's upper budgets under the new D); free_roads' route weights (a proxy that only
+    orders candidates). resistance_lp is the hard one: its linear program prices displacement
+    linearly in its path fractions, and the ramp's largest-piece step is not linear (an integer
+    or convex-relaxation reformulation, or the partial overlap kept as its internal proxy with the
+    ramped D as its stop).
+  - The check before moving them: re-cut the stored lineup networks under both rules and compare
+    the method rankings at matched D (Kendall tau of the medians, frontier membership); Task 7 of
+    the arterial plan re-scores the lineup under the ramped D and gives the first half of it.
+  - The budgets: BUDGETS (0.02 -- 0.20), D_LENS 0.05 and FREE_BUDGET 0.05 were kept as numbers
+    and now mean ramped D, 3 -- 5x stricter than before; re-picking them is the owner's call.
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
   owner's answer moves an end of the bracket to that screen's break-even rate. One is live,
@@ -581,16 +603,16 @@ Not pursued, with what would change that:
 
 ## The arterial (road method)
 
-- **The arterial's budget against the scored D** (owner's call, 2026-10-18 study): at
-  `max_displacement: 0.20` of footprint area destroyed (a touched building counted whole) the
-  arterial stops at scored area D 0.02 -- 0.07 on six lineup blocks, so Lens A (0.05, 0.10) is
-  unreached on most. Either the scored D follows the destroyed-area definition, or the arterial's
-  budget rises (the six blocks' whole networks reach 0.59 -- 0.90 destroyed); a re-run of
-  arterial_study.py's arms at the chosen budget decides it. Task 7 (the lineup's migration) waits
-  on this answer too.
+- **The arterial's budget against the scored D**: done (owner 2026-10-18): the research lineup's
+  displacement became the ramped destroyed area and the access presets stop on it at 0.20
+  (Destroyed(0.20, 0.10)); re-run on the six blocks, every block reaches area D 0.05 -- 0.20 in
+  both samplers (NOTES, "The research lineup's displacement: the ramped destroyed area"). Task 7
+  (the lineup's migration, ~96 task-h central: every road method's prefixes and lens rows
+  re-scored, the arterial re-proposed) waits on the owner's yes.
 - **A HardCap that keeps committed-road junctions** (idea): HardCap's samples replace the vertex
-  family once the cap binds, and it trailed PerLineFallback at D 0.05 on 6310 (-0.061 L_P) while
-  ahead on 40144. Keeping the committed roads' endpoints among the capped anchors (continuations
+  family once the cap binds, and under the ramped stop it trails PerLineFallback on all six
+  medians (L_P -0.0071 at D 0.05, -0.0045 at 0.10; ahead on 20269 and 40144) while 0.66 -- 0.74x
+  its wall on the two largest blocks. Keeping the committed roads' endpoints among the capped anchors (continuations
   for free) could put it on the quality frontier while keeping its flat step; tried by a third arm
   in arterial_study.py.
 - **The stored arterial networks are not reproduced** (open): lineup-caf14fa2's arterial networks

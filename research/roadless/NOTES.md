@@ -7926,7 +7926,8 @@ samples at one global arc-length stride). On 20269's stored network at 0/150/300
 PerLineFallback(32, 128) gives 112, 229, 323, 409, 525 anchors (its cap restarts on every line),
 HardCap(32, 128) 112, 128, 128, 128, 128 (guard arterial_check.py anchors, fault per-line).
 
-**The stop** (Task 3, stop.py): a required keyword-only max_displacement; the greedy stops before
+**The stop** (Task 3, stop.py; superseded the same day by the ramped destroyed area, next
+section): a required keyword-only max_displacement; the greedy stops before
 the step that would start with the committed roads' destroyed footprint share at or past it (a
 touched building counted whole, the owner's definition of 2026-10-18), the crossing road kept, so a
 stopped run is a commit prefix of a longer one; every proposal records why it stopped
@@ -7989,3 +7990,93 @@ scoring the stored rows took (8.1 h of complex and prefixes, its largest task 2,
 GB): ~13 -- 31 task-h, central ~18. The fit in area alone (0.01 + 0.59 h per km2) would give 128
 task-h, driven by the oversized blocks (up to 51.7 km2) that the six blocks (0.08 -- 0.46 km2) do
 not cover: those are the uncertain part.
+
+### The research lineup's displacement: the ramped destroyed area (2026-10-18)
+
+The owner's change (2026-10-18, "now, before the full rerun"), after the arterial study above
+showed the destroyed-area stop landing at scored D 0.018 -- 0.072: one rule for every building,
+the research lineup's displacement from here on, in place of both the scored partial overlap and
+the arterial's touched-building stop. The destroyed portion of building i under a corridor C is
+X_i = 1 - area(largest piece of O_i - C) / area(O_i), so a corner clip destroys the clipped share
+and a road through a building destroys the corridor plus every piece but the largest; building i
+counts c_i = min(1, X_i / tau) destroyed, tau 0.10 (0 -> 10% destroyed ramps 0 -> 1); D = sum
+c_i w_i / sum w_i under both populations (count, area) as before. A building with no area is
+destroyed iff the corridor covers its point. It lives in one module, src/reblock/destroyed.py
+(RampedDestroyed over a whole corridor; IncrementalDestroyed one piece at a time, each building
+keeping its covered region and only the buildings a new road touches recomputed), used by
+common.displacement and the prefix cuts (common.MEASURE = RampedDestroyed(tau=0.10), a required
+keyword-only `measure` down through prefix_to, road_rescore.prefix_len and FreeEnclosed) and by
+the arterial's stop (stop.Destroyed(share, tau), the access trio at Destroyed(0.20, 0.10);
+directness at NoBudget; ScoredArea and the touched-only DestroyedArea deleted). The lineup's rows
+root hashes the measure (road_rescore.lineup_rows; FreeEnclosed's identity too), so no
+partial-overlap row reads as a ramped one. The public package (reblock.buildings, reblock.budget)
+keeps the partial overlap until the site revamp (BACKLOG).
+
+Roads and clearings are now scored alike: the clearing presets already count whole buildings
+(gap_clear.Model's cost is each cleared building's full population share), and a road's D now
+counts a building whole once a tenth of it is destroyed.
+
+**Cost** (the coordinator's benchmark, scratchpad/arterial/destroyed_bench.py, on 20269 and 26061):
+the largest-piece step costs about the overlap intersection (0.02 -- 0.37 s per whole-network
+evaluation), so about 2x the partial D; clipping the corridor to each building's envelope first
+does not help; bisected buildings are rare (1 -- 107 per network). The guards: tests/
+test_destroyed.py (a corner clip, a bisection at 0.40 where the overlap says 0.10, zero-area
+buildings, incremental == whole; faults: the whole remainder for its largest piece, a forgetful
+meter), tests/methods/test_arterial_stop.py (the stop's meter equals the scoring function; a deaf
+meter breaks the stop) and arterial_check.py meter (on the stored 20269 and 38616 networks at
+1/25/100/300 segments the meter and common.displacement agree to 1.3e-11; the faults deaf and
+forgetful each fail it). In the study the meter's D at the stop and the same network scored
+afresh after planarizing differ by at most 1.1e-5 (planarization's noding).
+
+**The gap per block** (area weights; partial overlap / ramped / touched, a touched building
+whole). The stored lineup networks (lineup-caf14fa2, 300 commits):
+
+    block   partial  ramped  touched   ramped/partial
+    6310     0.448    0.798   0.854        1.8
+    20269    0.343    0.832   0.904        2.4
+    40144    0.456    0.845   0.896        1.9
+    39240    0.338    0.611   0.673        1.8
+    8480     0.119    0.484   0.595        4.1
+    38616    0.249    0.541   0.599        2.2
+
+and cur02's networks at the ramped 0.20 stop: 6310 0.081 / 0.202 / 0.223, 20269 0.056 / 0.202 /
+0.253, 40144 0.067 / 0.206 / 0.258, 39240 0.058 / 0.201 / 0.261, 8480 0.039 / 0.204 / 0.297, 38616
+0.055 / 0.202 / 0.248 (ramped/partial 2.5 -- 5.3: the gap is widest early, where a road's every
+touch is a fresh building, and closes as the corridor covers whole buildings).
+
+**The arterial study again, under the ramped stop and scoring** (arterial-study-d: orion, 12
+single-CPU tasks, all passed, ~25 min wall, ~2.3 task-h with scoring; arterial_rows/summary_*.csv).
+cur02 = PerLineFallback(32, 128), cap02 = HardCap(32, 128), both at Destroyed(0.20, 0.10) and 1000
+roads:
+
+    block      km2   stored h  cur02 s  cap02 s  commits  D at the stop  median step s
+    6310       0.084   4.04      289      340     25 / 33  0.202 / 0.204  11.5 /  9.9
+    20269      0.103   2.81      195      163     21 / 18  0.202 / 0.200   9.2 /  9.0
+    40144      0.153   4.29      318      356     24 / 29  0.206 / 0.204  13.3 / 12.2
+    39240      0.208   2.98      141      209     15 / 24  0.201 / 0.200   9.5 /  8.8
+    8480       0.387   5.46     1254      831     69 / 87  0.204 / 0.202  15.7 /  9.6
+    38616      0.461  12.69     1268      944     52 / 61  0.202 / 0.202  22.8 / 15.5
+
+Every run stopped on its budget (no max_roads, no no_gain stop; 8480, which saturated at partial
+0.12, now reaches ramped 0.20). Proposal walls sum to 0.96 h (cur02) and 0.79 h (cap02) against
+the stored 32.3 h; scoring adds ~0.25 h an arm (complex 100 -- 227 s a network, peak 1.9 -- 3.8
+GB). Every block now reaches area D 0.05 and 0.10 in both arms (and 0.15, 0.20).
+
+**Verdict** (the plan's Ruling 7, read symmetrically): neither dominates. cap02's wall is 0.66 --
+1.48x cur02's (faster on 8480 0.66, 38616 0.74, 20269 0.84; slower on 40144 1.12, 6310 1.18,
+39240 1.48, where it needs more commits to the budget). On quality cur02 leads all six medians
+(cap02 - cur02: L_P -0.0071, L_Pq -0.0045, L_J2 -0.0057 at D 0.05, ahead on 20269 and 40144; L_P
+-0.0045, L_Pq -0.0093, L_J2 -0.0065 at 0.10, ahead on 2 -- 3), but it is not faster on every block,
+so it does not dominate. Both presets stay: greedy_arterial_access_displacement (PerLineFallback,
+quality-first) and greedy_arterial_access_displacement_fast (HardCap, speed-first: 0.66 -- 0.74x
+the wall on the two largest blocks, its step flat at 128 anchors where cur02's grows to 358).
+
+**Task 7, re-estimated** (owner-gated): it now re-cuts and re-scores EVERY road method's prefixes
+and lens rows under the ramped D (the networks are kept, except the arterial's, which is
+re-proposed at its new stop). From the stored rows of lineup-caf14fa2 (550 networks): the prefix
+stage took 5.6 h (4.7 h of it the bisecting cuts, ~2x under the ramped D: ~10 h), the complex
+scoring 72.8 h (59.4 h of it meshing; the largest task 3,358 s, peak 79 GB); ~83 task-h of
+re-scoring. The arterial's re-proposal on its 62 lineup networks: the study's proposal walls are
+1.3 -- 6.4% of the stored (median 2.1%) against 612.6 h stored, so 8 -- 39 task-h, central ~13.
+Total ~96 task-h central (~91 -- 122), the oversized blocks (to 51.7 km2) the uncertain part as
+before.
