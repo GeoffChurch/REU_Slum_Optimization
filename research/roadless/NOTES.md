@@ -8071,6 +8071,20 @@ so it does not dominate. Both presets stay: greedy_arterial_access_displacement 
 quality-first) and greedy_arterial_access_displacement_fast (HardCap, speed-first: 0.66 -- 0.74x
 the wall on the two largest blocks, its step flat at 128 anchors where cur02's grows to 358).
 
+**At region scale** (arterial-region-5810b: ZAF.9.3.1_1_5810, the single-block Cape Town region
+of the multiblock_depth_density example, 6,619 buildings, 0.58 km2; arterial_study.py propose on
+orion, one core, unscored): greedy_arterial_access_displacement (the example's preset) stopped on
+its budget at D 0.201 after 102 commits (378 segments) in 9,234 s (2.6 h; median step 73.5 s, max
+178 s, up to 416 anchors, peak 0.46 GB); the speed-first twin at D 0.201 after 140 commits (727
+segments) in 4,554 s (1.3 h; median step 32.4 s at 128 anchors). The preset used to stop at 60
+roads in ~777 s. For regen-examples: nothing breaks (the arterial's derive entries miss on the new
+identity, no other method's do), but the access arterial becomes the example bake's long pole at
+~2.6 h single-core on the Cape Town region (Nairobi's multi-block region untimed, of the same
+order), against ~7 min for the other methods together. Either budget the bake for it (the ranking's
+threads: 8 locally, 1 here, take some of it back) or run the speed-first preset in the examples
+(half the wall, behind on quality); the owner's call, and the published arterial frontier moves
+either way.
+
 **Task 7, re-estimated** (owner-gated): it now re-cuts and re-scores EVERY road method's prefixes
 and lens rows under the ramped D (the networks are kept, except the arterial's, which is
 re-proposed at its new stop). From the stored rows of lineup-caf14fa2 (550 networks): the prefix
