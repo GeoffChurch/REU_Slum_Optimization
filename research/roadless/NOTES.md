@@ -8257,8 +8257,9 @@ cancelled within minutes, filled quadro2's 381 GB with four tasks). cycle_desire
 (1.0 task-h). Scored: 565 of the 574 (block, method). Not scored: 64070's resistance_lp (the carved
 mesh refused as not Delaunay, as before; 39240's cycle_desire, refused before, is scored now:
 its prefixes moved with the measure), cycle_desire on g3's five blocks still on orion (4287, 1182,
-472, 63818, 64070), and the arterial on three blocks still proposing at this writing (63612,
-19593, 38142).
+472, 63818, 64070), and the arterial on 63612, 19593 and 38142, where its proposals were
+cancelled past 21 h of a 23.5 h wall (owner 2026-10-20; their old arterial's walls were 115 --
+138 ks, unfinished) and the speed-first preset ran instead (below).
 
 **What the measure moved.** Ramped D runs about twice partial D on the median network
 (whole-network medians: clearance 0.29 against 0.14, resistance_lp 0.46 against 0.21, the grid 0.62
@@ -8290,11 +8291,25 @@ method's L_P median at D 0.05 falls to 0.38 -- 0.54 of what it was.
   arterial re-proposed).
 
 **The arterial.** Every network stops at its budget (whole-network D median 0.203); a median 0.46 h
-a proposal (5.5 h at most of the 79 in; the three left past 10 h) against the old arterial's 8.2 h
-at its 300-road cap. At D 0.05 it is the weakest road of the seven: last by L_P on 42 of its 79
+a proposal (5.5 h at most of the 79; the three cancelled past 21 h) against the old arterial's 8.2
+h at its 300-road cap. At D 0.05 it is the weakest road of the seven: last by L_P on 42 of its 79
 blocks, first on 6 (1182, 472, 4287, 30848, 41515, 6310); paired, behind clearance by a median
 0.009 L_P (ahead on 26), the grid 0.012 (17), cycle_desire 0.013 (18 of 72), cycle_native 0.018
 (16), resistance_lp 0.022 (14). In B's order it is the best road on three oversized blocks (1182,
 472, 4287), where every road is weak (L_P 0.003 -- 0.062). Its whole network at D 0.20 reaches a
 median L_P 0.079, where the others' whole networks reach 0.14 -- 0.35 at D 0.29 -- 0.63.
 consolidated_rows/summary_lineup_{roads,price,held,tau}.csv.
+
+**Why the quality-first arterial is slow on the large blocks** (the arterial study's step logs;
+BACKLOG, "The arterial's step toward linear"). Each step scores every pair of anchors: the
+candidates are 0.52 -- 0.55 x anchors^2 in every log. PerLineFallback adds 1.3 -- 4.5 anchors a
+commit (5810: 129 -> 416 anchors over 102 commits, the candidates 9,288 -> 89,648). A step costs a
+fixed part plus a per-candidate part, both growing with the block (5810: 29 s + 1.63 ms a
+candidate, R^2 0.99; the blocks of ~1,000 -- 1,350 buildings: 6 -- 11 s + 0.4 ms). So a step goes
+as commits^2 and a proposal as commits^3, times the block's size, and the commits to D 0.20 grow
+with the block: 63612, 19593 and 38142 ran past 21 h. HardCap holds the candidates at 9,152 every
+step (5810's steps flat at 32 -- 36 s: 1.3 h against 2.6 h) but needs more commits (140 against
+102), so it is not always faster on the small blocks. The way toward linear (re-rank only the
+candidates near or crossing the last commit, update the step's access state locally, commit several
+non-interacting roads a step) is a BACKLOG decision item, gated on the arterial staying on the
+frontier.
