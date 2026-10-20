@@ -38,6 +38,16 @@ five oversized blocks (g3, still on orion: item 4; g2a's three are in), the spee
 the three blocks where the quality-first one was cancelled (item 4), and the owner's three
 questions (Open, below). research/arterial-speed's Task 7 is done (item 4).
 
+**The revamp's scope** (owner 2026-10-20, "SGTM"): lead the site, README and examples with the
+roadless presets (P against the ramped destroyed area by building area) and their pictures (block
+5810's flow atlas, the corridor pictures from gap_maps, the flow over a no-buildings prior; NOTES,
+"Visualization: block 5810"), the road methods beside them on the same yardstick; say what P
+scores (walking, not vehicles) until the vulnerability score lands; decide what of
+research/roadless the public package takes (the branch carries the private cluster group and the
+1.8 GB gpu group, so it cannot merge as it is); a spec first. The items already deferred to the
+revamp go with it: the public package's and the road methods' own displacement (Open, below), the
+two families' account and the dangling citations (Owner's decisions, below).
+
 Closed (measured, NOTES): multi-rounding `.r<n>` (held out +0.001 at 2x; late `.r2l2` the same at
 1.58x); coarse-to-fine `.c0.75` (keeps gates at 0.85x, but with the polish dominated); coarse
 multi-start `.C<h>.m<k>` and fine `.m<k>` (neither faster nor better); the two-phase polish `.pP`
@@ -643,10 +653,10 @@ Not pursued, with what would change that:
   D 0.05 (last of seven on 42 of 79 blocks).
 - **A HardCap that keeps committed-road junctions** (idea): HardCap's samples replace the vertex
   family once the cap binds, and under the ramped stop it trails PerLineFallback on all six
-  medians (L_P -0.0071 at D 0.05, -0.0045 at 0.10; ahead on 20269 and 40144) while 0.66 -- 0.74x
-  its wall on the two largest blocks. Keeping the committed roads' endpoints among the capped anchors (continuations
-  for free) could put it on the quality frontier while keeping its flat step; tried by a third arm
-  in arterial_study.py.
+  medians (L_P -0.0071 at D 0.05, -0.0045 at 0.10; ahead on 20269 and 40144) while 0.66 --
+  0.74x its wall on the two largest blocks. Keeping the committed roads' endpoints among the
+  capped anchors (continuations for free) could put it on the quality frontier while keeping its
+  flat step; tried by a third arm in arterial_study.py.
 - **The stored arterial networks are not reproduced** (open): lineup-caf14fa2's arterial networks
   (now road_rows/superseded/lineup-caf14fa2) (run cp-roads2-arterial-large, 0f4be69e, ai05) differ
   from the first commit from what that code gives today on the same node and bank block (NOTES,
@@ -664,12 +674,38 @@ Not pursued, with what would change that:
   step goes as commits^2 and a proposal as commits^3, times the block's size, and the commits to D
   0.20 grow with the block. HardCap holds the candidates at 9,152 every step (5810's steps flat at
   32 -- 36 s: 1.3 h against 2.6 h) but needs more commits (140 against 102), so it is not always
-  faster on small blocks. Toward linear: re-rank only the candidates near or crossing the last
-  commit (checked against the full re-rank), update the step's access state locally, and commit
-  several non-interacting roads a step.
-- **The arterial's next speed items**: with the incremental gain (1.0 -- 2.0 ms at S 0, 0.25 --
-  1.1 ms after) a candidate's cost is the snap (~3 ms) and the displacement cost (~4.6 ms at S 0);
-  the ranking grows with the candidates (PerLineFallback's anchors).
+  faster on small blocks. Toward linear: rank from cached hits (speed idea 1, below: exact),
+  update the step's access state locally, and commit several non-interacting roads a step.
+- **Speed ideas, most promising first** (owner 2026-10-20: "add any promising ideas for speeding
+  up arterial"). Each keeps the roads unless it says otherwise.
+  1. **Rank from cached hits** (exact): a chord's first-order score (shortlist.first_order_score)
+     is the sum of d^2 - 1 over the parcels within RANK_RADIUS of it, over the buildings within
+     the half-width; both trees are built once per proposal, so a chord's two hit lists never
+     change. Query each chord once, when it first appears, and rank each step by a sparse product
+     with the step's depths (or only the parcels whose depth changed). That removes the
+     per-candidate part (0.4 -- 1.6 ms a candidate, 83% of 5810's last step) for every chord but
+     the step's new ones, so PerLineFallback's growing anchors stop costing much. Check: the same
+     shortlists step by step on the six study blocks and 5810.
+  2. **Profile the fixed part** (6 -- 29 s a step, growing with the block; never profiled): the
+     k = 512 exact evaluations (each the snap ~3 ms, the displacement cost ~4.6 ms at S 0 and the
+     gain 0.25 -- 2 ms: ~4 -- 5 s a step on one core, likely most of it on the small blocks), the
+     step's peel (parcel_access_layers over the whole block), the network's planarization
+     (_step_network) and the deep targets.
+  3. **A smaller k**: 512 -- 4096 give the same network (ShortlistEngine's docstring), but below
+     512 was never measured; try 128 and 256 on the six blocks.
+  4. **More cores a task** (workers and threads are outside the identity): the lineup runs the
+     arterial on one core (common.arms: workers 1; road_rescore._arms: threads 1), while the
+     preset's fork pool scores the exact evaluations in parallel and the ranking's 8 threads
+     measured 3.4x at region scale (354.9 s -> 104.3 s). A constant factor, not the scaling.
+  5. **A HardCap that keeps committed-road junctions** (above): quality at flat steps.
+  6. **Several non-interacting commits a step** (changes the roads): fewer steps; check the lenses
+     against one commit a step.
+
+  Dead ends, not to re-propose: lazy greedy (CELF) for the access objective (not submodular: it
+  diverged from the exact greedy on 6 of 6 blocks and was slower on 4; engines.LazyEngine's
+  docstring); and, on the July directness arterial, a reduced-K shortlist (slower), a geometric
+  one-added-edge proxy (Spearman 0.38 against the exact gain), stochastic greedy (35% less
+  directness a metre, slower than CELF) and hoisting the per-candidate graph rebuild (6%).
 
 ## How we run experiments
 
