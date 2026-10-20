@@ -38,6 +38,7 @@ ZAF.9.3.1_1_18739,clearance_looped,4
 ZAF.9.3.1_1_18739,cycle_native,4
 ZAF.9.3.1_1_18739,cycle_native_betweenness_contrast,4
 ZAF.9.3.1_1_18739,euclidean_grid,0
+ZAF.9.3.1_1_18739,greedy_arterial_access_displacement,0
 ZAF.9.3.1_1_18739,resistance_lp,4
 ZAF.9.3.1_1_18895,clearance,1
 ZAF.9.3.1_1_18895,clearance_looped,1
@@ -65,6 +66,7 @@ ZAF.9.3.1_1_18985,clearance_looped,3
 ZAF.9.3.1_1_18985,cycle_native,3
 ZAF.9.3.1_1_18985,cycle_native_betweenness_contrast,3
 ZAF.9.3.1_1_18985,euclidean_grid,0
+ZAF.9.3.1_1_18985,greedy_arterial_access_displacement,0
 ZAF.9.3.1_1_18985,resistance_lp,3
 ZAF.9.3.1_1_19161,clearance,1
 ZAF.9.3.1_1_19161,clearance_looped,1
@@ -161,6 +163,7 @@ ZAF.9.3.1_1_22422,clearance_looped,0
 ZAF.9.3.1_1_22422,cycle_native,0
 ZAF.9.3.1_1_22422,cycle_native_betweenness_contrast,0
 ZAF.9.3.1_1_22422,euclidean_grid,0
+ZAF.9.3.1_1_22422,greedy_arterial_access_displacement,0
 ZAF.9.3.1_1_22422,resistance_lp,0
 ZAF.9.3.1_1_22591,clearance,0
 ZAF.9.3.1_1_22591,clearance_looped,0
@@ -216,6 +219,7 @@ ZAF.9.3.1_1_24240,clearance_looped,4
 ZAF.9.3.1_1_24240,cycle_native,4
 ZAF.9.3.1_1_24240,cycle_native_betweenness_contrast,4
 ZAF.9.3.1_1_24240,euclidean_grid,0
+ZAF.9.3.1_1_24240,greedy_arterial_access_displacement,0
 ZAF.9.3.1_1_24240,resistance_lp,4
 ZAF.9.3.1_1_26061,clearance,0
 ZAF.9.3.1_1_26061,clearance_looped,0
@@ -236,12 +240,14 @@ ZAF.9.3.1_1_30796,clearance_looped,20
 ZAF.9.3.1_1_30796,cycle_native,20
 ZAF.9.3.1_1_30796,cycle_native_betweenness_contrast,20
 ZAF.9.3.1_1_30796,euclidean_grid,0
+ZAF.9.3.1_1_30796,greedy_arterial_access_displacement,0
 ZAF.9.3.1_1_30796,resistance_lp,20
 ZAF.9.3.1_1_30848,clearance,44
 ZAF.9.3.1_1_30848,clearance_looped,44
 ZAF.9.3.1_1_30848,cycle_native,44
 ZAF.9.3.1_1_30848,cycle_native_betweenness_contrast,44
 ZAF.9.3.1_1_30848,euclidean_grid,0
+ZAF.9.3.1_1_30848,greedy_arterial_access_displacement,0
 ZAF.9.3.1_1_30848,resistance_lp,44
 ZAF.9.3.1_1_32841,clearance,0
 ZAF.9.3.1_1_32841,clearance_looped,0
@@ -262,7 +268,6 @@ ZAF.9.3.1_1_38142,clearance_looped,0
 ZAF.9.3.1_1_38142,cycle_native,0
 ZAF.9.3.1_1_38142,cycle_native_betweenness_contrast,0
 ZAF.9.3.1_1_38142,euclidean_grid,0
-ZAF.9.3.1_1_38142,greedy_arterial_access_displacement,0
 ZAF.9.3.1_1_38142,resistance_lp,0
 ZAF.9.3.1_1_38190,clearance,0
 ZAF.9.3.1_1_38190,clearance_looped,0
@@ -415,12 +420,14 @@ ZAF.9.3.1_1_5810,clearance_looped,1
 ZAF.9.3.1_1_5810,cycle_native,1
 ZAF.9.3.1_1_5810,cycle_native_betweenness_contrast,1
 ZAF.9.3.1_1_5810,euclidean_grid,0
+ZAF.9.3.1_1_5810,greedy_arterial_access_displacement,0
 ZAF.9.3.1_1_5810,resistance_lp,1
 ZAF.9.3.1_1_62385,clearance,7
 ZAF.9.3.1_1_62385,clearance_looped,7
 ZAF.9.3.1_1_62385,cycle_native,7
 ZAF.9.3.1_1_62385,cycle_native_betweenness_contrast,7
 ZAF.9.3.1_1_62385,euclidean_grid,0
+ZAF.9.3.1_1_62385,greedy_arterial_access_displacement,0
 ZAF.9.3.1_1_62385,resistance_lp,7
 ZAF.9.3.1_1_62403,clearance,0
 ZAF.9.3.1_1_62403,clearance_looped,0
@@ -432,6 +439,7 @@ ZAF.9.3.1_1_62403,resistance_lp,0
 ZAF.9.3.1_1_62441,clearance,0
 ZAF.9.3.1_1_62441,clearance_looped,0
 ZAF.9.3.1_1_62441,cycle_native,0
+ZAF.9.3.1_1_62441,cycle_native_betweenness_contrast,0
 ZAF.9.3.1_1_62441,euclidean_grid,0
 ZAF.9.3.1_1_62441,greedy_arterial_access_displacement,0
 ZAF.9.3.1_1_62441,resistance_lp,0
@@ -445,6 +453,7 @@ ZAF.9.3.1_1_62523,resistance_lp,0
 ZAF.9.3.1_1_62803,clearance,0
 ZAF.9.3.1_1_62803,clearance_looped,0
 ZAF.9.3.1_1_62803,cycle_native,0
+ZAF.9.3.1_1_62803,cycle_native_betweenness_contrast,0
 ZAF.9.3.1_1_62803,euclidean_grid,0
 ZAF.9.3.1_1_62803,greedy_arterial_access_displacement,0
 ZAF.9.3.1_1_62803,resistance_lp,0
@@ -460,10 +469,12 @@ ZAF.9.3.1_1_6316,clearance_looped,0
 ZAF.9.3.1_1_6316,cycle_native,0
 ZAF.9.3.1_1_6316,cycle_native_betweenness_contrast,0
 ZAF.9.3.1_1_6316,euclidean_grid,0
+ZAF.9.3.1_1_6316,greedy_arterial_access_displacement,0
 ZAF.9.3.1_1_6316,resistance_lp,0
 ZAF.9.3.1_1_63612,clearance,19
 ZAF.9.3.1_1_63612,clearance_looped,19
 ZAF.9.3.1_1_63612,cycle_native,19
+ZAF.9.3.1_1_63612,cycle_native_betweenness_contrast,19
 ZAF.9.3.1_1_63612,euclidean_grid,0
 ZAF.9.3.1_1_63612,resistance_lp,19
 ZAF.9.3.1_1_63818,clearance,0
@@ -532,6 +543,7 @@ ZAF.9.5.4_1_9710,clearance_looped,0
 ZAF.9.5.4_1_9710,cycle_native,0
 ZAF.9.5.4_1_9710,cycle_native_betweenness_contrast,0
 ZAF.9.5.4_1_9710,euclidean_grid,0
+ZAF.9.5.4_1_9710,greedy_arterial_access_displacement,0
 ZAF.9.5.4_1_9710,resistance_lp,0
 ZAF.9.5.4_1_9712,clearance,0
 ZAF.9.5.4_1_9712,clearance_looped,0

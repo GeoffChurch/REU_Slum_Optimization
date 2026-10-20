@@ -34,9 +34,9 @@ RUNTIME, free first, optimizing P at area D 0.05; Lens A of P, mean over the blo
 
 **Next** (owner 2026-10-13): the site, README and examples revamp; then the vulnerability score
 with vehicle access (Owner's decisions, below). Left from the consolidated pass: cycle_desire on
-the eight largest oversized blocks (still on orion: item 4), research/arterial-speed's Task 7 on
-the owner's go (the arterial re-proposed and every road method re-scored under the ramped
-destroyed area: item 4), and the owner's three questions (Open, below).
+five oversized blocks (g3, still on orion: item 4; g2a's three are in), the arterial on the three
+blocks still proposing at Task 7's write-up (item 4), and the owner's three questions (Open,
+below). research/arterial-speed's Task 7 is done (item 4).
 
 Closed (measured, NOTES): multi-rounding `.r<n>` (held out +0.001 at 2x; late `.r2l2` the same at
 1.58x); coarse-to-fine `.c0.75` (keeps gates at 0.85x, but with the polish dominated); coarse
@@ -176,12 +176,19 @@ items up front"), in the order proposed:
    default is ahead of the best road at D 0.05 on all 82 under every lens (where B (i) ties, by a
    median +0.161 L_P on the large blocks and +0.077 on the oversized; the best road gets about half
    of SIMP's L_P), resistance_lp the best road on 50, none ahead of SIMP's default on any block;
-   cycle_desire on the eight largest oversized blocks is still running on orion (jobs 79684, 79686,
-   79687; the workspace's followup.md). The arterial: superseded (owner 2026-10-19) by
-   research/arterial-speed's (an incremental exact gain, a stop at the ramped destroyed-area D
-   0.20, the lineup's scoring under that measure); that branch's Task 7 re-proposes it on every
-   lineup block and re-scores every road method's prefixes under the new D. The old arterial's rows
-   at 300 roads (70 of 82 blocks) stay as a record only.
+   the old arterial superseded (owner 2026-10-19), its rows at 300 roads (70 of 82 blocks) a
+   record (road_rows/superseded/lineup-caf14fa2). **Re-scored under the ramped destroyed area with
+   the new arterial (the arterial plan's Task 7, 2026-10-20; NOTES, "The lineup under the ramped
+   destroyed area, with the new arterial")**: every road method's prefixes re-cut and lenses
+   re-scored in road_rows/lineup-f8fa4e53, the arterial re-proposed at its stop (Destroyed(0.20,
+   0.10), the quality-first sampler); 565 of the 574 block-and-method networks scored. SIMP's
+   default is ahead of the best road at D 0.05 on all 82 under every lens (where B (i) ties, by a
+   median +0.254 L_P on the large blocks and +0.118 on the oversized; the best road gets 27% and
+   19% of SIMP's L_P), resistance_lp the best road on 40, none ahead of SIMP's default on any
+   block; the arterial last of the seven at D 0.05 on 42 of its 79 blocks, the best road in B's
+   order on three oversized ones. Left: cycle_desire on g3's five oversized blocks, still on orion
+   (jobs 79686, 79687; the consolidated pass's followup.md), and the arterial on 63612, 19593 and
+   38142, still proposing at the write-up (the arterial plan's handoff-task7.md).
    **The metric decisions** (owner 2026-10-12, walking through four: the escape-time functional,
    the population, the conductance, the exits). (1) **P as the headline** ("leaning toward P with
    J_2 as a side report"): one solve, monotone, convex in the clearing (a certified bound), the
@@ -588,9 +595,17 @@ Open:
     ramped D as its stop).
   - The check before moving them: re-cut the stored lineup networks under both rules and compare
     the method rankings at matched D (Kendall tau of the medians, frontier membership); Task 7 of
-    the arterial plan re-scores the lineup under the ramped D and gives the first half of it.
-  - The budgets: BUDGETS (0.02 -- 0.20), D_LENS 0.05 and FREE_BUDGET 0.05 were kept as numbers
-    and now mean ramped D, 3 -- 5x stricter than before; re-picking them is the owner's call.
+    the arterial plan re-scored the lineup under the ramped D (2026-10-20), the first half of it.
+  - The budgets: BUDGETS (0.02 -- 0.20), D_LENS 0.05 and FREE_BUDGET 0.05 keep their numbers
+    under the ramped D (owner 2026-10-19), about twice as strict at the median network.
+  - Free first's stage under the ramped D (the owner's call): FreeEnclosed's budget is measured by
+    common.displacement, now ramped, so at HEAD lineup_arms() holds fewer roads first on the 42
+    blocks where free first holds any; the lineup's five stage methods' networks are the pass's
+    (held at partial D 0.05), re-cut and re-scored but not proposed again (owner 2026-10-19: only
+    the arterial). Re-proposing them under the ramped stage (a median 0.03 -- 0.08 h a network
+    for clearance, clearance_looped, cycle_native and resistance_lp, 4.3 h at most; cycle_desire
+    0.5 h on the large blocks and 10 -- 55 h on the oversized) would make the lineup's networks
+    what its code proposes.
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
   owner's answer moves an end of the bracket to that screen's break-even rate. One is live,
@@ -620,8 +635,10 @@ Not pursued, with what would change that:
   displacement became the ramped destroyed area and the access presets stop on it at 0.20
   (Destroyed(0.20, 0.10)); re-run on the six blocks, every block reaches area D 0.05 -- 0.20 in
   both samplers (NOTES, "The research lineup's displacement: the ramped destroyed area"). Task 7
-  (the lineup's migration, ~96 task-h central: every road method's prefixes and lens rows
-  re-scored, the arterial re-proposed) waits on the owner's yes.
+  done (2026-10-20; NOTES, "The lineup under the ramped destroyed area, with the new arterial"):
+  the arterial proposed again on the lineup's blocks (a median 0.46 h a proposal; three still
+  running past 10 h at the write-up), every road method re-cut and re-scored; the arterial is the
+  weakest road at D 0.05 (last of seven on 42 of 79 blocks).
 - **A HardCap that keeps committed-road junctions** (idea): HardCap's samples replace the vertex
   family once the cap binds, and under the ramped stop it trails PerLineFallback on all six
   medians (L_P -0.0071 at D 0.05, -0.0045 at 0.10; ahead on 20269 and 40144) while 0.66 -- 0.74x
@@ -629,10 +646,11 @@ Not pursued, with what would change that:
   for free) could put it on the quality frontier while keeping its flat step; tried by a third arm
   in arterial_study.py.
 - **The stored arterial networks are not reproduced** (open): lineup-caf14fa2's arterial networks
-  (run cp-roads2-arterial-large, 0f4be69e, ai05) differ from the first commit from what that code
-  gives today on the same node and bank block (NOTES, "The arterial: an incremental gain, a cap
-  that holds, a displacement budget"). Next: re-run lineup-one at the exact checkout 0f4be69e on
-  ai05 for a few commits; resolved when either side's first commit is explained.
+  (now road_rows/superseded/lineup-caf14fa2) (run cp-roads2-arterial-large, 0f4be69e, ai05) differ
+  from the first commit from what that code gives today on the same node and bank block (NOTES,
+  "The arterial: an incremental gain, a cap that holds, a displacement budget"). Next: re-run
+  lineup-one at the exact checkout 0f4be69e on ai05 for a few commits; resolved when either side's
+  first commit is explained.
 - **The arterial's next speed items**: with the incremental gain (1.0 -- 2.0 ms at S 0, 0.25 --
   1.1 ms after) a candidate's cost is the snap (~3 ms) and the displacement cost (~4.6 ms at S 0);
   the ranking grows with the candidates (PerLineFallback's anchors).
@@ -852,6 +870,19 @@ Not pursued, with what would change that:
 - **pyamg is read by no code** (since 2c4f57d0, the consolidated pass: it was fft_homog's solver;
   gap_flow, cluster and clearings_check only name it in comments). It stays in the `gpu` group;
   removing it is a dependency change, the owner's call.
+- **Unpulled results of settled runs** (archived; nothing on the cluster holds them): the 176
+  result files that 17 old checkouts held unpulled (RunRecord.unpulled: a local file of that name
+  differed) were copied to ~/cluster_archive/reblock/2026-10-17-unpulled/ (manifest.json) before
+  those checkouts were dropped (`gc --drop-unpulled`, the owner's one-off approval, 2026-10-17).
+  Their 44 runs kept their pins (written by the bump's migrate_pins, 2026-10-19), naming checkouts
+  that no longer exist; ~/cluster_archive/reblock/2026-10-19-unpulled/manifest.json lists each
+  run's commit, jobs and files (330 entries, 176 files, 1.64 MB) with the size and sha256 of its
+  10-17 copy. Unpinning the 44 (`cluster.py unpin <run>`, approved by the owner 2026-10-19) was
+  refused by the session's permission classifier and is left to the owner; it frees nothing on
+  disk (their checkouts are gone).
+- **The disk market holds reblock** (since Task 7's first launch at d643ded, 2026-10-20, with
+  `--over-capacity`: the home 11.8 GB over its 999 GB capacity, price infinite): reblock's
+  project.json is published and the keeper holds its files; checkouts no pin names are offered.
 - **cluster_submit chains a GPU run behind every live run** (seen with cp-dev in the consolidated
   pass): when the live runs' GPU sum is already over the project's budget, a new GPU run is chained
   after every live run, CPU runs among them, so it waits on runs that hold no GPU. The fix is

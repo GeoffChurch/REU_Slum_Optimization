@@ -7819,19 +7819,20 @@ closed (sightline went with the raster, phase 3).
 block and method: the network proposed by road_rescore.lineup_arms (FreeEnclosed under RUNTIME the
 stage of clearance, clearance_looped, cycle_native, cycle_desire and resistance_lp; the grid holds
 none), its canonical prefixes, its area prefixes scored on the complex under RUNTIME on a core;
-rows under road_rows/lineup-caf14fa2, the digest of the stage's identity. The runs submitted before
-2d5df972 wrote lineup-e3b882f9 and were moved file for file (five networks of 30796 and 23597
-proposed again at HEAD were identical WKB for WKB); 30 of their rows, which the cancelled reused
-run finished on the cluster after the same identities were scored here, differed only in timings,
-host and peak memory and were dropped for the standing row. The 21 large blocks where RUNTIME walls
-no home in keep item 4's networks (HoldNothing), scored under RUNTIME. cycle_desire's cluster
-requests were sized from its measured peaks scaled by area (8.8 GB/km^2 through the origin over the
-16 tasks above 1 km^2, 4.5 -- 10.9 per task; 1.8 -- 3.5 h/km^2 on the oversized), and 7499's ran on
-a core here (14.9 h, 83 GB at 8.4 km^2). Scored: 482 of the 492 (block, method) of the 82 blocks
-and six methods (clearance, clearance_looped, cycle_native and the grid on all 82, resistance_lp on
-81, cycle_desire on 73). Not scored: the two carved meshes refused (below), and cycle_desire on the
-eight largest oversized blocks still on orion (62441, 62803, 63612: job 79684; 4287: 79686; 1182,
-472, 63818, 64070: 79687), which a follow-up adds (the workspace's followup.md).
+rows under road_rows/lineup-caf14fa2 (lineup-f8fa4e53 since Task 7, the last section), the digest
+of the stage's identity. The runs submitted before 2d5df972 wrote lineup-e3b882f9 and were moved
+file for file (five networks of 30796 and 23597 proposed again at HEAD were identical WKB for WKB);
+30 of their rows, which the cancelled reused run finished on the cluster after the same identities
+were scored here, differed only in timings, host and peak memory and were dropped for the standing
+row. The 21 large blocks where RUNTIME walls no home in keep item 4's networks (HoldNothing),
+scored under RUNTIME. cycle_desire's cluster requests were sized from its measured peaks scaled by
+area (8.8 GB/km^2 through the origin over the 16 tasks above 1 km^2, 4.5 -- 10.9 per task; 1.8 --
+3.5 h/km^2 on the oversized), and 7499's ran on a core here (14.9 h, 83 GB at 8.4 km^2). Scored:
+482 of the 492 (block, method) of the 82 blocks and six methods (clearance, clearance_looped,
+cycle_native and the grid on all 82, resistance_lp on 81, cycle_desire on 73). Not scored: the two
+carved meshes refused (below), and cycle_desire on the eight largest oversized blocks still on
+orion (62441, 62803, 63612: job 79684; 4287: 79686; 1182, 472, 63818, 64070: 79687), which a
+follow-up adds (the workspace's followup.md).
 - Free first holds roads on 42 of the 82 blocks, for every stage method (cycle_desire on 41 of its
   networks so far); elsewhere the networks are HoldNothing's.
 - At area D 0.05 (medians over the blocks each reaches it on; L_P, L_{P_1/2}, L_J2): resistance_lp
@@ -7866,10 +7867,10 @@ eight largest oversized blocks still on orion (62441, 62803, 63612: job 79684; 4
   capped at 300 roads, no displacement stop) gives way to research/arterial-speed's (an incremental
   exact gain, a stop at the ramped destroyed-area D 0.20, the lineup's scoring under that measure),
   whose Task 7 re-proposes it on every lineup block and re-scores every road method's prefixes
-  under the new D. Its rows here are a record, read by no comparison
-  (consolidated.SUPERSEDED_ROADS): 70 of the 82 blocks scored (66 reaching D 0.05), a median 8.2 h
-  a proposal and 34.9 h at most; 17 of its tasks met the cluster's 23.5 h wall (8 oversized, 9
-  large) and were being re-run on cores here when the ruling came.
+  under the new D. Its rows here are a record, read by no comparison (since Task 7,
+  road_rows/superseded/lineup-caf14fa2): 70 of the 82 blocks scored (66 reaching D 0.05), a median
+  8.2 h a proposal and 34.9 h at most; 17 of its tasks met the cluster's 23.5 h wall (8 oversized,
+  9 large) and were being re-run on cores here when the ruling came.
 
 (Roads: two networks could not be scored: the carved mesh is refused as not Delaunay, 39240's
 cycle_desire (2 passages) and 64070's resistance_lp (1). On 39240 three vertices of the corridors'
@@ -8231,3 +8232,69 @@ less 16% of the meshing (the baseline complex; _faces' saving matters only on th
 carvings and is not counted) ~61 task-h. With the prefix stage (~10 task-h) and the arterial's
 re-proposal (8 -- 39, central ~13): ~84 task-h central (~79 -- 110), against ~96 (91 -- 122)
 before; about 3 -- 4 h of wall on quadro2's 32 cores, 4287's tasks (~40 min each) the long pole.
+
+### The lineup under the ramped destroyed area, with the new arterial (Task 7, 2026-10-19 -- 20)
+
+The arterial plan's Task 7 (owner 2026-10-19: the budgets keep their numbers, 0.02 -- 0.20, D_LENS
+0.05 and FREE_BUDGET 0.05, now read as the ramped destroyed-area D of common.MEASURE, tau 0.10;
+the re-scoring on quadro2; the quality-first arterial; every road method's prefixes and lenses
+re-cut and re-scored, only the arterial proposed again). research/arterial-speed merged into this
+branch (a1e89acd); consolidated `lineup-report` reads the arterial again, and road_rescore
+`lineup-score` cuts each network under the lineup's measure before it scores it. The rows moved
+to lineup_rows() = road_rows/lineup-f8fa4e53: the six methods' networks and proposal rows kept,
+their prefix rows, lens rows and canonical orders (cut under partial D) and every row of the old
+arterial moved to road_rows/superseded/lineup-caf14fa2, a record nothing reads.
+
+**The runs** (quadro2, one core a task, at a1e89acd; memory by each block's stored scoring peak:
+12 GB for the 59 blocks under 8 GB, 24 for the 15 under 16, 56 for 7, 88 for 4287): the six
+methods' networks shipped per block and re-cut and scored, 482 of 483 tasks in 70.3 task-h
+(longest 0.84 h, 4287); the arterial proposed, cut and scored on the 59 smaller blocks in 43.6
+task-h (longest 5.6 h); on the 23 larger ones proposed alone at 8 GB and then cut and scored by
+memory class (20 so far, 8.2 task-h for the cuts; 4287's 3.0 h), since a task that proposes and
+scores holds its scoring memory through hours of proposing at under 1 GB (the first such runs,
+cancelled within minutes, filled quadro2's 381 GB with four tasks). cycle_desire's g2a networks
+(63612, 62441, 62803; job 79684, finished on orion 2026-10-20) were copied in and cut and scored
+(1.0 task-h). Scored: 565 of the 574 (block, method). Not scored: 64070's resistance_lp (the carved
+mesh refused as not Delaunay, as before; 39240's cycle_desire, refused before, is scored now:
+its prefixes moved with the measure), cycle_desire on g3's five blocks still on orion (4287, 1182,
+472, 63818, 64070), and the arterial on three blocks still proposing at this writing (63612,
+19593, 38142).
+
+**What the measure moved.** Ramped D runs about twice partial D on the median network
+(whole-network medians: clearance 0.29 against 0.14, resistance_lp 0.46 against 0.21, the grid 0.62
+against 0.33), so a budget buys fewer roads: every method now reaches D 0.05 on all its blocks
+(clearance on 82 against 65, cycle_native 82 against 72; cycle_desire on 75 of its 77), and every
+method's L_P median at D 0.05 falls to 0.38 -- 0.54 of what it was.
+- At area D 0.05 (medians; L_P, L_{P_1/2}, L_J2): resistance_lp 0.054, 0.066, 0.065 (81 blocks);
+  cycle_desire 0.048, 0.064, 0.049 (75); cycle_native 0.048, 0.056, 0.052 (82); clearance_looped
+  0.047, 0.059, 0.053 (82); the grid 0.046, 0.062, 0.058 (82); clearance 0.042, 0.051, 0.048 (82);
+  the arterial 0.030, 0.031, 0.030 (79).
+- Each against SIMP's default, paired (median, L_P): resistance_lp -0.225, cycle_native -0.233,
+  the grid -0.240, clearance_looped -0.244, clearance -0.256, cycle_desire -0.265, the arterial
+  -0.270. No road method is ahead of SIMP's default on any block under any lens.
+- The price of roads in B's order: SIMP's default is ahead of the best road at D 0.05 on all 82
+  blocks under every lens. B (i) ties on 78; on the other 4 (30796, 30848, 41673, 45876) the best
+  road walls in more of the population (by 0.00006 -- 0.0015 of it). Where (i) ties, SIMP's
+  default leads by a median +0.254 L_P on the 56 large blocks (p10 +0.110, p90 +0.361, at least
+  +0.065) and +0.118 on the 22 oversized (p10 +0.058, p90 +0.175, at least +0.052); the best road
+  gets a median 27% of SIMP's L_P on the large (p10 17%, p90 41%) and 19% on the oversized (15%,
+  42%). The best road under L_P: resistance_lp on 40 blocks, cycle_native 16, clearance_looped
+  10, cycle_desire 9, the arterial 3, clearance 3, the grid 1.
+- The order against item 4's (Kendall tau per block, the 60 large blocks, the methods both hold):
+  median +0.40 under L_P (IQR +0.07 -- +0.60), +0.37 under L_{P_1/2} and L_J2, at least -0.87.
+  resistance_lp still leads.
+- Free first holds roads on the same 42 blocks: the six methods' networks are the pass's, whose
+  stage FreeEnclosed budgeted at partial D 0.05. Under the ramped measure the stage would hold
+  fewer roads on those blocks (its budget is measured by common.displacement, now ramped), so the
+  networks are not what lineup_arms() proposes at HEAD; kept by the owner's ruling (only the
+  arterial re-proposed).
+
+**The arterial.** Every network stops at its budget (whole-network D median 0.203); a median 0.46 h
+a proposal (5.5 h at most of the 79 in; the three left past 10 h) against the old arterial's 8.2 h
+at its 300-road cap. At D 0.05 it is the weakest road of the seven: last by L_P on 42 of its 79
+blocks, first on 6 (1182, 472, 4287, 30848, 41515, 6310); paired, behind clearance by a median
+0.009 L_P (ahead on 26), the grid 0.012 (17), cycle_desire 0.013 (18 of 72), cycle_native 0.018
+(16), resistance_lp 0.022 (14). In B's order it is the best road on three oversized blocks (1182,
+472, 4287), where every road is weak (L_P 0.003 -- 0.062). Its whole network at D 0.20 reaches a
+median L_P 0.079, where the others' whole networks reach 0.14 -- 0.35 at D 0.29 -- 0.63.
+consolidated_rows/summary_lineup_{roads,price,held,tau}.csv.
