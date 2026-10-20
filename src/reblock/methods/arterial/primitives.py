@@ -1,11 +1,10 @@
-"""Geometry primitives shared by the arterial engines: anchor/target sampling, candidate-chord
+"""Geometry primitives shared by the arterial engines: target sampling, candidate-chord
 enumeration, the parcel-boundary snap graph's precomputed data, and the merge/explode/planarize
 helpers that turn a list of `LineString`s into a road `GeoDataFrame`. No engine loop and no scoring
 live here -- see `engines.py` and `scoring.py`.
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 
 import geopandas as gpd
@@ -28,60 +27,6 @@ def _xy(c: tuple[float, ...]) -> tuple[float, float]:
     """First two components of a coordinate tuple (shapely yields 3-tuples for Z-aware
     geometry; every geometry here is 2-D, so drop anything past x, y)."""
     return (c[0], c[1])
-
-
-def _merged_lines(network: Sequence[BaseGeometry]) -> tuple[list[BaseGeometry], float]:
-    """The network as a flat line list plus its total length. `unary_union` explodes any Multi*
-    input, so streets given as a MultiLineString (a block with a hole/courtyard) are handled."""
-    merged = unary_union(network)
-    lines = list(merged.geoms) if isinstance(merged, BaseMultipartGeometry) else [merged]
-    return lines, sum(ln.length for ln in lines)
-
-
-def _arclength_samples(lines: Sequence[BaseGeometry], total: float,
-                       count: int) -> list[tuple[float, float]]:
-    """`count` points spaced evenly by arc-length along the network. `_rnd`-snapped, de-duplicated,
-    sorted for determinism. Yields ~`count` + one per line, not exactly `count`."""
-    pts: set[tuple[float, float]] = set()
-    if total > 0 and count > 0:
-        step = total / count
-        for ln in lines:
-            d = 0.0
-            while d <= ln.length:
-                pts.add(_rnd(_xy(ln.interpolate(d).coords[0])))
-                d += step
-    return sorted(pts)
-
-
-def _vertices_and_samples(lines: Sequence[BaseGeometry], total: float,
-                          n: int) -> list[tuple[float, float]]:
-    """Every network vertex plus `n` arc-length samples -- the uncapped anchor family. Vertices are
-    what make committed-segment endpoints anchors, so continuations come for free."""
-    pts: set[tuple[float, float]] = {_rnd(_xy(c)) for ln in lines for c in ln.coords}
-    pts.update(_arclength_samples(lines, total, n))
-    return sorted(pts)
-
-
-def _anchor_points(network: Sequence[BaseGeometry], n: int,
-                    max_anchors: int = 0) -> list[tuple[float, float]]:
-    """Anchors for candidate generation: every network vertex plus `n` arc-length samples.
-
-    `max_anchors > 0` is a CAP, not a mode switch. If the uncapped family already fits, it is
-    returned untouched; only when it does not does this fall back to ~`max_anchors` arc-length
-    samples, and even then it returns whichever set is smaller. So the cap can never inflate the
-    anchor count -- which the previous implementation did, replacing the vertex family outright and
-    yielding 129 anchors where uncapped gave 39 (measured 1.69x wall clock at block scale).
-
-    When the cap DOES bind the result is the sampled family, exactly as measured in
-    notes/2026-08-11-max-anchors-is-a-region-scale-win.md -- subsampling the vertex set instead
-    would preserve continuations and might well be better, but it is unmeasured.
-    """
-    lines, total = _merged_lines(network)
-    full = _vertices_and_samples(lines, total, n)
-    if max_anchors <= 0 or len(full) <= max_anchors:
-        return full
-    sampled = _arclength_samples(lines, total, max_anchors)
-    return sampled if len(sampled) < len(full) else full
 
 
 def _deep_targets(adjacency: ParcelAdjacency, roads: GeoDataFrame | None,
@@ -165,16 +110,3 @@ def _explode(merged: BaseGeometry | None, crs: CRS, width_m: float) -> GeoDataFr
 def _planarize(lines: list[LineString], crs: CRS, width_m: float) -> GeoDataFrame:
     """unary_union the lines (nodes crossings), explode to LineStrings, one row each."""
     return _explode(_merge(lines), crs, width_m)
-
-
-def _union_with(base_merged: BaseGeometry | None, real: LineString) -> BaseGeometry:
-    """Incremental planarize: node `real` against the already-merged `base_merged` (or just
-    `real` alone if there is no base yet) instead of re-unioning the whole committed list. Matches
-    `_StepContext.score_candidate`'s road-graph merge exactly (`budget.py`) -- bit-exact for
-    BUILDABLE trials, which meet the committed/street network only at shared boundary-graph
-    vertices, so this incremental two-stage union nodes identically to a one-shot union of the
-    full list. It is NOT bit-exact for aspirational free chords crossing a committed edge at a
-    float interior point ("Bug 2" -- see `_StepContext`'s docstring), so callers must gate this
-    on `realizer.snaps` and use the full `_planarize(committed + [real], ...)` for a
-    non-snapping realizer."""
-    return unary_union([base_merged, real]) if base_merged is not None else unary_union([real])

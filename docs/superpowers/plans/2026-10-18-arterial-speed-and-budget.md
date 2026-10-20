@@ -384,6 +384,7 @@ Commit conf, any deleted sampler's files, NOTES.md and BACKLOG.md (`research: ro
 - [ ] **Step 1: Ask**
 
 Report to the caller Task 5's estimate for re-proposing the arterial on the lineup's 62 blocks and wait for the owner's yes; do nothing below without it.
+Estimate (2026-10-19, after the mesh speedups 4014bc7f; NOTES, "Mesh speedups before the lineup's rerun"): ~84 task-h central (~79 -- 110), was ~96 (91 -- 122): the complex re-scoring ~61 task-h at quadro2's rate (16% of the meshing gone), the prefix stage ~10, the arterial's re-proposal 8 -- 39 (central ~13); about 3 -- 4 h of wall on quadro2.
 
 - [ ] **Step 2: Merge and move**
 
@@ -392,5 +393,5 @@ Move the old root to `lineup_rows()`'s new name; delete from it the arterial's r
 
 - [ ] **Step 3: Re-propose and report**
 
-Re-propose the arterial on the lineup's blocks with road_rescore's `lineup-one` through cluster.py `submit cpu` on orion (the task-hours and `--time` from Task 5's fit; `--mem` from the study's measured peaks), wait with `cluster.py wait` in `run_in_background`, sync, then `PYTHONPATH=. uv run python research/roadless/consolidated.py lineup-report` (1 process, ~5 min).
+Re-propose the arterial on the lineup's blocks with road_rescore's `lineup-one` through cluster.py `submit cpu` on quadro2 (the re-scoring's node: 52 µs a triangle alone against orion's 56, all 385 GB free; orion only for a second run of other blocks once this project's region jobs free its memory) (the task-hours and `--time` from Task 5's fit; `--mem` from the study's measured peaks), wait with `cluster.py wait` in `run_in_background`, sync, then `PYTHONPATH=. uv run python research/roadless/consolidated.py lineup-report` (1 process, ~5 min).
 Commit the regenerated `consolidated_rows/summary_lineup_*.csv` and the NOTES lines on what moved, and push research/roadless.

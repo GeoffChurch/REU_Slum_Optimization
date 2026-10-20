@@ -57,6 +57,7 @@ the boost too (RUNTIME). Rows ROWS/baselines/<id>__<part>.parquet, each under th
 from __future__ import annotations
 
 import dataclasses
+import itertools
 import multiprocessing
 import socket
 import sys
@@ -582,7 +583,7 @@ def report() -> None:
     w = b.pivot_table(index="block", columns="part", values=["P0", "Pq0", "J2_0", "walled"])
     out = pd.DataFrame(index=w.index)
     for k in ("P0", "Pq0", "J2_0"):
-        for prev, part in zip(PARTS, PARTS[1:]):
+        for prev, part in itertools.pairwise(PARTS):
             if (k, part) in w and (k, prev) in w:
                 out[f"{k}_{part}"] = w[(k, part)] / w[(k, prev)] - 1.0
         if (k, "runtime") in w and (k, "block") in w:
@@ -612,12 +613,12 @@ def report() -> None:
 
 LENSES = ("L_P", "L_Pq", "L_J2")         # P the headline, P_{1/2} the equity view, J_2 the old
 PRESETS = ("default", "hard", "cheap", "cheap005")
+# The arterial is research/arterial-speed's (its stop at the ramped destroyed-area D 0.20, the
+# quality-first sampler), re-proposed on the lineup's blocks by that plan's Task 7; the old one's
+# rows (300 roads, no stop) were deleted from the root when the measure moved it.
 LINEUP_ROADS = ("clearance", "clearance_looped", "cycle_native",
-                "cycle_native_betweenness_contrast", "resistance_lp", "euclidean_grid")
-# The old arterial (cap 300 roads, no displacement stop) is superseded (owner 2026-10-19) by
-# research/arterial-speed's arterial, re-proposed and re-scored by that branch's Task 7: its rows
-# under the lineup root are kept as a record, read by no comparison here.
-SUPERSEDED_ROADS = ("greedy_arterial_access_displacement",)
+                "cycle_native_betweenness_contrast", "resistance_lp", "euclidean_grid",
+                "greedy_arterial_access_displacement")
 OLD = STORED_ROADS / "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a"      # item 4 on the complex
 OLD_ROWS = OLD / "cpu" / "area_D0.02-0.05-0.1-0.15-0.2"
 
@@ -702,8 +703,7 @@ def lineup_report() -> None:
     root = rr.lineup_rows()
     cx = _read(root / metrics.RUNTIME / "cpu" / "area_D0.02-0.05-0.1-0.15-0.2")
     if len(cx):
-        assert set(cx.method) <= {*LINEUP_ROADS, *SUPERSEDED_ROADS}, set(cx.method)
-        cx = cast(pd.DataFrame, cx[cx.method.isin(LINEUP_ROADS)])
+        assert set(cx.method) <= set(LINEUP_ROADS), set(cx.method)
     if len(cx):
         at = _roads_at(cx, 0.05)
         at["size"] = at.block.map(feat["size"])

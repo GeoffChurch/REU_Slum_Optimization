@@ -23,8 +23,10 @@ from reblock.methods.arterial import (
     Displacement,
     ExactEngine,
     GreedyArterialReblocker,
+    NoBudget,
     SnapToBoundary,
 )
+from reblock.methods.arterial.anchors import PerLineFallback
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 from reblock.pipeline import build_regions
 from reblock.presets import load_stages
@@ -44,9 +46,10 @@ def main() -> None:
     print(f"  {'max_anchors':>12}{'seconds':>10}{'roads':>7}{'total_m':>10}")
     for ma in (24, 48, 96):
         m = GreedyArterialReblocker(realizer=SnapToBoundary(lam=2.0), objective=Access(),
-                                    cost=Displacement(), workers=16, max_anchors=ma, n_anchors=32,
+                                    cost=Displacement(), workers=16,
+                                    anchors=PerLineFallback(32, ma),
                                     top_k=8, max_roads=15, road_width_m=DEFAULT_ROAD_WIDTH_M,
-                                    engine=ExactEngine())
+                                    engine=ExactEngine(), budget=NoBudget())
         t = time.monotonic()
         r = m.propose(blk).roads
         el = time.monotonic() - t

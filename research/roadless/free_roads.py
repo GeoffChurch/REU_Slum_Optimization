@@ -86,6 +86,7 @@ import gap_factor  # noqa: E402
 from reblock.budget import road_corridor  # noqa: E402
 from reblock.contracts import Block  # noqa: E402
 from reblock.derive_graph import closure_hash, config_identity, source_hash  # noqa: E402
+from reblock.destroyed import RampedDestroyed  # noqa: E402
 from reblock.free_first import HeldRoad  # noqa: E402
 from reblock.methods.substrates import RoutingGraph  # noqa: E402
 from reblock.permeability import with_width  # noqa: E402
@@ -187,6 +188,7 @@ class FreeEnclosed:
     population: Population
     target_margin_m: float
     length_tie: float
+    measure: RampedDestroyed     # the true displacement's rule (common.MEASURE in the lineup)
 
     def __post_init__(self) -> None:
         if not 0.0 < self.budget <= 1.0:
@@ -198,7 +200,8 @@ class FreeEnclosed:
 
     @property
     def identity(self) -> Hashable:
-        return ("FreeEnclosed", CODE, closure_hash("reblock.budget"), config_identity(self))
+        return ("FreeEnclosed", CODE, closure_hash("reblock.budget"),
+                closure_hash("reblock.destroyed"), config_identity(self))
 
     @property
     def tag(self) -> str:
@@ -243,9 +246,10 @@ class FreeEnclosed:
             """The true displacement of `roads` under the budget's weightings, and under the
             key's (`population`)."""
             f = frame(roads)
-            return (Displaced(by_area=common.displacement(block, f, area_w),
-                              by_count=common.displacement(block, f, count_w)),
-                    common.displacement(block, f, w))
+            m = self.measure
+            return (Displaced(by_area=common.displacement(block, f, area_w, measure=m),
+                              by_count=common.displacement(block, f, count_w, measure=m)),
+                    common.displacement(block, f, w, measure=m))
 
         held: list[HeldRoad] = []
         steps: list[Step] = []
@@ -439,4 +443,4 @@ def lineup_free() -> FreeEnclosed:
     import metrics
     return FreeEnclosed(budget=FREE_BUDGET, metric=metrics.RUNTIME,
                         population=common.AreaPopulation(), target_margin_m=FREE_MARGIN_M,
-                        length_tie=FREE_LENGTH_TIE)
+                        length_tie=FREE_LENGTH_TIE, measure=common.MEASURE)

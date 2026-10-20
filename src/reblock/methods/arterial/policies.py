@@ -19,8 +19,8 @@ from shapely.geometry.base import BaseGeometry
 
 from reblock.contracts import Block
 from reblock.derive.access import ParcelAdjacency
+from reblock.methods.arterial.anchors import AnchorSampler
 from reblock.methods.arterial.primitives import (
-    _anchor_points,
     _candidate_chords,
     _deep_targets,
     _xy,
@@ -79,11 +79,10 @@ class _GrowPolicy:
 class _FaithfulPolicy:
     adjacency: ParcelAdjacency
     streets: list[BaseGeometry]
-    n_anchors: int
+    anchors: AnchorSampler
     top_k: int
     live: set[str]
     _initial: list[LineString]
-    max_anchors: int
 
     def initial(self) -> list[LineString]:
         return self._initial
@@ -92,7 +91,7 @@ class _FaithfulPolicy:
                      ) -> tuple[list[LineString], list[str]]:
         network = [*self.streets, *committed]
         cands = _candidate_chords(
-            _anchor_points(network, self.n_anchors, self.max_anchors),
+            self.anchors.points(network),
             _deep_targets(self.adjacency, _committed_gdf(committed, self.adjacency.block),
                           self.top_k))
         now = {ls.wkt: ls for ls in cands}
@@ -117,13 +116,13 @@ class CandidatePolicySpec(Protocol):
     block's adjacency, seed candidates), which is per-proposal and cannot be built where config is
     read -- so config injects a spec and the engine calls `build` once per block."""
 
-    def build(self, adjacency: ParcelAdjacency, streets: list[BaseGeometry], n_anchors: int,
-              top_k: int, max_anchors: int) -> CandidatePolicy: ...
+    def build(self, adjacency: ParcelAdjacency, streets: list[BaseGeometry],
+              anchors: AnchorSampler, top_k: int) -> CandidatePolicy: ...
 
 
-def _seed(adjacency: ParcelAdjacency, streets: list[BaseGeometry], n_anchors: int, top_k: int,
-          max_anchors: int) -> tuple[list[tuple[float, float]], list[LineString]]:
-    anchors0 = _anchor_points(streets, n_anchors, max_anchors)
+def _seed(adjacency: ParcelAdjacency, streets: list[BaseGeometry], anchors: AnchorSampler,
+          top_k: int) -> tuple[list[tuple[float, float]], list[LineString]]:
+    anchors0 = anchors.points(streets)
     targets0 = _deep_targets(adjacency, None, top_k)
     return anchors0, _candidate_chords(anchors0, targets0)
 
@@ -132,9 +131,9 @@ def _seed(adjacency: ParcelAdjacency, streets: list[BaseGeometry], n_anchors: in
 class Fixed:
     """Score only the step-0 candidate set forever. Cheapest, and blind to continuations."""
 
-    def build(self, adjacency: ParcelAdjacency, streets: list[BaseGeometry], n_anchors: int,
-              top_k: int, max_anchors: int) -> CandidatePolicy:
-        _, initial = _seed(adjacency, streets, n_anchors, top_k, max_anchors)
+    def build(self, adjacency: ParcelAdjacency, streets: list[BaseGeometry],
+              anchors: AnchorSampler, top_k: int) -> CandidatePolicy:
+        _, initial = _seed(adjacency, streets, anchors, top_k)
         return _FixedPolicy(initial)
 
 
@@ -142,9 +141,9 @@ class Fixed:
 class Grow:
     """Add continuations from each committed road's vertices as they appear. The shipped default."""
 
-    def build(self, adjacency: ParcelAdjacency, streets: list[BaseGeometry], n_anchors: int,
-              top_k: int, max_anchors: int) -> CandidatePolicy:
-        anchors0, initial = _seed(adjacency, streets, n_anchors, top_k, max_anchors)
+    def build(self, adjacency: ParcelAdjacency, streets: list[BaseGeometry],
+              anchors: AnchorSampler, top_k: int) -> CandidatePolicy:
+        anchors0, initial = _seed(adjacency, streets, anchors, top_k)
         return _GrowPolicy(adjacency, list(anchors0), top_k, {ls.wkt for ls in initial}, initial)
 
 
@@ -153,8 +152,8 @@ class Faithful:
     """Regenerate the exact greedy's candidate set every step. With rescore_every=1 this makes the
     lazy engine byte-identical to the exact one -- the oracle the lazy path is checked against."""
 
-    def build(self, adjacency: ParcelAdjacency, streets: list[BaseGeometry], n_anchors: int,
-              top_k: int, max_anchors: int) -> CandidatePolicy:
-        _, initial = _seed(adjacency, streets, n_anchors, top_k, max_anchors)
-        return _FaithfulPolicy(adjacency, list(streets), n_anchors, top_k,
-                               {ls.wkt for ls in initial}, initial, max_anchors)
+    def build(self, adjacency: ParcelAdjacency, streets: list[BaseGeometry],
+              anchors: AnchorSampler, top_k: int) -> CandidatePolicy:
+        _, initial = _seed(adjacency, streets, anchors, top_k)
+        return _FaithfulPolicy(adjacency, list(streets), anchors, top_k,
+                               {ls.wkt for ls in initial}, initial)

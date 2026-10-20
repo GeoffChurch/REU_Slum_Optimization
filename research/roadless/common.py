@@ -3,7 +3,8 @@
 The 220 consensus recipients on real footprints (the group Steiner study's sample) and the 82 large
 blocks, the blocks themselves (from the Cape Town source, each with its OSM features, or a bank
 shipped to a cluster node), the method-comparison lineup through the derive cache, the populations
-(a building's weight), the demands (what each home injects) and a road prefix's displacement.
+(a building's weight), the demands (what each home injects) and a road prefix's displacement
+(MEASURE: the ramped destroyed-area rule, reblock.destroyed).
 (`Scorer`, the raster's scorer of a road set, and its grids went with the raster: NOTES, "The
 complex as the runtime: the raster retired".)
 """
@@ -22,10 +23,21 @@ import pandas as pd
 import shapely
 from numpy.typing import NDArray
 
+from reblock.destroyed import RampedDestroyed
+
 if TYPE_CHECKING:
     from geopandas import GeoDataFrame
 
     from reblock.contracts import Block
+
+# The research lineup's displacement (owner 2026-10-18): every road network's D and every prefix's
+# cut are the ramped destroyed-area rule -- a building's destroyed portion X = 1 - its largest
+# standing piece over its area, counted min(1, X / tau) -- in place of the partial overlap the
+# public package (reblock.buildings, reblock.budget) keeps until the site revamp. The clearing
+# presets already count whole buildings (gap_clear's cost is each building's full share), so roads
+# and clearings are scored alike. Its tau is in the lineup's identity (road_rescore.lineup_rows,
+# free_roads.FreeEnclosed).
+MEASURE = RampedDestroyed(tau=0.10)
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
@@ -271,14 +283,13 @@ class PriorityDemand:
         return np.where(live, w * uq / mean, w)
 
 
-def displacement(block, roads, w: np.ndarray) -> float:
-    """Population-weighted share displaced: sum_i c_i w_i / sum_i w_i, c_i the share of building
-    i's outline the corridor takes (the project's overlap fraction)."""
+def displacement(block, roads, w: np.ndarray, *, measure: RampedDestroyed) -> float:
+    """Population-weighted share displaced: sum_i c_i w_i / sum_i w_i, c_i building i's ramped
+    destroyed share under the roads' corridor (`measure`; the lineup's is MEASURE)."""
     if roads is None or len(roads) == 0 or len(w) == 0:
         return 0.0
     from reblock.budget import road_corridor
-    c = block.buildings.displacement(road_corridor(roads))
-    return float((c * w).sum() / w.sum())
+    return measure.share(block.buildings, road_corridor(roads), w)
 
 
 _ROW = "__canonical_row__"      # canonical_order's scratch column (each road's row in the network)
@@ -301,19 +312,19 @@ def canonical_order(block: Block, roads: GeoDataFrame) -> GeoDataFrame:
                 roads.iloc[np.concatenate([np.arange(n), rows[rows >= n]])].reset_index(drop=True))
 
 
-def prefix_to(block, roads, target: float, w: np.ndarray):
+def prefix_to(block, roads, target: float, w: np.ndarray, *, measure: RampedDestroyed):
     """The shortest canonical prefix (canonical_order: the held roads, then street-first) whose
     weighted displacement reaches `target` (all roads, in canonical order, if none does):
     `prefix_to_displacement` with a population, and with the network's held roads first."""
     if len(roads) == 0:
         return roads
     ordered = canonical_order(block, roads)
-    if displacement(block, ordered, w) < target:
+    if displacement(block, ordered, w, measure=measure) < target:
         return ordered
     lo, hi = 0, len(ordered)
     while lo < hi:
         mid = (lo + hi) // 2
-        if displacement(block, ordered.iloc[:mid], w) >= target:
+        if displacement(block, ordered.iloc[:mid], w, measure=measure) >= target:
             hi = mid
         else:
             lo = mid + 1

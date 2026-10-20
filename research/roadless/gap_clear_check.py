@@ -31,6 +31,8 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S street-boost <-|ids,> [fault]  # fault: classes-dropped
     uv run python $S no-features <ids,> [fault]    # fault: neighbour-features
     uv run python $S underflow - [fault]           # fault: unfloored
+    uv run python $S faces <ids,> [fault]          # fault: unsorted
+    uv run python $S lazy-baseline <ids,> [fault]  # faults: atoms, eager
     uv run python $S both-ways <guards,> <ids,|->  # each guard, then under each of its faults
 
 `baseline`: the fixed mesh (the runtime's metric, METRIC) against the complex rebuilt
@@ -199,6 +201,18 @@ the potential under the population's demand has subnormal cells by a direct solv
 the underflow front is there), and the refined solve equals scipy's spsolve within UNDERFLOW_TOL
 of the largest. Fault `unfloored`: the backward error with each term read at its own size
 (_residual before the fix, verbatim): the baseline's solve stalls at a backward error of 1.
+
+`faces` and `lazy-baseline` (NOTES, "Mesh speedups before the lineup's rerun"), each on a block
+plain and carved by CROSS_HALF_M roads (`_cross_carving`: one along the block's middle, then that
+and one across it). `faces`: gap_clear._faces on the atoms, its per-face footprints grouped by one
+sort (gap_clear._by_face), equals the same with the per-face scan it replaced (`_scan_was`,
+verbatim): the faces, the noded lines, and every face's cover and zone, element for element.
+Fault `unsorted`: each face's footprints in the tree query's order, not ascending.
+`lazy-baseline`: a carved mesh (RUNTIME's, meshed afresh) builds no baseline complex
+(gap_complex.build is never called) and its file holds none; built on use, from its file or not,
+it equals the plain mesh's array for array (the plain one's stored, and read back). Faults:
+`atoms` (the carved mesh's baseline built on the carving's atoms, not the buildings), `eager` (a
+carved mesh's baseline built with it).
 """
 from __future__ import annotations
 
@@ -210,7 +224,7 @@ import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import geopandas as gpd
 import numpy as np
@@ -313,6 +327,7 @@ BARRIER_EDGE_M = 0.05   # barriers on a real block: the cut less this (m) holds 
 NO_FEATURES_TOL = 1e-12  # no-features: RUNTIME's baseline against the leak-only metric's (relative)
 UNDERFLOW_BLOCK = "ZAF.9.1.4_1_7283"    # underflow: its potential underflows along a 4 km strip
 UNDERFLOW_TOL = 1e-9     # ... its refined solve against spsolve, of the largest (9.6e-13 apart)
+CROSS_HALF_M = 3.0       # faces, lazy-baseline: the carving's roads' half-width (m; a 6 m road)
 
 
 @contextmanager
@@ -2100,6 +2115,139 @@ def _suffix_without_leak(self: gx.Exits) -> str:
     return f"+x{parts}v{gx.EXITS_CODE}" if parts else ""
 
 
+# ------------------------------------------------------------------ the mesh's speedups
+
+def _cross_carving(geo: gc.Geometry) -> gcl.Carving:
+    """`geo`'s footprints cut by two nested stops: a road along the block's middle (its bounds'
+    longer side, through its centroid), then that and one across it, each CROSS_HALF_M wide on
+    either side."""
+    boundary = cast("BaseGeometry", geo.boundary)
+    x0, y0, x1, y1 = shapely.bounds(boundary)
+    c = shapely.centroid(boundary)
+    along = shapely.LineString([(x0, c.y), (x1, c.y)] if x1 - x0 >= y1 - y0
+                               else [(c.x, y0), (c.x, y1)])
+    across = shapely.LineString([(c.x, y0), (c.x, y1)] if x1 - x0 >= y1 - y0
+                                else [(x0, c.y), (x1, c.y)])
+    first = shapely.buffer(along, CROSS_HALF_M)
+    return gcl.Carving.of(geo, [[first, shapely.union(first, shapely.buffer(across,
+                                                                             CROSS_HALF_M))]])
+
+
+def _scan_was(qi: np.ndarray, qb: np.ndarray, n: int) -> list[tuple[int, ...]]:
+    """gap_clear._faces's grouping before gap_clear._by_face, verbatim: a scan per face."""
+    return [tuple(sorted(qb[qi == k].tolist())) for k in range(n)]
+
+
+def _unsorted(qi: np.ndarray, qb: np.ndarray, n: int) -> list[tuple[int, ...]]:
+    """gap_clear._by_face with each face's footprints in the query's order (fault `unsorted`)."""
+    o = np.argsort(qi, kind="stable")
+    qi, qb = qi[o], qb[o]
+    cuts = np.searchsorted(qi, np.arange(n + 1))
+    return [tuple(qb[cuts[k]:cuts[k + 1]].tolist()) for k in range(n)]
+
+
+def faces(ids: list[str]) -> list[str]:
+    bad = []
+    for b in common.build_blocks(ids):
+        geo = gc.geometry(b)
+        for label, carving in (("plain", gcl.Carving.none(geo)), ("carved", _cross_carving(geo))):
+            atoms = geo._replace(polys=carving.polys)
+            got = gcl._faces(atoms, METRIC.spec, METRIC.form.grow)
+            with _patched(gcl, "_by_face", _scan_was):
+                was = gcl._faces(atoms, METRIC.spec, METRIC.form.grow)
+            same_faces = (len(got[0]) == len(was[0])
+                          and bool(shapely.equals_exact(got[0], was[0], tolerance=0.0).all()))
+            same_noded = bool(shapely.equals_exact(got[3], was[3], tolerance=0.0))
+            cover = sum(x != y for x, y in zip(got[1].tolist(), was[1].tolist(), strict=True))
+            zone = sum(x != y for x, y in zip(got[2].tolist(), was[2].tolist(), strict=True))
+            ok = same_faces and same_noded and cover == 0 and zone == 0
+            print(f"{b.block_id} {label}: {carving.n} atoms, {len(got[0])} faces "
+                  f"({sum(map(len, was[1].tolist()))} cover and {sum(map(len, was[2].tolist()))} "
+                  f"zone pairs); faces {'equal' if same_faces else 'APART'}, noded lines "
+                  f"{'equal' if same_noded else 'APART'}, {cover} covers and {zone} zones apart "
+                  f"-> {'ok' if ok else 'FAILS'}", flush=True)
+            if not ok:
+                bad.append(f"{b.block_id} {label}")
+    return bad
+
+
+def _arrays_apart(a: dict[str, np.ndarray], b: dict[str, np.ndarray]) -> list[str]:
+    """The names whose arrays differ (in value, dtype or shape), or that one side lacks."""
+    return sorted(k for k in a.keys() | b.keys()
+                  if k not in a or k not in b or a[k].dtype != b[k].dtype
+                  or not np.array_equal(a[k], b[k]))
+
+
+def lazy_baseline(ids: list[str]) -> list[str]:
+    bad = []
+    metric = _runtime()
+    real = gc.build
+    builds = {"n": 0}
+
+    def counted(*a: Any, **k: Any) -> gc.Complex:
+        builds["n"] += 1
+        return real(*a, **k)
+    for b in common.build_blocks(ids):
+        bid = b.block_id
+        geo = gc.geometry(b)
+        carving = _cross_carving(geo)
+        builds["n"] = 0
+        with tempfile.TemporaryDirectory() as tmp:
+            with _patched(gc, "build", counted):
+                fx = metric.fixed(b, cache=Path(tmp), carving=carving)
+                again = metric.fixed(b, cache=Path(tmp), carving=carving)    # read back
+            [path] = Path(tmp).glob("*.npz")
+            kept = [n for n in np.load(path).files if n.startswith("cx_")]
+        meshed = builds["n"]
+        with tempfile.TemporaryDirectory() as tmp:
+            plain = metric.fixed(b, cache=Path(tmp), carving=gcl.Carving.none(geo))
+            plain_again = metric.fixed(b, cache=Path(tmp), carving=gcl.Carving.none(geo))
+            [path] = Path(tmp).glob("*.npz")
+            plain_kept = [n for n in np.load(path).files if n.startswith("cx_")]
+        want = gc.complex_arrays(plain.cx0.complex())
+        apart = {"plain read back": _arrays_apart(gc.complex_arrays(plain_again.cx0.complex()),
+                                                  want),
+                 "carved": _arrays_apart(gc.complex_arrays(fx.cx0.complex()), want),
+                 "carved read back": _arrays_apart(gc.complex_arrays(again.cx0.complex()), want)}
+        ok = (meshed == 0 and not kept and bool(plain_kept)
+              and not any(apart.values()))
+        print(f"{bid}: the carved mesh ({carving.n} atoms) built {meshed} complexes and keeps "
+              f"{len(kept)} baseline arrays (the plain mesh's file {len(plain_kept)}); against "
+              "the plain mesh's baseline, " + ", ".join(
+                  f"{k} {len(v)} arrays apart{' (' + ', '.join(v) + ')' if v else ''}"
+                  for k, v in apart.items()) + f" -> {'ok' if ok else 'FAILS'}", flush=True)
+        if not ok:
+            bad.append(bid)
+    return bad
+
+
+@contextmanager
+def _baseline_on_atoms() -> Iterator[None]:
+    """A carved mesh's baseline built on the last carving's atoms (gap_clear.Carving.of's), not
+    the buildings (fault `atoms`)."""
+    last: list[gcl.Carving] = []
+    of, init = gcl.Carving.of, gcl.LazyBaseline.__init__
+
+    def carving_of(geo: gc.Geometry, networks: list[list[object]]) -> gcl.Carving:
+        last.append(of(geo, networks))
+        return last[-1]
+
+    def on_atoms(self: gcl.LazyBaseline, geo: gc.Geometry, spec: gc.Spec, grow: float) -> None:
+        init(self, geo._replace(polys=last[-1].polys), spec, grow)
+    with _patched(gcl.Carving, "of", staticmethod(carving_of)), \
+            _patched(gcl.LazyBaseline, "__init__", on_atoms):
+        yield
+
+
+def _eager(self: gcl.LazyBaseline, geo: gc.Geometry, spec: gc.Spec, grow: float) -> None:
+    """gap_clear.LazyBaseline built when made (fault `eager`)."""
+    _LAZY_INIT(self, geo, spec, grow)
+    _ = self.arrays
+
+
+_LAZY_INIT = gcl.LazyBaseline.__init__
+
+
 # ------------------------------------------------------------------ the run
 
 GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
@@ -2110,7 +2258,8 @@ GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "enclosure": enclosure, "leak-gradient": leak_gradient, "leak-scale": leak_scale,
     "barriers": barriers, "exits-identity": exits_identity, "loop-index": loop_index,
     "trip-calibration": trip_calibration, "closed-edge": closed_edge,
-    "street-boost": street_boost, "underflow": underflow, "no-features": no_features}
+    "street-boost": street_boost, "underflow": underflow, "no-features": no_features,
+    "faces": faces, "lazy-baseline": lazy_baseline}
 
 
 def _fault_exits():
@@ -2156,6 +2305,9 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "closed-edge": {"edge-open": lambda: _patched(gx.ClosedEdge, "mesh", lambda self, fm: fm)},
     "street-boost": {"classes-dropped": lambda: _patched(gx.StreetBoost, "on_way", _every_class)},
     "underflow": {"unfloored": lambda: _patched(gap_factor, "_residual", _residual_unfloored)},
+    "faces": {"unsorted": lambda: _patched(gcl, "_by_face", _unsorted)},
+    "lazy-baseline": {"atoms": _baseline_on_atoms,
+                      "eager": lambda: _patched(gcl.LazyBaseline, "__init__", _eager)},
     "trip-calibration": {"boundary-trips": lambda: _patched(gap_maps, "leak_drain",
                                                             _with_street),
                          "wrong-home": lambda: _patched(region_leaks, "trip_origins",

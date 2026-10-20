@@ -50,8 +50,10 @@ from reblock.methods.arterial import (
     Displacement,
     ExactEngine,
     GreedyArterialReblocker,
+    NoBudget,
     SnapToBoundary,
 )
+from reblock.methods.arterial.anchors import Uncapped
 from reblock.methods.arterial.primitives import _candidate_chords, _planarize
 from reblock.methods.arterial.scoring import _best_candidate, eval_candidate
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
@@ -201,10 +203,10 @@ def main() -> None:
         # workers=1 -> the serial path, so `_eval_hook`'s stash survives (a fork pool would
         # compute it in children and discard it)
         GreedyArterialReblocker(realizer=SnapToBoundary(lam=2.0), objective=Access(),
-                                cost=Displacement(), workers=1, max_roads=MAX_ROADS, n_anchors=32,
-                                top_k=8,
+                                cost=Displacement(), workers=1, max_roads=MAX_ROADS,
+                                anchors=Uncapped(32), top_k=8,
                                 road_width_m=DEFAULT_ROAD_WIDTH_M, engine=ExactEngine(),
-                                max_anchors=0).propose(b)
+                                budget=NoBudget()).propose(b)
         by_block[b.block_id] = list(_ROWS)
     OUT.write_text(json.dumps(by_block, indent=1))
 

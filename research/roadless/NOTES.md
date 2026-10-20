@@ -7958,3 +7958,276 @@ still on orion add at most about 790 (their walls) [inferred]. Here, single-thre
 arterial's re-runs 267 process-h (four finished in 14 -- 35 h each, eight killed at the owner's
 ruling after 3 -- 38 h), 7499's cycle_desire 14.9, the guards 10.6 and 11.9, the reused blocks' and
 the last lenses' scoring before them. Within the caps (40 GPU-h, 3,000 core-h).
+
+### The arterial: an incremental gain, a cap that holds, a displacement budget (2026-10-18)
+
+The plan (docs/superpowers/plans/2026-10-18-arterial-speed-and-budget.md; branch
+research/arterial-speed, Tasks 1 -- 6) took the lineup's arterial
+(greedy_arterial_access_displacement) from a road-count budget that never bound for the method (55
+of 62 lineup networks at 300 commits ended with every parcel at depth 1, a median 54 road km/km2)
+to a displacement budget, and made a step cheaper first.
+
+**Before** (arterial_rows/before/: the brief's microbench on 20269): one step grew from 10 s with
+nothing committed to 51 s at 607 segments; the exact evaluation of the 512 shortlisted candidates
+was 8.8 of the 10.4 s at S 0, the access gain alone (a full re-peel per candidate) 9 -- 51 ms of
+the 17 -- 54 ms each.
+
+**The incremental gain** (Task 1, objectives._AccessStep): a snapped road's gain lowered from the
+step's own peel (a breadth-first relaxation from the parcels it fronts, exact integer burdens) with
+liveness one dwithin test against the step's seed (streets and committed roads, every committed
+road live, asserted). Exact: every realized candidate of three greedy steps on 1808, DJI.1_2_602
+and five fixture blocks equals the re-peel (==), and the guard arterial_check.py gain on 20269 and
+38616 at 0/50/150/300 stored segments found 0 mismatches in 4,096 shortlisted candidates; the
+faults always-live, no-min and streets-only each fail it. The gain is 1.0 -- 2.0 ms per candidate
+at S 0 and 0.25 -- 1.1 ms after, against 7.7 -- 40 ms for the re-peel. The same 40 commits as
+before on 20269, 6310 and 39240 (120 of 120, WKB for WKB), the steps' total time 455 -> 182 s, 608
+-> 224 s, 491 -> 187 s (2.5 -- 2.9x: snap, ~3 ms, and the displacement cost, ~4.6 ms, now dominate
+a candidate).
+
+**The sampler** (Task 2, anchors.py): AnchorSampler as a Strategy, Uncapped (the old max_anchors:
+0), PerLineFallback (the old capped sampler, moved unchanged) and HardCap (at most max_anchors
+samples at one global arc-length stride). On 20269's stored network at 0/150/300/450/607 segments
+PerLineFallback(32, 128) gives 112, 229, 323, 409, 525 anchors (its cap restarts on every line),
+HardCap(32, 128) 112, 128, 128, 128, 128 (guard arterial_check.py anchors, fault per-line).
+
+**The stop** (Task 3, stop.py; superseded the same day by the ramped destroyed area, next
+section): a required keyword-only max_displacement; the greedy stops before
+the step that would start with the committed roads' destroyed footprint share at or past it (a
+touched building counted whole, the owner's definition of 2026-10-18), the crossing road kept, so a
+stopped run is a commit prefix of a longer one; every proposal records why it stopped
+(max_displacement, no_gain or max_roads). Every arterial preset at 0.20; the access pair's
+max_roads 1000 a safety cap; road_rescore's ARTERIAL_MAX_ROADS deleted and the lineup's rows root
+hashes the arterial's whole identity. Under the destroyed-area share a budget of 1.0 binds once
+every building is touched (1808's ten do), so 'no budget' is math.inf at the engine. The directness
+presets take 0.20 too: on a block as small as 1808 it binds after one road.
+
+**The study** (Tasks 4 -- 5, arterial_study.py; orion, cluster run arterial-study-b, 12 single-CPU
+tasks, all passed, 19 min wall, 1.7 task-h with scoring; rows arterial_rows/study untracked,
+summaries arterial_rows/summary_{runs,lenses,prefixes}.csv). cur02 = PerLineFallback(32, 128),
+cap02 = HardCap(32, 128), both at 0.20 destroyed and 1000 roads:
+
+    block      km2   stored h  cur02 s  cap02 s  commits  scored D_area at the stop
+    6310       0.084   4.04      257      283     23 / 28  0.072 / 0.067
+    20269      0.103   2.81      143      126     16 / 14  0.044 / 0.046
+    40144      0.153   4.29      242      285     19 / 24  0.055 / 0.053
+    39240      0.208   2.98       84      168      9 / 20  0.040 / 0.046
+    8480       0.387   5.46      726      579     50 / 62  0.026 / 0.018
+    38616      0.461  12.69      847      625     41 / 41  0.043 / 0.040
+
+(Proposal walls; the tasks with prefixes and complex scoring took 3.6 -- 17.3 min. Task 5's commit
+subject says 0.95 h and 0.83 h; the proposal walls sum to 0.64 h and 0.57 h, the tasks to 0.89 h
+and 0.82 h, against the stored 32.3 h.) Every run stopped on max_displacement (no max_roads stop).
+Median step 8.8 -- 18.6 s (cur02, anchors up to 304) against 8.4 -- 15.3 s (cap02, 128).
+
+**Destroyed area runs far above the scored area D** (the plan's Ruling 1, measured): the stop at
+0.20 destroyed sits at scored area D 0.026 -- 0.072 (cur02) and 0.018 -- 0.067 (cap02), 3 -- 11x
+below; the scored budgets 0.10, 0.15 and 0.20 are unreached on every block, 0.05 on four of six
+(20269, 39240, 8480, 38616), and 0.02 on 8480 under cap02. The stored whole networks show the same
+gap (6310: 0.854 destroyed against 0.448 scored). Lens A at 0.05 and 0.10 cannot be read off the
+arterial at this budget: the owner's call whether the scored D follows the destroyed-area
+definition or the arterial's budget rises.
+
+**Verdict** (the plan's Ruling 7): neither sampler dominates. cap02's wall is 0.74 -- 2.00x cur02's
+(faster on 20269, 8480, 38616; slower on 6310, 40144 and 39240, where it needs more commits to the
+same budget); at D 0.05 only 6310 and 40144 reach the budget in both arms, cap02 behind on 6310
+(L_P -0.061) and ahead on 40144 (+0.024), median -0.019 L_P, -0.012 L_Pq, -0.015 L_J2; no block
+reaches 0.10. Both stay: greedy_arterial_access_displacement keeps PerLineFallback (quality-first)
+and greedy_arterial_access_displacement_fast takes HardCap (speed-first: a flat per-step cost,
+ahead on the two largest blocks); the repulsion twin keeps the quality-first sampler.
+
+**The baseline is not reproduced.** The fidelity checks fail: cur02's network lies 1.7 -- 8.7 km
+outside the stored lineup network (lineup-caf14fa2), from the first commit, so the prefix movement
+(summary_prefixes.csv: symmetric differences 0.5 -- 3.7 of the baseline prefix's length) and the
+lens deltas measure the stored network against a fresh one, not the stop. The stored networks came
+from run cp-roads2-arterial-large at 0f4be69e on ai05 (quadro2), whose code, lock and conf match
+18044cbb; today this host, orion and a probe on ai05 itself (3 commits on 20269 and 6310) agree
+commit for commit with each other and with the pre-change tree, and none gives the baseline's first
+commit (on 20269 the step-0 leader leads by 9% and none of the top 12 candidates lies in the
+baseline). Checked and not the cause: the run's own bank block (identical parcels, streets and
+footprints), dependency versions, the derive path, the shortlist's ties at its cut, the checkout's
+editable install. Open; Task 7 re-proposes the lineup's arterial in any case.
+
+**The migration** (Task 7, owner-gated): re-proposing the arterial on the lineup's 62 blocks at the
+default preset. Against the stored walls (612.6 h for 62 networks at 300 commits) the study's
+proposal walls are 0.8 -- 3.7% (median 1.7%): 5 -- 23 task-h of proposal (central ~10), plus the
+scoring the stored rows took (8.1 h of complex and prefixes, its largest task 2,609 s at up to 64
+GB): ~13 -- 31 task-h, central ~18. The fit in area alone (0.01 + 0.59 h per km2) would give 128
+task-h, driven by the oversized blocks (up to 51.7 km2) that the six blocks (0.08 -- 0.46 km2) do
+not cover: those are the uncertain part.
+
+### The research lineup's displacement: the ramped destroyed area (2026-10-18)
+
+The owner's change (2026-10-18, "now, before the full rerun"), after the arterial study above
+showed the destroyed-area stop landing at scored D 0.018 -- 0.072: one rule for every building,
+the research lineup's displacement from here on, in place of both the scored partial overlap and
+the arterial's touched-building stop. The destroyed portion of building i under a corridor C is
+X_i = 1 - area(largest piece of O_i - C) / area(O_i), so a corner clip destroys the clipped share
+and a road through a building destroys the corridor plus every piece but the largest; building i
+counts c_i = min(1, X_i / tau) destroyed, tau 0.10 (0 -> 10% destroyed ramps 0 -> 1); D = sum
+c_i w_i / sum w_i under both populations (count, area) as before. A building with no area is
+destroyed iff the corridor covers its point. It lives in one module, src/reblock/destroyed.py
+(RampedDestroyed over a whole corridor; IncrementalDestroyed one piece at a time, each building
+keeping its covered region and only the buildings a new road touches recomputed), used by
+common.displacement and the prefix cuts (common.MEASURE = RampedDestroyed(tau=0.10), a required
+keyword-only `measure` down through prefix_to, road_rescore.prefix_len and FreeEnclosed) and by
+the arterial's stop (stop.Destroyed(share, tau), the access trio at Destroyed(0.20, 0.10);
+directness at NoBudget; ScoredArea and the touched-only DestroyedArea deleted). The lineup's rows
+root hashes the measure (road_rescore.lineup_rows; FreeEnclosed's identity too), so no
+partial-overlap row reads as a ramped one. The public package (reblock.buildings, reblock.budget)
+keeps the partial overlap until the site revamp (BACKLOG).
+
+Roads and clearings are now scored alike: the clearing presets already count whole buildings
+(gap_clear.Model's cost is each cleared building's full population share), and a road's D now
+counts a building whole once a tenth of it is destroyed.
+
+**Cost** (the coordinator's benchmark, scratchpad/arterial/destroyed_bench.py, on 20269 and 26061):
+the largest-piece step costs about the overlap intersection (0.02 -- 0.37 s per whole-network
+evaluation), so about 2x the partial D; clipping the corridor to each building's envelope first
+does not help; bisected buildings are rare (1 -- 107 per network). The guards: tests/
+test_destroyed.py (a corner clip, a bisection at 0.40 where the overlap says 0.10, zero-area
+buildings, incremental == whole; faults: the whole remainder for its largest piece, a forgetful
+meter), tests/methods/test_arterial_stop.py (the stop's meter equals the scoring function; a deaf
+meter breaks the stop) and arterial_check.py meter (on the stored 20269 and 38616 networks at
+1/25/100/300 segments the meter and common.displacement agree to 1.3e-11; the faults deaf and
+forgetful each fail it). In the study the meter's D at the stop and the same network scored
+afresh after planarizing differ by at most 1.1e-5 (planarization's noding).
+
+**The gap per block** (area weights; partial overlap / ramped / touched, a touched building
+whole). The stored lineup networks (lineup-caf14fa2, 300 commits):
+
+    block   partial  ramped  touched   ramped/partial
+    6310     0.448    0.798   0.854        1.8
+    20269    0.343    0.832   0.904        2.4
+    40144    0.456    0.845   0.896        1.9
+    39240    0.338    0.611   0.673        1.8
+    8480     0.119    0.484   0.595        4.1
+    38616    0.249    0.541   0.599        2.2
+
+and cur02's networks at the ramped 0.20 stop: 6310 0.081 / 0.202 / 0.223, 20269 0.056 / 0.202 /
+0.253, 40144 0.067 / 0.206 / 0.258, 39240 0.058 / 0.201 / 0.261, 8480 0.039 / 0.204 / 0.297, 38616
+0.055 / 0.202 / 0.248 (ramped/partial 2.5 -- 5.3: the gap is widest early, where a road's every
+touch is a fresh building, and closes as the corridor covers whole buildings).
+
+**The arterial study again, under the ramped stop and scoring** (arterial-study-d: orion, 12
+single-CPU tasks, all passed, ~25 min wall, ~2.3 task-h with scoring; arterial_rows/summary_*.csv).
+cur02 = PerLineFallback(32, 128), cap02 = HardCap(32, 128), both at Destroyed(0.20, 0.10) and 1000
+roads:
+
+    block      km2   stored h  cur02 s  cap02 s  commits  D at the stop  median step s
+    6310       0.084   4.04      289      340     25 / 33  0.202 / 0.204  11.5 /  9.9
+    20269      0.103   2.81      195      163     21 / 18  0.202 / 0.200   9.2 /  9.0
+    40144      0.153   4.29      318      356     24 / 29  0.206 / 0.204  13.3 / 12.2
+    39240      0.208   2.98      141      209     15 / 24  0.201 / 0.200   9.5 /  8.8
+    8480       0.387   5.46     1254      831     69 / 87  0.204 / 0.202  15.7 /  9.6
+    38616      0.461  12.69     1268      944     52 / 61  0.202 / 0.202  22.8 / 15.5
+
+Every run stopped on its budget (no max_roads, no no_gain stop; 8480, which saturated at partial
+0.12, now reaches ramped 0.20). Proposal walls sum to 0.96 h (cur02) and 0.79 h (cap02) against
+the stored 32.3 h; scoring adds ~0.25 h an arm (complex 100 -- 227 s a network, peak 1.9 -- 3.8
+GB). Every block now reaches area D 0.05 and 0.10 in both arms (and 0.15, 0.20).
+
+**Verdict** (the plan's Ruling 7, read symmetrically): neither dominates. cap02's wall is 0.66 --
+1.48x cur02's (faster on 8480 0.66, 38616 0.74, 20269 0.84; slower on 40144 1.12, 6310 1.18,
+39240 1.48, where it needs more commits to the budget). On quality cur02 leads all six medians
+(cap02 - cur02: L_P -0.0071, L_Pq -0.0045, L_J2 -0.0057 at D 0.05, ahead on 20269 and 40144; L_P
+-0.0045, L_Pq -0.0093, L_J2 -0.0065 at 0.10, ahead on 2 -- 3), but it is not faster on every block,
+so it does not dominate. Both presets stay: greedy_arterial_access_displacement (PerLineFallback,
+quality-first) and greedy_arterial_access_displacement_fast (HardCap, speed-first: 0.66 -- 0.74x
+the wall on the two largest blocks, its step flat at 128 anchors where cur02's grows to 358).
+
+**At region scale** (arterial-region-5810b: ZAF.9.3.1_1_5810, the single-block Cape Town region
+of the multiblock_depth_density example, 6,619 buildings, 0.58 km2; arterial_study.py propose on
+orion, one core, unscored): greedy_arterial_access_displacement (the example's preset) stopped on
+its budget at D 0.201 after 102 commits (378 segments) in 9,234 s (2.6 h; median step 73.5 s, max
+178 s, up to 416 anchors, peak 0.46 GB); the speed-first twin at D 0.201 after 140 commits (727
+segments) in 4,554 s (1.3 h; median step 32.4 s at 128 anchors). The preset used to stop at 60
+roads in ~777 s. For regen-examples: nothing breaks (the arterial's derive entries miss on the new
+identity, no other method's do), but the access arterial becomes the example bake's long pole at
+~2.6 h single-core on the Cape Town region (Nairobi's multi-block region untimed, of the same
+order), against ~7 min for the other methods together. Either budget the bake for it (the ranking's
+threads: 8 locally, 1 here, take some of it back) or run the speed-first preset in the examples
+(half the wall, behind on quality); the owner's call, and the published arterial frontier moves
+either way.
+
+**Task 7, re-estimated** (owner-gated): it now re-cuts and re-scores EVERY road method's prefixes
+and lens rows under the ramped D (the networks are kept, except the arterial's, which is
+re-proposed at its new stop). From the stored rows of lineup-caf14fa2 (550 networks): the prefix
+stage took 5.6 h (4.7 h of it the bisecting cuts, ~2x under the ramped D: ~10 h), the complex
+scoring 72.8 h (59.4 h of it meshing; the largest task 3,358 s, peak 79 GB); ~83 task-h of
+re-scoring. The arterial's re-proposal on its 62 lineup networks: the study's proposal walls are
+1.3 -- 6.4% of the stored (median 2.1%) against 612.6 h stored, so 8 -- 39 task-h, central ~13.
+Total ~96 task-h central (~91 -- 122), the oversized blocks (to 51.7 km2) the uncertain part as
+before.
+
+### Mesh speedups before the lineup's rerun (2026-10-19)
+
+Task 7 re-meshes every road network of the lineup (552 (block, network) tasks; in the stored rows
+of lineup-caf14fa2, 59.9 of 71.2 task-h are `t_mesh`). A profile of the road meshes (scratchpad
+study, 6310 and 20269) found two costs that change no score, both now gone (4014bc7f):
+
+- **The baseline complex on every carving.** Fixed.of built free first's baseline complex (cx0,
+  gc.build on the buildings) with every mesh, 15-16% of a road mesh's time, though only
+  Model.free_first reads it and road scoring never frees first. It is now a Strategy settled
+  where the mesh is made (gap_clear.Baseline): the plain mesh's StoredBaseline, built with it and
+  kept in its file as before (the cache format and every plain cache file unchanged), and a
+  carved mesh's LazyBaseline, built from the buildings on first use and never stored.
+- **A scan per face in _faces.** Each face's cover and zone were read by a scan of every query
+  pair (quadratic in the faces); now one sort groups them (gap_clear._by_face). On 6310's lineup
+  networks carved into one mesh at once (14,465 atoms, 238,125 faces) _faces takes 13.0 s
+  against 145.6 s, identical; on one network's carving (7k -- 26k faces) it was 1 -- 2 s.
+
+Both are bit-identical. On 6310's seven lineup networks (proof.py, the code before and after,
+one process each on rtx6000): every lens at all 40 stops, every array of every fixed mesh (by
+digest), P0, P_{1/2},0 and J_2,0, the baseline complex (carved, plain, plain read back) and free
+first's held set on a carved and on the plain mesh are identical. Guards (gap_clear_check.py,
+both ways on 6310): `faces` (the grouped lists against the scan's, verbatim, on the block plain
+and carved by a cross of two 6 m roads; fault `unsorted` fails it, 222 -- 2,317 lists apart) and
+`lazy-baseline` (a carved mesh builds no complex and stores none, and its baseline built on use
+equals the plain mesh's array for array; faults `atoms`, the baseline built on the carving's
+atoms, 17 arrays apart, and `eager`, built with the mesh, fail it).
+
+**Time, 6310 end to end** (carve + mesh + model + states, one network a process, rtx6000):
+
+    network                               triangles  mesh before/after s  total before/after s
+    resistance_lp                         1,540,260      56.0 / 51.0          69.1 / 64.1
+    clearance                             1,281,361      49.6 / 39.4          60.8 / 50.0
+    clearance_looped                      1,465,350      53.8 / 45.0          66.8 / 58.0
+    cycle_native                          1,413,181      51.4 / 41.7          61.6 / 51.8
+    cycle_native_betweenness_contrast     1,344,831      50.8 / 42.3          61.0 / 52.3
+    euclidean_grid                        1,290,275      50.3 / 39.9          61.8 / 50.8
+    greedy_arterial_access_displacement   1,543,234      59.7 / 46.8          73.7 / 60.1
+
+The meshes 9 -- 22% faster (17% over the seven), the networks 14.9% (454.7 -> 387.1 s); model and
+states unchanged (4 -- 7 s each). A carved model that does free first now pays the build there
+(11 -> 19 s on resistance_lp), which no road scoring does.
+
+**The nodes** (the same task, 6310 resistance_lp through `cx`, new code, one task alone on the
+node; mesh-node-orion and mesh-node-quadro2 at 85083830; both nodes' lenses equal rtx6000's
+exactly):
+
+    node             host     us / triangle  mesh s  model + states s  total s  peak GB
+    rtx6000 (local)  rtx6000      33.1         51.0      12.0             64.1     2.5
+    quadro2          ai05         52.2         80.4      23.8            106.1     2.5
+    orion            ai01         55.7         85.8      23.0            110.6     2.5
+
+Alone, quadro2 and orion are within 7% of each other and 1.6 -- 1.7x rtx6000. Packed, the stored
+lineup ran slower per triangle (median, small blocks: ai05 80, ai01 95, rtx6000 40; the large
+ones ai05 89, ai01 107, rtx6000 43): memory bandwidth shared by 30-odd tasks, worse on orion.
+Memory now (2026-10-19 15:30Z): quadro2 idle (64 CPUs, 385 GB, nothing allocated); orion 62 of 72
+CPUs idle but 1,204 of 1,545 GB allocated, to this project's own region jobs (79684_0..2 at 210
+GB, 79687_0 at 540 GB, 1-1.5 days into 2.5- and 6-day limits), so ~340 GB free. The heavy tasks:
+the six of 4287 at ~65 GB, 7499's at 79 GB, five more at 41 -- 49 GB, 95% of tasks under 40 GB
+(median 4.5 GB).
+
+**Recommendation for Task 7's re-scoring:** pin it to quadro2 (the faster CPU node, all its
+memory free: 4287's six tasks fit five at a time beside the small ones), with `--mem` per block
+from the stored peaks; orion only for a second run of other blocks once the region jobs release
+their memory (with ~340 GB free, 4287 alone would take all of it). rtx6000 is 1.6x faster again
+but holds no free slot.
+
+**Task 7, re-estimated:** the complex scoring, the stored 71.2 task-h at their hosts' packed
+rates, is ~70 task-h at quadro2's (ai01's 35.2 mesh-h at 1.2x its rate, rtx6000's 4.9 at 0.5x);
+less 16% of the meshing (the baseline complex; _faces' saving matters only on the largest
+carvings and is not counted) ~61 task-h. With the prefix stage (~10 task-h) and the arterial's
+re-proposal (8 -- 39, central ~13): ~84 task-h central (~79 -- 110), against ~96 (91 -- 122)
+before; about 3 -- 4 h of wall on quadro2's 32 cores, 4287's tasks (~40 min each) the long pole.

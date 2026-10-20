@@ -15,7 +15,7 @@ complex (decision (2)).
     uv run python $S cx <rows> <scratch> <metric> <cpu|gpu> <id> <items,> [--replace]
     uv run python $S cxreport <rows> <lineup,> <metric> <cpu|gpu>
     uv run python $S lineup-one <scratch> <id> <method> [--replace]   # propose, cut, score
-    uv run python $S lineup-score <scratch> <id> <methods,> [--replace]   # score only
+    uv run python $S lineup-score <scratch> <id> <methods,> [--replace]   # cut, score
 
 ON THE COMPLEX (phase 2b; NOTES, "The complex as the runtime: the ports and the cross-checks"):
 `cx` scores the area prefixes on the gap complex's metric (<metric>, refused unless it is one:
@@ -75,6 +75,7 @@ import relax  # noqa: E402
 import search  # noqa: E402
 
 from reblock.budget import road_corridor  # noqa: E402
+from reblock.destroyed import RampedDestroyed  # noqa: E402
 
 if TYPE_CHECKING:
     from shapely.geometry.base import BaseGeometry
@@ -196,19 +197,17 @@ def _arms() -> dict:
 # The research lineup (the consolidated pass; BACKLOG 5's TODO, owner 2026-10-12 "leave a TODO"):
 # every method that holds roads first holds free_roads.lineup_free() (FreeEnclosed under RUNTIME)
 # in place of HoldNothing (clearance, clearance_looped's tree, cycle_native, cycle_desire,
-# resistance_lp; the grid and the arterial hold no stage), and the arterial's road cap lifted from
-# its preset's 60 to ARTERIAL_MAX_ROADS so it reaches the Lens A budget (at 60 it reached area D
-# 0.011 -- 0.044 on the sentinel's 9712, 22422 and 5810: NOTES, "Re-scoring the road methods: the
-# large-block sentinel"). Its rows' root carries this identity (lineup_rows), so no row of another
-# lineup or metric reads as its own.
+# resistance_lp; the grid and the arterial hold no stage). The arterial runs as its preset says
+# (the quality-first sampler, PerLineFallback): it stops at the ramped destroyed-area D the
+# lineup scores by (Destroyed(share=0.20, tau=0.10)), its max_roads a safety cap. Its rows' root
+# carries the stage's and the arterial's identities and the measure (lineup_rows), so no row of
+# another lineup, metric, arterial or measure reads as its own.
 ARTERIAL = "greedy_arterial_access_displacement"
-ARTERIAL_MAX_ROADS = 300
 
 
 def lineup_arms() -> dict[str, Method]:
     """The research lineup's methods (above), by name."""
     import free_roads
-    from reblock.methods.arterial.reblocker import GreedyArterialReblocker
     from reblock.methods.clearance import ClearanceReblocker
     from reblock.methods.cycle_native import CycleNativeReblocker
     from reblock.methods.loop_closure import LoopClosureRefiner
@@ -221,20 +220,21 @@ def lineup_arms() -> dict[str, Method]:
             m = dataclasses.replace(m, base=dataclasses.replace(m.base, free_first=free))
         elif isinstance(m, CycleNativeReblocker | ResistanceLPReblocker | ClearanceReblocker):
             m = dataclasses.replace(m, free_first=free)
-        if name == ARTERIAL:
-            assert isinstance(m, GreedyArterialReblocker), name
-            m = dataclasses.replace(m, max_roads=ARTERIAL_MAX_ROADS)
         out[name] = m
     return out
 
 
 def lineup_rows() -> Path:
     """The research lineup's rows root: road_rows/lineup-<digest of its free-first stage's
-    identity (the metric's name in it) and the arterial's cap>."""
+    identity (the metric's name in it), the arterial's whole identity and the displacement measure
+    (common.MEASURE, its tau)>. The root changes whenever the arterial's identity does (its
+    sampler, budget or cap: its networks change) or the measure does (every prefix's cut and D
+    change), so no row of another measure reads as its own."""
     import hashlib
 
     import free_roads
-    ident = repr((free_roads.lineup_free().identity, ARTERIAL_MAX_ROADS))
+    ident = repr((free_roads.lineup_free().identity, lineup_arms()[ARTERIAL].identity,
+                  common.MEASURE.identity))
     return ROADLESS / "road_rows" / f"lineup-{hashlib.sha256(ident.encode()).hexdigest()[:8]}"
 
 
@@ -242,7 +242,7 @@ def _lineup_root(rows: Path) -> Path:
     """`rows` if it is the research lineup's root (lineup_rows), else a refusal: proposals and
     prefixes are made by the lineup's arms only, under its identity."""
     if rows.resolve() != lineup_rows().resolve():
-        raise SystemExit(f"{rows}: the lineup's rows are {lineup_rows()} (its stage and cap)")
+        raise SystemExit(f"{rows}: the lineup's rows are {lineup_rows()} (its stage and arterial)")
     return rows
 
 
@@ -394,17 +394,17 @@ def propose_all(rows: Path, scratch: Path, procs: int, ids: list[str], methods: 
 POPS = ("count", "area")         # the two weightings the prefixes are cut by
 
 
-def prefix_len(block, ordered, target: float, w: np.ndarray) -> int:
+def prefix_len(block, ordered, target: float, w: np.ndarray, *, measure: RampedDestroyed) -> int:
     """common.prefix_to's length on roads already in canonical order (common.canonical_order once
     per network rather than once per budget): the shortest prefix whose `w`-weighted
     displacement reaches `target`, or all of them. Checked against common.prefix_to on every
     network (prefixes_one)."""
-    if common.displacement(block, ordered, w) < target:
+    if common.displacement(block, ordered, w, measure=measure) < target:
         return len(ordered)
     lo, hi = 0, len(ordered)
     while lo < hi:
         mid = (lo + hi) // 2
-        if common.displacement(block, ordered.iloc[:mid], w) >= target:
+        if common.displacement(block, ordered.iloc[:mid], w, measure=measure) >= target:
             hi = mid
         else:
             lo = mid + 1
@@ -449,11 +449,12 @@ def _prefixes_one(job: PrefixJob) -> None:
     polys = np.asarray(b.buildings.outlines)
     W = {pop: common.POPULATIONS[pop].weights(polys) for pop in POPS}
     lens = [dict(pop=pop, budget=np.nan if bud is None else bud, full=bud is None,
-                 m=len(ordered) if bud is None else prefix_len(b, ordered, bud, W[pop]))
+                 m=len(ordered) if bud is None else prefix_len(b, ordered, bud, W[pop],
+                                                                measure=common.MEASURE))
             for pop in POPS for bud in (*BUDGETS, None)]
     # the same prefixes as common.prefix_to (which orders afresh for each budget)
     for pop in POPS:
-        ref = common.prefix_to(b, roads, BUDGETS[1], W[pop])
+        ref = common.prefix_to(b, roads, BUDGETS[1], W[pop], measure=common.MEASURE)
         [m] = [r["m"] for r in lens if r["pop"] == pop and r["budget"] == BUDGETS[1]]
         if len(ref) != m or not ref.geometry.reset_index(drop=True).geom_equals_exact(
                 ordered.geometry.iloc[:m].reset_index(drop=True), tolerance=0.0).all():
@@ -466,8 +467,9 @@ def _prefixes_one(job: PrefixJob) -> None:
         ta = time.perf_counter()
         P_old = permeability(ctx, pre)               # (a), on every distinct prefix
         per_m[m] = dict(n_roads=m, road_m=float(pre.geometry.length.sum()),
-                        D_count=common.displacement(b, pre, W["count"]),
-                        D_area=common.displacement(b, pre, W["area"]), P_old=P_old,
+                        D_count=common.displacement(b, pre, W["count"], measure=common.MEASURE),
+                        D_area=common.displacement(b, pre, W["area"], measure=common.MEASURE),
+                        P_old=P_old,
                         t_P_old=time.perf_counter() - ta)
     prefix_rows = [dict(block=bid, n=len(polys), method=name, **r, **per_m[r["m"]]) for r in lens]
     out = prefix_dir(job.rows) / f"{bid}__{name}.parquet"
@@ -713,34 +715,39 @@ def cx(rows: Path, scratch: Path, metric: gcl.ComplexMetric, bid: str, items: li
 
 # ------------------------------------------------------------------ the lineup, one (block, method)
 
-def lineup_one(scratch: Path, bid: str, name: str, *, replace: bool) -> None:
-    """One (block, method) of the research lineup end to end in this process (a cluster `cpu`
-    task): its network proposed by lineup_arms' method (propose, through the derive cache), its
-    canonical prefixes (prefixes_one), and its area prefixes scored on the complex under RUNTIME
-    on a core (cx_network), every row under lineup_rows()."""
+def _cut_and_score(scratch: Path, b: Block, name: str, *, replace: bool) -> None:
+    """A proposed network of the lineup cut to its canonical prefixes under the lineup's measure
+    (prefixes_one) and its area prefixes scored on the complex under RUNTIME on a core
+    (cx_network), every row under lineup_rows()."""
     import metrics
-    _check_single_threaded()
     rows = lineup_rows()
-    propose(rows, scratch, bid, name, lineup_arms()[name], False)
-    if not net_path(scratch, bid, name, False).exists():
-        raise SystemExit(f"{bid} {name}: no network (its proposal row says why)")
-    [b] = common.build_blocks([bid])
-    _BLOCKS[bid] = b
-    if prefixes_one(PrefixJob(rows, scratch, bid, name)) is not None:
-        raise SystemExit(f"{bid} {name}: its prefixes failed")
+    _BLOCKS[b.block_id] = b
+    if prefixes_one(PrefixJob(rows, scratch, b.block_id, name)) is not None:
+        raise SystemExit(f"{b.block_id} {name}: its prefixes failed")
     metric = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.factorization_of("cpu"))
     cx_network(rows, scratch, metric, b, name, replace=replace)
 
 
+def lineup_one(scratch: Path, bid: str, name: str, *, replace: bool) -> None:
+    """One (block, method) of the research lineup end to end in this process (a cluster `cpu`
+    task): its network proposed by lineup_arms' method (propose, through the derive cache), then
+    cut and scored (_cut_and_score)."""
+    _check_single_threaded()
+    propose(lineup_rows(), scratch, bid, name, lineup_arms()[name], False)
+    if not net_path(scratch, bid, name, False).exists():
+        raise SystemExit(f"{bid} {name}: no network (its proposal row says why)")
+    [b] = common.build_blocks([bid])
+    _cut_and_score(scratch, b, name, replace=replace)
+
+
 def lineup_score(scratch: Path, bid: str, names: list[str], *, replace: bool) -> None:
-    """The lineup's networks of `bid` already proposed and cut (consolidated `reuse-networks`),
-    scored on the complex under RUNTIME on a core (cx_network)."""
-    import metrics
+    """The lineup's networks of `bid` already proposed (shipped in, or kept across a change of
+    the measure: the arterial plan's Task 7), each cut and scored (_cut_and_score): a prefix row
+    is a function of the measure, so it is cut where it is scored, never carried over."""
     _check_single_threaded()
     [b] = common.build_blocks([bid])
-    metric = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.factorization_of("cpu"))
     for name in names:
-        cx_network(lineup_rows(), scratch, metric, b, name, replace=replace)
+        _cut_and_score(scratch, b, name, replace=replace)
 
 
 # ------------------------------------------------------------------ report

@@ -27,24 +27,24 @@ all_methods:
     objective: {_target_: reblock.methods.arterial.Directness}
     cost: {_target_: reblock.methods.arterial.Length}
     max_roads: 15
-    n_anchors: 32
+    anchors: {_target_: reblock.methods.arterial.Uncapped, n: 32}
+    budget: {_target_: reblock.methods.arterial.NoBudget}
     top_k: 8
     road_width_m: 7.0
     workers: 16
     engine: {_target_: reblock.methods.arterial.LazyEngine, policy: {_target_: reblock.methods.arterial.Grow}, rescore_every: 0}
-    max_anchors: 0
   greedy_arterial_repulsion:
     _target_: reblock.methods.arterial.GreedyArterialReblocker
     realizer: {_target_: reblock.methods.arterial.SnapToBoundary, lam: 2.0}
     objective: {_target_: reblock.methods.arterial.Directness}
     cost: {_target_: reblock.methods.arterial.Repulsion}
     max_roads: 15
-    n_anchors: 32
+    anchors: {_target_: reblock.methods.arterial.Uncapped, n: 32}
+    budget: {_target_: reblock.methods.arterial.NoBudget}
     top_k: 8
     road_width_m: 7.0
     workers: 16
     engine: {_target_: reblock.methods.arterial.LazyEngine, policy: {_target_: reblock.methods.arterial.Grow}, rescore_every: 0}
-    max_anchors: 0
   # aspirational (ideal straight chords, not snapped to frontages) is a DIAGNOSTIC -- it isolates
   # the effect of frontage-snapping, NOT a universal directness ceiling. directness/E measure
   # internal circulation (all-pairs, door-to-door incl. the walk-to-road legs); under that honest
@@ -74,74 +74,101 @@ all_methods:
   # in 4 of 6 -- an approximation for no speed. ShortlistEngine (tier 2: rank every candidate by a
   # cheap first-order estimate, score only the top k=512 exactly) is what makes access affordable
   # at region scale at all -- 11.6h unfinished -> ~80 min uncapped. `max_anchors: 128` (this pair
-  # ONLY; directness/CELF above stay uncapped at `max_anchors: 0`) stacks a further 7.6x median
+  # ONLY; directness/CELF above stay `Uncapped`) stacks a further 7.6x median
   # (2.5-12.2x, 6/6 regions, no detectable quality difference at matched displacement) -- ~330x
   # combined, 11.6h unfinished to ~10 min (notes/2026-08-11-max-anchors-is-a-region-scale-win.md).
   # The cap changes which candidates exist, so it changes directness outcomes too, and every
-  # measurement behind it is objective=access.
-  # max_roads 60, NOT 15 -- the same rule that puts resistance_lp/cycle_native at
-  # max_displacement 0.20: a method's own cap must sit clear of the Lens A budget, or the cap binds
-  # before the lens does and the reported number is the cap rather than the method. At 15 this pair
-  # terminated at 0.5-2.6% displacement in every settlement region -- graded at its own cap
-  # everywhere, and short of P*=0.60 in 3 of 6 regions, so its apparent command of the
-  # low-displacement corner was measured over a very short curve. Swept on capetown/depth_density
-  # (2,690 parcels, cold) before choosing:
-  #   max_roads=15   52 segs  2838 m  disp=0.0238  perm=0.6352  136.2s
-  #   max_roads=30  113 segs  4318 m  disp=0.0528  perm=0.7567  313.2s  (2.3x)
-  #   max_roads=60  215 segs  6928 m  disp=0.1078  perm=0.8443  777.6s  (5.7x)
-  # 60 is the first value that clears the 10% Lens A budget. It is NOT free: cost is superlinear
-  # (~1.4 exponent) and this is already the slowest method in the lineup -- the ~330x
-  # ShortlistEngine + max_anchors work is what made 15 affordable at region scale, and this spends
-  # that headroom. BOTH variants move together: they are a matched pair differing only in `cost`,
-  # so a difference in budget would make the one comparison they exist for meaningless.
+  # measurement behind it is objective=access. It is now `PerLineFallback`'s cap, which does not
+  # hold on a network of many lines: its anchor counts reach 112 to 525 over 0 to 607 committed
+  # segments on ZAF.9.3.1_1_20269 (`HardCap` is the sampler whose cap holds; anchors.py).
+  # The budget is `Destroyed(share: 0.20, tau: 0.10)`: the ramped destroyed-area displacement the
+  # research lineup scores (owner 2026-10-18; reblock.destroyed: a building's destroyed portion is
+  # 1 - its largest standing piece over its area, ramped to min(1, X / tau), weighted by footprint
+  # area), checked before each commit with the crossing road kept -- the same 0.20 that puts
+  # resistance_lp/cycle_native clear of the Lens A budget, so the lens binds before the method's
+  # own stop does (theirs is still the partial overlap until the methods' costs move: BACKLOG).
+  # `max_roads: 1000` is a SAFETY CAP expected never to bind; every proposal records why it
+  # stopped (params["stop"]: budget, no_gain or max_roads) and its D at the stop, so a bind is
+  # seen. History: a road cap was the budget here (15, then 60, then the research lineup's
+  # 300), and it graded the cap rather than the method -- at 60 this pair reached area D only 0.011
+  # to 0.044 on large blocks -- while 55 of 62 lineup networks at 300 ended with every parcel at
+  # depth 1, at a median 54 road km/km2. BOTH variants move together: they are a matched pair
+  # differing only in `cost`, so a difference in budget would make the one comparison they exist
+  # for meaningless.
   greedy_arterial_access_repulsion:
     _target_: reblock.methods.arterial.GreedyArterialReblocker
     realizer: {_target_: reblock.methods.arterial.SnapToBoundary, lam: 2.0}
     objective: {_target_: reblock.methods.arterial.Access}
     cost: {_target_: reblock.methods.arterial.Repulsion}
-    max_roads: 60
-    n_anchors: 32
+    max_roads: 1000
+    anchors: {_target_: reblock.methods.arterial.PerLineFallback, n: 32, max_anchors: 128}
+    budget: {_target_: reblock.methods.arterial.Destroyed, share: 0.20, tau: 0.10}
     top_k: 8
     road_width_m: 7.0
     workers: 16
     engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512, threads: 8}
-    max_anchors: 128
   greedy_arterial_access_displacement:
     _target_: reblock.methods.arterial.GreedyArterialReblocker
     realizer: {_target_: reblock.methods.arterial.SnapToBoundary, lam: 2.0}
     objective: {_target_: reblock.methods.arterial.Access}
     cost: {_target_: reblock.methods.arterial.Displacement}
-    max_roads: 60
-    n_anchors: 32
+    max_roads: 1000
+    anchors: {_target_: reblock.methods.arterial.PerLineFallback, n: 32, max_anchors: 128}
+    budget: {_target_: reblock.methods.arterial.Destroyed, share: 0.20, tau: 0.10}
     top_k: 8
     road_width_m: 7.0
     workers: 16
     engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512, threads: 8}
-    max_anchors: 128
+  # Two operating points of the street-priced access arterial, one per anchor sampler (anchors.py),
+  # from the six-block study under the ramped destroyed-area stop (2026-10-18; research/roadless/
+  # NOTES.md, "The research lineup's displacement: the ramped destroyed area";
+  # arterial_rows/summary_*.csv): neither dominates the other.
+  #   greedy_arterial_access_displacement (above), QUALITY-FIRST: PerLineFallback(32, 128), whose
+  #     "cap" admits one extra anchor per network line (up to 358 anchors on the study's blocks).
+  #     Ahead of HardCap on all six lens medians (L_P +0.0071 at area D 0.05, +0.0045 at 0.10);
+  #     gives up per-step time, which grows with the network (median step 9.2-22.8 s against
+  #     8.8-15.5 s).
+  #   greedy_arterial_access_displacement_fast (here), SPEED-FIRST: HardCap(32, 128), at most 128
+  #     anchors on any network, a flat per-step cost: 0.66-0.74x the wall on the two largest blocks
+  #     (8480, 38616). Gives up the vertex family once the cap binds, so it can need more commits to
+  #     the same budget (1.12-1.48x the wall on 40144, 6310, 39240) and trails on quality.
+  # The repulsion twin keeps the quality-first sampler (the matched pair moves together).
+  greedy_arterial_access_displacement_fast:
+    _target_: reblock.methods.arterial.GreedyArterialReblocker
+    realizer: {_target_: reblock.methods.arterial.SnapToBoundary, lam: 2.0}
+    objective: {_target_: reblock.methods.arterial.Access}
+    cost: {_target_: reblock.methods.arterial.Displacement}
+    max_roads: 1000
+    anchors: {_target_: reblock.methods.arterial.HardCap, n: 32, max_anchors: 128}
+    budget: {_target_: reblock.methods.arterial.Destroyed, share: 0.20, tau: 0.10}
+    top_k: 8
+    road_width_m: 7.0
+    workers: 16
+    engine: {_target_: reblock.methods.arterial.ShortlistEngine, k: 512, threads: 8}
   greedy_arterial_aspirational:
     _target_: reblock.methods.arterial.GreedyArterialReblocker
     realizer: {_target_: reblock.methods.arterial.IdealChord}
     objective: {_target_: reblock.methods.arterial.Directness}
     cost: {_target_: reblock.methods.arterial.Length}
     max_roads: 15
-    n_anchors: 32
+    anchors: {_target_: reblock.methods.arterial.Uncapped, n: 32}
+    budget: {_target_: reblock.methods.arterial.NoBudget}
     top_k: 8
     road_width_m: 7.0
     workers: 16
     engine: {_target_: reblock.methods.arterial.ExactEngine}
-    max_anchors: 0
   greedy_arterial_displacement:
     _target_: reblock.methods.arterial.GreedyArterialReblocker
     realizer: {_target_: reblock.methods.arterial.IdealChord}
     objective: {_target_: reblock.methods.arterial.Directness}
     cost: {_target_: reblock.methods.arterial.Displacement}
     max_roads: 15
-    n_anchors: 32
+    anchors: {_target_: reblock.methods.arterial.Uncapped, n: 32}
+    budget: {_target_: reblock.methods.arterial.NoBudget}
     top_k: 8
     road_width_m: 7.0
     workers: 16
     engine: {_target_: reblock.methods.arterial.ExactEngine}
-    max_anchors: 0
   clearance: {_target_: reblock.methods.clearance.ClearanceReblocker, substrate: "${substrate}", repulsion: 0.0, depth_target: 2, max_roads: 400, road_width_m: 7.0, price: {_target_: reblock.transparency.Opaque}, free_first: {_target_: reblock.free_first.HoldNothing}}
   demand_greedy: {_target_: reblock.methods.demand_greedy.DemandGreedyReblocker, desire_source: "${desire_source}", substrate: "${substrate}", buffer_m: 3.0, eps: 0.1, gamma: 1.0, depth_target: 2, max_roads: 400, road_width_m: 7.0}
   # demand_greedy routed toward curvature-aware betweenness ridges (raw counts). Beats clearance on

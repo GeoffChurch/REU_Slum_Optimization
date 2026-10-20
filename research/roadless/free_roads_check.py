@@ -189,9 +189,10 @@ def free_roads(ids: list[str]) -> list[str]:
         left = sc.enclosed_left(frame(len(roads)))
         polys = np.asarray(b.buildings.outlines)
         d_area = common.displacement(b, frame(len(roads)),
-                                     common.AreaPopulation().weights(polys))
+                                     common.AreaPopulation().weights(polys), measure=FREE.measure)
         d_count = common.displacement(b, frame(len(roads)),
-                                      common.CountPopulation().weights(polys))
+                                      common.CountPopulation().weights(polys),
+                                      measure=FREE.measure)
         if (abs(left - p.share_after) > SHARE_TOL or abs(d_area - p.D_area) > SHARE_TOL
                 or abs(d_count - p.D_count) > SHARE_TOL or max(d_area, d_count) > FREE.budget):
             bad.append(f"{bid}: left {left} against {p.share_after}, D {d_area} {d_count} "

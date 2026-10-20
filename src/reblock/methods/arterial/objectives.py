@@ -11,18 +11,29 @@ objective it has.
 """
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, TypeAlias, runtime_checkable
 
+import numpy as np
+import shapely
 from geopandas import GeoDataFrame
+from numpy.typing import NDArray
 from pyproj import CRS
+from shapely import STRtree
 from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
 
 from reblock.budget import _BlockScoringContext, _StepContext, access_burden
-from reblock.derive.access import ParcelAdjacency, parcel_access_layers, past_every_parcel
-from reblock.methods.arterial.primitives import _explode, _planarize, _union_with
+from reblock.derive.access import (
+    ParcelAdjacency,
+    _line_parts,
+    parcel_access_layers,
+    past_every_parcel,
+    street_connectivity,
+)
+from reblock.methods.arterial.primitives import _planarize
 from reblock.methods.arterial.realize import ChordRealizer
 
 
@@ -81,20 +92,6 @@ class _Replanarized:
 
 
 @dataclass(frozen=True)
-class _Unioned:
-    """Score `real` noded against the committed union incrementally -- bit-exact for a snapped
-    road, which meets the network only at shared boundary-graph vertices (see `_union_with`)."""
-    objective: BlockObjective
-    committed: CommittedNetwork
-    base: float
-
-    def of(self, real: LineString) -> float:
-        c = self.committed
-        trial = _explode(_union_with(c.merged, real), c.crs, 2.0 * c.half_width_m)
-        return self.objective.value(trial) - self.base
-
-
-@dataclass(frozen=True)
 class _Incremental:
     """Score a snapped `real` through the step's frozen `_StepContext`, reprojecting parcels onto
     only its own edges -- bit-exact to a full re-derivation for snapped roads, and the reason the
@@ -109,9 +106,74 @@ class _Incremental:
 
 
 @dataclass(frozen=True)
+class _AccessStep:
+    """A snapped road's access gain over one step, lowered from the step's own peel instead of
+    re-peeling the block per candidate: exact, because burdens are integers and the peel's depth
+    with one more road is `min(base depth, 1 + hops from the parcels the road fronts)` whenever
+    the road reaches the street.
+
+    Liveness is one distance test: a snapped road's touch-component reaches a street iff the road
+    lies within `tol` of a street or of a committed road, since every committed road is itself live
+    (it had a positive gain when committed, and adding roads only merges components).
+    `at_step` asserts that premise for the committed network it is given. A road that is not live
+    seeds nothing, so its gain is exactly 0.0, as the re-peel's is.
+
+    `live`, `seeded` and `relaxed_burden` are the seams the guard's faults patch
+    (tests/methods/test_arterial_access_step.py, research/roadless/arterial_check.py)."""
+    neighbours: list[set[int]]
+    parcel_tree: STRtree             # positional over the block's parcels, the peel's order
+    seed: BaseGeometry | None        # streets + committed roads (all live), prepared
+    tol: float
+    depths: NDArray[np.int64]        # the step's peel, positional; stranded = n_parcels + 1
+    burden: int                      # sum of depths ** 2
+    base_burden: float               # the no-roads burden -- the objective's denominator
+    base: float                      # the objective over the committed roads
+
+    def live(self, real: LineString) -> bool:
+        return self.seed is not None and bool(shapely.dwithin(real, self.seed, self.tol))
+
+    def seeded(self, real: LineString) -> NDArray[np.intp]:
+        """The parcels `real` fronts (within `tol`, the peel's seeding) that it lowers to 1."""
+        near = self.parcel_tree.query(real, predicate="dwithin", distance=self.tol)
+        return np.sort(near[self.depths[near] > 1])
+
+    def relaxed_burden(self, seeds: NDArray[np.intp]) -> int:
+        """The burden once `seeds` sit at depth 1: breadth-first from them, a parcel lowered only
+        when one more hop beats its current depth (and nothing past it then can improve)."""
+        # A list, not the array: the walk reads one element at a time, where numpy's per-element
+        # access costs several times a list's.
+        depths: list[int] = self.depths.tolist()
+        burden = self.burden
+        frontier: deque[int] = deque()
+        for s in seeds.tolist():
+            old = depths[s]
+            depths[s] = 1
+            burden -= old * old - 1
+            frontier.append(s)
+        neighbours = self.neighbours
+        while frontier:
+            i = frontier.popleft()
+            nxt = depths[i] + 1
+            for j in neighbours[i]:
+                old = depths[j]
+                if nxt < old:
+                    depths[j] = nxt
+                    burden -= old * old - nxt * nxt
+                    frontier.append(j)
+        return burden
+
+    def of(self, real: LineString) -> float:
+        if self.base_burden == 0.0 or not self.live(real):
+            return 0.0
+        # The same float arithmetic as `value(trial) - base`: the burden is an exact integer.
+        return (1.0 - float(self.relaxed_burden(self.seeded(real))) / self.base_burden) - self.base
+
+
+@dataclass(frozen=True)
 class _AccessBlock:
     adjacency: ParcelAdjacency
     base_burden: float          # access burden with no roads at all -- the denominator
+    parcel_tree: STRtree        # positional over the block's parcels, the peel's order
 
     def value(self, roads: GeoDataFrame) -> float:
         if self.base_burden == 0.0:
@@ -121,10 +183,24 @@ class _AccessBlock:
         return 1.0 - access_burden(depths) / self.base_burden
 
     def at_step(self, committed: CommittedNetwork, realizer: ChordRealizer) -> StepGain:
-        base = self.value(committed.roads)
-        if realizer.snaps:
-            return _Unioned(self, committed, base)
-        return _Replanarized(self, committed, base)
+        if not realizer.snaps:
+            return _Replanarized(self, committed, self.value(committed.roads))
+        adj = self.adjacency
+        depths = parcel_access_layers(adj, committed.roads, unreached=past_every_parcel
+                                      ).to_numpy(dtype=np.int64)
+        burden = int((depths ** 2).sum())
+        base = 0.0 if self.base_burden == 0.0 else 1.0 - burden / self.base_burden
+        seed = street_connectivity(adj.block.streets, committed.roads, adj.tol).seed_geom
+        if seed is not None:
+            shapely.prepare(seed)
+        parts = _line_parts(committed.roads)
+        # The gain's exactness rests on every committed road being live (see `_AccessStep`).
+        assert not parts or (seed is not None and bool(shapely.dwithin(
+            np.asarray(parts, dtype=object), seed, adj.tol).all())), (
+            f"{adj.block.block_id}: a committed road does not reach the street")
+        return _AccessStep(neighbours=adj.neighbours, parcel_tree=self.parcel_tree, seed=seed,
+                           tol=adj.tol, depths=depths, burden=burden,
+                           base_burden=self.base_burden, base=base)
 
 
 @dataclass(frozen=True)
@@ -166,7 +242,8 @@ class Access:
     def for_block(self, adjacency: ParcelAdjacency) -> BlockObjective:
         base_burden = access_burden(parcel_access_layers(
             adjacency, None, unreached=past_every_parcel))
-        return _AccessBlock(adjacency, base_burden)
+        return _AccessBlock(adjacency, base_burden,
+                            STRtree(list(adjacency.block.parcels.geometry)))
 
 
 @dataclass(frozen=True)

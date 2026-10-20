@@ -569,6 +569,28 @@ can be done after we've done the entire website/README/examples revamp"):
   vehicle of width W reaches, over W (item 4, decision 3).
 
 Open:
+- **The public package's displacement, and the methods' internal costs, onto the ramped
+  destroyed area** (later: at the site revamp). The research lineup adopted the ramped destroyed
+  area on 2026-10-18 (owner: "now, before the full rerun"; NOTES, "The research lineup's
+  displacement: the ramped destroyed area"): X = 1 - the largest standing piece of a footprint over
+  its area, a building counted min(1, X / 0.10), in reblock.destroyed, which scores every road
+  network's D and prefix cuts (common.MEASURE) and stops the access arterial (Destroyed(0.20,
+  0.10)). Still on the partial overlap:
+  - the public package (reblock.buildings' displacement, reblock.budget: the site, README and
+    examples' frontier and lenses), which moves with the revamp, so the published figures move
+    once;
+  - the methods' own costs and caps: clearance, cycle_native and resistance_lp optimize the partial
+    overlap and stop at partial 0.20 (3 -- 5x below ramped 0.20, so their networks may end short
+    of the lineup's upper budgets under the new D); free_roads' route weights (a proxy that only
+    orders candidates). resistance_lp is the hard one: its linear program prices displacement
+    linearly in its path fractions, and the ramp's largest-piece step is not linear (an integer
+    or convex-relaxation reformulation, or the partial overlap kept as its internal proxy with the
+    ramped D as its stop).
+  - The check before moving them: re-cut the stored lineup networks under both rules and compare
+    the method rankings at matched D (Kendall tau of the medians, frontier membership); Task 7 of
+    the arterial plan re-scores the lineup under the ramped D and gives the first half of it.
+  - The budgets: BUDGETS (0.02 -- 0.20), D_LENS 0.05 and FREE_BUDGET 0.05 were kept as numbers
+    and now mean ramped D, 3 -- 5x stricter than before; re-picking them is the owner's call.
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
   owner's answer moves an end of the bracket to that screen's break-even rate. One is live,
@@ -591,6 +613,29 @@ Not pursued, with what would change that:
   direct; wiki `pages/reblock/raster-escape-time-metric-retired.md`).
 - *The greedy's sweep kernel*: closed, the raster's GPU sweep (the complex's greedy sweeps on the
   host, clear.Catchment; wiki `pages/reblock/raster-escape-time-metric-retired.md`).
+
+## The arterial (road method)
+
+- **The arterial's budget against the scored D**: done (owner 2026-10-18): the research lineup's
+  displacement became the ramped destroyed area and the access presets stop on it at 0.20
+  (Destroyed(0.20, 0.10)); re-run on the six blocks, every block reaches area D 0.05 -- 0.20 in
+  both samplers (NOTES, "The research lineup's displacement: the ramped destroyed area"). Task 7
+  (the lineup's migration, ~96 task-h central: every road method's prefixes and lens rows
+  re-scored, the arterial re-proposed) waits on the owner's yes.
+- **A HardCap that keeps committed-road junctions** (idea): HardCap's samples replace the vertex
+  family once the cap binds, and under the ramped stop it trails PerLineFallback on all six
+  medians (L_P -0.0071 at D 0.05, -0.0045 at 0.10; ahead on 20269 and 40144) while 0.66 -- 0.74x
+  its wall on the two largest blocks. Keeping the committed roads' endpoints among the capped anchors (continuations
+  for free) could put it on the quality frontier while keeping its flat step; tried by a third arm
+  in arterial_study.py.
+- **The stored arterial networks are not reproduced** (open): lineup-caf14fa2's arterial networks
+  (run cp-roads2-arterial-large, 0f4be69e, ai05) differ from the first commit from what that code
+  gives today on the same node and bank block (NOTES, "The arterial: an incremental gain, a cap
+  that holds, a displacement budget"). Next: re-run lineup-one at the exact checkout 0f4be69e on
+  ai05 for a few commits; resolved when either side's first commit is explained.
+- **The arterial's next speed items**: with the incremental gain (1.0 -- 2.0 ms at S 0, 0.25 --
+  1.1 ms after) a candidate's cost is the snap (~3 ms) and the displacement cost (~4.6 ms at S 0);
+  the ranking grows with the candidates (PerLineFallback's anchors).
 
 ## How we run experiments
 
@@ -811,6 +856,30 @@ Not pursued, with what would change that:
   pass): when the live runs' GPU sum is already over the project's budget, a new GPU run is chained
   after every live run, CPU runs among them, so it waits on runs that hold no GPU. The fix is
   GeoffChurch/cluster_submit's.
+- **Carve every prefix and keep the road meshes** (owner's call; NOTES, "Mesh speedups before the
+  lineup's rerun"): one mesh per network with every prefix 1 .. M carved, kept on disk, so a
+  change of the displacement measure or the budgets (Task 7 is the second in a week) re-cuts the
+  prefixes and re-scores them as states without meshing again. The study (6310 resistance_lp,
+  1,299 prefixes against its 6 stops): the mesh 59 s against 56 s (1.73M triangles against 1.54M,
+  +12%), the model 6.7 s and a state about 1 s, but Carving.of 238 s against 1.1 s (each stop
+  rebuilds the tree and re-cuts every atom its corridor touches, so the carving grows with the
+  prefixes times the atoms). Kept, the lineup's 552 meshes are about 2.1 billion triangles, ~410
+  GB at the plain 6310 file's 192 B a triangle. On the frontier if Carving.of cuts each road's own
+  piece once (one tree, corridor k less corridor k - 1, as the arterial's IncrementalDestroyed
+  does), so that carving every prefix costs about one carving, and the disk is there: a re-cut is
+  then model + states (6310: ~11 s against ~55 s a network, ~5x) for one ~12% larger mesh build.
+- **One Delaunay of the linework in place of GEOS per face** (owner's call; NOTES, "Mesh speedups
+  before the lineup's rerun"): full_mesh triangulates each face with GEOS's constrained Delaunay,
+  8.8 s of the plain 6310 mesh's 43 s (754k triangles over 6,239 faces), then flips. qhull's
+  Delaunay of the same 387,603 distinct vertices takes 2.7 s (775k triangles), and 524 of the
+  393,305 linework segments (0.13%) are not among its edges, every one of them encroached (a
+  vertex inside its diametral circle; 6,030 are encroached in all). (The study's first count,
+  98.6% missing and 63 encroached, was two bugs of its bench: qhull's int32 simplices overflowed
+  the edge keys, and the encroachment test read the third-nearest vertex.) The saving is at most
+  ~6 s of a ~40 s road mesh (~15%) less the recovery. On the frontier if the 524 segments are
+  recovered (split, or their few faces meshed by GEOS as now), the faces read off the one
+  triangulation, and the result is the same constrained Delaunay mesh up to cocircular ties: any
+  other mesh moves every score and MESH_REV with it, which a ~15% saving does not pay for.
 - **Carved meshes refused as not Delaunay** (found in the consolidated pass; NOTES, "The
   consolidated pass: every block under the final metric"): two of the road lineup's networks could
   not be scored, 39240's cycle_desire (2 passages) and 64070's resistance_lp (1): "passages with

@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import cast
 
 import numpy as np
+from shapely import STRtree
+from shapely.ops import unary_union
 
 from reblock.budget import access_burden
 from reblock.contracts import Block
@@ -34,9 +36,9 @@ from reblock.derive.access import (
     parcel_access_layers,
     past_every_parcel,
 )
+from reblock.methods.arterial.anchors import Uncapped
 from reblock.methods.arterial.objectives import _AccessBlock
 from reblock.methods.arterial.primitives import (
-    _anchor_points,
     _candidate_chords,
     _deep_targets,
     _explode,
@@ -98,7 +100,8 @@ def main() -> None:
     base_burden = access_burden(parcel_access_layers(
         adjacency, None, unreached=past_every_parcel))
     t_peel0 = time.perf_counter() - t0
-    scorer = _AccessBlock(adjacency, base_burden)     # what `Access().for_block` builds
+    scorer = _AccessBlock(adjacency, base_burden,      # what `Access().for_block` builds
+                          STRtree(list(block.parcels.geometry)))
 
     print(f"  ONCE PER BLOCK      parcel_adjacency {t_adj:8.2f} s")
     print(f"                      boundary graph   {t_graph:8.2f} s  "
@@ -107,7 +110,7 @@ def main() -> None:
 
     # --- step 0 exactly as `_greedy_arterials` sets it up (committed empty) ---
     t0 = time.perf_counter()
-    anchors = _anchor_points(list(block.streets.geometry), 32, 0)
+    anchors = Uncapped(32).points(list(block.streets.geometry))
     targets = _deep_targets(adjacency, None, 8)
     candidates = _candidate_chords(anchors, targets)
     t_cand = time.perf_counter() - t0
@@ -126,8 +129,7 @@ def main() -> None:
     for real in reals:
         if real is None or real.length == 0:
             continue
-        from reblock.methods.arterial.primitives import _union_with
-        trial = _explode(_union_with(None, real), block.crs, 2.0 * HALF_W)
+        trial = _explode(unary_union([real]), block.crs, 2.0 * HALF_W)
         t0 = time.perf_counter()
         scorer.value(trial)
         peel_t.append(time.perf_counter() - t0)

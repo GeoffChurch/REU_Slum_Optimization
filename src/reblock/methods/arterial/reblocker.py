@@ -1,5 +1,6 @@
 """GreedyArterialReblocker: greedily insert the single straight arterial with the best
-objective gain per meter, one at a time, until a road budget runs out. How a candidate chord
+objective gain per meter, one at a time, until the injected displacement budget is reached, the
+road cap binds, or nothing gains (stop.py). How a candidate chord
 becomes a road is an injected `ChordRealizer` -- SnapToBoundary (snapped to the parcel-boundary
 graph; the shippable navigability method) or IdealChord (ideal chords; a diagnostic isolating the
 effect of frontage-snapping, NOT a universal directness ceiling -- see the design doc's correction
@@ -14,14 +15,16 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Hashable
-from dataclasses import dataclass
+from dataclasses import KW_ONLY, dataclass
 
 from reblock.contracts import Block, Proposal
 from reblock.derive_graph import config_identity
+from reblock.methods.arterial.anchors import AnchorSampler
 from reblock.methods.arterial.costs import ArterialCost
 from reblock.methods.arterial.engines import ArterialEngine
 from reblock.methods.arterial.objectives import ArterialObjective
 from reblock.methods.arterial.realize import ChordRealizer
+from reblock.methods.arterial.stop import DisplacementBudget
 from reblock.permeability import with_width
 
 
@@ -34,7 +37,12 @@ class GreedyArterialReblocker:
     realizer: ChordRealizer
     # What a road gains -- Access, Efficiency or Directness (see objectives.py).
     objective: ArterialObjective
-    n_anchors: int
+    # Which network points the candidate chords join -- Uncapped (every vertex + n arc-length
+    # samples; the directness presets), PerLineFallback (that family, or ~max_anchors per-line
+    # samples when it does not fit: a cap that does not hold on a network of many lines) or
+    # HardCap (that family, or at most max_anchors samples at one stride: a cap that holds).
+    # See anchors.py.
+    anchors: AnchorSampler
     top_k: int
     max_roads: int
     # What a road is charged -- Length (per metre), Displacement (per home newly displaced) or
@@ -48,11 +56,12 @@ class GreedyArterialReblocker:
     # LazyEngine (CELF lazy-greedy, valid only for submodular objectives). Injected rather than
     # selected by lazy/candidate_policy/rescore_every flags, matching `realizer` above.
     engine: ArterialEngine
-    # A CAP, not a mode switch: 0 = uncapped (every network vertex + arc-length samples,
-    # byte-identical); >0 only ever REDUCES that uncapped anchor count, falling back to
-    # ~max_anchors arc-length samples when the uncapped set does not already fit -- see
-    # _anchor_points.
-    max_anchors: int
+    _: KW_ONLY
+    # The displacement budget, checked before each step with the crossing road kept -- NoBudget
+    # (the directness presets: max_roads is their budget) or Destroyed (the ramped destroyed-area
+    # D the research lineup scores: the access presets). `max_roads` is the other stop; the
+    # reason and the budget's share at the stop are in every proposal's params. See stop.py.
+    budget: DisplacementBudget
 
     @property
     def identity(self) -> Hashable | None:
@@ -62,11 +71,12 @@ class GreedyArterialReblocker:
 
     def propose(self, block: Block, prior: Proposal | None = None) -> Proposal:
         del prior
-        roads = self.engine.run(
+        run = self.engine.run(
             block, objective=self.objective, cost=self.cost, realizer=self.realizer,
-            n_anchors=self.n_anchors, top_k=self.top_k, max_roads=self.max_roads,
-            half_width_m=self.road_width_m / 2.0, workers=self.workers,
-            max_anchors=self.max_anchors)
+            anchors=self.anchors, top_k=self.top_k, max_roads=self.max_roads,
+            budget=self.budget, half_width_m=self.road_width_m / 2.0,
+            workers=self.workers)
+        roads = run.roads
         realizer_name = type(self.realizer).__name__
         objective_name, cost_name = type(self.objective).__name__, type(self.cost).__name__
         # `proposal_id` names render files, so it tells apart every configuration `identity` does
@@ -81,4 +91,6 @@ class GreedyArterialReblocker:
             params={"segments": len(roads), "realizer": realizer_name,
                     "objective": objective_name,
                     "cost": cost_name, "road_width_m": self.road_width_m,
-                    "engine": type(self.engine).__name__})
+                    "engine": type(self.engine).__name__, "commits": run.commits,
+                    "stop": run.stop, "budget": repr(self.budget),
+                    "displaced": run.displaced})
