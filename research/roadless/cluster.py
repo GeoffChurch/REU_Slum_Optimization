@@ -9,9 +9,10 @@ mesh once, NOTES "Exits as leaks: the region model on the complex (5810@major)")
 retired raster's tasks were sized from the cells of their grid, `--mesh` and `--scans`, at
 GB_PER_MILLION GB per million unknowns: NOTES, "The complex as the runtime: the raster
 retired".) With `--items`, one task per (block, item), the item in the command's `{item}` (a
-region's configurations and presets: region_leaks). `--unpack` ships a tar per block of inputs git does not carry (parquet rows, at their
-repo paths) and unpacks it in the task's checkout before the command. Results (parquet rows) come
-back to the same paths here, never overwriting a local file.
+region's configurations and presets: region_leaks). `--unpack` ships a tar per block of inputs
+git does not carry (parquet rows, at their repo paths) and unpacks it in the task's checkout
+before the command. Results (parquet rows) come back to the same paths here, never overwriting a
+local file.
 
 `cpu` runs one task per (block, item) on the CPUs of one node and no GPU: a script command with
 `{id}` and `{item}` in it, for every block of the ids and every item of `--items`, so a block's
@@ -33,8 +34,10 @@ a block's tasks unpack one tar at once into the checkout they share.
         --mem G --items <items,|@file> [--gpus N] [--time T] [--unpack TAR] <ids,|@file> \
         -- <script> <args with {id} and {item}>
     uv run python research/roadless/cluster.py status|sync [<run>]
-    uv run python research/roadless/cluster.py wait <run> [--timeout 3h]    # exit 0 passed, 3 failed, 4 timed out, 5 blind
-    uv run python research/roadless/cluster.py resubmit <run> [--gb G] [--time T]   # its failed / missing blocks as <run>-r1
+    uv run python research/roadless/cluster.py wait <run> [--timeout 3h]
+        # exit 0 passed, 3 failed, 4 timed out, 5 blind
+    uv run python research/roadless/cluster.py resubmit <run> [--gb G] [--time T]
+        # its failed / missing blocks as <run>-r1
     uv run python research/roadless/cluster.py cancel <run>
     uv run python research/roadless/cluster.py watch start|stop
 
@@ -50,6 +53,8 @@ from datetime import timedelta
 from pathlib import Path
 
 import cluster_submit as cs
+from cluster_submit.remote import SubprocessRunner
+from cluster_submit.tree import blob_at
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
@@ -62,8 +67,11 @@ CPU_NODES = {
     "orion": 64,        # 72 CPUs, 36 cores; idle on 2026-10-12
     "quadro2": 40,      # 64 CPUs, 32 cores; shared (another user's jobs: 8 CPUs, 320 of 376 GB)
 }
-# The checkout's .venv from uv.lock, with every default group: cupy and pyamg (`gpu`) among them.
-ENV = cs.Uv()
+# The shared env of uv.lock (cluster_submit's "Envs": one per lock, built once on the login node,
+# reblock and ext/topology editable against each task's checkout): reblock has no extras, and
+# pyproject's default-groups are every group, cupy and pyamg (`gpu`) among them, so it names none
+# beside them.
+ENV = cs.Uv(extras=(), groups=())
 # Every task's environment: single-threaded, no bytecode, the shipped bank (common.build_blocks).
 PRELUDE = ("source research/roadless/cluster_env.sh",
            'export REBLOCK_BLOCK_BANK="$CLUSTER_SUBMIT_INPUTS/bank.pkl"')
@@ -89,6 +97,14 @@ def _command(args: argparse.Namespace, *placeholders: str) -> str:
     return line
 
 
+def _script_at(args: argparse.Namespace, sha: str) -> None:
+    """The command's script is a file of the run's commit: read there, from git, never the
+    working tree (cluster_submit's "A plan reads the repo at its commit")."""
+    script = args.command[0]
+    if blob_at(SubprocessRunner(), REPO, sha, script) is None:
+        raise SystemExit(f"{script} is not a file at {sha[:12]}, the commit the run's tasks run")
+
+
 def _unpacks(unpack: str | None, ids: list[str]) -> dict[str, Path]:
     """`--unpack`'s tar per block (its path with {id}), each present; none without it."""
     if unpack is None:
@@ -112,6 +128,7 @@ def _unpack_argument(parser: argparse.ArgumentParser) -> None:
 @dataclass(frozen=True)
 class Blocks:
     name: str = "blocks"
+    env: cs.Env = ENV
     pull: cs.IntoTree = cs.IntoTree("research/roadless", ("*.parquet",))
     routine_exits: frozenset[int] = frozenset()     # every non-zero exit is a failure
 
@@ -131,11 +148,12 @@ class Blocks:
         parser.add_argument("command", nargs=argparse.REMAINDER,
                             help="-- <script> <args with {id}>")
 
-    def plan(self, args: argparse.Namespace, workdir: Path) -> cs.RunPlan:
-        import common   # geopandas and the block sources: only a submit needs them
+    def plan(self, args: argparse.Namespace, workdir: Path, *, sha: str) -> cs.RunPlan:
+        import common  # geopandas and the block sources: only a submit needs them
 
         items = [] if args.items is None else _listed(args.items)
         line = _command(args, "{id}", *(["{item}"] if items else []))
+        _script_at(args, sha)
         ids = _listed(args.ids)
         if args.gb <= 0:
             raise SystemExit(f"--gb {args.gb}: a task's GPU memory is positive")
@@ -158,8 +176,9 @@ class Blocks:
             inputs=(workdir / "bank.pkl", *args.extra, *unpack.values()),
             prelude=PRELUDE, describe=(f"{len(ids)} blocks: {line}",))
 
-    def more(self, ctx: cs.Context, rec: cs.RunRecord) -> bool:
-        return False    # never asked: no exit of its is routine (cluster_submit's "Leases")
+    def more(self, ctx: cs.Context, rec: cs.RunRecord, *,
+             killed: tuple[str, ...]) -> cs.Continue | cs.Done:
+        return cs.Done("never asked: no exit of its is routine (cluster_submit's \"Leases\")")
 
 
 @dataclass(frozen=True)
@@ -167,6 +186,7 @@ class Cpu:
     """One task per (block, item), CPU only, on one node of CPU_NODES (the module's docstring)."""
 
     name: str = "cpu"
+    env: cs.Env = ENV
     pull: cs.IntoTree = cs.IntoTree("research/roadless", ("*.parquet",))
     routine_exits: frozenset[int] = frozenset()     # every non-zero exit is a failure
 
@@ -187,10 +207,11 @@ class Cpu:
         parser.add_argument("command", nargs=argparse.REMAINDER,
                             help="-- <script> <args with {id} and {item}>")
 
-    def plan(self, args: argparse.Namespace, workdir: Path) -> cs.RunPlan:
-        import common   # geopandas and the block sources: only a submit needs them
+    def plan(self, args: argparse.Namespace, workdir: Path, *, sha: str) -> cs.RunPlan:
+        import common  # geopandas and the block sources: only a submit needs them
 
         line = _command(args, "{id}", "{item}")
+        _script_at(args, sha)
         if args.cpus < 1 or args.mem < 1:
             raise SystemExit(f"--cpus and --mem are at least 1: {args.cpus}, {args.mem}")
         at_once = CPU_NODES[args.node]
@@ -219,16 +240,23 @@ class Cpu:
             inputs=(workdir / "bank.pkl", *unpack.values()), prelude=PRELUDE,
             describe=(f"{len(ids)} blocks x {len(items)} items on {args.node}: {line}",))
 
-    def more(self, ctx: cs.Context, rec: cs.RunRecord) -> bool:
-        return False    # never asked: no exit of its is routine (cluster_submit's "Leases")
+    def more(self, ctx: cs.Context, rec: cs.RunRecord, *,
+             killed: tuple[str, ...]) -> cs.Continue | cs.Done:
+        return cs.Done("never asked: no exit of its is routine (cluster_submit's \"Leases\")")
 
 
 # sacct_grace: how long a run is out of squeue before a task of it with no exit code and no sacct
 # row is taken as cancelled before it started (cluster_submit's "Settling a run": 10 minutes, the
 # cluster's accounting lag many times over; cx-raster, 2026-10-15, had 19 such tasks).
-PROJECT = cs.Project(name="reblock", repo=REPO, cluster=cs.load_cluster("ai"), env=ENV,
+# market: the disk market of ai's home (its keeper holds reblock's files once a launch publishes
+# them). checkout_setup: nothing to link into a checkout. gpu_market None: reblock's waves are held
+# outside the GPU market's shadow accounts (never `keeper install` from here: it would remove the
+# GPU market's files the keeper reads; the keeper is installed from GeoffChurch/mycooc). campaigns:
+# none of reblock's runs is a campaign's lease.
+PROJECT = cs.Project(name="reblock", repo=REPO, cluster=cs.load_cluster("ai"),
                      kinds=(Blocks(), Cpu()), max_gpus=4,   # owner, 2026-10-03: a shared cluster
-                     sacct_grace=timedelta(minutes=10))
+                     checkout_setup=(), sacct_grace=timedelta(minutes=10),
+                     market=cs.load_market("ai"), gpu_market=None, campaigns=cs.NoCampaigns())
 
 if __name__ == "__main__":
     sys.path[:0] = [str(HERE), str(REPO)]   # common and the repo's scripts package, for Blocks.plan
