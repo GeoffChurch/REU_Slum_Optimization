@@ -198,8 +198,9 @@ items up front"), in the order proposed:
    of the seven at D 0.05 on 42 of its 79 blocks, the best road in B's order on three oversized
    ones. Left: cycle_desire on g3's five oversized blocks, still on orion (jobs 79686, 79687; the
    consolidated pass's followup.md). On 63612, 19593 and 38142 the quality-first arterial was
-   cancelled past 21 h (owner 2026-10-20), and the speed-first preset runs there instead (t7-fast),
-   reported beside the lineup, never as its arterial.
+   cancelled after 14 -- 16 h (owner 2026-10-20), and the speed-first preset ran there instead
+   (t7-fast: stopped on its budget in 1.8 -- 3.8 h, fourth or fifth of seven at D 0.05), reported
+   beside the lineup, never as its arterial.
    **The metric decisions** (owner 2026-10-12, walking through four: the escape-time functional,
    the population, the conductance, the exits). (1) **P as the headline** ("leaning toward P with
    J_2 as a side report"): one solve, monotone, convex in the clearing (a certified bound), the
@@ -648,9 +649,9 @@ Not pursued, with what would change that:
   both samplers (NOTES, "The research lineup's displacement: the ramped destroyed area"). Task 7
   done (2026-10-20; NOTES, "The lineup under the ramped destroyed area, with the new arterial"):
   the arterial proposed again on 79 of the lineup's 82 blocks (a median 0.46 h a proposal; on
-  63612, 19593 and 38142 it was cancelled past 21 h, owner 2026-10-20, and the speed-first preset
-  ran there instead), every road method re-cut and re-scored; the arterial is the weakest road at
-  D 0.05 (last of seven on 42 of 79 blocks).
+  63612, 19593 and 38142 it was cancelled after 14 -- 16 h, owner 2026-10-20, and the speed-first
+  preset ran there instead), every road method re-cut and re-scored; the arterial is the weakest
+  road at D 0.05 (last of seven on 42 of 79 blocks).
 - **A HardCap that keeps committed-road junctions** (idea): HardCap's samples replace the vertex
   family once the cap binds, and under the ramped stop it trails PerLineFallback on all six
   medians (L_P -0.0071 at D 0.05, -0.0045 at 0.10; ahead on 20269 and 40144) while 0.66 --
