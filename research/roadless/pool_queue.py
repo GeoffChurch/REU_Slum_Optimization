@@ -23,7 +23,7 @@ workers of its pools claim, run and record, each claim one attempt.
 - **Strikes** (the plan's Ruling 6, mycooc's lesson 7): an attempt that ends failed, or is reaped
   before its walltime, with no row written, is a strike; after the ladder's `strikes` the job is
   FAILED, for a person (`retry`). A walltime kill is no strike (it raises the time estimate to
-  what the attempt ran, and past the lease less its margin the job goes long), nor an OOM (it
+  what the attempt ran, and past `fresh_minutes` the job goes long), nor an OOM (it
   promotes), nor a failure that wrote a row (the job ran further: run again, it keeps what stands).
 - **OOM promotes; it never drops**: an OOM's job moves a rung up, needing the ladder's `fit_mem`
   times its peak (the peak that killed it is a floor of its need, as uncertain as a fit), its
@@ -84,9 +84,10 @@ FINISHED = (Outcome.DONE, Outcome.FAILED, Outcome.OOM)
 
 
 def fresh_minutes(ladder: Ladder) -> float:
-    """The minutes a fresh worker of `ladder` can give a job: its lease less the margin. A job
-    estimated past them is the long lane's."""
-    return ladder.lease_minutes - ladder.margin_minutes
+    """The minutes a fresh worker of `ladder` can give a job: its lease less the margin and its
+    startup (a worker's first claim comes after its checkout, imports and opening the queue). A
+    job estimated past them is the long lane's: no worker could claim it."""
+    return ladder.lease_minutes - ladder.margin_minutes - ladder.startup_minutes
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -278,6 +279,7 @@ class _Obj:
 def _ladder_json(lad: Ladder) -> dict[str, object]:
     return {"name": lad.name, "cards": lad.cards, "cpus": lad.cpus, "rungs": list(lad.rungs),
             "lease_minutes": lad.lease_minutes, "margin_minutes": lad.margin_minutes,
+            "startup_minutes": lad.startup_minutes,
             "strikes": lad.strikes, "idle_minutes": lad.idle_minutes,
             "poll_seconds": lad.poll_seconds, "stored_mem": lad.stored_mem,
             "fit_mem": lad.fit_mem, "stored_time": lad.stored_time, "about": lad.about}
@@ -292,7 +294,8 @@ def _ladder(o: _Obj) -> Ladder:
     lad = Ladder(name=o.text("name"), cards=o.count("cards"), cpus=o.count("cpus"),
                  rungs=tuple(rungs),
                  lease_minutes=o.number("lease_minutes"),
-                 margin_minutes=o.number("margin_minutes"), strikes=o.count("strikes"),
+                 margin_minutes=o.number("margin_minutes"),
+                 startup_minutes=o.number("startup_minutes"), strikes=o.count("strikes"),
                  idle_minutes=o.number("idle_minutes"), poll_seconds=o.number("poll_seconds"),
                  stored_mem=o.number("stored_mem"), fit_mem=o.number("fit_mem"),
                  stored_time=o.number("stored_time"), about=o.text("about"))
@@ -617,7 +620,7 @@ class SqliteQueue:
         """`worker` is gone (squeue no longer lists it: the steward's evidence): retired, and
         the job it held settled. With `now` at or past its Slurm end time it was killed at its
         walltime: no strike, the job's time estimate raised to what the attempt ran, and past
-        the lease less its margin the job goes long. Before it, it died: a strike if the attempt
+        `fresh_minutes` the job goes long. Before it, it died: a strike if the attempt
         wrote no row. A worker retired already (its own exit came first) is left as it is."""
         with self._tx() as db:
             w = self._worker_row(db, worker)
@@ -671,9 +674,7 @@ class SqliteQueue:
 
     @staticmethod
     def _take(db: sqlite3.Connection, w: sqlite3.Row, job: sqlite3.Row) -> Claim:
-        """`job` becomes `w`'s, with a new attempt; a worker holding a claim is refused
-        (`_one_claim`)."""
-        _one_claim(db, w["id"])
+        """`job` becomes `w`'s, with a new attempt."""
         attempt = _inserted(db.execute(
             "INSERT INTO attempts (job, worker, node, cls, start, rows) VALUES (?, ?, ?, ?, ?, 0)",
             (job["id"], w["id"], w["node"], w["cls"], time.time())))
@@ -688,6 +689,7 @@ class SqliteQueue:
         walltime left less the margin), the longest first; None if none is."""
         with self._tx() as db:
             w = self._live(db, worker)
+            _one_claim(db, worker)
             job = self._pick(db, w, minutes_left)
             return None if job is None else self._take(db, w, job)
 
@@ -697,6 +699,7 @@ class SqliteQueue:
         is refused (ValueError)."""
         with self._tx() as db:
             w = self._live(db, worker)
+            _one_claim(db, worker)
             row = db.execute("SELECT * FROM jobs WHERE id = ?", (job,)).fetchone()
             if row is None:
                 raise ValueError(f"no job {job}")
