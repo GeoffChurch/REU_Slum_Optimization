@@ -19,9 +19,10 @@ clearing (none, T's, U's) scored under both metrics on the same device: Lens A (
 L_J2 on each metric's own baseline: T's over the homes T scores, U's over every home with demand)
 and B (i) by street reach (ROWS/lenses/<id>.parquet); the block's facts (ROWS/facts/<id>.parquet:
 the walled-in homes, T's free stage and the population it frees, each arm's D, the clearings'
-Jaccard); per walled-in home its population share, its escape time under U at baseline against the
-block's median home (over the homes T scores: their escape times are T's), and whether each arm's
-clearing leaves it walled in (ROWS/homes/<id>.parquet).
+Jaccard); per walled-in home its population share, its escape time under U at baseline and after
+each arm's clearing (U's metric: T's has none for it) against the block's median home at baseline
+(over the homes T scores: their escape times are T's), and whether each arm's clearing leaves it
+walled in (ROWS/homes/<id>.parquet).
 
 `report`: per block (summary_blocks.csv), per walled-in home (summary_homes.csv), and by size
 (summary_sizes.csv: the people each arm leaves walled in, those U leaves that T frees, each lens's
@@ -66,6 +67,7 @@ POP = common.PopulationDemand()
 LENSES = ("L_P", "L_Pq", "L_J2")
 BB_DRAWS = 4000                      # the Bayesian bootstrap's draws (consolidated._bb_interval's)
 BB_SEED = 20261021
+FAR = 10.0       # a freed home still far: its escape time under U over 10x the block's median
 
 
 class Arm(NamedTuple):
@@ -130,6 +132,7 @@ class Scored(NamedTuple):
     homes it leaves walled in, and the baseline's homes."""
     rows: list[dict[str, object]]
     left: tuple[np.ndarray, np.ndarray, np.ndarray]
+    u: tuple[np.ndarray, np.ndarray, np.ndarray]
     walled0: np.ndarray
     nodem: np.ndarray
     u0: np.ndarray
@@ -153,13 +156,15 @@ def score(bid: str, label: str, metric: gcl.ComplexMetric, xs: tuple[np.ndarray,
     pygc.collect()                      # the last model's plans freed before this one's
     [b] = common.build_blocks([bid])
     m = metric.clearing(b, demand=POP)
-    rows, left = [], []
+    rows, left, u = [], [], []
     for clearing, x in zip(CLEARINGS, xs, strict=True):
         L = m.base if clearing == "none" else m.lenses(x)
         rows.append(dict(block=bid, scorer=label, clearing=clearing, n_cleared=int(x.sum()),
                          D=float(m.cost[x].sum()), **rr._lens_row(m, L)))
         left.append(m.walled0 & ~L.live)
-    return Scored(rows=rows, left=(left[0], left[1], left[2]), walled0=m.walled0, nodem=m.nodem,
+        u.append(L.u)
+    return Scored(rows=rows, left=(left[0], left[1], left[2]), u=(u[0], u[1], u[2]),
+                  walled0=m.walled0, nodem=m.nodem,
                   u0=m.u_pop0, pop=m.pop, cost=m.cost, pocket=m.dem.pocket,
                   shadowed=m.dem.shadowed, after_free=m.enclosed_left(held), P0=m.base.P,
                   J2_0=m.base.J2)
@@ -219,7 +224,8 @@ def lenses(bid: str, device: str, *, replace: bool) -> None:
         plan_U=arms.u.plan.name, wall_lenses=time.time() - t0)
     homes = pd.DataFrame(dict(
         block=bid, home=np.flatnonzero(w), share=share[w], u0_U=sU.u0[w], u0_ratio=sU.u0[w] / med,
-        nodem_U=sU.nodem[w], shadowed_U=sU.shadowed[w], left_T=leftT[w], left_U=leftU[w]))
+        u_T_ratio=sU.u[1][w] / med, u_U_ratio=sU.u[2][w] / med, nodem_U=sU.nodem[w],
+        shadowed_U=sU.shadowed[w], left_T=leftT[w], left_U=leftU[w]))
     for o, df in zip(outs, (pd.DataFrame(sT.rows + sU.rows), pd.DataFrame([block]), homes),
                      strict=True):
         clearings.write_once(df, o, replace=replace)
@@ -303,6 +309,14 @@ def report() -> None:
             u0_ratio_median=float(hm.u0_ratio.median()) if len(hm) else np.nan,
             u0_ratio_p90=float(hm.u0_ratio.quantile(0.9)) if len(hm) else np.nan,
             u0_ratio_max=float(hm.u0_ratio.max()) if len(hm) else np.nan,
+            # the walled-in homes each arm frees (B (i)) and how well U's metric then serves
+            # them: their escape time after the clearing against the median at baseline (a home
+            # freed on another side keeps its demand in its still-sealed pocket)
+            freed_T=int((~hm.left_T).sum()), freed_U=int((~hm.left_U).sum()),
+            freed_T_u_median=float(hm.u_T_ratio[~hm.left_T].median()),
+            freed_U_u_median=float(hm.u_U_ratio[~hm.left_U].median()),
+            freed_T_far=int((hm.u_T_ratio[~hm.left_T] > FAR).sum()),
+            freed_U_far=int((hm.u_U_ratio[~hm.left_U] > FAR).sum()),
             walled_P0_share_U_median=float(g.walled_P0_share_U.median()),
             walled_P0_share_U_max=float(g.walled_P0_share_U.max()),
             walled_J2_share_U_median=float(g.walled_J2_0_share_U.median()),
