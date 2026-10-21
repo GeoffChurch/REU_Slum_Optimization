@@ -7,6 +7,7 @@ UNIFORM's mesh, leaks and doors (metrics.walls_on_uniform), scored at baseline a
     S=research/roadless/leaky.py        # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S block <id> <part> [--replace]    # ROWS/<part>/{facts,homes}/<id>.parquet
     uv run python $S report <part>                     # ROWS/<part>/summary_*.csv
+    uv run python $S placement <id> [--replace]        # ROWS/placement/<id>.parquet
 
 `block`, at baseline (nothing cleared), T's model and W's on the same core: per home (homes/) its
 population share, whether T walls it in (B (i)) or gives it no demand, its escape time under T and
@@ -26,7 +27,8 @@ solves, P's and P_{1/2}'s), and W's passes per solve.
 share whose escape time moves by more than MOVED from T's, and the ratio W / T's median, p10 and
 p90 (a home with no footprint in the mesh, under a barrier's cut, has no escape time under W and is
 left out); (2) the walled-in homes' escape time against their block's median home under W (median,
-p90, max); (3) their share of W's P0 and J_2,0; (4) the own wall's share, median and p90, for open
+p90, max; and apart by their situation, `placement`: in a pocket, or with no open ground within
+ring_m); (3) their share of W's P0 and J_2,0; (4) the own wall's share, median and p90, for open
 and walled-in homes apart; (5) the through-traffic and the dissipation's shares; (6) the unknowns
 and times W / T, and the passes; (7) the open homes' rank agreement with T (Spearman's correlation
 of their escape times under W and T, by block: median, p10, min); (8) P0 under W over T's, by block
@@ -63,6 +65,8 @@ sys.path.insert(0, str(HERE))
 import clearings  # noqa: E402
 import common  # noqa: E402
 import gap_calib  # noqa: E402
+import gap_clear as gcl  # noqa: E402
+import gap_complex as gc  # noqa: E402
 import gap_walls as gw  # noqa: E402
 import metrics  # noqa: E402
 
@@ -172,6 +176,20 @@ def flow(wm: gw.WallModel, wl: gw.WallLenses) -> Flow:
                 interiors=float(diss[ia & ib & ~wall].sum()), total=total)
 
 
+def placement(bid: str, *, replace: bool) -> None:
+    """Per home of `bid` where U puts it (its cached mesh's demand, every setting's base): placed in
+    a pocket (walled in at baseline, its points on open ground no street reaches) or with no open
+    ground within ring_m at all (U's homes without demand); ROWS/placement/<id>.parquet."""
+    out = ROWS / "placement" / f"{bid}.parquet"
+    clearings.check_new(out, replace=replace)
+    metric = metrics.metric_of(metrics.UNIFORM, device="cpu")
+    [b] = common.build_blocks([bid])
+    fx = metric.fixed(b, cache=gcl.CACHE, carving=gcl.Carving.none(gc.geometry(b)))
+    df = pd.DataFrame(dict(block=bid, home=np.arange(len(fx.dem.pocket)), pocket_U=fx.dem.pocket,
+                           noground_U=fx.dem.walled))
+    clearings.write_once(df, out, replace=replace)
+
+
 def _outs(part: str, bid: str) -> tuple[Path, Path]:
     return ROWS / part / "facts" / f"{bid}.parquet", ROWS / part / "homes" / f"{bid}.parquet"
 
@@ -260,6 +278,15 @@ def _read(part: str, kind: str) -> pd.DataFrame:
         pd.DataFrame()
 
 
+def _read_placement(blocks: list[str]) -> pd.DataFrame:
+    """U's placement rows (`placement`) of `blocks`, each required."""
+    paths = [ROWS / "placement" / f"{b}.parquet" for b in blocks]
+    missing = [p.stem for p in paths if not p.exists()]
+    if missing:
+        raise RuntimeError(f"no placement rows for {missing[:5]} (leaky.py placement <id>)")
+    return pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True)
+
+
 def _q(x: pd.Series, q: float) -> float:
     return float(x.quantile(q)) if len(x) else np.nan
 
@@ -279,6 +306,15 @@ def report(part: str) -> None:
         lambda h: float(stats.spearmanr(h.u_T, h.u_W).statistic)).reindex(blk.index)
     blk.reset_index().to_csv(ROWS / part / "summary_blocks.csv", index=False)
     homes = homes.merge(blk[["control"]].reset_index(), on="block")
+    # (2) by situation: U's placement (`placement`), every block's
+    place = _read_placement(list(blk.index))
+    homes = homes.merge(place, on=["block", "home"], how="left", validate="one_to_one")
+    w = homes[homes.walled]
+    if w.pocket_U.isna().any() or (w.pocket_U.astype(bool) == w.noground_U.astype(bool)).any():
+        raise RuntimeError("a walled-in home neither in a pocket nor without open ground, or both "
+                           "(or a block without its placement rows)")
+    homes["pocket_U"] = homes.pocket_U.astype(bool)
+    homes["noground_U"] = homes.noground_U.astype(bool)
     out = []
     for name, sel in (("walled-in blocks", ~blk.control), ("controls", blk.control),
                       ("all", blk.control | ~blk.control)):
@@ -298,6 +334,11 @@ def report(part: str) -> None:
             ratio_down=float(np.mean(r < 1.0 - MOVED)) if len(r) else np.nan,
             walled_med_median=_q(wh.u_W_med, 0.5), walled_med_p90=_q(wh.u_W_med, 0.9),
             walled_med_max=float(wh.u_W_med.max()) if len(wh) else np.nan,
+            walled_pocket=int(wh.pocket_U.sum()), walled_noground=int(wh.noground_U.sum()),
+            walled_pocket_med_median=_q(wh.u_W_med[wh.pocket_U], 0.5),
+            walled_pocket_med_p90=_q(wh.u_W_med[wh.pocket_U], 0.9),
+            walled_noground_med_median=_q(wh.u_W_med[wh.noground_U], 0.5),
+            walled_noground_med_p90=_q(wh.u_W_med[wh.noground_U], 0.9),
             walled_P0_share_median=float(g.walled_P0_share.median()),
             walled_P0_share_max=float(g.walled_P0_share.max()),
             walled_J2_share_median=float(g.walled_J2_share.median()),
@@ -342,6 +383,8 @@ def main(argv: list[str]) -> None:
         block_run(argv[1], argv[2], replace=replace)
     elif len(argv) == 2 and argv[0] == "report":
         report(argv[1])
+    elif len(argv) == 2 and argv[0] == "placement":
+        placement(argv[1], replace=replace)
     else:
         raise SystemExit(__doc__)
 

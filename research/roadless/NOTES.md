@@ -8764,3 +8764,49 @@ from 11x to 7.6x: the median home slows more than they do).
 
 **Compute, the second setting** (here, 2 processes): its 82 blocks twice (once more for (9)), 0.7
 process-h each pass; the first setting's re-run 0.16; the diagnostics 0.15.
+
+**The third setting: a diode, ell_out 10 m, ell_in 10,000 m, k_in 1, cap 64**
+(`Wk1o10i10000n64`; the second report's suggestion, the controller's pick: the entry price the one
+knob of the walled-in homes' exchange rate; leaky_rows/Wk1o10i10000n64/). The same 82 blocks, all
+82 settled (no block at the cap). The ten measures beside the first two settings (all 82 blocks;
+the walled-in homes' rows on the 77):
+
+                                        Wk1l200       Wk1o10i1000n64  Wk1o10i10000n64
+    1  open homes moved > 5%            91.4%         97.6%           97.3%
+       W / T median (p10, p90)          1.21 (0.67,   0.63 (0.30,     0.68 (0.30, 0.99)
+                                        4.79)         0.99)
+    2  walled-in / block median: med    1.97          2.83            9.85
+       p90, max                         2.88, 3.95    5.80, 11.5      30.0, 82.4
+    3  walled-in share of P0: med, max  1.1%, 35%     1.6%, 43%       4.7%, 64%
+       of J_2,0: med, max               1.6%, 46%     2.6%, 55%       20%, 97%
+    4  own wall, open: med (p90)        39% (84%)     14% (75%)       12% (74%)
+       walled-in: med (p90)             15% (27%)     16% (53%)       27% (69%)
+    5  entering from open ground        5.2%          7.4%            1.5%
+       from another building            6.0%          2.7%            0.5%
+       walls, interiors (of P0)         51%, 0.8%     21%, 3.7%       17%, 2.7%
+    6  unknowns x T, time x T (med)     3.1, 5.7      3.1, 82         3.1, 97
+    7  Spearman with T: med, p10, min   0.914, 0.732, 0.926, 0.861,   0.927, 0.855, 0.758
+                                        0.663         0.744
+    8  P0 W / T: med (p10, p90)         1.09 (0.68,   0.52 (0.35,     0.62 (0.45, 0.85)
+                                        1.55)         0.66)
+    9  walls out / in / party (of P0)   44 / 1.1 /    10 / 6.8 /      8.3 / 4.2 / 1.9% (pooled
+                                        3.2%          2.6%            5.7 / 9.3 / 6.2%)
+    10 passes per solve: med, max       1, 1          8, 11           9, 13
+
+The walled-in homes by situation (U's placement, leaky.py `placement`): 316 have open ground in a
+pocket, 11 (on 8 blocks) none within ring_m, their only ways out into neighbours. Their multiple
+of the block median, median and p90 (max): pocket homes 1.96, 2.87 (3.9); 2.82, 5.77 (11.5); 9.82,
+29.1 (79.8); no-ground homes 2.30, 3.62 (4.0); 3.35, 10.8 (11.5); 13.9, 81.5 (82.4). The entry
+price acts on both, since a pocket's one way to the street is also into a building; the no-ground
+homes pay it straight from their own walls and on 10,000 m lie 1.4x the pocket homes at the
+median and 2.8x at p90.
+
+What the third setting says: the entry price sets the walled-in homes' exchange rate (median 2.0x,
+2.8x, 9.8x the block median across the three settings; J_2,0's share 1.6%, 2.6%, 20%, 97% at most
+on 44837) while the open homes barely move between the diodes (Spearman 0.926 and 0.927; P0 W / T
+0.52 and 0.62, through-traffic now 1.5% from open ground): the open homes' level is set by the
+exit price and the sources inside (P0 1.09x at 200 m symmetric, 0.52 -- 0.62x at 10 m out). Its
+cost: 9 passes a solve (7 -- 13), 97x T's scoring time (12 s on a small block, 176 s on 8152).
+
+**Compute, the third setting** (here, 2 processes): its 82 blocks 0.86 process-h; U's placement
+rows 0.05.

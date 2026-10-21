@@ -674,9 +674,12 @@ Open:
   unknowns, 5.6x the time. Second, the diode out 10 m, in 1,000 m (`Wk1o10i1000n64`): open homes'
   ranks kept better (Spearman by block median 0.93 against 0.91) but P0 halved (0.52x T's, below on
   every block); walled-in homes 2.8x the median (max 11.5x), 1.6% of P0; own wall 14%; 8 passes a
-  solve (max 11), 82x T's time. Next setting: the controller's and owner's pick. Stage 2 (SIMP's
-  interpolation of a partly cleared building's walls) after a setting is picked; a
-  leaks-in-interiors variant later.
+  solve (max 11), 82x T's time. Third, out 10 m, in 10,000 m (`Wk1o10i10000n64`): the entry price
+  sets the walled-in homes' exchange rate (9.8x the median, p90 30x, max 82x; 20% of J_2,0, 97% at
+  most; the 11 homes with no open ground 1.4x the pocket homes' median) while the open homes barely
+  move between the diodes (Spearman 0.93, P0 0.62x T's); 9 passes a solve (max 13), 97x T's time.
+  Next setting: the controller's and owner's pick. Stage 2 (SIMP's interpolation of a partly
+  cleared building's walls) after a setting is picked; a leaks-in-interiors variant later.
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
   owner's answer moves an end of the bracket to that screen's break-even rate. One is live,
