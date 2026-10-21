@@ -334,3 +334,20 @@ So the re-run's long lane holds two jobs, and everything else shares the cluster
 10. **The re-run's timing**: wait for the pool (its build, guards and a smoke wave), or run it on today's kinds with demand stated (the market-demand branch) and move to the pool after?
 11. **Groups fixed to a node at submit**: the first build does not move a block's untouched jobs to a node where the market allocates more (mycooc's `reroute` does, a job at a time); add it if a wave's nodes are allocated unevenly.
 12. **The ladders and margins** (rungs, 1.2 and 1.5 on memory, 1.25 on time, a 10-minute walltime margin, 3 strikes): set from the measurements above; any you would set otherwise?
+
+## 9. Decisions (owner, 2026-10-21: "Lease-pool spec LGTM")
+
+The owner approved the spec with the controller's recommendations on the open questions:
+
+1. A steward per wave, not a cluster_submit hook.
+2. The pool is built here, behind Protocols, and moves to GeoffChurch/cluster_submit once mycooc and reblock both run on it; cluster_submit is asked now for starting a campaign's lease from a template the campaign names.
+3. The queue's home, `$HOME/reblock-waves/<w>/`, outside cluster_submit's tree, is acceptable (small; the steward deletes the bank and tars when the wave ends).
+4. `Keep` for partial rows in every pooled script, each with a guard.
+5. `max_gpus = 4` stays until the first waves show the market's widths behaving.
+6. Old `blocks` and `cpu` records are archived out of the registry.
+7. `Fixed` only in the first build; `Screened` after the re-run.
+8. No checkpointing: no oversized re-proposal is planned.
+9. ai's cgroup version is probed at build; without a readable OOM count an OOM is a strike, not a promotion.
+10. The held re-run waits for the pool.
+11. Groups stay fixed to a node at submit in the first build.
+12. The ladders and margins as written.
