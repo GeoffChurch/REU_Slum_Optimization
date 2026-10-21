@@ -6,12 +6,15 @@ code as it is and must fail under each of its faults.
     uv run python $S claim [--fault <name>]         # fault: split-tx
     uv run python $S transitions [--fault <name>]   # faults: late-finish, drop-on-top,
                                                     # any-worker, second-claim
+    uv run python $S class [--fault <name>] <rows>  # faults: median-rate, no-fit-margin
     uv run python $S both-ways <guards,> [args ...]   # each guard, then under each of its faults
 
 A guard runs as `<guard> [--fault <name>] [args ...]`: the fault is named by its flag, so a
 mistyped one is never read as an argument, and an unknown one exits naming the guard's faults.
 Each guard declares its arguments (GUARDS), and run alone it refuses any other count of them;
-`both-ways` passes its arguments to every guard it names. `claim` and `transitions` take none.
+`both-ways` passes its arguments to every guard it names. `claim` and `transitions` take none;
+`class` takes the rows root (`<rows>`: research/roadless of the checkout holding the stored rows,
+which are git-ignored: from a worktree, the main checkout's).
 
 `claim`: CLAIM_JOBS jobs of one node and one class under cpu-score, estimated evenly over (0, 105]
 minutes (pool_queue.fresh_minutes, a lease less its margin and a worker's startup: every job a
@@ -53,12 +56,33 @@ strikes, gb, peak_gb and minutes among them):
   with the same `since` -> none.
 - `other-worker`: a worker's finish DONE of another worker's attempt is refused (ValueError), the
   job still the claimer's and the attempt unrecorded.
-- `one-claim`: a worker holding a claim is refused another, by claim and by claim_job
-  (ValueError), the other job left PENDING.
+- `one-claim`: a worker holding a claim is refused another, by claim, by claim_job of another job
+  and by claim_job of the job it holds (ValueError: refused before the job's state is read), the
+  other job left PENDING.
 Faults: `late-finish` (finish ignores whose claim it is: the reaped worker's late DONE marks the
 job done), `drop-on-top` (past the top rung the job is FAILED, not LONG: the spec's "OOM promotes;
 it never drops"), `any-worker` (finish takes any worker's word for an attempt: the other worker's
 DONE marks the job done), `second-claim` (a worker holding a claim may claim again).
+
+`class` (pool_plan's classes and estimates, the spec's 3.4 with the plan's Ruling 15), on the
+stored rows under `<rows>`, every block's area from its consolidated_rows/summary_features.csv:
+- `stored`: the lineup-score family's every stored (block, method), planned under cpu-score (a
+  plan of every stored block and method over orion and quadro2): its class is that of the smallest
+  rung holding 1.2 times its most demanding stored peak (recomputed here from the family's runs),
+  or it is LONG past 88 GB; its needed minutes are 1.25 times that run's wall (rel 1e-9).
+- `leave-one-out`: the propose family's cycle_desire (CLASS_ITEM) jobs on blocks of at least
+  FIT_MIN_KM2: each block's estimate with its own rows removed (a family without them) is 1.5
+  times the worst per-km2 peak of the others on such blocks times its area (recomputed here, rel
+  1e-9), and holds its measured peak. The tightest is 62803 (164.7 GB on 11.90 km2, 13.8 GB/km2,
+  the worst rate on record: it finished after desire_fit.out), held by 53556's 10.9 GB/km2.
+- `plan`: plan_wave of the CLASS_BLOCKS stored lineup blocks with the most stored work (4287 among
+  them: its arterial network's 3.0 h, the long lane's) and the seven methods, over CLASS_NODES:
+  every job of a block on one node, its group the block; the nodes' summed needed minutes within
+  the largest group's of each other (longest-processing-time first); a job whose needed minutes
+  pass pool_queue.fresh_minutes (a lease less its margin and a worker's startup, 105) is LONG.
+Faults: `median-rate` (the fit's rate the family's median per-km2 rate, not its worst: the
+recomputation fails) and `no-fit-margin` (the fit without its 1.5: 62803 is classed below its
+measured peak).
 """
 from __future__ import annotations
 
@@ -67,11 +91,14 @@ import multiprocessing as mp
 import queue
 import random
 import sqlite3
+import statistics
 import sys
 import tempfile
 import time
+from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from itertools import pairwise
 from multiprocessing.queues import Queue as MpQueue
@@ -83,6 +110,7 @@ from cluster_submit.context import STAMP
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import pool_plan as pp  # noqa: E402
 import pool_queue as pq  # noqa: E402
 from pool_ladder import LADDERS, Ladder, class_name, rung_of  # noqa: E402
 
@@ -536,7 +564,10 @@ def _one_claim(path: Path, lad: Ladder) -> list[str]:
         return c.notes
     tries: tuple[tuple[str, Callable[[], pq.Claim | None]], ...] = (
         ("claim", lambda: c.q.claim(worker=w, minutes_left=c.fresh)),
-        ("claim_job", lambda: c.q.claim_job(worker=w, job=second.id)))
+        ("claim_job", lambda: c.q.claim_job(worker=w, job=second.id)),
+        # of the job it holds: refused, not None (the one-claim check comes before the job's
+        # state is read, so a check moved back after it would answer None here)
+        ("claim_job of its own job", lambda: c.q.claim_job(worker=w, job=first.id)))
     for how, again in tries:
         try:
             got = again()
@@ -592,8 +623,182 @@ class Guard(NamedTuple):
     args: tuple[str, ...]
 
 
+# ---- class ----------------------------------------------------------------------------------
+
+CLASS_NODES = ("orion", "quadro2")
+CLASS_ITEM = "cycle_native_betweenness_contrast"    # leave-one-out: cycle_desire's proposals
+CLASS_BLOCKS = 12        # plan: the stored lineup blocks with the most stored work
+
+
+def _now() -> str:
+    return datetime.now(UTC).strftime(STAMP)
+
+
+def _most(runs: Sequence[pp.Observed]) -> dict[tuple[str, str], pp.Observed]:
+    """Each (block, item)'s most demanding run, recomputed here: its largest peak (then wall)."""
+    most: dict[tuple[str, str], pp.Observed] = {}
+    for o in runs:
+        k = (o.block, o.item)
+        if k not in most or (o.peak_gb, o.minutes) > (most[k].peak_gb, most[k].minutes):
+            most[k] = o
+    return most
+
+
+@dataclass(frozen=True, kw_only=True)
+class _Without:
+    """`family` with `block`'s runs removed: that block as if never run (the leave-one-out's)."""
+
+    family: pp.Family
+    block: str
+
+    @property
+    def name(self) -> str:
+        return self.family.name
+
+    def stored(self, block: str, item: str) -> pp.Observed | None:
+        return None if block == self.block else self.family.stored(block, item)
+
+    def observed(self) -> Sequence[pp.Observed]:
+        return [o for o in self.family.observed() if o.block != self.block]
+
+
+def _stored_classes(lineup: pp.Family, lad: Ladder, areas: dict[str, float]) -> list[str]:
+    most = _most(lineup.observed())
+    est = pp.Estimator(family=lineup, ladder=lad, areas=areas, history=(),
+                       fit_min_km2=pp.FIT_MIN_KM2)
+    seed = pp.plan_wave(wave="pool-check", commit=COMMIT, family=lineup.name, ladder=lad,
+                        estimator=est, nodes=CLASS_NODES, ids=sorted({b for b, _ in most}),
+                        items=sorted({i for _, i in most}), line=lambda b, i: f"echo {b} {i}",
+                        created=_now())
+    notes: list[str] = []
+    by: Counter[str] = Counter()
+    for j in seed.jobs:
+        if (j.block, j.item) not in most:
+            continue                     # no stored run: the fit's (leave-one-out's to check)
+        o = most[(j.block, j.item)]
+        r = rung_of(1.2 * o.peak_gb, lad)
+        by["long" if r is None else class_name(0, r)] += 1
+        if r is None and j.lane != pq.Lane.LONG:
+            notes.append(f"{j.block} {j.item}: peak {o.peak_gb:.1f} GB in {j.lane}, want LONG")
+        if r is not None and j.cls != class_name(0, r):
+            notes.append(f"{j.block} {j.item}: peak {o.peak_gb:.2f} GB in {j.cls}, want "
+                         f"{class_name(0, r)}")
+        if not math.isclose(j.minutes, 1.25 * o.minutes, rel_tol=1e-9):
+            notes.append(f"{j.block} {j.item}: {j.minutes:.2f} minutes, want 1.25 x "
+                         f"{o.minutes:.2f}")
+    print(f"stored: {len(most)} stored (block, method)s of {len({b for b, _ in most})} blocks "
+          f"under cpu-score, by class " + ", ".join(f"{c} {by[c]}" for c in sorted(
+              by, key=lambda c: math.inf if c == "long" else int(c[1:])))
+          + (" -> ok" if not notes else " -> FAILS: " + "; ".join(notes[:5])
+             + (f" ({len(notes)} in all)" if len(notes) > 5 else "")), flush=True)
+    return ["stored"] if notes else []
+
+
+class Held(NamedTuple):
+    """A leave-one-out estimate against its block's measured peak, and the rate that set it."""
+    ratio: float          # the estimate over the measured peak
+    block: str
+    measured: float       # GB
+    area: float           # km2
+    gb: float             # the estimate
+    by: str               # the block whose per-km2 peak is the worst of the others
+    rate: float           # GB/km2
+
+
+def _leave_one_out(propose: pp.Family, lad: Ladder, areas: dict[str, float]) -> list[str]:
+    runs = propose.observed()
+    floor = pp.FIT_MIN_KM2
+    large = [o for o in runs if areas[o.block] >= floor]
+    jobs = [o for o in large if o.item == CLASS_ITEM]
+    notes: list[str] = []
+    held: list[Held] = []
+    for blk in sorted({o.block for o in jobs}):
+        est = pp.Estimator(family=_Without(family=propose, block=blk), ladder=lad, areas=areas,
+                           history=(), fit_min_km2=floor).estimate(blk, CLASS_ITEM)
+        worst = max((o for o in large if o.block != blk), key=lambda o: o.peak_gb / areas[o.block])
+        rate = worst.peak_gb / areas[worst.block]
+        want = 1.5 * rate * areas[blk]
+        measured = max(o.peak_gb for o in jobs if o.block == blk)
+        if not math.isclose(est.gb(), want, rel_tol=1e-9):
+            notes.append(f"{blk}: {est.gb():.2f} GB, want 1.5 x {rate:.3f} GB/km2 x "
+                         f"{areas[blk]:.3f} km2 = {want:.2f}")
+        if est.gb() < measured:
+            notes.append(f"{blk}: {est.gb():.1f} GB, below its measured {measured:.1f}")
+        held.append(Held(ratio=est.gb() / measured, block=blk, measured=measured,
+                         area=areas[blk], gb=est.gb(), by=worst.block, rate=rate))
+    if not held:
+        notes.append(f"no {CLASS_ITEM} job on a block of at least {floor:g} km2")
+    t = min(held) if held else None
+    print(f"leave-one-out: {len(jobs)} {CLASS_ITEM} jobs on {len(held)} blocks of at least "
+          f"{floor:g} km2" + ("" if t is None else
+                              f"; the tightest {t.block} ({t.measured:.1f} GB on {t.area:.2f} km2, "
+                              f"{t.measured / t.area:.1f} GB/km2) at {t.gb:.1f} GB, by {t.by}'s "
+                              f"{t.rate:.1f} GB/km2")
+          + (" -> ok" if not notes else " -> FAILS: " + "; ".join(notes[:5])
+             + (f" ({len(notes)} in all)" if len(notes) > 5 else "")), flush=True)
+    return ["leave-one-out"] if notes else []
+
+
+def _placed(lineup: pp.Family, lad: Ladder, areas: dict[str, float]) -> list[str]:
+    most = _most(lineup.observed())
+    work = dict.fromkeys(sorted({b for b, _ in most}), 0.0)
+    for (b, _), o in most.items():
+        work[b] += o.minutes
+    blocks = sorted(sorted(work, key=lambda b: -work[b])[:CLASS_BLOCKS])
+    items = sorted({i for _, i in most})
+    est = pp.Estimator(family=lineup, ladder=lad, areas=areas, history=(),
+                       fit_min_km2=pp.FIT_MIN_KM2)
+    seed = pp.plan_wave(wave="pool-check", commit=COMMIT, family=lineup.name, ladder=lad,
+                        estimator=est, nodes=CLASS_NODES, ids=blocks, items=items,
+                        line=lambda b, i: f"echo {b} {i}", created=_now())
+    notes: list[str] = []
+    group = dict.fromkeys(blocks, 0.0)
+    load = dict.fromkeys(CLASS_NODES, 0.0)
+    nodes: dict[str, set[str]] = {}
+    for j in seed.jobs:
+        group[j.block] += j.minutes
+        load[j.node] += j.minutes
+        nodes.setdefault(j.block, set()).add(j.node)
+        if j.group != j.block:
+            notes.append(f"job {j.id}: group {j.group}, block {j.block}")
+        if j.minutes > pq.fresh_minutes(lad) and j.lane != pq.Lane.LONG:
+            notes.append(f"{j.block} {j.item}: {j.minutes:.0f} minutes in {j.lane}, want LONG")
+    split = {b: sorted(n) for b, n in nodes.items() if len(n) != 1}
+    if split:
+        notes.append(f"blocks on more than one node: {split}")
+    if len(seed.jobs) != len(blocks) * len(items):
+        notes.append(f"{len(seed.jobs)} jobs, not {len(blocks)} x {len(items)}")
+    gap, largest = max(load.values()) - min(load.values()), max(group.values())
+    if gap > largest:
+        notes.append(f"the nodes' loads {dict(load)} differ by {gap:.0f} minutes, more than the "
+                     f"largest group's {largest:.0f}")
+    long = [f"{j.block} {j.item} ({j.minutes:.0f} min, {j.gb:.0f} GB)"
+            for j in seed.jobs if j.lane == pq.Lane.LONG]
+    print(f"plan: {len(blocks)} blocks, {len(seed.jobs)} jobs over {', '.join(CLASS_NODES)}: "
+          + ", ".join(f"{n} {load[n]:.0f} min ({sum(1 for b in nodes if n in nodes[b])} blocks)"
+                      for n in CLASS_NODES)
+          + f", the largest group {largest:.0f} min; long: {', '.join(long) or 'none'}"
+          + (" -> ok" if not notes else " -> FAILS: " + "; ".join(notes)), flush=True)
+    return ["plan"] if notes else []
+
+
+def classes(args: list[str]) -> list[str]:
+    [rows] = args
+    root = Path(rows)
+    lad = LADDERS["cpu-score"]
+    if (lad.stored_mem, lad.stored_time, lad.fit_mem, lad.rungs) != (1.2, 1.25, 1.5,
+                                                                      (4, 12, 24, 56, 88)):
+        return [f"cpu-score is not the guard's (stored_mem 1.2, stored_time 1.25, fit_mem 1.5, "
+                f"rungs 4-88): {lad}"]
+    areas = pp.areas_of(root / "consolidated_rows" / "summary_features.csv", {})
+    lineup, propose = pp.FAMILIES["lineup-score"](root), pp.FAMILIES["propose"](root)
+    return (_stored_classes(lineup, lad, areas) + _leave_one_out(propose, lad, areas)
+            + _placed(lineup, lad, areas))
+
+
 GUARDS: dict[str, Guard] = {"claim": Guard(run=claim, args=()),
-                            "transitions": Guard(run=transitions, args=())}
+                            "transitions": Guard(run=transitions, args=()),
+                            "class": Guard(run=classes, args=("rows",))}
 
 
 # ---- faults ---------------------------------------------------------------------------------
@@ -632,12 +837,22 @@ def _dropped_on_top(ladder: Ladder, *, cls: str, lane: pq.Lane, gb: float, peak_
             if lane == pq.Lane.POOL and p.lane == pq.Lane.LONG else p)
 
 
+_FITTED = pp.Estimator._fitted
+
+
+def _unmargined(self: pp.Estimator, block: str) -> pp.Estimate:
+    """pool_plan.Estimator._fitted without the fit's margin (fit_mem)."""
+    return _FITTED(self, block)._replace(mem_margin=1.0)
+
+
 FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "claim": {"split-tx": lambda: _patched(pq.SqliteQueue, "claim", _split_claim)},
     "transitions": {"late-finish": lambda: _patched(pq, "_holds", lambda job, attempt: True),
                     "drop-on-top": lambda: _patched(pq, "_promoted", _dropped_on_top),
                     "any-worker": lambda: _patched(pq, "_mine", lambda attempt, worker: True),
                     "second-claim": lambda: _patched(pq, "_one_claim", lambda db, worker: None)},
+    "class": {"median-rate": lambda: _patched(pp, "_worst_rate", statistics.median),
+              "no-fit-margin": lambda: _patched(pp.Estimator, "_fitted", _unmargined)},
 }
 
 

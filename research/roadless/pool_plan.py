@@ -1,0 +1,504 @@
+"""A wave's plan (docs/superpowers/specs/2026-10-21-lease-pool-design.md, 3.4, with the plan's
+Ruling 15): each job's estimate, from an estimator Strategy per family of work built once where
+the wave is configured, and from it the job's class, lane and node.
+
+- **A family** (`Family`) is a kind of work and the rows that record it: `stored(block, item)` is
+  the most demanding stored run of this work on that block (its largest peak, then its longest
+  wall: rows carry no finish time to tell the last), and `observed()` every finished job of it on
+  record, for the fit. A peak is a finished job's maximum RSS, never a reading while it ran
+  (GeoffChurch/mycooc's lesson 9). The families (FAMILIES, the command line's choice by name,
+  resolved once): baselines, presets-gpu and presets-cpu (the onecard rows), lenses (a block's
+  runtime baseline: the same mesh and model, the spec's section 7), lineup-score, propose, and
+  smoke (Task 10's table).
+- **An estimate** (`Estimator.estimate`) is, first, the newest earlier wave's measure of the job
+  (`history_of`: their final queues), then the family's stored run, each with the ladder's
+  `stored_mem` and `stored_time` margins (1.2 and 1.25 in every preset); with neither, the fit,
+  with `fit_mem` (1.5) and no time margin (the worst rate is its margin), over the family's jobs
+  and the earlier waves': on a block of at least `fit_min_km2` (FIT_MIN_KM2, desire_fit.out's 1
+  km2, where a job's fixed overhead is a small share), the worst per-km2 peak (and wall) of the
+  jobs on such blocks times the block's area; on a smaller block, the largest peak (and wall) of
+  the jobs on blocks under it. Taken over every block, the worst rate is a small block's overhead
+  (20 GB/km2 on 0.08 km2 against 8.8 on the large ones), which would class every large block past
+  every node.
+- **A plan** (`plan_wave`): one job per (block, item); its class the smallest rung holding its
+  estimate (pool_ladder.rung_of); the long lane's when its needed minutes pass a fresh lease's
+  (pool_queue.fresh_minutes) or its memory the top rung, then needing `fit_mem` times its peak (a
+  long run is sized per job, as an OOM past the top rung is: pool_queue); a block's jobs on one
+  node (its group: results can differ by machine), the groups to nodes longest-processing-time
+  first on needed minutes.
+
+Rows are read with pandas, here only: nothing on the cluster imports this module.
+"""
+from __future__ import annotations
+
+import json
+import math
+import sqlite3
+from abc import ABC, abstractmethod
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import datetime
+from functools import cached_property
+from pathlib import Path
+from typing import NamedTuple, Protocol
+
+import pandas as pd
+import pool_queue as pq
+from cluster_submit.context import stamped
+from pool_ladder import Ladder, class_name, rung_of
+
+from reblock.contracts import Block
+
+#: The fit's floor (Ruling 15, desire_fit.out's choice): the worst per-km2 rate is taken over the
+#: jobs on blocks of at least this many km2, where a job's fixed overhead is a small share.
+FIT_MIN_KM2 = 1.0
+
+
+class Observed(NamedTuple):
+    """A finished job's measure: its peak RSS (GB) and its wall (minutes), from `source`
+    (`rows:<path>`, a stored row's file under the rows root, or `wave:<w>`, an earlier wave's
+    final queue)."""
+
+    block: str
+    item: str
+    peak_gb: float
+    minutes: float
+    source: str
+
+
+class Estimate(NamedTuple):
+    """A job's estimate: the bases (a peak in GB, a wall in minutes), the margins they are taken
+    with, and where the bases came from."""
+
+    peak_gb: float
+    minutes: float
+    mem_margin: float
+    time_margin: float
+    source: str
+
+    def gb(self) -> float:
+        """The memory the job needs: its peak times its margin."""
+        return self.peak_gb * self.mem_margin
+
+    def needed_minutes(self) -> float:
+        """The minutes the job needs: its wall times its margin."""
+        return self.minutes * self.time_margin
+
+
+class Family(Protocol):
+    """A family of work and the records of it (the module's doc)."""
+
+    @property
+    def name(self) -> str: ...
+
+    def stored(self, block: str, item: str) -> Observed | None:
+        """The most demanding stored run of this work on `block` (Ruling 15); None if none is."""
+        ...
+
+    def observed(self) -> Sequence[Observed]:
+        """Every finished job of this work on record, for the fit."""
+        ...
+
+
+# ---- the families --------------------------------------------------------------------------
+
+def _measure(root: Path, path: Path, *, block: object, item: object, peak_gb: float,
+             minutes: float) -> Observed:
+    """A stored row's measure, checked at this boundary: its block and item strings, its peak and
+    wall finite and not negative (else ValueError naming the file); its source the file's path
+    under `root`."""
+    where = path.relative_to(root).as_posix()
+    if not (isinstance(block, str) and isinstance(item, str)):
+        raise ValueError(f"{where}: block {block!r} and item {item!r} are not both strings")
+    if not all(math.isfinite(v) and v >= 0 for v in (peak_gb, minutes)):
+        raise ValueError(f"{where}: a peak of {peak_gb!r} GB in {minutes!r} minutes")
+    return Observed(block=block, item=item, peak_gb=peak_gb, minutes=minutes,
+                    source=f"rows:{where}")
+
+
+class _Rows(ABC):
+    """A family read from its stored rows, once (`_read`): `stored` a (block, item)'s most
+    demanding run, by its peak then its wall; `observed` every run."""
+
+    @abstractmethod
+    def _read(self) -> tuple[Observed, ...]: ...
+
+    @cached_property
+    def _runs(self) -> tuple[Observed, ...]:
+        return self._read()
+
+    @cached_property
+    def _most(self) -> dict[tuple[str, str], Observed]:
+        most: dict[tuple[str, str], Observed] = {}
+        for o in self._runs:
+            k = (o.block, o.item)
+            if k not in most or (o.peak_gb, o.minutes) > (most[k].peak_gb, most[k].minutes):
+                most[k] = o
+        return most
+
+    def stored(self, block: str, item: str) -> Observed | None:
+        k = (block, item)
+        return self._most[k] if k in self._most else None
+
+    def observed(self) -> Sequence[Observed]:
+        return self._runs
+
+
+@dataclass(frozen=True, kw_only=True)
+class Baselines(_Rows):
+    """A block's baselines (leak, bar, runtime: a job per block and part), from
+    `consolidated_rows/baselines/*/<id>.parquet`: item the row's part, its wall the build, mesh
+    and model's."""
+
+    root: Path
+
+    @property
+    def name(self) -> str:
+        return "baselines"
+
+    def _read(self) -> tuple[Observed, ...]:
+        out = []
+        for f in sorted(self.root.glob("consolidated_rows/baselines/*/*.parquet")):
+            t = pd.read_parquet(f, columns=["block", "part", "peak_rss_gb", "t_build", "t_mesh",
+                                            "t_model"])
+            out += [_measure(self.root, f, block=r["block"], item=r["part"],
+                             peak_gb=float(r["peak_rss_gb"]),
+                             minutes=(float(r["t_build"]) + float(r["t_mesh"])
+                                      + float(r["t_model"])) / 60)
+                    for r in t.to_dict("records")]
+        return tuple(out)
+
+
+#: The baseline part whose mesh and model a block's lenses share (the spec's section 7).
+RUNTIME = "runtime"
+
+#: The onecard rows' devices: a block's presets on one card, or on one core.
+DEVICES = ("gpu", "cpu")
+
+
+@dataclass(frozen=True, kw_only=True)
+class Onecard(_Rows):
+    """A block's presets on one `device` (one job per block, item ""), from
+    `consolidated_rows/onecard/*/<device>/<id>.parquet`: the presets' whole wall."""
+
+    root: Path
+    device: str
+
+    def __post_init__(self) -> None:
+        if self.device not in DEVICES:
+            raise ValueError(f"no onecard device {self.device!r} (devices: {', '.join(DEVICES)})")
+
+    @property
+    def name(self) -> str:
+        return f"presets-{self.device}"
+
+    def _read(self) -> tuple[Observed, ...]:
+        out = []
+        for f in sorted(self.root.glob(f"consolidated_rows/onecard/*/{self.device}/*.parquet")):
+            t = pd.read_parquet(f, columns=["block", "device", "peak_rss_gb", "wall"])
+            for r in t.to_dict("records"):
+                if r["device"] != self.device:
+                    raise ValueError(f"{f}: a row of device {r['device']!r} under {self.device}")
+                out.append(_measure(self.root, f, block=r["block"], item="",
+                                    peak_gb=float(r["peak_rss_gb"]),
+                                    minutes=float(r["wall"]) / 60))
+        return tuple(out)
+
+
+@dataclass(frozen=True, kw_only=True)
+class Lenses(_Rows):
+    """A block's lenses (one job per block, item ""): no peak of their own is stored, so the
+    block's runtime baseline (the same mesh and model: the spec's section 7) is their basis, and
+    every block's is their fit's; an OOM promotes a job it puts too low."""
+
+    root: Path
+
+    @property
+    def name(self) -> str:
+        return "lenses"
+
+    def _read(self) -> tuple[Observed, ...]:
+        return tuple(o._replace(item="") for o in Baselines(root=self.root).observed()
+                     if o.item == RUNTIME)
+
+
+#: road_rescore.cx_plain's files beside the networks' under an area_* directory (the old metric's):
+#: a block's plain mesh, its clearings scored and its homes' weights, not a network's
+#: (consolidated.py's lineup readers skip them too).
+NOT_NETWORKS = ("__plain.parquet", "__homes.parquet")
+
+
+@dataclass(frozen=True, kw_only=True)
+class LineupScore(_Rows):
+    """A lineup network scored (one job per block and method), from every
+    `road_rows/**/area_*/<id>__<item>.parquet`, the superseded included: item the method, a file's
+    rows (one per budget) one job, its peak and its total wall."""
+
+    root: Path
+
+    @property
+    def name(self) -> str:
+        return "lineup-score"
+
+    def _read(self) -> tuple[Observed, ...]:
+        out = []
+        for f in sorted(self.root.glob("road_rows/**/area_*/*__*.parquet")):
+            if f.name.endswith(NOT_NETWORKS):
+                continue
+            t = pd.read_parquet(f, columns=["block", "method", "peak_rss_gb", "t_total"])
+            jobs = set(zip(t["block"], t["method"], strict=True))
+            if len(jobs) != 1:
+                raise ValueError(f"{f}: rows of {len(jobs)} (block, method)s, not one")
+            [(block, method)] = jobs
+            out.append(_measure(self.root, f, block=block, item=method,
+                                peak_gb=float(t["peak_rss_gb"].max()),
+                                minutes=float(t["t_total"].max()) / 60))
+        return tuple(out)
+
+
+#: A proposal's status when it ran to its end (the others failed, timed out or were reused).
+OK = "ok"
+
+
+@dataclass(frozen=True, kw_only=True)
+class Proposals(_Rows):
+    """A road proposal (one job per block and method), from every
+    `road_rows/**/proposals/<id>__<item>.parquet` whose status is ok: item the method, its total
+    wall."""
+
+    root: Path
+
+    @property
+    def name(self) -> str:
+        return "propose"
+
+    def _read(self) -> tuple[Observed, ...]:
+        out = []
+        for f in sorted(self.root.glob("road_rows/**/proposals/*__*.parquet")):
+            t = pd.read_parquet(f)
+            ok = t[t["status"] == OK]
+            if ok.empty:
+                continue                 # a failed run's row may lack a peak or a total wall
+            out += [_measure(self.root, f, block=r["block"], item=r["method"],
+                             peak_gb=float(r["peak_rss_gb"]),
+                             minutes=float(r["total_wall_s"]) / 60)
+                    for r in ok[["block", "method", "peak_rss_gb", "total_wall_s"]].to_dict(
+                        "records")]
+        return tuple(out)
+
+
+class Basis(NamedTuple):
+    peak_gb: float
+    minutes: float
+
+
+#: The smoke waves' jobs (Task 10), by item: the same on every block, taken as stored.
+SMOKE_JOBS: dict[str, Basis] = {"quick": Basis(peak_gb=0.5, minutes=1.0),
+                                "big": Basis(peak_gb=3.0, minutes=1.0),
+                                "oom": Basis(peak_gb=1.0, minutes=1.0),
+                                "slow": Basis(peak_gb=0.5, minutes=3.0),
+                                "gpu": Basis(peak_gb=2.0, minutes=2.0)}
+
+
+@dataclass(frozen=True, kw_only=True)
+class Smoke:
+    """The smoke waves' jobs (SMOKE_JOBS), source `smoke`; an item of no smoke job is refused.
+    Nothing to fit (`observed` is empty)."""
+
+    root: Path
+
+    @property
+    def name(self) -> str:
+        return "smoke"
+
+    def stored(self, block: str, item: str) -> Observed | None:
+        if item not in SMOKE_JOBS:
+            raise SystemExit(f"smoke has no item {item!r} (items: {', '.join(SMOKE_JOBS)})")
+        b = SMOKE_JOBS[item]
+        return Observed(block=block, item=item, peak_gb=b.peak_gb, minutes=b.minutes,
+                        source="smoke")
+
+    def observed(self) -> Sequence[Observed]:
+        return ()
+
+
+#: The families by name: the command line's choice, resolved once (no default), each built on the
+#: rows root (research/roadless of the checkout whose rows it reads).
+FAMILIES: dict[str, Callable[[Path], Family]] = {
+    "baselines": lambda root: Baselines(root=root),
+    "presets-gpu": lambda root: Onecard(root=root, device="gpu"),
+    "presets-cpu": lambda root: Onecard(root=root, device="cpu"),
+    "lenses": lambda root: Lenses(root=root),
+    "lineup-score": lambda root: LineupScore(root=root),
+    "propose": lambda root: Proposals(root=root),
+    "smoke": lambda root: Smoke(root=root),
+}
+
+
+# ---- estimates -----------------------------------------------------------------------------
+
+def _worst_rate(rates: Sequence[float]) -> float:
+    """The fit's rate: the worst of the jobs' per-km2 rates (desire_fit.out's)."""
+    return max(rates)
+
+
+@dataclass(frozen=True, kw_only=True)
+class Estimator:
+    """A wave's estimates (the module's doc): of `family`'s work, under `ladder`'s margins, from
+    `history` (earlier waves' measures of the family, newest wave first: history_of), the family's
+    stored runs, or the fit, by `areas` (km2) with its floor `fit_min_km2`."""
+
+    family: Family
+    ladder: Ladder
+    areas: Mapping[str, float]
+    history: Sequence[Observed]
+    fit_min_km2: float
+
+    def estimate(self, block: str, item: str) -> Estimate:
+        """(block, item)'s estimate: the newest wave's measure of it, else the family's most
+        demanding stored run (both with the ladder's stored_mem and stored_time), else the fit
+        (`_fitted`)."""
+        seen = next((o for o in self.history if (o.block, o.item) == (block, item)), None)
+        if seen is None:
+            seen = self.family.stored(block, item)
+        if seen is None:
+            return self._fitted(block)
+        return Estimate(peak_gb=seen.peak_gb, minutes=seen.minutes,
+                        mem_margin=self.ladder.stored_mem, time_margin=self.ladder.stored_time,
+                        source=seen.source)
+
+    def _fitted(self, block: str) -> Estimate:
+        """The fit for `block`, over the family's jobs and the earlier waves': at least
+        fit_min_km2, the worst per-km2 peak and wall of the jobs on such blocks times its area;
+        under it, the largest peak and wall of the jobs on blocks under it. Its memory margin is
+        the ladder's fit_mem, its time's none (the worst rate is its margin). A block with no
+        area, a job on one, or no job to fit is a SystemExit naming it."""
+        what = f"{self.family.name}'s fit"
+        if block not in self.areas:
+            raise SystemExit(f"{block}: nothing of {self.family.name} stored, and no area to fit "
+                             "it by (summary_features.csv or the bank)")
+        runs = (*self.family.observed(), *self.history)
+        unknown = sorted({o.block for o in runs} - set(self.areas))
+        if unknown:
+            raise SystemExit(f"{what}: no area for the blocks of its jobs "
+                             f"{', '.join(unknown[:5])}" + (f" ({len(unknown)} in all)"
+                                                            if len(unknown) > 5 else ""))
+        area, floor = self.areas[block], self.fit_min_km2
+        if area >= floor:
+            large = [o for o in runs if self.areas[o.block] >= floor]
+            if not large:
+                raise SystemExit(f"{block} ({area:.2f} km2): {what} has no job on a block of at "
+                                 f"least {floor:g} km2")
+            peak = _worst_rate([o.peak_gb / self.areas[o.block] for o in large]) * area
+            minutes = _worst_rate([o.minutes / self.areas[o.block] for o in large]) * area
+            source = f"fit:{len(large)} jobs of at least {floor:g} km2"
+        else:
+            small = [o for o in runs if self.areas[o.block] < floor]
+            if not small:
+                raise SystemExit(f"{block} ({area:.2f} km2): {what} has no job on a block under "
+                                 f"{floor:g} km2")
+            peak, minutes = max(o.peak_gb for o in small), max(o.minutes for o in small)
+            source = f"fit:{len(small)} jobs under {floor:g} km2"
+        return Estimate(peak_gb=peak, minutes=minutes, mem_margin=self.ladder.fit_mem,
+                        time_margin=1.0, source=source)
+
+
+class _Wave(NamedTuple):
+    created: datetime
+    wave: str
+    observed: list[Observed]
+
+
+def history_of(waves: Path, family: str) -> list[Observed]:
+    """The earlier waves' measures of `family`'s work: of each `waves/<w>/final.db` (a wave's
+    final snapshot, the plan's Ruling 14) whose header's family is `family`, each job's last
+    attempt that ended DONE (its peak and minutes, source `wave:<w>`), newest wave first by the
+    header's `created`. A final.db whose header names another wave than its directory is refused
+    (ValueError)."""
+    found: list[_Wave] = []
+    for path in sorted(waves.glob("*/final.db")):
+        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        db.row_factory = sqlite3.Row
+        try:
+            text = db.execute("SELECT header FROM header").fetchone()["header"]
+            h = pq._header(pq._Obj(json.loads(text), f"{path}: header"))
+            if h.wave != path.parent.name:
+                raise ValueError(f"{path} is wave {h.wave}'s")
+            if h.family != family:
+                continue
+            rows = db.execute(
+                "SELECT j.block, j.item, a.peak_gb, a.minutes FROM jobs j JOIN attempts a"
+                " ON a.id = (SELECT MAX(id) FROM attempts WHERE job = j.id AND outcome = ?)"
+                " ORDER BY j.id", (pq.Outcome.DONE.value,)).fetchall()
+        finally:
+            db.close()
+        found.append(_Wave(created=stamped(h.created), wave=h.wave, observed=[
+            Observed(block=r["block"], item=r["item"], peak_gb=r["peak_gb"],
+                     minutes=r["minutes"], source=f"wave:{h.wave}") for r in rows]))
+    found.sort(key=lambda w: (w.created, w.wave), reverse=True)
+    return [o for w in found for o in w.observed]
+
+
+def areas_of(features_csv: Path, bank: Mapping[str, object]) -> dict[str, float]:
+    """Each block's area in km2: summary_features.csv's `area_m2` (consolidated.py's), then, for a
+    block the CSV lacks (5810@major), the bank's block's boundary (a projected CRS: m2). A block
+    twice in the CSV, an area not positive, or a bank's value not a Block is refused."""
+    feat = pd.read_csv(features_csv, usecols=["block", "area_m2"])
+    if not feat["block"].is_unique:
+        raise ValueError(f"{features_csv}: a block twice")
+    areas = {str(b): float(a) / 1e6 for b, a in zip(feat["block"], feat["area_m2"], strict=True)}
+    for bid, b in bank.items():
+        if bid in areas:
+            continue
+        if not isinstance(b, Block):
+            raise TypeError(f"the bank's {bid} is of type {type(b).__name__}, not a Block")
+        areas[bid] = float(b.boundary.area) / 1e6
+    odd = sorted(b for b, a in areas.items() if not (math.isfinite(a) and a > 0))
+    if odd:
+        raise ValueError(f"{features_csv}: areas not positive for {', '.join(odd[:5])}")
+    return areas
+
+
+# ---- the plan ------------------------------------------------------------------------------
+
+def plan_wave(*, wave: str, commit: str, family: str, ladder: Ladder, estimator: Estimator,
+              nodes: Sequence[str], ids: Sequence[str], items: Sequence[str],
+              line: Callable[[str, str], str], created: str) -> pq.Seed:
+    """Wave `wave`'s seed (closed: the `Fixed` feed): a job per (id, item), in that order (`items`
+    is `[""]` for a command without `{item}`), job k the k-th from 1, its command `line(block,
+    item)` and its estimate `estimator`'s; its class the smallest rung of `ladder` holding the
+    estimate's gb; the long lane's when its needed minutes pass pool_queue.fresh_minutes or its gb
+    the top rung (then of the top rung's class), needing `fit_mem` times its peak; its group its
+    block, every group on one of `nodes`, longest-processing-time first on the group's needed
+    minutes (ties by `ids`' order, to the least loaded node, ties by `nodes`' order). The
+    estimator's family and ladder must be `family` and `ladder` (else ValueError)."""
+    if family != estimator.family.name or ladder != estimator.ladder:
+        raise ValueError(f"wave {wave}: family {family} and ladder {ladder.name}, the estimator's "
+                         f"{estimator.family.name} and {estimator.ladder.name}")
+    if not nodes or len(set(nodes)) != len(nodes):
+        raise ValueError(f"wave {wave}: nodes {list(nodes)}")
+    work = [(b, i) for b in ids for i in items]
+    est = {w: estimator.estimate(*w) for w in work}
+    group = dict.fromkeys(ids, 0.0)
+    for (b, _), e in est.items():
+        group[b] += e.needed_minutes()
+    load = dict.fromkeys(nodes, 0.0)
+    node_of: dict[str, str] = {}
+    for b in sorted(group, key=lambda b: -group[b]):     # stable: ties in ids' order
+        n = min(nodes, key=lambda n: load[n])            # the first of the least loaded
+        node_of[b] = n
+        load[n] += group[b]
+    fresh = pq.fresh_minutes(ladder)
+    jobs = []
+    for k, (b, i) in enumerate(work, 1):
+        e = est[(b, i)]
+        rung = rung_of(e.gb(), ladder)
+        long = rung is None or e.needed_minutes() > fresh
+        jobs.append(pq.JobSeed(
+            id=k, block=b, item=i, group=b, line=line(b, i), node=node_of[b],
+            cls=class_name(ladder.cards, ladder.rungs[-1] if rung is None else rung),
+            gb=ladder.fit_mem * e.peak_gb if long else e.gb(), minutes=e.needed_minutes(),
+            peak_gb=e.peak_gb, source=e.source, lane=pq.Lane.LONG if long else pq.Lane.POOL))
+    header = pq.Header(wave=wave, commit=commit, family=family, ladder=ladder, created=created,
+                       feed="fixed")
+    return pq.Seed(header=header, jobs=tuple(jobs), closed=True)

@@ -42,12 +42,11 @@ class Ladder:
     (GB, ascending) of memory; a lease runs `lease_minutes`, and a worker claims only a job that
     fits the walltime it has left less `margin_minutes`, its first claim `startup_minutes` into
     its lease at most (so a job estimated past the lease less both is the long lane's: no worker
-    could claim it). Margins, startup and rungs change cost only, never a row. A job is failed
-    after `strikes` attempts
-    that made no progress (the plan's Ruling 6); an idle worker retires after `idle_minutes`,
-    polling every `poll_seconds`. A job's estimate is its stored peak times `stored_mem` (its
-    stored wall times `stored_time`), or the family's fit times `fit_mem`. `about` says what the
-    preset optimizes and what it gives up."""
+    could claim it). Margins, startup and rungs change cost only, never a row. A job is failed after
+    `strikes` attempts that made no progress (the plan's Ruling 6); an idle worker retires after
+    `idle_minutes`, polling every `poll_seconds`. A job's estimate is its stored peak times
+    `stored_mem` (its stored wall times `stored_time`), or the family's fit times `fit_mem`. `about`
+    says what the preset optimizes and what it gives up."""
 
     name: str
     cards: int
