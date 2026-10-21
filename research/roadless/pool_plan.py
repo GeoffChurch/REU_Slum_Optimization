@@ -3,13 +3,13 @@ Ruling 15): each job's estimate, from an estimator Strategy per family of work b
 the wave is configured, and from it the job's class, lane and node.
 
 - **A family** (`Family`) is a kind of work and the rows that record it: `stored(block, item)` is
-  the most demanding stored run of this work on that block (its largest peak, then its longest
-  wall: rows carry no finish time to tell the last), and `observed()` every finished job of it on
-  record, for the fit. A peak is a finished job's maximum RSS, never a reading while it ran
-  (GeoffChurch/mycooc's lesson 9). The families (FAMILIES, the command line's choice by name,
-  resolved once): baselines, presets-gpu and presets-cpu (the onecard rows), lenses (a block's
-  runtime baseline: the same mesh and model, the spec's section 7), lineup-score, propose, and
-  smoke (Task 10's table).
+  the most demanding stored measure of this work on that block (its largest stored peak and,
+  apart from it, its longest stored wall: rows carry no finish time to tell the last), and
+  `observed()` every finished job of it on record, for the fit. A peak is a finished job's
+  maximum RSS, never a reading while it ran (GeoffChurch/mycooc's lesson 9). The families
+  (FAMILIES, the command line's choice by name, resolved once): baselines, presets-gpu and
+  presets-cpu (the onecard rows), lenses (a block's runtime baseline: the same mesh and model, the
+  spec's section 7), lineup-score, propose, and smoke (Task 10's table).
 - **An estimate** (`Estimator.estimate`) is, first, the newest earlier wave's measure of the job
   (`history_of`: their final queues), then the family's stored run, each with the ladder's
   `stored_mem` and `stored_time` margins (1.2 and 1.25 in every preset); with neither, the fit,
@@ -25,8 +25,10 @@ the wave is configured, and from it the job's class, lane and node.
   estimate (pool_ladder.rung_of); the long lane's when its needed minutes pass a fresh lease's
   (pool_queue.fresh_minutes) or its memory the top rung, then needing `fit_mem` times its peak (a
   long run is sized per job, as an OOM past the top rung is: pool_queue); a block's jobs on one
-  node (its group: results can differ by machine), the groups to nodes longest-processing-time
-  first on needed minutes.
+  node (its group: results can differ by machine), and only on a node whose usable memory
+  (USABLE_GB: its memory less its tier's reserve) holds every one of them, a pool job's rung or a
+  long job's need; the groups to those nodes longest-processing-time first on their pool jobs'
+  needed minutes (a long job runs as a run of its own, outside the pools' balance).
 
 Rows are read with pandas, here only: nothing on the cluster imports this module.
 """
@@ -99,7 +101,8 @@ class Family(Protocol):
     def name(self) -> str: ...
 
     def stored(self, block: str, item: str) -> Observed | None:
-        """The most demanding stored run of this work on `block` (Ruling 15); None if none is."""
+        """The most demanding stored measure of this work on `block` (Ruling 15): its largest
+        stored peak and, apart from it, its longest stored wall; None if none is stored."""
         ...
 
     def observed(self) -> Sequence[Observed]:
@@ -123,9 +126,19 @@ def _measure(root: Path, path: Path, *, block: object, item: object, peak_gb: fl
                     source=f"rows:{where}")
 
 
+def _demanding(peak: Observed, wall: Observed) -> Observed:
+    """A (block, item)'s stored basis: the largest stored peak (`peak`'s) and, taken apart from
+    it, the longest stored wall (`wall`'s: the spec's 3.4, time estimates come the same way; one
+    run's wall understated another's by up to 3.5 times); its source names both runs when they
+    differ."""
+    source = peak.source if wall.source == peak.source else f"{peak.source} (wall {wall.source})"
+    return peak._replace(minutes=wall.minutes, source=source)
+
+
 class _Rows(ABC):
     """A family read from its stored rows, once (`_read`): `stored` a (block, item)'s most
-    demanding run, by its peak then its wall; `observed` every run."""
+    demanding measure (`_demanding`: its largest peak and its longest wall, the first stored of
+    each on a tie); `observed` every run."""
 
     @abstractmethod
     def _read(self) -> tuple[Observed, ...]: ...
@@ -136,12 +149,15 @@ class _Rows(ABC):
 
     @cached_property
     def _most(self) -> dict[tuple[str, str], Observed]:
-        most: dict[tuple[str, str], Observed] = {}
+        peak: dict[tuple[str, str], Observed] = {}
+        wall: dict[tuple[str, str], Observed] = {}
         for o in self._runs:
             k = (o.block, o.item)
-            if k not in most or (o.peak_gb, o.minutes) > (most[k].peak_gb, most[k].minutes):
-                most[k] = o
-        return most
+            if k not in peak or o.peak_gb > peak[k].peak_gb:
+                peak[k] = o
+            if k not in wall or o.minutes > wall[k].minutes:
+                wall[k] = o
+        return {k: _demanding(p, wall[k]) for k, p in peak.items()}
 
     def stored(self, block: str, item: str) -> Observed | None:
         k = (block, item)
@@ -460,7 +476,7 @@ def history_of(waves: Path, family: str) -> list[Observed]:
             raise ValueError(f"{path} is wave {h.wave}'s")
         if h.family != family:
             continue
-        db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        db = sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True)
         db.row_factory = sqlite3.Row
         try:
             rows = db.execute(
@@ -478,8 +494,9 @@ def history_of(waves: Path, family: str) -> list[Observed]:
 
 def areas_of(features_csv: Path, bank: Mapping[str, object]) -> dict[str, float]:
     """Each block's area in km2: summary_features.csv's `area_m2` (consolidated.py's), then, for a
-    block the CSV lacks (5810@major), the bank's block's boundary (a projected CRS: m2). A block
-    twice in the CSV, an area not positive, or a bank's value not a Block is refused."""
+    block the CSV lacks (one consolidated.py has not described: a new region, say), the bank's
+    block's boundary (a projected CRS: m2). A block twice in the CSV, an area not positive, or a
+    bank's value not a Block is refused."""
     feat = pd.read_csv(features_csv, usecols=["block", "area_m2"])
     if not feat["block"].is_unique:
         raise ValueError(f"{features_csv}: a block twice")
@@ -498,47 +515,96 @@ def areas_of(features_csv: Path, bank: Mapping[str, object]) -> dict[str, float]
 
 # ---- the plan ------------------------------------------------------------------------------
 
+#: Each node's memory less its tier's reserve (GB): the most one node gives a wave's jobs, a pool
+#: worker's rung or a long run's need. A declared table, the spec's 3.4 figures (248 on the GPU
+#: nodes and quadro2, 376 less 128; 1,381 on orion): cluster_submit's site and GPU files at the
+#: pin (ec79a0eb) hold neither a node's memory (sinfo's) nor its reserve (fitted at run time into
+#: the board's tiers.json from other users' jobs). A node not here cannot be planned on.
+USABLE_GB: dict[str, float] = {"h100": 248.0, "quadro1": 248.0, "quadro2": 248.0,
+                               "tesla1": 248.0, "tesla2": 248.0, "orion": 1381.0}
+
+
+class Sized(NamedTuple):
+    """Where a job's estimate puts it (`_sized`): its lane, its class, the memory it needs (its
+    `gb`) and what a node must give it (`hold_gb`: its rung's, a pool worker's; or its own, a long
+    run's)."""
+
+    lane: pq.Lane
+    cls: str
+    gb: float
+    hold_gb: float
+
+
+def _sized(e: Estimate, ladder: Ladder) -> Sized:
+    """`e`'s job: a pool's, of the class of the smallest rung holding its gb, when a rung does and
+    its needed minutes fit a fresh lease (pool_queue.fresh_minutes); else the long lane's, of that
+    rung's class (the top rung's past it), needing `fit_mem` times its peak."""
+    rung = rung_of(e.gb(), ladder)
+    cls = class_name(ladder.cards, ladder.rungs[-1] if rung is None else rung)
+    if rung is not None and e.needed_minutes() <= pq.fresh_minutes(ladder):
+        return Sized(lane=pq.Lane.POOL, cls=cls, gb=e.gb(), hold_gb=rung)
+    gb = ladder.fit_mem * e.peak_gb
+    return Sized(lane=pq.Lane.LONG, cls=cls, gb=gb, hold_gb=gb)
+
+
+def _able(nodes: Sequence[str], usable_gb: Mapping[str, float], need: float) -> list[str]:
+    """The nodes of `nodes` (in order) whose usable memory holds `need` GB."""
+    return [n for n in nodes if need <= usable_gb[n]]
+
+
 def plan_wave(*, wave: str, commit: str, family: str, ladder: Ladder, estimator: Estimator,
-              nodes: Sequence[str], ids: Sequence[str], items: Sequence[str],
-              line: Callable[[str, str], str], created: str) -> pq.Seed:
+              nodes: Sequence[str], usable_gb: Mapping[str, float], ids: Sequence[str],
+              items: Sequence[str], line: Callable[[str, str], str], created: str) -> pq.Seed:
     """Wave `wave`'s seed (closed: the `Fixed` feed): a job per (id, item), in that order (`items`
     is `[""]` for a command without `{item}`), job k the k-th from 1, its command `line(block,
-    item)` and its estimate `estimator`'s; its class the smallest rung of `ladder` holding the
-    estimate's gb; the long lane's when its needed minutes pass pool_queue.fresh_minutes or its gb
-    the top rung (then of the top rung's class), needing `fit_mem` times its peak; its group its
-    block, every group on one of `nodes`, longest-processing-time first on the group's needed
-    minutes (ties by `ids`' order, to the least loaded node, ties by `nodes`' order). The
-    estimator's family and ladder must be `family` and `ladder` (else ValueError). A long job
-    estimated past any partition's wall (4287's fitted cycle_desire proposal, about 584 h against
-    7 days) is planned LONG with its estimate as it is: refusing or flagging it is the submit's
-    (Task 7)."""
+    item)` and its estimate `estimator`'s, its lane, class and need `_sized`'s; its group its
+    block, every group on one of `nodes` whose usable memory (`usable_gb`, USABLE_GB at the edge)
+    holds each of its jobs (a pool job's rung, a long job's need), longest-processing-time first on
+    the group's pool jobs' needed minutes (a long job runs as a run of its own: ties by `ids`'
+    order, each to the least loaded of the nodes that hold it, ties by `nodes`' order). A group no
+    node holds is a SystemExit naming its block and its largest job, never placed where it cannot
+    run. The estimator's family and ladder must be `family` and `ladder`, and every node in
+    `usable_gb` (else ValueError). A long job estimated past any partition's wall (4287's fitted
+    cycle_desire proposal, about 584 h against 7 days) is planned LONG with its estimate as it
+    is: refusing or flagging it is the submit's (Task 7)."""
     if family != estimator.family.name or ladder != estimator.ladder:
         raise ValueError(f"wave {wave}: family {family} and ladder {ladder.name}, the estimator's "
                          f"{estimator.family.name} and {estimator.ladder.name}")
     if not nodes or len(set(nodes)) != len(nodes):
         raise ValueError(f"wave {wave}: nodes {list(nodes)}")
+    unknown = [n for n in nodes if n not in usable_gb]
+    if unknown:
+        raise ValueError(f"wave {wave}: no usable memory known for {', '.join(unknown)} "
+                         f"(nodes: {', '.join(usable_gb)})")
     work = [(b, i) for b in ids for i in items]
     est = {w: estimator.estimate(*w) for w in work}
-    group = dict.fromkeys(ids, 0.0)
-    for (b, _), e in est.items():
-        group[b] += e.needed_minutes()
+    size = {w: _sized(e, ladder) for w, e in est.items()}
+    pooled = dict.fromkeys(ids, 0.0)                     # a group's pool minutes
+    largest: dict[str, tuple[str, str]] = {}              # a group's largest job
+    for w, s in size.items():
+        b = w[0]
+        if s.lane == pq.Lane.POOL:
+            pooled[b] += est[w].needed_minutes()
+        if b not in largest or s.hold_gb > size[largest[b]].hold_gb:
+            largest[b] = w
     load = dict.fromkeys(nodes, 0.0)
     node_of: dict[str, str] = {}
-    for b in sorted(group, key=lambda b: -group[b]):     # stable: ties in ids' order
-        n = min(nodes, key=lambda n: load[n])            # the first of the least loaded
+    for b in sorted(pooled, key=lambda b: -pooled[b]):   # stable: ties in ids' order
+        top = size[largest[b]]
+        able = _able(nodes, usable_gb, top.hold_gb)
+        if not able:
+            raise SystemExit(f"wave {wave}: no node of {', '.join(nodes)} holds {b}'s "
+                             f"{largest[b][1] or 'job'} ({top.lane} needing {top.hold_gb:.0f} GB; "
+                             f"usable: " + ", ".join(f"{n} {usable_gb[n]:g}" for n in nodes) + ")")
+        n = min(able, key=lambda n: load[n])             # the first of the least loaded
         node_of[b] = n
-        load[n] += group[b]
-    fresh = pq.fresh_minutes(ladder)
+        load[n] += pooled[b]
     jobs = []
     for k, (b, i) in enumerate(work, 1):
-        e = est[(b, i)]
-        rung = rung_of(e.gb(), ladder)
-        long = rung is None or e.needed_minutes() > fresh
+        e, s = est[(b, i)], size[(b, i)]
         jobs.append(pq.JobSeed(
-            id=k, block=b, item=i, group=b, line=line(b, i), node=node_of[b],
-            cls=class_name(ladder.cards, ladder.rungs[-1] if rung is None else rung),
-            gb=ladder.fit_mem * e.peak_gb if long else e.gb(), minutes=e.needed_minutes(),
-            peak_gb=e.peak_gb, source=e.source, lane=pq.Lane.LONG if long else pq.Lane.POOL))
+            id=k, block=b, item=i, group=b, line=line(b, i), node=node_of[b], cls=s.cls, gb=s.gb,
+            minutes=e.needed_minutes(), peak_gb=e.peak_gb, source=e.source, lane=s.lane))
     header = pq.Header(wave=wave, commit=commit, family=family, ladder=ladder, created=created,
                        feed="fixed")
     return pq.Seed(header=header, jobs=tuple(jobs), closed=True)

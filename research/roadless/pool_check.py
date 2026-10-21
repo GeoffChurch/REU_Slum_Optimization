@@ -7,7 +7,8 @@ code as it is and must fail under each of its faults.
     uv run python $S transitions [--fault <name>]   # faults: late-finish, drop-on-top,
                                                     # any-worker, second-claim
     uv run python $S class [--fault <name>] <rows>  # faults: median-rate, no-fit-margin,
-                                                    # family-rate
+                                                    # family-rate, all-long, no-capacity,
+                                                    # with-proposed, one-run
     uv run python $S both-ways <guards,> [args ...]   # each guard, then under each of its faults
 
 A guard runs as `<guard> [--fault <name>] [args ...]`: the fault is named by its flag, so a
@@ -69,9 +70,13 @@ DONE marks the job done), `second-claim` (a worker holding a claim may claim aga
 stored rows under `<rows>`, every block's area from its consolidated_rows/summary_features.csv:
 - `stored`: the lineup-score family's every stored (block, method) (scoring-only runs: no root of
   pool_plan.PROPOSED_AND_SCORED), planned under cpu-score (a plan of every stored block and method
-  over orion and quadro2): its class is that of the smallest rung holding 1.2 times its most
-  demanding stored peak (recomputed here from the family's runs), or it is LONG past 88 GB; its
-  needed minutes are 1.25 times that run's wall (rel 1e-9).
+  over orion and quadro2), its basis recomputed here from the family's runs (its largest stored
+  peak and, apart from it, its longest stored wall), lanes both ways: needing 1.2 times that
+  peak, a job a rung holds whose 1.25 times that wall fits a fresh lease (fresh_minutes, 105) is
+  a pool's in that rung's class, any other the long lane's needing 1.5 times its peak; its needed
+  minutes are 1.25 times the wall (rel 1e-9). And two facts of the rows (2026-10-21) no reader
+  supplies, pinning the scoring-only ruling: no stored network is past the top rung, and 62803's
+  cycle_desire is a pool's in m24 (SCORED_ALONE_*).
 - `leave-one-out`: for each item of the propose family, its jobs on blocks of at least
   FIT_MIN_KM2: each block's estimate with its own rows removed (a family without them) is 1.5
   times the worst per-km2 peak of the others on such blocks, the item's own when they are on
@@ -82,13 +87,19 @@ stored rows under `<rows>`, every block's area from its consolidated_rows/summar
   53556's 10.9 GB/km2. The other items tell a family-wide fit from an item's: cycle_desire's own
   rate is the family's.
 - `plan`: plan_wave of the CLASS_BLOCKS stored lineup blocks with the most stored work (4287 among
-  them: its arterial network's 3.0 h, the long lane's) and the seven methods, over CLASS_NODES:
-  every job of a block on one node, its group the block; the nodes' summed needed minutes within
-  the largest group's of each other (longest-processing-time first); a job whose needed minutes
-  pass pool_queue.fresh_minutes (a lease less its margin and a worker's startup, 105) is LONG.
+  them: its arterial network's 3.0 h, the long lane's) and the seven methods, over CLASS_NODES
+  with pool_plan.USABLE_GB: each job's lane both ways against its estimate, as in `stored`;
+  every job of a block on one node, its group the block, and that node's usable memory holding
+  each of them (a pool job's rung, a long job's need: the g3 blocks' fitted cycle_desire scoring
+  is past quadro2's 248 GB); the placement replayed, the groups longest-processing-time first on
+  their pool jobs' minutes, each to the least loaded of the nodes that hold it.
 Faults: `median-rate` (the fit's rate the median per-km2 rate, not the worst: the recomputation
-fails), `no-fit-margin` (the fit without its 1.5: 62803 is classed below its measured peak) and
-`family-rate` (every item fitted at the family's rate: the cheap methods' recomputation fails).
+fails), `no-fit-margin` (the fit without its 1.5: 62803 is classed below its measured peak),
+`family-rate` (every item fitted at the family's rate: the cheap methods' recomputation fails),
+`all-long` (every job sent to the long lane: the pool's jobs fail the lanes), `no-capacity`
+(groups placed on any node: a long job on quadro2 past its 248 GB), `with-proposed` (lineup-score
+reads the rows that proposed as they scored: the facts fail) and `one-run` (the stored wall the
+largest peak's run's, not the longest: the needed minutes fail).
 """
 from __future__ import annotations
 
@@ -175,7 +186,7 @@ class Attempt(NamedTuple):
 
 
 def _attempts(path: Path) -> list[Attempt]:
-    db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    db = sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True)
     db.row_factory = sqlite3.Row
     try:
         return [Attempt(id=r["id"], job=r["job"], worker=r["worker"], outcome=r["outcome"],
@@ -634,20 +645,54 @@ class Guard(NamedTuple):
 CLASS_NODES = ("orion", "quadro2")
 CLASS_ITEM = "cycle_native_betweenness_contrast"    # leave-one-out: cycle_desire's proposals
 CLASS_BLOCKS = 12        # plan: the stored lineup blocks with the most stored work
+# Facts of the stored rows (2026-10-21) that no reader supplies, pinning the scoring-only ruling
+# (pool_plan.PROPOSED_AND_SCORED): scored alone, every stored lineup network fits a rung of
+# cpu-score, and 62803's cycle_desire network (16.6 GB scored alone, 165 GB where it was proposed
+# in the same process) is m24's.
+SCORED_ALONE_BLOCK = "ZAF.9.3.1_1_62803"
+SCORED_ALONE_CLASS = "m24"
 
 
 def _now() -> str:
     return datetime.now(UTC).strftime(STAMP)
 
 
-def _most(runs: Sequence[pp.Observed]) -> dict[tuple[str, str], pp.Observed]:
-    """Each (block, item)'s most demanding run, recomputed here: its largest peak (then wall)."""
-    most: dict[tuple[str, str], pp.Observed] = {}
+class Stored(NamedTuple):
+    """A (block, item)'s stored basis, recomputed here: its largest peak, its longest wall."""
+    peak_gb: float
+    minutes: float
+
+
+def _stored(runs: Sequence[pp.Observed]) -> dict[tuple[str, str], Stored]:
+    out: dict[tuple[str, str], Stored] = {}
     for o in runs:
         k = (o.block, o.item)
-        if k not in most or (o.peak_gb, o.minutes) > (most[k].peak_gb, most[k].minutes):
-            most[k] = o
-    return most
+        out[k] = (Stored(peak_gb=max(out[k].peak_gb, o.peak_gb),
+                         minutes=max(out[k].minutes, o.minutes)) if k in out
+                  else Stored(peak_gb=o.peak_gb, minutes=o.minutes))
+    return out
+
+
+def _lane_wrong(j: pq.JobSeed, *, peak: float, gb: float, minutes: float,
+                lad: Ladder) -> list[str]:
+    """`j` against its estimate (its basis `peak`, needing `gb` and `minutes`), both ways: a job a
+    rung holds whose minutes fit a fresh lease is a pool's, in that rung's class; any other is
+    the long lane's, needing fit_mem times its peak."""
+    r = rung_of(gb, lad)
+    if r is not None and minutes <= pq.fresh_minutes(lad):
+        want = class_name(lad.cards, r)
+        return ([] if (j.lane, j.cls) == (pq.Lane.POOL, want) else
+                [f"{j.block} {j.item}: {j.lane} in {j.cls}, want pool in {want} ({gb:.1f} GB, "
+                 f"{minutes:.0f} min)"])
+    need = lad.fit_mem * peak
+    return ([] if j.lane == pq.Lane.LONG and math.isclose(j.gb, need, rel_tol=1e-9) else
+            [f"{j.block} {j.item}: {j.lane} needing {j.gb:.1f} GB, want long needing "
+             f"{need:.1f} ({gb:.1f} GB, {minutes:.0f} min)"])
+
+
+def _failing(notes: Sequence[str]) -> str:
+    return (" -> ok" if not notes else " -> FAILS: " + "; ".join(notes[:5])
+            + (f" ({len(notes)} in all)" if len(notes) > 5 else ""))
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -669,34 +714,44 @@ class _Without:
 
 
 def _stored_classes(lineup: pp.Family, lad: Ladder, areas: dict[str, float]) -> list[str]:
-    most = _most(lineup.observed())
+    stored = _stored(lineup.observed())
     est = pp.Estimator(family=lineup, ladder=lad, areas=areas, history=(),
                        fit_min_km2=pp.FIT_MIN_KM2, fit_min_blocks=pp.FIT_MIN_BLOCKS)
     seed = pp.plan_wave(wave="pool-check", commit=COMMIT, family=lineup.name, ladder=lad,
-                        estimator=est, nodes=CLASS_NODES, ids=sorted({b for b, _ in most}),
-                        items=sorted({i for _, i in most}), line=lambda b, i: f"echo {b} {i}",
-                        created=_now())
+                        estimator=est, nodes=CLASS_NODES, usable_gb=pp.USABLE_GB,
+                        ids=sorted({b for b, _ in stored}), items=sorted({i for _, i in stored}),
+                        line=lambda b, i: f"echo {b} {i}", created=_now())
     notes: list[str] = []
     by: Counter[str] = Counter()
+    lanes: Counter[str] = Counter()
     for j in seed.jobs:
-        if (j.block, j.item) not in most:
+        if (j.block, j.item) not in stored:
             continue                     # no stored run: the fit's (leave-one-out's to check)
-        o = most[(j.block, j.item)]
-        r = rung_of(1.2 * o.peak_gb, lad)
-        by["long" if r is None else class_name(0, r)] += 1
-        if r is None and j.lane != pq.Lane.LONG:
-            notes.append(f"{j.block} {j.item}: peak {o.peak_gb:.1f} GB in {j.lane}, want LONG")
-        if r is not None and j.cls != class_name(0, r):
-            notes.append(f"{j.block} {j.item}: peak {o.peak_gb:.2f} GB in {j.cls}, want "
-                         f"{class_name(0, r)}")
-        if not math.isclose(j.minutes, 1.25 * o.minutes, rel_tol=1e-9):
+        s = stored[(j.block, j.item)]
+        gb, minutes = 1.2 * s.peak_gb, 1.25 * s.minutes
+        r = rung_of(gb, lad)
+        by["past 88" if r is None else class_name(0, r)] += 1
+        lanes[j.lane.value] += 1
+        notes += _lane_wrong(j, peak=s.peak_gb, gb=gb, minutes=minutes, lad=lad)
+        if not math.isclose(j.minutes, minutes, rel_tol=1e-9):
             notes.append(f"{j.block} {j.item}: {j.minutes:.2f} minutes, want 1.25 x "
-                         f"{o.minutes:.2f}")
-    print(f"stored: {len(most)} stored (block, method)s of {len({b for b, _ in most})} blocks "
+                         f"{s.minutes:.2f}")
+    past = by["past 88"]
+    if past:
+        notes.append(f"{past} stored lineup networks past the top rung: scored alone, none is")
+    fact = next((j for j in seed.jobs if (j.block, j.item) == (SCORED_ALONE_BLOCK, CLASS_ITEM)),
+                None)
+    if fact is None or (fact.lane, fact.cls) != (pq.Lane.POOL, SCORED_ALONE_CLASS):
+        notes.append(f"{SCORED_ALONE_BLOCK}'s {CLASS_ITEM}: "
+                     + ("not planned" if fact is None else f"{fact.lane} in {fact.cls}")
+                     + f", want pool in {SCORED_ALONE_CLASS} (scored alone)")
+    print(f"stored: {len(stored)} stored (block, method)s of {len({b for b, _ in stored})} blocks "
           f"under cpu-score, by class " + ", ".join(f"{c} {by[c]}" for c in sorted(
-              by, key=lambda c: math.inf if c == "long" else int(c[1:])))
-          + (" -> ok" if not notes else " -> FAILS: " + "; ".join(notes[:5])
-             + (f" ({len(notes)} in all)" if len(notes) > 5 else "")), flush=True)
+              by, key=lambda c: math.inf if c == "past 88" else int(c[1:])))
+          + "; by lane " + ", ".join(f"{k} {n}" for k, n in sorted(lanes.items()))
+          + ("" if fact is None else f"; {SCORED_ALONE_BLOCK}'s {CLASS_ITEM} {fact.lane} in "
+                                     f"{fact.cls}")
+          + _failing(notes), flush=True)
     return ["stored"] if notes else []
 
 
@@ -770,45 +825,61 @@ def _leave_one_out(propose: pp.Family, lad: Ladder, areas: dict[str, float]) -> 
 
 
 def _placed(lineup: pp.Family, lad: Ladder, areas: dict[str, float]) -> list[str]:
-    most = _most(lineup.observed())
-    work = dict.fromkeys(sorted({b for b, _ in most}), 0.0)
-    for (b, _), o in most.items():
-        work[b] += o.minutes
+    stored = _stored(lineup.observed())
+    work = dict.fromkeys(sorted({b for b, _ in stored}), 0.0)
+    for (b, _), s in stored.items():
+        work[b] += s.minutes
     blocks = sorted(sorted(work, key=lambda b: -work[b])[:CLASS_BLOCKS])
-    items = sorted({i for _, i in most})
+    items = sorted({i for _, i in stored})
     est = pp.Estimator(family=lineup, ladder=lad, areas=areas, history=(),
                        fit_min_km2=pp.FIT_MIN_KM2, fit_min_blocks=pp.FIT_MIN_BLOCKS)
+    usable = pp.USABLE_GB
     seed = pp.plan_wave(wave="pool-check", commit=COMMIT, family=lineup.name, ladder=lad,
-                        estimator=est, nodes=CLASS_NODES, ids=blocks, items=items,
-                        line=lambda b, i: f"echo {b} {i}", created=_now())
+                        estimator=est, nodes=CLASS_NODES, usable_gb=usable, ids=blocks,
+                        items=items, line=lambda b, i: f"echo {b} {i}", created=_now())
+    rung_gb = {class_name(lad.cards, r): float(r) for r in lad.rungs}
     notes: list[str] = []
-    group = dict.fromkeys(blocks, 0.0)
-    load = dict.fromkeys(CLASS_NODES, 0.0)
-    nodes: dict[str, set[str]] = {}
+    need = dict.fromkeys(blocks, 0.0)            # the most a group's jobs need of its node
+    pooled = dict.fromkeys(blocks, 0.0)          # a group's pool minutes
+    on: dict[str, set[str]] = {}
     for j in seed.jobs:
-        group[j.block] += j.minutes
-        load[j.node] += j.minutes
-        nodes.setdefault(j.block, set()).add(j.node)
+        e = est.estimate(j.block, j.item)
+        notes += _lane_wrong(j, peak=e.peak_gb, gb=e.gb(), minutes=e.needed_minutes(), lad=lad)
+        hold = rung_gb[j.cls] if j.lane == pq.Lane.POOL else j.gb
+        if hold > usable[j.node]:
+            notes.append(f"{j.block} {j.item}: {j.lane} needing {hold:.0f} GB on {j.node} "
+                         f"({usable[j.node]:g} GB usable)")
+        need[j.block] = max(need[j.block], hold)
+        if j.lane == pq.Lane.POOL:
+            pooled[j.block] += j.minutes
+        on.setdefault(j.block, set()).add(j.node)
         if j.group != j.block:
             notes.append(f"job {j.id}: group {j.group}, block {j.block}")
-        if j.minutes > pq.fresh_minutes(lad) and j.lane != pq.Lane.LONG:
-            notes.append(f"{j.block} {j.item}: {j.minutes:.0f} minutes in {j.lane}, want LONG")
-    split = {b: sorted(n) for b, n in nodes.items() if len(n) != 1}
+    split = {b: sorted(n) for b, n in on.items() if len(n) != 1}
     if split:
         notes.append(f"blocks on more than one node: {split}")
     if len(seed.jobs) != len(blocks) * len(items):
         notes.append(f"{len(seed.jobs)} jobs, not {len(blocks)} x {len(items)}")
-    gap, largest = max(load.values()) - min(load.values()), max(group.values())
-    if gap > largest:
-        notes.append(f"the nodes' loads {dict(load)} differ by {gap:.0f} minutes, more than the "
-                     f"largest group's {largest:.0f}")
-    long = [f"{j.block} {j.item} ({j.minutes:.0f} min, {j.gb:.0f} GB)"
+    # The placement replayed: the groups longest-processing-time first on their pool minutes,
+    # each to the least loaded of the nodes that hold its every job (a long job's minutes outside
+    # the balance).
+    load = dict.fromkeys(CLASS_NODES, 0.0)
+    for b in sorted(blocks, key=lambda b: -pooled[b]):
+        able = [n for n in CLASS_NODES if need[b] <= usable[n]]
+        want = min(able, key=lambda n: load[n]) if able else None
+        got = sorted(on[b])
+        if got != [want]:
+            loads = ", ".join(f"{n} {load[n]:.0f}" for n in CLASS_NODES)
+            notes.append(f"{b} on {', '.join(got)}, want {want} ({pooled[b]:.0f} pool minutes, "
+                         f"needing {need[b]:.0f} GB; loads {loads})")
+        load[got[0]] += pooled[b]
+    long = [f"{j.block} {j.item} ({j.minutes:.0f} min, {j.gb:.0f} GB, {j.node})"
             for j in seed.jobs if j.lane == pq.Lane.LONG]
-    print(f"plan: {len(blocks)} blocks, {len(seed.jobs)} jobs over {', '.join(CLASS_NODES)}: "
-          + ", ".join(f"{n} {load[n]:.0f} min ({sum(1 for b in nodes if n in nodes[b])} blocks)"
+    print(f"plan: {len(blocks)} blocks, {len(seed.jobs)} jobs over "
+          + ", ".join(f"{n} ({usable[n]:g} GB usable)" for n in CLASS_NODES) + ": pool minutes "
+          + ", ".join(f"{n} {load[n]:.0f} ({sum(1 for b in on if n in on[b])} blocks)"
                       for n in CLASS_NODES)
-          + f", the largest group {largest:.0f} min; long: {', '.join(long) or 'none'}"
-          + (" -> ok" if not notes else " -> FAILS: " + "; ".join(notes)), flush=True)
+          + f"; long: {', '.join(long) or 'none'}" + _failing(notes), flush=True)
     return ["plan"] if notes else []
 
 
@@ -880,6 +951,15 @@ def _family_pool(runs: Sequence[pp.Observed], *, item: str, fit_min_blocks: int)
     return pp.Pool(scope="family", runs=list(runs))
 
 
+_SIZED = pp._sized
+
+
+def _all_long(e: pp.Estimate, ladder: Ladder) -> pp.Sized:
+    """pool_plan._sized with every job sent to the long lane, needing fit_mem times its peak."""
+    gb = ladder.fit_mem * e.peak_gb
+    return _SIZED(e, ladder)._replace(lane=pq.Lane.LONG, gb=gb, hold_gb=gb)
+
+
 FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "claim": {"split-tx": lambda: _patched(pq.SqliteQueue, "claim", _split_claim)},
     "transitions": {"late-finish": lambda: _patched(pq, "_holds", lambda job, attempt: True),
@@ -888,7 +968,12 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
                     "second-claim": lambda: _patched(pq, "_one_claim", lambda db, worker: None)},
     "class": {"median-rate": lambda: _patched(pp, "_worst_rate", statistics.median),
               "no-fit-margin": lambda: _patched(pp.Estimator, "_fitted", _unmargined),
-              "family-rate": lambda: _patched(pp, "_pool", _family_pool)},
+              "family-rate": lambda: _patched(pp, "_pool", _family_pool),
+              "all-long": lambda: _patched(pp, "_sized", _all_long),
+              "no-capacity": lambda: _patched(pp, "_able", lambda nodes, usable_gb, need: list(
+                  nodes)),
+              "with-proposed": lambda: _patched(pp, "PROPOSED_AND_SCORED", frozenset()),
+              "one-run": lambda: _patched(pp, "_demanding", lambda peak, wall: peak)},
 }
 
 

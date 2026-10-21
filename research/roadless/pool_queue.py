@@ -868,7 +868,7 @@ def read_header(path: Path) -> Header:
     """The header of the queue at `path`, or of a snapshot of one (a wave's final.db), read
     exactly; read-only, one SELECT (so a path with no queue is refused, never made one: sqlite3's
     OperationalError, and a queue with no header is a ValueError)."""
-    db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    db = sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True)
     try:
         row = db.execute("SELECT header FROM header").fetchone()
     finally:
