@@ -2422,8 +2422,10 @@ _LAZY_INIT = gcl.LazyBaseline.__init__
 UNIFORM_TOL = 1e-12      # uniform-control: P0 and every home's escape time, U against T
                          # (relative: one solve on the same cells but the pockets', which hold no
                          # demand; 3e-14 -- 7e-14 apart on 41940 and 41779)
-POCKET_TOL = 1e-9        # pocket-escape: a pocket's leak drainage against its homes' injection
-                         # (relative: the refined solve's floor)
+POCKET_TOL = 1e-7        # pocket-escape: a pocket's leak drainage against its homes' injection
+                         # (relative: the refined solve's backward error read in a pocket whose
+                         # leak is ~1e-7 of the system's conductances, 2.2e-9 on 20269 and 5.8e-9
+                         # on 23597; a pocket that drains nowhere is off by all of it)
 
 
 def _tu(b: Block) -> tuple[gcl.Model, gcl.Model]:
