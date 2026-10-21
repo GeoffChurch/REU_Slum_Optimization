@@ -87,7 +87,7 @@ def _passage_flux(Tp: NDArray[np.float64], u: NDArray[np.float64], ea: NDArray[n
 
 def flow_of(m: gcl.Model, st: gcl.State, inj: NDArray[np.float64]) -> CellFlow:
     """The flow of the factored state `st` under the injection `inj` per home."""
-    c, fm, r = st.sys.cells, m.fm, st.reach
+    c, fm, r = st.sys.cells, st.fm, st.reach
     u = m.solve(st, inj)
     F = _passage_flux(r.Tp, u, c.ea, c.eb)
     Ff = r.Gf * u[c.fc]

@@ -25,8 +25,9 @@ COMPLEX = "cx+"           # every complex metric's name starts so (gap_clear.Com
 # digest ending its name: the runtime until the consolidated pass, and the core every guard of the
 # complex checks against its oracles (gap_clear_check)
 PER_BLOCK = f"cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v{gap_clear.CODE}"
-# The drivable streets: the highway classes (`_link` folded) the street boost raises (owner
-# 2026-10-16: "a 10x boost is I think reasonable" on drivable streets; footways, paths, tracks not)
+# The drivable streets: the highway classes (`_link` folded) the street boost raises where they are
+# tagged paved (owner 2026-10-16: "a 10x boost is I think reasonable" on drivable streets;
+# footways, paths, tracks not; 2026-10-20: "only boost if it's explicitly tagged paved")
 DRIVE_CLASSES = ("living_street", "motorway", "primary", "residential", "secondary", "service",
                  "tertiary", "trunk", "unclassified")
 # The one metric for every block and region (owner 2026-10-14 -- 16; BACKLOG 4, decisions (1) --
@@ -35,10 +36,10 @@ DRIVE_CLASSES = ("living_street", "motorway", "primary", "residential", "seconda
 # as barriers 8 m wide, open at real crossings 3 m wide (`B8c3`); the edge open, a block's street
 # ring its exit; the leaks' central constants, chosen once on 5810@major's closed reference for a
 # 500 m median trip with 90% of the leak at buildings (`Lo6214b562`: region_leaks.CALIBRATED); the
-# drivable streets' conductance 10x (`S10h<classes>`)
+# paved drivable streets' conductance 10x, and a proposed road's corridor's (`S10spavedh<classes>`)
 BARRIERS = gx.OsmBarriers(line_m=8.0, cross_m=3.0)
 LEAK = gx.InternalLeak(open_m=6214.0, foot_m=562.0)
-BOOST = gx.StreetBoost(factor=10.0, classes=DRIVE_CLASSES)
+BOOST = gx.StreetBoost(factor=10.0, surfaces=gx.PAVED, classes=DRIVE_CLASSES)
 EXITS = gx.Exits(barriers=BARRIERS, edge=gx.OpenEdge(), leak=LEAK, boost=BOOST)
 RUNTIME = PER_BLOCK + EXITS.suffix
 

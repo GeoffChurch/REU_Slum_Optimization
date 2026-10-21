@@ -55,8 +55,8 @@ MAX_WINDOW_M = 40000.0
 OSM_PAD_M = 100.0        # the OSM features are read in the face's box grown by this (m)
 EXTRACT_PAD_M = 10000.0  # the cached extract covers the kblock source's blocks grown by this (m):
                          # every face of the major network about a kblock (checked at each use)
-EXTRACT_REV = 2          # what a cached extract holds (its key): the layers, columns and rows of
-                         # _read (2: the features no reader reads dropped)
+EXTRACT_REV = 3          # what a cached extract holds (its key): the layers, columns and rows of
+                         # _read (2: the features no reader reads dropped; 3: the ways' surface)
 
 
 @dataclass(frozen=True)
@@ -189,7 +189,7 @@ def _read(iso: str, crs: Any, box: tuple[float, float, float, float]) -> Osm:
     wt = _tags(w.other_tags)
     ways = gpd.GeoDataFrame(
         {"highway": w.highway.fillna("").to_numpy(), "railway": w.railway.fillna("").to_numpy(),
-         "waterway": w.waterway.fillna("").to_numpy(),
+         "waterway": w.waterway.fillna("").to_numpy(), "surface": _tag(wt, "surface"),
          "bridge": [b not in ("", "no") for b in _tag(wt, "bridge")],
          "tunnel": [b not in ("", "no") for b in _tag(wt, "tunnel")]},
         geometry=w.geometry.to_numpy(), crs=crs)

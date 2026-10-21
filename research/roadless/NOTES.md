@@ -8335,3 +8335,66 @@ g2a's cycle_desire 1.0, the speed-first three 9.5, the first arterial runs (canc
 arterial is the excess: its proposals ran a median 0.46 h but 14 -- 16 h unstopped on three blocks,
 where the estimate took the study's 1.3 -- 6.4% of the stored walls. Here: the guards after the
 merge (98 runs both ways, 9.9 process-h; the arterial and mesh guards and pytest about 0.5 more).
+
+### The street boost on paved ways only, and on proposed roads (owner 2026-10-20)
+
+**Why.** Block 5810's flow pictures (the pipeline page, 2026-10-20) showed long corridors along
+its lanes that looked found by the flow; they were given to it. The street boost took a way by its
+highway class alone, and OpenStreetMap classes 5810's sand lanes as residential and service:
+inside the block 7,259 m of the 7,735 m boosted is tagged unpaved, 234 m paved and 242 m untagged
+(Overpass, ways of 3 m or more inside the block), while 651 m of asphalt footway and 399 m of
+paving-stone pedestrian way took no boost. With the boost off the lanes carry about their share of
+the flow: 15.5% of the open ground, 17.8% of the power (1.1x; the drivable lanes 1.2x, the
+footways 0.9x), 26.7% of the hottest 1% of pixels (70.9% with the boost); over the no-buildings
+prior the strongest pixels lie in the narrow gaps between buildings, 3.3% of the top 1% on a lane
+(6.9% boosted). P0 is 3.30e6 unboosted against 1.85e6. The owner: "Footpaths shouldn't get the 10x
+boost until they are picked for paving"; "Let's only boost if it's explicitly tagged paved".
+
+**The survey** (the store's 302 blocks and 5810@major; per block the drivable length inside it, off
+its ring's edge strip as consolidated `features` measures it, from the Geofabrik extract): of
+473 km, 37% tagged paved, 23% unpaved, 40% untagged. By size (paved / unpaved / untagged): small
+29 / 28 / 42%, large 47 / 26 / 27%, oversized 32 / 21 / 46%, 5810@major 43 / 29 / 29%. The rule
+below leaves the inside unboosted (paved inside 1 m or less) on 71 of the 105 small blocks with a
+drivable way inside, 18 of the 60 large and 1 of the 22 oversized. The 158,872 drivable ways of
+the extract's box are tagged asphalt 81,191, untagged 53,686, paved 13,160, unpaved 4,902,
+paving_stones 3,123, concrete 860, gravel 797, the rest under 400 each.
+
+**The rule** (gap_exits): `StreetBoost(factor, surfaces, classes)`, a way boosted when its highway
+class (`_link` folded) is one of `classes` and its surface tag one `surfaces` takes: `SurfaceIn`,
+an explicit tag among its values (`PAVED`: the OSM wiki's paved group of the surface key, asphalt,
+paved, concrete, paving_stones, sett, cobblestone, bricks and the rest), so an untagged way is not
+boosted; `AnySurface`, any (the region test's 3x on every highway, S3). RUNTIME's boost is
+`StreetBoost(10, PAVED, DRIVE_CLASSES)`. The extract now reads the ways' surface tag
+(regions.EXTRACT_REV 3; the guards' synthetic ways carry the column too).
+
+**Proposed roads** (owner 2026-10-20: "proposed roads should get the same 10x boost as existing
+drivable streets"): a road prefix's state conducts on its own mesh (gap_clear.Model.mesh_of, the
+state's `fm`), every triangle whose centroid lies in the prefix's corridor (the roads' paved
+ground, budget.road_corridor: each road buffered by half its width; Carving.corridors) at the
+exits' road factor (`Boost.road`: 10 under RUNTIME, 1 with no boost), a triangle on a paved way too
+at the larger; a clearing's state is on the exits' mesh as before, and cleared ground is not
+boosted. The per-block metric has no boost, so its road scores and its name stand.
+
+**The name.** RUNTIME is now
+
+    cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75
+
+(`s<label>` after the boost's factor, none for any surface; EXITS_CODE a03a092b -> 65531d75 with
+PAVED among gap_exits' constants, so every name with exits moved). The region study's stored names
+moved with it (.superpowers/sdd/2026-10-20-paved-boost/migrate_paved.py): every configuration but
+T500b90D10 scores as before (no surface-filtered boost, no road scored), so its names were renamed
+in place; T500b90D10's rows (the old RUNTIME's boost) went to region_rows/superseded/ and its lines
+left the region summaries. Every row under the old RUNTIME (the pass's presets and baselines, the
+lineup's lens rows, the store's runs.csv lines naming it) is the old metric's.
+
+**Guards** (both ways): `street-boost` gained an unpaved residential way and an untagged tertiary
+on its synthetic block (0 of 77 and 0 of 74 triangles near them boosted, the asphalt residential
+way 366 of 366, the asphalt footway 0 of 96) and runs on 4241 (paved drivable 6,431 of 6,431
+boosted, 0 of the 6,304 near only a drivable way not tagged paved, 0 of the 10,318 near only a
+footway or path); new fault `surfaces-dropped` (the unpaved and untagged ways boosted, and all
+6,304 on 4241). New `road-boost`: on the synthetic block under its boost and under none, and on
+4241 under RUNTIME, each carved by the faces guard's two nested 6 m roads, every passage between
+two triangles in a prefix's corridor conducts the road factor times the unboosted mesh's (x10 on
+558 and 2,219 synthetic passages, 19,828 and 34,243 on 4241; x1 with no boost), the exits' mesh
+outside, and each state reaches on its own mesh; faults `unboosted-road` (a prefix on the exits'
+mesh: x1) and `ways-dropped` (the corridor boosted on the unboosted mesh: outside apart).
