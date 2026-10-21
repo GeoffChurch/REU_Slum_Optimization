@@ -8824,3 +8824,44 @@ most): clearly worse than their neighbours, over half of a block's J_2,0 only on
 passes a solve (5 -- 9), 65x T's scoring time (7.7 s on a small block, 176 s on 8152).
 
 **Compute, the fourth setting** (here, 2 processes): its 82 blocks 0.70 process-h.
+
+**Does the exit price shift P uniformly?** (owner 2026-10-21: "if the current sources are always
+the interiors of buildings, isn't the effect of varying the egress resistance (close to) a uniform
+shift in total power dissipation P? If so, why not just use symmetric walls since it would, I'd
+guess, not change which buildings are cleared?"). Tested on single-building clearings at baseline
+(leaky_single.py; rows leaky_rows/single/, summary_{pairs,shift,drivers,frees}.csv): on six small
+walled-in blocks (19570, 41940, 38486, 63718, and 44837 and 21622, which with 63718 hold homes with
+no open ground within ring_m; 1,282 buildings), each building j cleared alone, dP_j = P0 - P(j
+cleared) and dP_j / D_j (D_j its population share, the metric's cost) under A `Wk1l3000`
+(symmetric at setting 4's entry price), B `Wk1o10i3000n64`, C `Wk1o100i3000n64` (setting 4), S1
+`Wk1l200` and T (RUNTIME). Medians over the six blocks (min -- max):
+1. Spearman of dP_j / D_j: A-B 0.63 (0.46 -- 0.85), A-C 0.74 (0.69 -- 0.88), B-C 0.96 (0.91 --
+   0.99); against T: A 0.21 (-0.03 -- 0.78), B 0.47, C 0.45, S1 0.46. Top-10 Jaccard: A-B 0.43,
+   A-C 0.60, B-C 0.82; each against T 0.00 -- 0.18. Top 5%: A-B 0.39, A-C 0.53, B-C 0.78.
+2. The shift is not uniform: std_j[dP_j(A) - dP_j(B)] / std_j[dP_j(B)] is 7.3 (3.4 -- 17; the exit
+   price from 10 m to 3,000 m moves the gains seven times more than they spread under B); C against
+   B 0.35 (0.23 -- 1.15), S1 against B 0.65.
+3. What drives it: clearing j frees its own residents from their own wall, a toll that scales with
+   the exit price and with j's population over its outline. The shift dP_j(A) - dP_j(B) follows
+   the difference of j's own-wall dissipation at baseline (Spearman 0.90, 0.79 -- 0.96; C - B
+   0.84) more than the frontage its clearing opens to its neighbours (0.73; C - B 0.52); under A
+   j's own wall is a median 24% -- 66% of its gain by block. The exit price is not a constant
+   added to every home: a clearing removes the cleared home's share of it.
+4. The clearings that free walled-in homes (178 of the 1,282, on five blocks): in the top 10 by
+   dP_j / D_j, summed over the blocks, A 35, B 32, C 32, S1 18, T 1; in the top 5% (65 places) A
+   41, B 37, C 38, S1 24, T 2; their best rank 1 or 2 on four of the five walled-in blocks under
+   A, B and C (7 or 8 on 19570; 8 -- 44 under T, which gives a walled-in home no demand).
+So symmetric walls would change which buildings are cleared: against setting 4 (C), A's top 10 has
+a Jaccard of 0.60 (its top 5% 0.53), and it agrees with T least of all (Spearman 0.21). The entry
+price fixed, the exit price decides how much a clearing is worth to the cleared home's own
+residents.
+
+**The warm start** (owner 2026-10-21: yes; gap_walls.WarmStart, a Strategy of WallModel in no name:
+the loop settles on the state's one solution from any start). Every state after the baseline
+starts each wall passage on the baseline's P solve's side. On 19570's diode B, 30 single
+clearings: 9 passes a solve cold (max 12), 5 warm (max 10), half the time, P bit for bit. In the
+test above: B 5 passes (max 12), C 4 (max 9). `settles` both ways from each start (19570: 6 passes
+at baseline; a random clearing 4 warm, 6 cold).
+
+**Compute** (here, 2 processes): the six blocks 3.65 process-h (63718 1.87 h: B and C 81% of it),
+the warm start's test and `settles` 0.15, over the ~3 asked.

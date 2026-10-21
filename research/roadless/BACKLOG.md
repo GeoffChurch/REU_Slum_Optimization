@@ -680,10 +680,15 @@ Open:
   move between the diodes (Spearman 0.93, P0 0.62x T's); 9 passes a solve (max 13), 97x T's time.
   Fourth, out 100 m, in 3,000 m (`Wk1o100i3000n64`): P0 0.92x T's, open homes centred on T's (W / T
   median 0.99), Spearman 0.937; walled-in homes 3.9x the median (p90 7.3x, max 14x), 2.1% of P0,
-  4.8% of J_2,0; own wall 31%; 6 passes a solve, 65x T's time. The warm start (each loop from the
-  last solve's sides) waits for the owner's choice of model. Next setting: the controller's and
-  owner's pick. Stage 2 (SIMP's interpolation of a partly cleared building's walls) after a setting
-  is picked; a leaks-in-interiors variant later.
+  4.8% of J_2,0; own wall 31%; 6 passes a solve, 65x T's time. The owner's question whether the
+  exit price is a uniform shift of P (single clearings, six small blocks): no; clearing a home
+  frees its own residents from its own wall, so the exit price reweights the gains (std of the A -
+  B shift 7.3x B's; Spearman of dP / D, symmetric 3,000 m against the 10 m diode 0.63, against
+  setting 4 0.74); symmetric walls would change which buildings are cleared. Every W setting ranks
+  the clearings that free walled-in homes at the top (T does not). The warm start built
+  (gap_walls.WarmStart: 9 passes a solve to 5). Next: the controller's and owner's pick. Stage 2
+  (SIMP's interpolation of a partly cleared building's walls) after a setting is picked; a
+  leaks-in-interiors variant later.
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
   owner's answer moves an end of the bracket to that screen's break-even rate. One is live,
