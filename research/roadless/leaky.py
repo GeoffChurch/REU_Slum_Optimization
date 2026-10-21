@@ -214,7 +214,7 @@ def block_run(bid: str, part: str, *, replace: bool) -> None:
     share = mt.cost.copy()
     del mt, lt
     pygc.collect()
-    wm = metric_w.model(b, demand=POP)
+    wm = metric_w.model(b, demand=POP, start=gw.WarmStart())
     if not np.array_equal(wm.walled0, walled):
         raise RuntimeError(f"{bid}: W's base walls in other homes than T at baseline")
     t = time.time()

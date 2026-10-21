@@ -34,8 +34,10 @@ the west B's into A; the party passages' current from the potentials and sigma |
 ell_out + ell_in) equals the crossing population each way, within CURRENT_TOL. Fault `one-side`:
 DiodeWalls charging a party passage only ell_out from its first triangle to its second.
 `settles`: after the diode's loop, every wall passage's conductance is its current's side's (beyond
-SIDE_REL), on DIRECTION_BLOCK and each block named, the loop taking more than one pass (the premise:
-directions flip). Fault `one-pass`: the loop returning after its first pass.
+SIDE_REL), on DIRECTION_BLOCK and each block named, at the baseline (from the outward sides, the
+loop taking more than one pass: the premise, directions flip) and at a random clearing of a
+twentieth of the buildings, from each start (gap_walls.WarmStart, ColdStart). Fault `one-pass`:
+the loop returning after its first pass.
 `energy`: under each walls, at the baseline and a random clearing: P = q . u equals the
 dissipation, each passage at its current's side's conductance (the current-voltage curve, not the
 solver's record) plus the street faces' and the leaks', within ENERGY_TOL; and every unknown cell
@@ -96,6 +98,7 @@ POP = common.PopulationDemand()
 SYM = gw.SymmetricWalls(k_in=1.0, ell=200.0)
 DIODE = gw.DiodeWalls(k_in=1.0, ell_out=50.0, ell_in=300.0, max_passes=32)
 WALLS = (SYM, DIODE)
+WARM = gw.WarmStart()    # every model's loops after the baseline (`settles` also runs them cold)
 PER_BLOCK = gcl.complex_of(metrics.PER_BLOCK, factorization=gap_factor.SuperLU())
 CURRENT_TOL = 1e-8       # a wall group's current from the definition against conservation's
                          # (relative: the refined solves agree to 1e-12 and better)
@@ -124,12 +127,12 @@ def _patched(owner: object, name: str, value: object) -> Iterator[None]:
         setattr(owner, name, old)
 
 
-def _walls_model(b: Block, metric: gcl.ComplexMetric,
-                 walls: gw.SymmetricWalls | gw.DiodeWalls) -> gw.WallModel:
-    """W on `metric`'s mesh of `b`, meshed afresh (a temporary cache)."""
+def _walls_model(b: Block, metric: gcl.ComplexMetric, walls: gw.SymmetricWalls | gw.DiodeWalls,
+                 *, start: gw.ColdStart | gw.WarmStart) -> gw.WallModel:
+    """W on `metric`'s mesh of `b`, meshed afresh (a temporary cache), its loops from `start`."""
     with tempfile.TemporaryDirectory() as tmp:
         fx = metric.fixed(b, cache=Path(tmp), carving=gcl.Carving.none(gc.geometry(b)))
-    return gw.WallModel(metric.model(b, fx, demand=POP), walls=walls)
+    return gw.WallModel(metric.model(b, fx, demand=POP), walls=walls, start=start)
 
 
 def _uniform() -> gcl.ComplexMetric:
@@ -183,7 +186,7 @@ def direction(_ids: list[str]) -> list[str]:
     b = _direction_block()
     bad = []
     for walls in WALLS:
-        wm = _walls_model(b, PER_BLOCK, walls)
+        wm = _walls_model(b, PER_BLOCK, walls, start=WARM)
         ell_out, ell_in = walls.ell_out, walls.ell_in
         wl = wm.base_
         st, u = wl.state, wl.pop.u
@@ -227,7 +230,7 @@ def party(_ids: list[str]) -> list[str]:
         ell_out, ell_in = walls.ell_out, walls.ell_in
         for east in (True, False):
             b = _party_block(east=east)
-            wm = _walls_model(b, PER_BLOCK, walls)
+            wm = _walls_model(b, PER_BLOCK, walls, start=WARM)
             st, u = wm.base_.state, wm.base_.pop.u
             iA, iB = (0, 1) if wm.base.polys[0].bounds[0] < wm.base.polys[1].bounds[0] else (1, 0)
             w = st.wall
@@ -273,15 +276,21 @@ def settles(ids: list[str]) -> list[str]:
     for bid in ids:
         [b] = common.build_blocks([bid])
         cases.append((bid, b, _uniform()))
+    rng = np.random.default_rng(SEED + 3)
     for name, b, metric in cases:
-        wm = _walls_model(b, metric, DIODE)
-        wl = wm.base_
-        wrong, n = _side_errors(wm, wl)
-        ok = wrong == 0 and wl.pop.passes > 1
-        print(f"settles {name}: {wl.pop.passes} passes; {wrong} of {n} asymmetric wall passages "
-              f"off their current's side -> {'ok' if ok else 'FAILS'}", flush=True)
-        if not ok:
-            bad.append(f"{name}: {wrong} off side, {wl.pop.passes} passes")
+        for start in (WARM, gw.ColdStart()):
+            wm = _walls_model(b, metric, DIODE, start=start)
+            # the baseline (from the outward sides) and a random clearing (from the start's)
+            x = np.zeros(wm.n, dtype=bool)
+            x[rng.permutation(wm.n)[:max(1, wm.n // 20)]] = True
+            for label, wl in (("baseline", wm.base_), ("random", wm.lenses(x))):
+                wrong, n = _side_errors(wm, wl)
+                ok = wrong == 0 and (label != "baseline" or wl.pop.passes > 1)
+                print(f"settles {name} {type(start).__name__} {label}: {wl.pop.passes} passes; "
+                      f"{wrong} of {n} asymmetric wall passages off their current's side -> "
+                      f"{'ok' if ok else 'FAILS'}", flush=True)
+                if not ok:
+                    bad.append(f"{name} {label}: {wrong} off side, {wl.pop.passes} passes")
     return bad
 
 
@@ -321,7 +330,7 @@ def energy(ids: list[str]) -> list[str]:
     rng = np.random.default_rng(SEED)
     for name, b, metric in cases:
         for walls in WALLS:
-            wm = _walls_model(b, metric, walls)
+            wm = _walls_model(b, metric, walls, start=WARM)
             x = np.zeros(wm.n, dtype=bool)
             order = rng.permutation(wm.n)
             x[order[np.cumsum(wm.cost[order]) <= BUDGET]] = True
@@ -356,7 +365,7 @@ def monotone(ids: list[str]) -> list[str]:
     for bid in ids:
         [b] = common.build_blocks([bid])
         for walls in WALLS:
-            wm = _walls_model(b, _uniform(), walls)
+            wm = _walls_model(b, _uniform(), walls, start=WARM)
             rng = np.random.default_rng(SEED + 1)
             rises = []
             for k in range(MONO_ORDERS):
@@ -396,7 +405,7 @@ def walled_count(ids: list[str]) -> list[str]:
         if not mT.walled0.any():
             bad.append(f"{bid}: no home walled in (the premise)")
             continue
-        wm = _walls_model(b, _uniform(), SYM)
+        wm = _walls_model(b, _uniform(), SYM, start=WARM)
         rng = np.random.default_rng(SEED + 2)
         states = {"baseline": np.zeros(mT.n, dtype=bool)}
         for j in np.argsort(-mT.pop, kind="stable")[:ONE_K]:
@@ -433,7 +442,7 @@ def sources(ids: list[str]) -> list[str]:
     bad = []
     for bid in ids:
         [b] = common.build_blocks([bid])
-        wm = _walls_model(b, _uniform(), SYM)
+        wm = _walls_model(b, _uniform(), SYM, start=WARM)
         c, fm = wm.sys.cells, wm.fm
         xy = fm.xy[fm.tri]
         e1, e2 = xy[:, 1] - xy[:, 0], xy[:, 2] - xy[:, 0]

@@ -43,7 +43,10 @@ loop (`DiodeSolver`): each wall passage's side guessed (out of its building firs
 solved, each side taken from the sign of its current, the same pattern refactored, until no
 passage changes side; a passage whose potential difference is within SIDE_REL of the largest
 potential keeps its side (its current is roundoff, either conductance the same solution to that
-level). Not settled within `max_passes`: raises. The passes are recorded per solve.
+level). Not settled within `max_passes`: raises. The passes are recorded per solve. Where the loop
+starts is a Strategy of the model's (`ColdStart`: out of each building; `WarmStart`: every state
+after the baseline from the baseline's directions), in no name: the loop settles on the state's
+one solution from any start.
 
 THE NAME. A part `+W...` after the placement's in gap_clear's grammar (gap_clear._NAME's `walls`
 group; gap_clear.complex_of refuses it: no optimizer runs on W): `Wk<k_in>l<ell>` symmetric,
@@ -146,7 +149,10 @@ class Walls(Protocol):
     def costs(self, leave: NDArray[np.bool_], enter: NDArray[np.bool_]
               ) -> tuple[NDArray[np.float64], NDArray[np.float64]]: ...
 
-    def solver(self, wm: WallModel, st: WallState) -> Solver: ...
+    def solver(self, wm: WallModel, st: WallState, prior: NDArray[np.int8]) -> Solver:
+        """The state's solver, a diode's loop starting each wall passage on `prior`'s side (per
+        static passage: 1 first to second, -1 back, 0 none: out of its building)."""
+        ...
 
 
 def _check_lengths(k_in: float, *ells: float) -> None:
@@ -183,7 +189,7 @@ class SymmetricWalls:
         c = self.ell * (leave.astype(np.float64) + enter.astype(np.float64))
         return c, c
 
-    def solver(self, wm: WallModel, st: WallState) -> Solver:
+    def solver(self, wm: WallModel, st: WallState, prior: NDArray[np.int8]) -> Solver:
         return LinearSolver(wm, st)
 
 
@@ -214,8 +220,8 @@ class DiodeWalls:
         lv, en = leave.astype(np.float64), enter.astype(np.float64)
         return self.ell_out * lv + self.ell_in * en, self.ell_out * en + self.ell_in * lv
 
-    def solver(self, wm: WallModel, st: WallState) -> Solver:
-        return DiodeSolver(wm, st, max_passes=self.max_passes)
+    def solver(self, wm: WallModel, st: WallState, prior: NDArray[np.int8]) -> Solver:
+        return DiodeSolver(wm, st, max_passes=self.max_passes, prior=prior)
 
 
 class LinearSolver:
@@ -234,14 +240,17 @@ class LinearSolver:
 class DiodeSolver:
     """DiodeWalls' solves: the active-set loop (module docstring), per right-hand side."""
 
-    def __init__(self, wm: WallModel, st: WallState, *, max_passes: int):
+    def __init__(self, wm: WallModel, st: WallState, *, max_passes: int,
+                 prior: NDArray[np.int8]):
         self.wm, self.st, self.max_passes = wm, st, max_passes
         c = wm.sys.cells
         w = st.wall
         self.ea, self.eb = c.ea[w], c.eb[w]
         self.asym = st.g_ab[w] != st.g_ba[w]
-        # out of its building first: forward where the passage leaves one and enters none
-        self.side0 = np.where(st.enter & ~st.leave, -1, 1).astype(np.int8)
+        # each wall passage on the prior's side, else out of its building (forward where it
+        # leaves one and enters none)
+        outward = np.where(st.enter & ~st.leave, -1, 1).astype(np.int8)
+        self.side0 = np.where(prior[w] != 0, prior[w], outward).astype(np.int8)
 
     def conductance(self, side: NDArray[np.int8]) -> NDArray[np.float64]:
         """Per static passage its conductance on `side` (per wall passage: 1 first to second,
@@ -286,12 +295,31 @@ class WallLenses(NamedTuple):
     q: Solved
 
 
+class ColdStart:
+    """Every state's diode loop from the walls' outward sides (out of each building)."""
+
+    def prior(self, wm: WallModel) -> NDArray[np.int8]:
+        return np.zeros(len(wm.sys.cells.pe), dtype=np.int8)
+
+
+class WarmStart:
+    """Every state's diode loop after the baseline from the baseline's directions (its P solve's
+    currents' sides; the owner 2026-10-21: yes to a warm start): a clearing turns few of them."""
+
+    def prior(self, wm: WallModel) -> NDArray[np.int8]:
+        return wm.sides0
+
+
 class WallModel:
     """W on a base model's fixed mesh (module docstring): `base` a gap_clear.Model on the plain
-    mesh (its mesh, cells, pattern and plan, leaks, populations and B (i)), `walls` the Strategy.
-    The baseline (`base_`) is scored at construction, P_{1/2}'s weights from its escape times."""
+    mesh (its mesh, cells, pattern and plan, leaks, populations and B (i)), `walls` the Strategy,
+    `start` where a state's diode loop starts (ColdStart, WarmStart: the loop settles on the
+    state's one solution from any start, so it is in no name; the passes are recorded). The
+    baseline (`base_`) is scored at construction from the outward sides, P_{1/2}'s weights from
+    its escape times, the baseline's directions (`sides0`) from its P solve."""
 
-    def __init__(self, base: gcl.Model, *, walls: SymmetricWalls | DiodeWalls):
+    def __init__(self, base: gcl.Model, *, walls: SymmetricWalls | DiodeWalls,
+                 start: ColdStart | WarmStart):
         if base.carving.stops:
             raise ValueError("walls on a carved mesh: the plain mesh only (no road prefix)")
         self.base, self.walls = base, walls
@@ -332,11 +360,21 @@ class WallModel:
             raise RuntimeError(f"{base.block.block_id}: homes {np.flatnonzero(off).tolist()} "
                                "have sources off the unknowns at baseline (an inside cell is "
                                "never ground, and every one is reached through its walls)")
-        solver0 = walls.solver(self, st0)
+        solver0 = walls.solver(self, st0, np.zeros(len(c.pe), dtype=np.int8))
         s0 = solver0.solve(self.rhs(st0, self.pop))
+        self.sides0 = self.directions(s0.u)
+        self.prior = start.prior(self)
         self.u_pop0 = self.home_u(s0.u)
         self.inj_q = gcl.PQ.injection(self.pop, self.u_pop0, self.nodem)
         self.base_ = self._score(st0, solver0, s0)
+
+    def directions(self, u: NDArray[np.float64]) -> NDArray[np.int8]:
+        """Per static passage the side of its current under `u` (1 first to second, -1 back, 0
+        within SIDE_REL of the largest potential)."""
+        c = self.sys.cells
+        du = u[c.ea] - u[c.eb]
+        tol = SIDE_REL * float(np.abs(u).max(initial=0.0))
+        return np.where(du > tol, 1, np.where(du < -tol, -1, 0)).astype(np.int8)
 
     def sources(self) -> tuple[sp.csr_matrix, NDArray[np.bool_]]:
         """(cells x homes: each home's population over its own footprint's triangles (its cover)
@@ -467,8 +505,15 @@ class WallModel:
     def lenses(self, removed: NDArray[np.bool_]) -> WallLenses:
         """The 0/1 clearing `removed` scored (module docstring)."""
         st = self.state(removed)
-        solver = self.walls.solver(self, st)
+        solver = self.walls.solver(self, st, self.prior)
         return self._score(st, solver, solver.solve(self.rhs(st, self.pop)))
+
+    def power(self, removed: NDArray[np.bool_]) -> tuple[WallState, Solved, float]:
+        """The 0/1 clearing `removed`'s state, its population's solve and P (P alone: no
+        P_{1/2}, no B (i))."""
+        st = self.state(removed)
+        s = self.walls.solver(self, st, self.prior).solve(self.rhs(st, self.pop))
+        return st, s, float(self.rhs(st, self.pop) @ s.u)
 
 
 # ------------------------------------------------------------------ the metric, named
@@ -491,10 +536,12 @@ class WallMetric:
         head, sep, tail = self.base.name.partition(f"+v{gcl.CODE}")
         return f"{head}+{self.walls.name}{sep}{tail}"
 
-    def model(self, block: object, *, demand: common.Demand) -> WallModel:
+    def model(self, block: object, *, demand: common.Demand,
+              start: ColdStart | WarmStart) -> WallModel:
         """The block's W scorer on the base's cached plain mesh (its base model's demand
-        `demand`: the base's own scores; W's lenses read the population's and P_{1/2}'s)."""
-        return WallModel(self.base.clearing(block, demand=demand), walls=self.walls)
+        `demand`: the base's own scores; W's lenses read the population's and P_{1/2}'s), its
+        diode loops from `start`."""
+        return WallModel(self.base.clearing(block, demand=demand), walls=self.walls, start=start)
 
 
 _N = r"([0-9]+(?:\.[0-9]+)?(?:e-?[0-9]+)?)"
