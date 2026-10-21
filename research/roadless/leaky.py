@@ -4,7 +4,7 @@ priced as a length"; the brief .superpowers/sdd/2026-10-21-leaky-walls). Each se
 part (gap_walls: `Wk<k_in>l<ell>` symmetric, `Wk<k_in>o<ell_out>i<ell_in>n<passes>` a diode) on
 UNIFORM's mesh, leaks and doors (metrics.walls_on_uniform), scored at baseline against T (RUNTIME).
 
-    S=research/roadless/walls.py        # from the repo root, PYTHONPATH=., single-threaded
+    S=research/roadless/leaky.py        # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S block <id> <part> [--replace]    # ROWS/<part>/{facts,homes}/<id>.parquet
     uv run python $S report <part>                     # ROWS/<part>/summary_*.csv
 
@@ -35,7 +35,7 @@ controls).
 Typed as `search.py`'s docstring says:
 
     MYPYPATH=research/roadless uv run mypy --strict --follow-imports=silent \\
-        research/roadless/walls.py
+        research/roadless/leaky.py
 """
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ import gap_calib  # noqa: E402
 import gap_walls as gw  # noqa: E402
 import metrics  # noqa: E402
 
-ROWS = HERE / "walls_rows"
+ROWS = HERE / "leaky_rows"
 BLOCKS = ROWS / "blocks.csv"        # block, size, control
 POP = common.PopulationDemand()
 MOVED = 0.05     # an open home's escape time moved: W / T off 1 by more than this

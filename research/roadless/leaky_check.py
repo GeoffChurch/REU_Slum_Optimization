@@ -3,7 +3,7 @@ each wall priced as a length"), each with its fault injection (a patch in one pr
 edited): a guard passes on the code as it is and must fail under its fault (gap_clear_check.py's
 convention). Every guard meshes afresh (a cache of its own, in a temporary directory).
 
-    S=research/roadless/walls_check.py     # from the repo root, PYTHONPATH=., single-threaded
+    S=research/roadless/leaky_check.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S direction - [fault]          # fault: in-out-swapped
     uv run python $S party - [fault]              # fault: one-side
     uv run python $S settles <ids,> [fault]       # fault: one-pass
@@ -62,7 +62,7 @@ so it is in no digest). Fault `part-dropped`: WallMetric's name without the wall
 Typed as `search.py`'s docstring says:
 
     MYPYPATH=research/roadless uv run mypy --strict --follow-imports=silent \\
-        research/roadless/walls_check.py
+        research/roadless/leaky_check.py
 """
 from __future__ import annotations
 

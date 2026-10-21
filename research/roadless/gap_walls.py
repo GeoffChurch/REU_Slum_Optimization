@@ -260,16 +260,18 @@ class DiodeSolver:
 
     def solve(self, rhs: NDArray[np.float64]) -> Solved:
         side = self.side0
+        changed = 0
         for k in range(1, self.max_passes + 1):
             g = self.conductance(side)
             u = self.wm.timed_solve(self.wm.factor(self.st, g), rhs)
             new = self.sides(u, side)
-            if not (new != side)[self.asym].any():
+            changed = int(((new != side) & self.asym).sum())
+            if changed == 0:
                 return Solved(u=u, g=g, passes=k)
             side = new
         raise RuntimeError(f"{self.wm.base.block.block_id}: the walls' active set did not settle "
-                           f"in {self.max_passes} passes "
-                           f"({int(((new != side) & self.asym).sum())} passages still changing)")
+                           f"in {self.max_passes} passes ({changed} passages changed side in the "
+                           "last)")
 
 
 # ------------------------------------------------------------------ the scorer
