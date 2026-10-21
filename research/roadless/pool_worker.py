@@ -8,13 +8,15 @@ its command line (the queue, the OOM evidence, the clock, the job's runner) and 
 - **The loop** (`work`): refuse a queue of another commit than the worker's checkout (3.11),
   before registering; register; then, at each job boundary: asked to step aside, retire (75);
   claim the longest pending job of its node and class estimated within the walltime left less the
-  ladder's margin; none fits while some are pending, retire (75: mycooc's lesson 4); nothing
-  pending, drained (0) on a closed queue, else wait a poll, retiring (75) once it has idled the
-  ladder's idle minutes, or at once when no job could start in the walltime left (an idle worker
-  killed at its walltime is a failed task, which ends its lease's chain). Its every exit retires
-  it from the queue (`finally`), so a job it held goes back as if never claimed.
+  ladder's margin, never one it has attempted (a job that failed goes to another worker, so a bad
+  node spends one strike a job: the controller's ruling); none fits, or every one pending is one
+  it attempted, retire (75: mycooc's lesson 4); nothing pending, drained (0) on a closed queue,
+  else wait a poll, retiring (75) once it has idled the ladder's idle minutes, or at once when no
+  job could start in the walltime left (an idle worker killed at its walltime is a failed task,
+  which ends its lease's chain). Its every exit retires it from the queue (`finally`), so a job
+  it held goes back as if never claimed.
 - **A job** (`run_job`): `bash -c <line>` in the checkout, stdout and stderr merged and streamed
-  into the worker's log between the job's markers; each clearings.ROW_WRITTEN line counted into
+  into the worker's log between the job's markers; each row_marker.ROW_WRITTEN line counted into
   the attempt as it comes (so a reaper sees what a killed job had written); its code, and its
   peak (`ru_maxrss`, the child's and its descendants' maximum) from `os.wait4`. The child runs at
   oom_score_adj 1000, set by itself before it execs (raising its own needs no privilege), so a
@@ -52,7 +54,7 @@ from enum import IntEnum
 from pathlib import Path
 from typing import NamedTuple, Protocol
 
-import clearings
+import row_marker
 from pool_queue import Claim, Header, JobState, Lane, Outcome, Queue
 
 #: Different jobs failed in a row after which a worker exits 1, its own fault (a bad node): a
@@ -185,7 +187,7 @@ class Ran(NamedTuple):
     rc: int             # the shell's code, -signal when killed
     peak_gb: float
     minutes: float      # its wall
-    rows: int           # the clearings.ROW_WRITTEN lines it printed
+    rows: int           # the row_marker.ROW_WRITTEN lines it printed
 
 
 def _last_for_the_oom_killer() -> None:
@@ -199,7 +201,7 @@ def run_job(line: str, *, cwd: Path, env: Mapping[str, str], log: Callable[[str]
             wrote: Callable[[], None]) -> Ran:
     """`bash -c <line>` in `cwd` with `env`, at oom_score_adj OOM_SCORE_ADJ, its output (stdout
     and stderr merged, undecodable bytes replaced) given to `log` line by line as it comes,
-    `wrote()` called for each line starting with clearings.ROW_WRITTEN; its code and peak from
+    `wrote()` called for each line starting with row_marker.ROW_WRITTEN; its code and peak from
     `os.wait4` once its output ends. If reading it raises, the child is killed and reaped before
     the error goes on, so no job outlives its worker's attempt."""
     start = time.monotonic()
@@ -214,7 +216,7 @@ def run_job(line: str, *, cwd: Path, env: Mapping[str, str], log: Callable[[str]
         for out in proc.stdout:
             text = out.rstrip("\n")
             log(text)
-            if text.startswith(clearings.ROW_WRITTEN):
+            if text.startswith(row_marker.ROW_WRITTEN):
                 rows += 1
                 wrote()
     except BaseException:
@@ -274,8 +276,9 @@ def work(*, queue: Queue, worker: str, run: str, node: str, cls: str, commit: st
          run_line: Callable[[Claim], Ran], oom: OomEvidence, log: Callable[[str], None]) -> Exit:
     """`worker` (a Slurm task of `run`, on `node` in class `cls`, its checkout at `commit`, its
     walltime ending at `ends_at`, epoch seconds on `now`'s clock) claims and runs its jobs until
-    it exits (the module's doc), each by `run_line`, `wait`ing a poll on an open queue with
-    nothing pending; the queue's ladder gives its margin and idle minutes."""
+    it exits (the module's doc), each by `run_line`, never one it has attempted, `wait`ing a poll
+    on an open queue with nothing pending; the queue's ladder gives its margin and idle
+    minutes."""
     header = queue.header()
     refused = _refused(header, commit)
     if refused is not None:
@@ -287,19 +290,22 @@ def work(*, queue: Queue, worker: str, run: str, node: str, cls: str, commit: st
     queue.register(worker=worker, run=run, node=node, cls=cls, ends_at=ends_at)
     try:
         failed: list[int] = []              # the jobs of the attempts failed in a row
+        attempted: set[int] = set()         # the jobs it has claimed: never claimed again
         idle_since: float | None = None
         while True:
             if queue.asked_aside(worker):
                 log("asked to step aside: retired (75)")
                 return Exit.RETIRED
             left = (ends_at - now()) / 60 - lad.margin_minutes
-            c = queue.claim(worker=worker, minutes_left=left)
+            c = queue.claim(worker=worker, minutes_left=left, exclude=attempted)
             if c is None:
-                pending = sum(1 for j in queue.jobs()
-                              if (j.node, j.cls, j.state) == (node, cls, JobState.PENDING))
+                pending = [j.id for j in queue.jobs()
+                           if (j.node, j.cls, j.state) == (node, cls, JobState.PENDING)]
                 if pending:
-                    log(f"{pending} jobs of {node} {cls} pending, none estimated within the "
-                        f"{left:.1f} minutes left less the margin: retired (75)")
+                    tried = sum(1 for i in pending if i in attempted)
+                    log(f"{len(pending)} jobs of {node} {cls} pending, {tried} of them attempted "
+                        f"by this worker, none other estimated within the {left:.1f} minutes "
+                        "left less the margin: retired (75)")
                     return Exit.RETIRED
                 if queue.closed():
                     log(f"the queue closed, nothing of {node} {cls} pending: drained (0)")
@@ -315,6 +321,7 @@ def work(*, queue: Queue, worker: str, run: str, node: str, cls: str, commit: st
                 wait()
                 continue
             idle_since = None
+            attempted.add(c.job.id)
             outcome = _attempt(c, queue=queue, worker=worker, run_line=run_line, oom=oom, log=log)
             failed = [*failed, c.job.id] if outcome == Outcome.FAILED else []
             if len(set(failed)) >= FAILED_IN_A_ROW:

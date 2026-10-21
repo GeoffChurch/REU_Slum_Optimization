@@ -82,6 +82,7 @@ from typing import Any, Protocol
 
 import numpy as np
 import pandas as pd
+import row_marker
 import shapely
 from numpy.typing import NDArray
 from shapely.geometry.base import BaseGeometry
@@ -478,18 +479,12 @@ def _exclusive(tmp: Path, path: Path) -> None:
     os.link(tmp, path)
 
 
-#: What write_once prints, the row's path after it, once a row it writes stands: a pool's worker
-#: counts these lines of its job's output into the job's attempt (pool_worker.run_job), so a job
-#: that failed having written a row ran further and is no strike (docs/superpowers/plans/
-#: 2026-10-21-lease-pool.md, Ruling 6). A row kept or refused is not written, so not printed.
-ROW_WRITTEN = "[row] wrote "
-
-
 def write_once(df: pd.DataFrame, path: Path, *, replace: bool) -> None:
     """A run's rows to `path` whole (a temp name no pull matches, then into place) and only if no
     row stands there, unless `replace` (check_new): a second write of one identity raises
-    `Exists` and leaves the first. Once the row stands, ROW_WRITTEN and its path are printed
-    (flushed). The guard: clearings_check.py `overwrite` (fault `no-check`)."""
+    `Exists` and leaves the first. Once the row stands, row_marker.ROW_WRITTEN and its path are
+    printed (flushed), for a pool's worker to count. The guard: clearings_check.py `overwrite`
+    (fault `no-check`)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     df.to_parquet(tmp)
@@ -504,7 +499,7 @@ def write_once(df: pd.DataFrame, path: Path, *, replace: bool) -> None:
                              "names a replacement)") from None
     finally:
         tmp.unlink(missing_ok=True)
-    print(f"{ROW_WRITTEN}{path}", flush=True)
+    print(f"{row_marker.ROW_WRITTEN}{path}", flush=True)
 
 
 def replace_flag(argv: list[str]) -> tuple[list[str], bool]:

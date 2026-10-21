@@ -5,14 +5,14 @@ code as it is and must fail under each of its faults.
     S=research/roadless/pool_check.py      # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S claim [--fault <name>]         # fault: split-tx
     uv run python $S transitions [--fault <name>]   # faults: late-finish, drop-on-top,
-                                                    # any-worker, second-claim
+                                                    # any-worker, second-claim, no-exclude
     uv run python $S class [--fault <name>] <rows>  # faults: median-rate, no-fit-margin,
                                                     # family-rate, all-long, no-capacity,
                                                     # with-proposed, one-run
     uv run python $S walltime [--fault <name>]      # fault: no-fit
     uv run python $S oom [--fault <name>]           # faults: fail-on-oom, unified-first
     uv run python $S identity [--fault <name>]      # fault: no-identity
-    uv run python $S worker [--fault <name>]        # fault: fail-worker
+    uv run python $S worker [--fault <name>]        # faults: fail-worker, no-exclude
     uv run python $S both-ways <guards,> [args ...]   # each guard, then under each of its faults
 
 A guard runs as `<guard> [--fault <name>] [args ...]`: the fault is named by its flag, so a
@@ -27,8 +27,8 @@ minutes (pool_queue.fresh_minutes, a lease less its margin and a worker's startu
 plan would pool), in a queue in a temporary directory on local disk; CLAIM_WORKERS processes
 (fork), started together, each opens the queue (the first makes it from the seed), registers a
 worker and claims with a fresh worker's 105 minutes left (every job fits: the fit is
-`walltime`'s), finishes the job done and claims again until nothing is left, sleeping 0 to
-CLAIM_SLEEP between operations. Fails on a job
+`walltime`'s), excluding the jobs it has claimed, as a worker does, finishes the job done and
+claims again until nothing is left, sleeping 0 to CLAIM_SLEEP between operations. Fails on a job
 with two attempts, a job not done, an attempt finished by a worker other than its claimer (the
 queue's attempts against what each process says it finished), and a worker whose claims'
 estimates ever rise (each claim is the longest pending at its time, so a worker's never rise).
@@ -65,10 +65,15 @@ strikes, gb, peak_gb and minutes among them):
 - `one-claim`: a worker holding a claim is refused another, by claim, by claim_job of another job
   and by claim_job of the job it holds (ValueError: refused before the job's state is read), the
   other job left PENDING.
+- `exclude`: a worker's claim excluding the job it attempted (FAILED, a strike: PENDING) takes the
+  shorter pending job, not the longer one it attempted; with only that one pending, excluding
+  both, none (the job as it was); another worker, excluding nothing, takes it. (The other cases'
+  claims exclude nothing, their workers claiming a job again as a lease's next worker would.)
 Faults: `late-finish` (finish ignores whose claim it is: the reaped worker's late DONE marks the
 job done), `drop-on-top` (past the top rung the job is FAILED, not LONG: the spec's "OOM promotes;
 it never drops"), `any-worker` (finish takes any worker's word for an attempt: the other worker's
-DONE marks the job done), `second-claim` (a worker holding a claim may claim again).
+DONE marks the job done), `second-claim` (a worker holding a claim may claim again), `no-exclude`
+(SqliteQueue.claim drops its exclusion: the worker takes back the job it attempted).
 
 `class` (pool_plan's classes and estimates, the spec's 3.4 with the plan's Ruling 15), on the
 stored rows under `<rows>`, every block's area from its consolidated_rows/summary_features.csv:
@@ -118,8 +123,9 @@ moves only a poll at a time, so no job's run spends the walltime:
   rises by one: the job promoted (PENDING in m12, an attempt `oom` rc -9), the worker going on to
   the next job and draining (0); the child's oom_score_adj, which it prints, 1000, the worker's own
   unchanged (and below 1000, so the child's is the worker's doing); `unchanged`, the count not
-  rising, and `unreadable`, no count (pool_worker.Unreadable): each attempt FAILED, a strike, the
-  job FAILED after three, the log saying why (unreadable). `readers`: pool_worker.oom_evidence on
+  rising, and `unreadable`, no count (pool_worker.Unreadable): the attempt FAILED, a strike, the
+  job PENDING for another worker and this one retired (75: the only job pending is one it
+  attempted), the log saying why (unreadable). `readers`: pool_worker.oom_evidence on
   fixtures under a cgroup root of their own: v2 (memory.events's oom_kill, read afresh at each
   call), v1 (memory.oom_control's), hybrid (v1's memory line beside a v2 one: v1), and Unreadable
   for a v2 cgroup with no memory.events, a v1 one with no oom_kill line (before kernel 4.13) and no
@@ -131,19 +137,23 @@ moves only a poll at a time, so no job's run spends the walltime:
 - `worker`: `absent-queue` (the plan's Review Focus 1), pool.py `work` run in this process as a
   cluster_submit task would be (its environment set: HOME, the Slurm array ids and end time, the
   run, the checkout and its manifest) on a wave whose shipped seed no process has opened: it makes
-  the queue, its job 1 failing three times (FAILED) without ending it, then job 2, which checks its
-  own environment and directory (CLUSTER_SUBMIT_INPUTS the wave's inputs, common.BANK_ENV the
-  wave's bank, the checkout), done; exit 0, the worker registered and retired. `bad-node`: jobs 1-3
-  failing: after job 3's first failure (three different jobs in a row) exit 1, job 4 never
-  claimed. `progress`: a job writing two rows by clearings.write_once and exiting 1: its first
-  attempt counts 2 rows (the ROW_WRITTEN lines) and is no strike; each later one is refused at its
-  first row (Exists), writes none and strikes, so the job is FAILED after four attempts.
+  the queue, its job 1 failing (a strike) without ending it, then job 2, which checks its own
+  environment and directory (CLUSTER_SUBMIT_INPUTS the wave's inputs, common.BANK_ENV the wave's
+  bank, the checkout), done; exit 75 (job 1, pending, is one it attempted), the worker registered
+  and retired. `bad-node`: jobs 1-3 failing: each attempted once, one strike each (never
+  claimed again by the worker), and after job 3's failure (three different jobs in a row) exit 1,
+  job 4 never claimed; `one-job`, its only job failing: one attempt, one strike, retired (75).
+  `progress`: a job writing two rows by clearings.write_once and exiting 1, run by two workers in
+  turn: the first's attempt counts 2 rows (row_marker.ROW_WRITTEN lines) and is no strike, and it
+  retires (75) rather than claim it again; the second's is refused at its first row (Exists),
+  writes none and strikes.
   `idle`: an open queue with nothing pending: retired (75) after the ladder's idle minutes, 10
   polls; `idle-at-end`, the same with less than the margin left: at once. `aside`: asked aside
   during job 1: retired (75) after it, job 2 never claimed. `long-lane`: pool.py `work --job` of a
   LONG job, twice: done (0), then not waiting (1), each worker registered on the job's node in the
-  class `long`. Fault `fail-worker` (one failed job ends the worker, exit 1): absent-queue,
-  bad-node and progress fail.
+  class `long`. Faults: `fail-worker` (one failed job ends the worker, exit 1) and `no-exclude`
+  (SqliteQueue.claim drops its exclusion: a worker spends a failed job's every strike), each
+  failing absent-queue, bad-node, one-job and progress.
 """
 from __future__ import annotations
 
@@ -161,7 +171,7 @@ import sys
 import tempfile
 import time
 from collections import Counter
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager, redirect_stdout
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -176,12 +186,12 @@ from cluster_submit.remote_build import MANIFEST
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import clearings  # noqa: E402
 import common  # noqa: E402
 import pool as pl  # noqa: E402
 import pool_plan as pp  # noqa: E402
 import pool_queue as pq  # noqa: E402
 import pool_worker as pw  # noqa: E402
+import row_marker  # noqa: E402
 from pool_ladder import LADDERS, Ladder, class_name, rung_of  # noqa: E402
 
 NODE = "orion"
@@ -282,7 +292,7 @@ def _claimer(path: Path, seed: pq.Seed, k: int, start: Barrier, out: MpQueue[Rep
                    ends_at=time.time() + 3600.0)
         while True:
             time.sleep(rng.uniform(0.0, CLAIM_SLEEP))
-            c = q.claim(worker=worker, minutes_left=left)
+            c = q.claim(worker=worker, minutes_left=left, exclude=[x.job for x in claims])
             if c is None:
                 break
             claims.append(Claimed(attempt=c.attempt, job=c.job.id, minutes=c.job.minutes))
@@ -390,7 +400,9 @@ class Case:
         return Registered(name=name, ends=ends)
 
     def claim(self, worker: str, *, left: float, want: pq.Job) -> pq.Claim | None:
-        c = self.q.claim(worker=worker, minutes_left=left)
+        """`worker`'s claim excluding nothing: a case's worker claims a job again as the next
+        worker of a lease would (the exclusion is the `exclude` case's)."""
+        c = self.q.claim(worker=worker, minutes_left=left, exclude=())
         if c is None:
             self.notes.append(f"{worker}'s claim: none, want job {want.id}")
         else:
@@ -571,7 +583,7 @@ def _claim_job(path: Path, lad: Ladder) -> list[str]:
     s = _seed_job(1, minutes=30.0, peak_gb=100.0, ladder=lad)
     c = Case(path, lad, [s])
     pool = c.worker("pool", cls=s.cls, minutes=120).name
-    c.check("a pool's claim", c.q.claim(worker=pool, minutes_left=c.fresh) is None,
+    c.check("a pool's claim", c.q.claim(worker=pool, minutes_left=c.fresh, exclude=()) is None,
             "took the LONG job")
     w = c.worker("long", cls=s.cls, minutes=3 * 24 * 60).name
     got = c.q.claim_job(worker=w, job=s.id)
@@ -633,7 +645,7 @@ def _one_claim(path: Path, lad: Ladder) -> list[str]:
     if c.claim(w, left=c.fresh, want=_as_job(first, state=pq.JobState.CLAIMED, worker=w)) is None:
         return c.notes
     tries: tuple[tuple[str, Callable[[], pq.Claim | None]], ...] = (
-        ("claim", lambda: c.q.claim(worker=w, minutes_left=c.fresh)),
+        ("claim", lambda: c.q.claim(worker=w, minutes_left=c.fresh, exclude=())),
         ("claim_job", lambda: c.q.claim_job(worker=w, job=second.id)),
         # of the job it holds: refused, not None (the one-claim check comes before the job's
         # state is read, so a check moved back after it would answer None here)
@@ -645,6 +657,34 @@ def _one_claim(path: Path, lad: Ladder) -> list[str]:
         except ValueError:
             pass
     c.after("the second claims", None, _as_job(second, state=pq.JobState.PENDING))
+    return c.notes
+
+
+def _excluded(path: Path, lad: Ladder) -> list[str]:
+    longer, shorter = _small(lad, 1, minutes=60.0), _small(lad, 2, minutes=30.0)
+    c = Case(path, lad, [longer, shorter])
+    w = c.worker("w1", cls=longer.cls, minutes=120).name
+    got = c.claim(w, left=c.fresh, want=_as_job(longer, state=pq.JobState.CLAIMED, worker=w))
+    if got is None:
+        return c.notes
+    c.q.finish(got.attempt, worker=w, outcome=pq.Outcome.FAILED, peak_gb=3.1, minutes=25.0, rc=1)
+    struck = _as_job(longer, state=pq.JobState.PENDING)._replace(strikes=1)
+    c.after("finish FAILED, no row", None, struck)
+    # its next claim, excluding the job it attempted: the shorter job, the longer one pending
+    nxt = c.q.claim(worker=w, minutes_left=c.fresh, exclude=[longer.id])
+    if nxt is None:
+        c.notes.append(f"{w}'s claim excluding job {longer.id}: none, want job {shorter.id}")
+        return c.notes
+    c.expect(f"{w}'s claim excluding job {longer.id}", nxt.job,
+             _as_job(shorter, state=pq.JobState.CLAIMED, worker=w))
+    c.q.finish(nxt.attempt, worker=w, outcome=pq.Outcome.DONE, peak_gb=3.1, minutes=25.0, rc=0)
+    # only the job it attempted pending: none for it, the job left as it was
+    none = c.q.claim(worker=w, minutes_left=c.fresh, exclude=[longer.id, shorter.id])
+    c.check(f"{w}'s claim excluding both", none is None, f"job {none and none.job.id}, want none")
+    c.after(f"{w}'s claim excluding both", None, struck)
+    # another worker, which has attempted nothing, takes it
+    other = c.worker("w2", cls=longer.cls, minutes=120).name
+    c.claim(other, left=c.fresh, want=struck._replace(state=pq.JobState.CLAIMED, worker=other))
     return c.notes
 
 
@@ -666,6 +706,7 @@ TRANSITIONS: tuple[tuple[str, Callable[[Path, Ladder], list[str]]], ...] = (
     ("aside", _aside),
     ("other-worker", _other_worker),
     ("one-claim", _one_claim),
+    ("exclude", _excluded),
 )
 
 
@@ -1021,11 +1062,12 @@ def _nothing(q: pq.Queue, c: pq.Claim) -> None:
     """A case's step after a job: none."""
 
 
-def _work(path: Path, seed: pq.Seed, *, commit: str, minutes_left: float,
+def _work(path: Path, seed: pq.Seed, *, worker: str, commit: str, minutes_left: float,
           oom: pw.OomEvidence, after: Callable[[pq.Queue, pq.Claim], None]) -> Worked:
-    """pool_worker.work as WORKER (of NODE, m4) on a queue at `path` made from `seed`, its
-    checkout at `commit`, `minutes_left` of walltime on a fake clock (Clock), each job a real
-    child (pool_worker.run_job in `path`'s directory), `after` called after each."""
+    """pool_worker.work as `worker` (of NODE, m4) on a queue at `path` made from `seed` (or
+    opened, made already), its checkout at `commit`, `minutes_left` of walltime on a fake clock
+    (Clock), each job a real child (pool_worker.run_job in `path`'s directory), `after` called
+    after each."""
     q: pq.Queue = pq.SqliteQueue.open(path, seed)
     clock = Clock(start=time.time(), poll=seed.header.ladder.poll_seconds)
     log: list[str] = []
@@ -1036,7 +1078,7 @@ def _work(path: Path, seed: pq.Seed, *, commit: str, minutes_left: float,
         after(q, c)
         return ran
 
-    ex = pw.work(queue=q, worker=WORKER, run=f"pool-check-{NODE}-m4-s1", node=NODE, cls="m4",
+    ex = pw.work(queue=q, worker=worker, run=f"pool-check-{NODE}-m4-s1", node=NODE, cls="m4",
                  commit=commit, ends_at=clock.now() + 60.0 * minutes_left, now=clock.now,
                  wait=clock.wait, run_line=run_line, oom=oom, log=log.append)
     return Worked(exit=int(ex), log=log, jobs={j.id: j for j in q.jobs()},
@@ -1061,7 +1103,7 @@ def walltime(_args: list[str]) -> list[str]:
         return [f"cpu-score's margin is {lad.margin_minutes}, not the guard's 10"]
     jobs = [_m4(i, minutes=m, line="true") for i, m in enumerate(WALLTIME_JOBS, 1)]
     with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
-        w = _work(Path(tmp) / "queue.db", _seed(lad, jobs), commit=COMMIT,
+        w = _work(Path(tmp) / "queue.db", _seed(lad, jobs), worker=WORKER, commit=COMMIT,
                   minutes_left=WALLTIME_LEFT, oom=Counted(count=0), after=_nothing)
     ran = [w.jobs[a.job].minutes for a in w.attempts]
     pending = sorted(j.minutes for j in w.jobs.values() if j.state == pq.JobState.PENDING)
@@ -1096,7 +1138,7 @@ def _oom_cases(tmp: Path) -> list[str]:
     ev = Counted(count=OOM_BEFORE)
     w = _work(tmp / "promote.db", _seed(lad, [_m4(1, minutes=60.0, line=SIGKILLED),
                                              _m4(2, minutes=30.0, line="true")]),
-              commit=COMMIT, minutes_left=120.0, oom=ev, after=_bump_job_1(ev))
+              worker=WORKER, commit=COMMIT, minutes_left=120.0, oom=ev, after=_bump_job_1(ev))
     printed = [x for x in w.log if x.startswith("oom_score_adj ")]
     notes = _state(w, 1, state=pq.JobState.PENDING, cls="m12", strikes=0) + _state(
         w, 2, state=pq.JobState.DONE, cls="m4", strikes=0)
@@ -1110,18 +1152,18 @@ def _oom_cases(tmp: Path) -> list[str]:
           f"{_tried(w)}, job 1 {w.jobs[1].state} in {w.jobs[1].cls}, the child at {printed}, "
           f"the worker's own {now}, exit {w.exit}" + _failing(notes), flush=True)
     bad += ["promote"] if notes else []
-    # a SIGKILL with the count unchanged, and with no count to read: failed, a strike each time
+    # a SIGKILL with the count unchanged, and with no count to read: FAILED, a strike, and the
+    # job another worker's (this one retires: the only job pending is one it attempted)
     for name, evidence in (("unchanged", Counted(count=OOM_BEFORE)),
                            ("unreadable", pw.Unreadable(why=NO_CGROUP))):
         w = _work(tmp / f"{name}.db", _seed(lad, [_m4(1, minutes=60.0, line=SIGKILLED)]),
-                  commit=COMMIT, minutes_left=120.0, oom=evidence, after=_nothing)
-        notes = _state(w, 1, state=pq.JobState.FAILED, cls="m4", strikes=lad.strikes)
-        notes += [] if _tried(w) == [(1, "failed", -9)] * lad.strikes else [
-            f"attempts {_tried(w)}"]
-        notes += [] if w.exit == pw.Exit.DRAINED else [f"exit {w.exit}, want 0"]
+                  worker=WORKER, commit=COMMIT, minutes_left=120.0, oom=evidence, after=_nothing)
+        notes = _state(w, 1, state=pq.JobState.PENDING, cls="m4", strikes=1)
+        notes += [] if _tried(w) == [(1, "failed", -9)] else [f"attempts {_tried(w)}"]
+        notes += [] if w.exit == pw.Exit.RETIRED else [f"exit {w.exit}, want 75"]
         why = [x for x in w.log if NO_CGROUP in x and x.startswith("job 1: failed")]
-        if name == "unreadable" and len(why) != lad.strikes:
-            notes.append(f"the log says why {len(why)} times, want {lad.strikes}")
+        if name == "unreadable" and len(why) != 1:
+            notes.append(f"the log says why {len(why)} times, want once")
         print(f"oom {name}: a SIGKILL ({evidence.about}): attempts {_tried(w)}, job 1 "
               f"{w.jobs[1].state} with {w.jobs[1].strikes} strikes, exit {w.exit}"
               + _failing(notes), flush=True)
@@ -1204,7 +1246,8 @@ def identity(_args: list[str]) -> list[str]:
     bad: list[str] = []
     with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
         w = _work(Path(tmp) / "pool.db", _seed(lad, [_m4(1, minutes=30.0, line="true")]),
-                  commit=OTHER_COMMIT, minutes_left=120.0, oom=Counted(count=0), after=_nothing)
+                  worker=WORKER, commit=OTHER_COMMIT, minutes_left=120.0, oom=Counted(count=0),
+                  after=_nothing)
         notes = ([] if w.exit == pw.Exit.OWN_FAULT else [f"exit {w.exit}, want 1"]) + (
             [] if not w.attempts else [f"attempts {_tried(w)}, want none"]) + (
             [] if not w.workers else [f"registered {[x.id for x in w.workers]}, want none"]) + (
@@ -1286,12 +1329,13 @@ def _absent_queue(tmp: Path) -> list[str]:
     tried = [(a.job, a.outcome, a.rc) for a in _attempts(w.queue)]
     workers = [(x.id, x.run, x.node, x.cls, x.retired) for x in q.workers()]
     notes = (["the queue was there before the worker"] if there_before else []) + (
-        [] if ex == pw.Exit.DRAINED else [f"exit {ex}, want 0"]) + (
-        [] if tried == [(1, "failed", 3)] * lad.strikes + [(2, "done", 0)] else
-        [f"attempts {tried}, want job 1 failed {lad.strikes} times, then job 2 done (its "
-         "environment and directory the wave's)"]) + (
-        [] if (jobs[1].state, jobs[2].state) == (pq.JobState.FAILED, pq.JobState.DONE) else
-        [f"jobs {jobs[1].state}, {jobs[2].state}"]) + (
+        [] if ex == pw.Exit.RETIRED else [f"exit {ex}, want 75"]) + (
+        [] if tried == [(1, "failed", 3), (2, "done", 0)] else
+        [f"attempts {tried}, want job 1 failed, then job 2 done (its environment and directory "
+         "the wave's)"]) + (
+        [] if (jobs[1].state, jobs[1].strikes, jobs[2].state) == (
+            pq.JobState.PENDING, 1, pq.JobState.DONE) else
+        [f"jobs {jobs[1].state} ({jobs[1].strikes} strikes), {jobs[2].state}"]) + (
         [] if workers == [(f"{TASK_JOB}_0", run, NODE, "m4", True)] else [f"workers {workers}"])
     print(f"worker absent-queue: pool.py work on a wave whose queue no process had made: exit "
           f"{ex}, attempts {tried}, workers {workers}" + _failing(notes), flush=True)
@@ -1300,17 +1344,31 @@ def _absent_queue(tmp: Path) -> list[str]:
 
 def _bad_node(tmp: Path) -> list[str]:
     lad = LADDERS["cpu-score"]
+    bad: list[str] = []
     w = _work(tmp / "bad-node.db", _seed(lad, [
         _m4(1, minutes=60.0, line="exit 1"), _m4(2, minutes=50.0, line="exit 1"),
         _m4(3, minutes=40.0, line="exit 1"), _m4(4, minutes=30.0, line="true")]),
-        commit=COMMIT, minutes_left=120.0, oom=Counted(count=0), after=_nothing)
-    want = [(1, "failed", 1)] * lad.strikes + [(2, "failed", 1)] * lad.strikes + [(3, "failed", 1)]
+        worker=WORKER, commit=COMMIT, minutes_left=120.0, oom=Counted(count=0), after=_nothing)
+    want = [(1, "failed", 1), (2, "failed", 1), (3, "failed", 1)]
     notes = ([] if w.exit == pw.Exit.OWN_FAULT else [f"exit {w.exit}, want 1"]) + (
-        [] if _tried(w) == want else [f"attempts {_tried(w)}, want {want}"]) + _state(
+        [] if _tried(w) == want else [f"attempts {_tried(w)}, want {want}"]) + [
+        n for i in (1, 2, 3) for n in _state(w, i, state=pq.JobState.PENDING, cls="m4",
+                                             strikes=1)] + _state(
         w, 4, state=pq.JobState.PENDING, cls="m4", strikes=0)
-    print(f"worker bad-node: jobs 1-3 failing, job 4 not: attempts {_tried(w)}, job 4 "
-          f"{w.jobs[4].state}, exit {w.exit}" + _failing(notes), flush=True)
-    return ["bad-node"] if notes else []
+    print(f"worker bad-node: jobs 1-3 failing, job 4 not: attempts {_tried(w)}, strikes "
+          f"{[w.jobs[i].strikes for i in (1, 2, 3, 4)]}, job 4 {w.jobs[4].state}, exit {w.exit}"
+          + _failing(notes), flush=True)
+    bad += ["bad-node"] if notes else []
+    # one job, failing: one strike, never claimed again by this worker, which retires
+    w = _work(tmp / "one-job.db", _seed(lad, [_m4(1, minutes=60.0, line="exit 1")]),
+              worker=WORKER, commit=COMMIT, minutes_left=120.0, oom=Counted(count=0),
+              after=_nothing)
+    notes = ([] if w.exit == pw.Exit.RETIRED else [f"exit {w.exit}, want 75"]) + (
+        [] if _tried(w) == [(1, "failed", 1)] else [f"attempts {_tried(w)}, want one"]) + _state(
+        w, 1, state=pq.JobState.PENDING, cls="m4", strikes=1)
+    print(f"worker one-job: its only job failing: attempts {_tried(w)}, job 1 {w.jobs[1].state} "
+          f"with {w.jobs[1].strikes} strikes, exit {w.exit}" + _failing(notes), flush=True)
+    return bad + (["one-job"] if notes else [])
 
 
 def _progress(tmp: Path) -> list[str]:
@@ -1321,20 +1379,24 @@ def _progress(tmp: Path) -> list[str]:
             f"[clearings.write_once(pd.DataFrame({{'a': [1]}}), Path(p), replace=False) "
             f"for p in {rows!r}]; sys.exit(1)")
     line = f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
-    w = _work(tmp / "progress.db", _seed(lad, [_m4(1, minutes=30.0, line=line)]), commit=COMMIT,
-              minutes_left=120.0, oom=Counted(count=0), after=_nothing)
+    seed = _seed(lad, [_m4(1, minutes=30.0, line=line)])
+    first = _work(tmp / "progress.db", seed, worker=WORKER, commit=COMMIT, minutes_left=120.0,
+                  oom=Counted(count=0), after=_nothing)
+    w = _work(tmp / "progress.db", seed, worker="w2", commit=COMMIT, minutes_left=120.0,
+              oom=Counted(count=0), after=_nothing)
     counted = [a.rows for a in w.attempts]
-    printed = [x for x in w.log if x.startswith(clearings.ROW_WRITTEN)]
-    want = [2] + [0] * lad.strikes
-    notes = ([] if counted == want else [f"rows by attempt {counted}, want {want} (the first "
-                                         "written, no strike; each later refused, a strike)"]) + (
-        [] if printed == [f"{clearings.ROW_WRITTEN}{p}" for p in rows] else
+    printed = [x for x in first.log if x.startswith(row_marker.ROW_WRITTEN)]
+    notes = ([] if counted == [2, 0] else [f"rows by attempt {counted}, want [2, 0] (the first "
+                                           "written, no strike; the next refused, a strike)"]) + (
+        [] if printed == [f"{row_marker.ROW_WRITTEN}{p}" for p in rows] else
         [f"ROW_WRITTEN lines {printed}"]) + _state(
-        w, 1, state=pq.JobState.FAILED, cls="m4", strikes=lad.strikes) + (
-        [] if w.exit == pw.Exit.DRAINED else [f"exit {w.exit}, want 0"])
-    print(f"worker progress: a job writing two rows (clearings.write_once) and exiting 1: rows by "
-          f"attempt {counted}, job 1 {w.jobs[1].state} with {w.jobs[1].strikes} strikes, exit "
-          f"{w.exit}" + _failing(notes), flush=True)
+        w, 1, state=pq.JobState.PENDING, cls="m4", strikes=1) + (
+        [] if (first.exit, w.exit) == (pw.Exit.RETIRED, pw.Exit.RETIRED) else
+        [f"exits {first.exit}, {w.exit}, want 75, 75"])
+    print(f"worker progress: a job writing two rows (clearings.write_once) and exiting 1, run by "
+          f"two workers: rows by attempt {counted}, job 1 {w.jobs[1].state} with "
+          f"{w.jobs[1].strikes} strikes, exits {first.exit}, {w.exit}" + _failing(notes),
+          flush=True)
     return ["progress"] if notes else []
 
 
@@ -1344,7 +1406,7 @@ def _idle(tmp: Path) -> list[str]:
     bad: list[str] = []
     for name, left, want in (("idle", 120.0, polls), ("idle-at-end", lad.margin_minutes / 2, 0)):
         seed = pq.Seed(header=_header(lad), jobs=(), closed=False)
-        w = _work(tmp / f"{name}.db", seed, commit=COMMIT, minutes_left=left,
+        w = _work(tmp / f"{name}.db", seed, worker=WORKER, commit=COMMIT, minutes_left=left,
                   oom=Counted(count=0), after=_nothing)
         notes = ([] if w.exit == pw.Exit.RETIRED else [f"exit {w.exit}, want 75"]) + (
             [] if w.waits == want else [f"{w.waits} polls, want {want}"])
@@ -1365,7 +1427,7 @@ def _stepped_aside(tmp: Path) -> list[str]:
 
     w = _work(tmp / "aside.db", _seed(lad, [_m4(1, minutes=60.0, line="true"),
                                             _m4(2, minutes=30.0, line="true")]),
-              commit=COMMIT, minutes_left=120.0, oom=Counted(count=0), after=ask)
+              worker=WORKER, commit=COMMIT, minutes_left=120.0, oom=Counted(count=0), after=ask)
     notes = ([] if asked == [[WORKER]] else [f"asked {asked}"]) + (
         [] if w.exit == pw.Exit.RETIRED else [f"exit {w.exit}, want 75"]) + (
         [] if _tried(w) == [(1, "done", 0)] else [f"attempts {_tried(w)}, want job 1's"]) + (
@@ -1425,12 +1487,13 @@ def _patched(owner: object, name: str, value: object) -> Iterator[None]:
         setattr(owner, name, old)
 
 
-def _split_claim(self: pq.SqliteQueue, *, worker: str, minutes_left: float) -> pq.Claim | None:
+def _split_claim(self: pq.SqliteQueue, *, worker: str, minutes_left: float,
+                 exclude: Collection[int]) -> pq.Claim | None:
     """SqliteQueue.claim with its select and its update in two transactions, SPLIT_SLEEP apart."""
     with self._tx() as db:
         w = self._live(db, worker)
         pq._one_claim(db, worker)
-        job = self._pick(db, w, minutes_left)
+        job = self._pick(db, w, minutes_left=minutes_left, exclude=exclude)
     if job is None:
         return None
     time.sleep(SPLIT_SLEEP)
@@ -1474,9 +1537,16 @@ def _all_long(e: pp.Estimate, *, ladder: Ladder) -> pp.Sized:
 _CLAIM = pq.SqliteQueue.claim
 
 
-def _claim_any(self: pq.SqliteQueue, *, worker: str, minutes_left: float) -> pq.Claim | None:
+def _claim_any(self: pq.SqliteQueue, *, worker: str, minutes_left: float,
+               exclude: Collection[int]) -> pq.Claim | None:
     """SqliteQueue.claim ignoring the walltime left: every pending job fits."""
-    return _CLAIM(self, worker=worker, minutes_left=math.inf)
+    return _CLAIM(self, worker=worker, minutes_left=math.inf, exclude=exclude)
+
+
+def _claim_again(self: pq.SqliteQueue, *, worker: str, minutes_left: float,
+                 exclude: Collection[int]) -> pq.Claim | None:
+    """SqliteQueue.claim dropping the exclusion: a worker may claim a job it attempted."""
+    return _CLAIM(self, worker=worker, minutes_left=minutes_left, exclude=())
 
 
 _OUTCOME = pw._outcome
@@ -1506,7 +1576,8 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "transitions": {"late-finish": lambda: _patched(pq, "_holds", lambda job, attempt: True),
                     "drop-on-top": lambda: _patched(pq, "_promoted", _dropped_on_top),
                     "any-worker": lambda: _patched(pq, "_mine", lambda attempt, worker: True),
-                    "second-claim": lambda: _patched(pq, "_one_claim", lambda db, worker: None)},
+                    "second-claim": lambda: _patched(pq, "_one_claim", lambda db, worker: None),
+                    "no-exclude": lambda: _patched(pq.SqliteQueue, "claim", _claim_again)},
     "class": {"median-rate": lambda: _patched(pp, "_worst_rate", statistics.median),
               "no-fit-margin": lambda: _patched(pp.Estimator, "_fitted", _unmargined),
               "family-rate": lambda: _patched(pp, "_pool", _family_pool),
@@ -1519,7 +1590,8 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "oom": {"fail-on-oom": lambda: _patched(pw, "_outcome", _oom_failed),
             "unified-first": lambda: _patched(pw, "oom_evidence", _unified_first)},
     "identity": {"no-identity": lambda: _patched(pw, "_refused", lambda header, commit: None)},
-    "worker": {"fail-worker": lambda: _patched(pw, "FAILED_IN_A_ROW", 1)},
+    "worker": {"fail-worker": lambda: _patched(pw, "FAILED_IN_A_ROW", 1),
+               "no-exclude": lambda: _patched(pq.SqliteQueue, "claim", _claim_again)},
 }
 
 
