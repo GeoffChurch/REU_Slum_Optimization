@@ -1703,8 +1703,9 @@ def _attached_osm(b: Block) -> gx.Osm:
 
 
 def _neighbour_osm(b: Block) -> gx.Osm:
-    """The features meeting the kblock that touches `b` and shares the most drivable way with it
-    (within BOOST_M of its polygon): a neighbouring block's (fault `neighbour-features`)."""
+    """The features meeting the kblock that touches `b` and shares the most of the boost's ways
+    with it (a drivable way tagged paved within BOOST_M of its polygon): a neighbouring block's
+    (fault `neighbour-features`)."""
     import regions
     src = common._source()
     allb = gpd.read_parquet(src.blocks_path, columns=["block_id", "geometry"])
@@ -1715,7 +1716,9 @@ def _neighbour_osm(b: Block) -> gx.Osm:
     best, shared = None, -1.0
     for bid, poly in zip(near.block_id.astype(str), near.geometry, strict=True):
         osm = extract.meeting(poly)
-        w = osm.ways[osm.ways.highway.str.removesuffix("_link").isin(metrics.DRIVE_CLASSES)]
+        boosted = (osm.ways.highway.str.removesuffix("_link").isin(metrics.BOOST.classes).to_numpy()
+                   & metrics.BOOST.surfaces.of(osm.ways.surface))
+        w = osm.ways[boosted]
         reach = shapely.intersection(w.geometry.to_numpy(), b.boundary.buffer(gx.BOOST_M))
         got = float(shapely.length(reach).sum())
         if got > shared:
@@ -1730,7 +1733,7 @@ def no_features(ids: list[str]) -> list[str]:
     checked on them), RUNTIME's baseline (P0, P_{1/2},0, J_2,0, every home's escape time, the homes
     walled in) equals the leak-only metric's to NO_FEATURES_TOL: the barriers and the boost change
     nothing where they meet nothing. Fault `neighbour-features`: the block carries the features of
-    a neighbouring kblock (its drivable streets along the shared ring)."""
+    a neighbouring kblock (its paved drivable streets along the shared ring)."""
     bad = []
     for b in common.build_blocks(ids):
         bid = b.block_id
