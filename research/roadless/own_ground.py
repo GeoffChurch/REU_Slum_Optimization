@@ -15,6 +15,14 @@ previous test and under the test; each clearing's walled-in homes under both tes
 uniform study's stored clearings (T's and U's SIMP answers at D 0.05, STORED) recounted under both.
 Rows: ROWS/blocks/<id>.parquet (the block's) and ROWS/homes/<id>.parquet (its walled-in homes').
 
+`pockets <id>`: how much of each freed home's own ground opens (a home is freed when ANY of it
+reaches the street, a sliver of open ground within ring_m among it): on the complex free first runs
+on (the block's RUNTIME fixed mesh's baseline complex and groundless homes; no flow model), per
+walled-in home with own ground its own ground's area, its pockets (its own ground's components at
+the filtration width), and at the test's free first's clearing and the stored T and U clearings
+the share of its own ground's area reaching the street and whether its largest pocket does.
+Rows: ROWS/pockets/<id>.parquet.
+
 `stored <relax rows>`: the uniform study's T and U rows at D 0.05 under <relax rows> (its worktree's
 relax_rows, git-ignored there) written to STORED: per block and arm its metric, plan, free stage
 and final clearing (committed: what was recounted).
@@ -24,8 +32,9 @@ and final clearing (committed: what was recounted).
 unit of the population it frees (median, pooled, the blocks over 1, the worst), the homes the
 previous test freed through a neighbour that the test leaves walled in at that clearing and how
 many the test's free first frees by opening their own ground (and of those, by clearing the home
-itself), and the stored clearings' walled-in homes under both tests. The blocks: BLOCKS (the 121
-with walled-in homes under RUNTIME: the uniform study's).
+itself), and the stored clearings' walled-in homes under both tests; and of the homes each
+clearing frees, how much of their own ground opens (summary_pockets.csv, from `pockets`). The
+blocks: BLOCKS (the 121 with walled-in homes under RUNTIME: the uniform study's).
 
 Typed as `search.py`'s docstring says:
 
@@ -48,6 +57,7 @@ sys.path.insert(0, str(HERE))
 import clearings  # noqa: E402
 import common  # noqa: E402
 import gap_calib  # noqa: E402
+import gap_clear as gcl  # noqa: E402
 import gap_complex as gc  # noqa: E402
 import gap_flow as gf  # noqa: E402
 import metrics  # noqa: E402
@@ -81,6 +91,61 @@ def stored(root: Path) -> None:
     ROWS.mkdir(parents=True, exist_ok=True)
     d.to_csv(STORED, index=False)
     print(f"{len(d)} rows ({d.block.nunique()} blocks, arms {sorted(d.arm.unique())}) -> {STORED}",
+          flush=True)
+
+
+def pockets_run(bid: str, *, replace: bool) -> None:
+    out = ROWS / "pockets" / f"{bid}.parquet"
+    clearings.check_new(out, replace=replace)
+    t0 = time.time()
+    metric = metrics.metric_of(metrics.RUNTIME, device="cpu")
+    [b] = common.build_blocks([bid])
+    fx = metric.fixed(b, cache=gcl.CACHE, carving=gcl.Carving.none(gc.geometry(b)))
+    cut = metric.exits.barriers.block(b)          # the model's block (ComplexMetric.model)
+    geo = gc.geometry(cut)
+    pop = common.AreaPopulation().weights(np.asarray(cut.buildings.outlines))   # the model's
+    cost = pop / pop.sum()
+    n = len(pop)
+    w, grow = metric.form.filtration_w, metric.form.grow
+    base = fx.cx0.complex()
+    own = gc.own_of(geo, base, fx.groundless)
+    walled0 = gc.walled(gc.home_exits(gc.homes_own(geo, own, base), gc.exit_widths(base)), w)
+    zero = np.zeros(n, dtype=bool)
+    fr = gc.free_first(geo, metric.spec, w=w, grow=grow, budget=BUDGET, cost=cost, pop=pop,
+                       held0=zero, cx0=base, groundless=fx.groundless)
+    st = pd.read_csv(STORED, dtype={"free_cleared": str, "simp_cleared": str})
+    st = st[st.block == bid].set_index("arm")
+    xs = {"own": fr.held}
+    for arm in ARMS:
+        x = zero.copy()
+        x[_ids(st.loc[arm, "simp_cleared"])] = True
+        xs[arm] = x
+    comp, _street = gc.components(base, w)
+    R = own.tri.tocsr()
+    homes = np.flatnonzero(walled0 & ~fx.groundless)
+    reached = {}
+    for name, x in xs.items():
+        cx = gc.build(geo, metric.spec, ~x, carve=None, grow=grow)
+        live = (gc.located(cx.tri_geom, own.xy) @ (gc.exit_widths(cx).width >= w)) > 0
+        reached[name] = np.asarray(live).ravel()
+    rows = []
+    for h in homes:
+        tris = R.indices[R.indptr[h]:R.indptr[h + 1]]
+        a = base.area[tris]
+        pk, inv = np.unique(comp[tris], return_inverse=True)
+        pa = np.bincount(inv, weights=a)
+        big = int(np.argmax(pa))
+        row: dict[str, object] = dict(block=bid, home=int(h), share=float(cost[h]),
+                                      own_area=float(a.sum()), pockets=len(pk),
+                                      largest_share=float(pa[big] / a.sum()))
+        for name, r in reached.items():
+            on = r[tris]
+            row[f"freed_{name}"] = bool(on.any())
+            row[f"reached_{name}"] = float(a[on].sum() / a.sum())
+            row[f"largest_{name}"] = bool(on[inv == big].any())
+        rows.append(row)
+    clearings.write_once(pd.DataFrame(rows), out, replace=replace)
+    print(f"{bid}: {len(homes)} walled-in homes with own ground; {time.time() - t0:.0f}s",
           flush=True)
 
 
@@ -264,12 +329,33 @@ def report() -> None:
     table.to_csv(ROWS / "summary_sizes.csv", index=False)
     pd.set_option("display.width", 220)
     print(table.round(5).T.to_string())
+    pk = _read("pockets")
+    if pk.empty:
+        return
+    pk = pk.merge(blk[["size"]].reset_index(), on="block")
+    rows = []
+    for clearing in ("own", "T", "U"):
+        for size in ("small", "large", "oversized", "all"):
+            g = pk if size == "all" else pk.loc[(pk["size"] == size).to_numpy()]
+            f = g[g[f"freed_{clearing}"]]
+            rows.append(dict(
+                clearing=clearing, size=size, homes=len(g), freed=len(f),
+                reached_median=float(f[f"reached_{clearing}"].median()),
+                reached_under_half=int((f[f"reached_{clearing}"] < 0.5).sum()),
+                reached_under_tenth=int((f[f"reached_{clearing}"] < 0.1).sum()),
+                largest_sealed=int((~f[f"largest_{clearing}"]).sum()),
+                largest_sealed_blocks=int(f.loc[~f[f"largest_{clearing}"], "block"].nunique())))
+    pt = pd.DataFrame(rows)
+    pt.to_csv(ROWS / "summary_pockets.csv", index=False)
+    print(pt.round(4).to_string())
 
 
 def main(argv: list[str]) -> None:
     argv, replace = clearings.replace_flag(argv)
     if len(argv) == 2 and argv[0] == "block":
         block_run(argv[1], replace=replace)
+    elif len(argv) == 2 and argv[0] == "pockets":
+        pockets_run(argv[1], replace=replace)
     elif len(argv) == 2 and argv[0] == "stored":
         stored(Path(argv[1]))
     elif argv == ["report"]:

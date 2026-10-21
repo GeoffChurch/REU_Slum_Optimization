@@ -8561,3 +8561,136 @@ pass's default wall on one card (two arms, two meshes, two models for the lenses
 (63612; its process's peak RSS 55.8 GB of the task's 64, GPU 6.9 GB). The U arm took 0.93x T's
 wall (0.84x SIMP's own time). Here, single-threaded, at most 2 processes: the 80 small blocks 2.1
 process-h (0.96x the default's wall), the guards and diagnostics about 8 process-h.
+
+### A home is freed only when its own ground opens (owner 2026-10-21)
+
+**The ruling.** The uniform rule's study (the section above) read T's free first as counting a
+walled-in home freed when a neighbour cleared within ring_m (1 m) reached the street while the
+home's own pocket stayed sealed (40185's home 21). Asked "Should a home count as freed when only a
+cleared neighbour within 1 m reaches it, with its own pocket still sealed?", the owner: "No, its
+own pocket must open". The controller's ruling on the case the question did not cover: a home with
+no open ground within ring_m at baseline (every side against another footprint or a shy zone: the
+study's 84) has no pocket to open, so cleared ground within ring_m reaching the street still frees
+it; clearing a neighbour is its only way out.
+
+**The test** (gap_complex's HOMES; brief and rulings .superpowers/sdd/2026-10-21-own-ground). A
+home's own ground is the open ground within ring_m of its outline at baseline, live or in a sealed
+pocket (and the open band within ring_m then). It is freed when some of its own ground reaches the
+street by street reach (gap_clear.Reach.street: never a pocket's leak). A groundless home, with no
+point of Placement's rule on open ground within ring_m (gap_flow.groundless: by construction the
+homes PocketDemand leaves without demand), is freed by any ground within ring_m, cleared ground
+included, as before. A home connected at baseline stays connected (clearing only adds ground), so
+only the walled-in homes' answers move. The previous test is this one with every home read as
+groundless, so it keeps no code of its own (the measurement and the own-ground guard run it so).
+One test everywhere:
+- B (i): gap_clear.Fixed keeps the groundless homes and each home's ground that frees it
+  (gap_flow.own_ring: its ring's triangles open with every footprint standing, a groundless home's
+  whole ring) in place of the ring (_CACHE_FORMAT 4); Model.live_homes_of reads it, and with it
+  every lens, enclosed_left and their callers (consolidated, road_rescore, region_leaks, pweight,
+  uniform.py).
+- Free first: gap_complex.free_first takes the fixed mesh's groundless homes. A home is freed
+  through its own ground's components of the region graph (a groundless home's through its ring's
+  and the standing buildings within ring_m, as before), and each rebuild tests it by
+  gap_complex.homes_own: the rebuilt triangles holding the centroids of its baseline ring's
+  triangles, exact at the runtime's filtration width 0, where a baseline triangle is convex open
+  ground in every rebuild. Model.free_first keeps its home-for-home check against the flow model;
+  Model.complex_live (the reach guard's reference) and gap_compare.ComplexModel (the roads guard's)
+  read the same test.
+- free_roads (the lineup's free-first stage): a home's target is the sealed pocket its own ground
+  lies in (a groundless home's, its 1 m ring and the pocket that touches, as before), and its roads
+  must free it by the test; its identity's source hash gains gap_flow.
+  gap_compare.ComplexModel.free_first, which nothing called, is gone.
+
+**The name.** The test is in the metric's name, through the code's digest:
+gap_complex.ENCLOSURE_REV = 2 (MESH_REV's pattern; 29 constants, CODE 34d40e8a -> 1569a066). B (i)
+is a lens of every scored row and free first a method of the metric's model, and every row holding
+either carries the metric's name; the plan's name would leave B (i) unmarked on every lens row, and
+a marker on the lens rows would be a second identity every reader has to check. RUNTIME is now
+
+    cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75
+
+and the per-block metric and UNIFORM moved with it. Every row stored under v34d40e8a is the
+previous test's and was not migrated (the held re-run recomputes): the relax and polish rows,
+consolidated's baselines, lenses, onecard and screen rows, road_rows' scoring under the per-block
+metric, the region study's runs (5810@major walls in 36 homes and its runs free first), uniform's
+arms, the store's runs.csv lines naming it; and the lineup's free-first stage, whose identity
+carries the metric's name and free_roads' source. Every cached mesh re-keys. `exits-identity` now
+fails on the region study's 21 stored run names (summary_lenses.csv), the previous code's, until
+they are re-run or superseded.
+
+**Guards** (each both ways, here on cores). New `own-ground` (40185, RUNTIME): free first by the
+previous test at D 0.05 holds building 0 and frees home 21 through its ground alone; the flow model
+and the complex both count 21 walled in there, B (i) its 0.00232; the test's free first frees it
+exactly when its own ground reaches the street. Fault `ring-reach` (gap_flow.own_ring keeping the
+whole ring: the flow model reads 21 freed). New `groundless` (23597's home 93): T's groundless
+homes and U's are U's homes without demand, and free first (budget 1) frees 93 through cleared
+ground, its ring reaching the street and none of its open triangles. Fault `own-everywhere` (no
+home groundless: 93 is never freed). `free` (20269, 23597, 40185: every walled-in home freed, the
+complex and the flow model agreeing home for home; `drop-crossing` fails on all three), `reach`
+(19570, 20269, 40185: alike at every state; `threshold` fails), gap_check `free` (`no-rebuild`
+fails), enclosure, pocket-count, pocket-escape, uniform-control, baseline (phase 1's numbers: 19570
+-5.4e-5, +1.3e-5, -7.4e-5), pattern, barriers, lazy-baseline, no-features, identity, constants (29)
+and pweight's displacement: as expected. free_roads_check's `free-roads` (20269, 18895, 23597,
+24240: every walled-in home freed, no road refused; `one-short` fails) lost its
+fault at first: under `through-barriers` 24240's home 405's road through the water now frees its
+pocket, and the test held it, so the guard now also checks that no held road runs more than
+free_roads.OBSTACLE_EDGE_M into the metric's barriers, and the fault fails there (23597's home 889,
+24240's 405). `exits-identity`'s faults fail; without one it fails on the 21 stale names only. Not
+run: `roads` (it needs the main checkout's road_rows), the device guards (GPU; the factorization is
+untouched), and the guards that read no part of the test (gradient, weights, convex, flux, the
+leaks', the boosts', underflow, faces, loop-index, trip-calibration, closed-edge, pocket-gradient).
+
+**The measurement** (own_ground.py; rows own_rows/, parquet ignored;
+summary_{blocks,homes,sizes,pockets}.csv and stored_clearings.csv, the uniform study's T and U
+clearings). RUNTIME on cores; on the 121 blocks with walled-in homes (792 homes: 77 small with 327,
+39 large with 416, 5 oversized with 49; 84 groundless), free first alone at area D 0.05 by the
+previous test and by the test, each clearing's walled-in homes read by both. The previous test's
+free first holds T's stored free stage on all 121 blocks, and gives the uniform study's numbers.
+- Left walled in: the same 28 homes on 6 blocks under both (all groundless with no crossing; large
+  26 on 4, oversized 2 on 2, small none; at most 0.10% of a block's population). Of the 84
+  groundless homes both free 56.
+- Freed through a neighbour alone: at the previous test's clearing, 27 homes on 24 blocks (16 small
+  on 14 blocks, 11 large on 10, no oversized; all with own ground) count freed by the previous test
+  while none of their own ground reaches the street: the test leaves them walled in there (55 in
+  all). The test's free first frees all 27 by opening their own ground, 2 of them (40185's home 21,
+  20937's 101) by clearing the home itself with a neighbour.
+- D: the free stage changes on 30 blocks (the 24, and 6 where other crossings changed), up on 22
+  and down on 8: a mean 0.00482 against 0.00478 (+0.0054 summed; a median +0.00016 a changed block,
+  at most +0.0032 on 43304). D per unit of the population freed: median 0.688 against 0.686, pooled
+  0.494 against 0.490, over 1 on 30 of the 119 blocks where it frees anyone against 27 (over 2 on
+  11 against 8), 21.5 at worst on 42404 under both; 40185 1.12 -> 2.12, 20937 1.26 -> 2.26, 42453
+  0.94 -> 1.52, 18895 0.45 -> 2.02.
+- A home freed with its own building cleared (the home among the held buildings): 74 of the 764
+  freed under the test, 73 under the previous: clearing a walled-in home counts as freeing it
+  whenever its ground then reaches the street, the previous test's rule as much as this one's.
+- The stored clearings: T's SIMP answer leaves 51 homes walled in on 25 blocks under the test (28
+  on 6 under the previous): the 23 more are pocket homes its clearing reached only through a
+  neighbour, all among the 221 the uniform study called freed but far (over 10x the block's median
+  escape time under U's metric; these a median 268x). U's leaves 100 on 33 under both: U never
+  frees a home through a neighbour alone. So the study's reading of its 221 far homes ("freed
+  through a cleared neighbour's ground within 1 m while their pocket stays sealed") holds for 23 of
+  them; the other 198 have some of their own ground reaching the street under T's clearing.
+- How much of a freed home's own ground opens (`pockets`, on the complex free first runs on): a
+  home is freed when any of its own ground reaches the street, and 409 of the 708 walled-in homes
+  with own ground hold it in more than one pocket (its components at the filtration width; the
+  largest a median 98% of it, under 90% for 275). The test's free first frees all 708, 91 of them
+  (on 47 blocks) with their largest pocket still sealed: a median 28% of their own ground reaching
+  the street, under 10% for 21, a sliver. T's stored clearing frees 685 by the test, 69 with the
+  largest pocket sealed (18895's home 510: building 323's clearing opens a 3-triangle sliver, 0.1%
+  of its 4.2 m^2 of own ground, its 135-triangle pocket sealed; the test's free first clears 996
+  instead and opens the pocket, D 0.0018 against 0.0004); U's 687, 20. Of the 198 far homes T's
+  clearing frees by the test, 67 have their largest pocket sealed; of its 487 near ones, 2.
+
+**What it says.** The test moves free first little: the same 28 homes stay walled in, and the 27
+the previous test freed through a neighbour alone are freed through their own ground for +0.0054 of
+D summed over the 121 blocks (D per unit of the population freed over 1 on 30 blocks against 27).
+The previous test's generosity is not the uniform study's 31%: it explains 23 of the 221 far homes.
+Two readings of "freed" stay the owner's: a home freed when any of its own ground opens, a sliver
+or a smaller pocket among it (91 of free first's 708 with the largest pocket sealed), and a home
+freed with its own building among those cleared (74 of 764).
+
+**Compute.** Here, single-threaded: the measurement 5.4 process-h (the models and meshes 3.6 h;
+free first 0.77 h by the previous test, 0.96 h by the test: 1.25x, the own ground's location in
+each rebuild), peak RSS 41 GB (1182), at most 6 processes and then 4 (the controller's cap);
+`pockets` 3.0 process-h; the guards about 12.5 process-h, 9.5 of them the free-roads guard's (both
+ways twice, the second time with its barrier check).

@@ -659,8 +659,17 @@ Open:
     option (it leads on the freed homes' service and on fairness) or goes to the wiki's dead ends.
   - Decided (owner 2026-10-21): U's code stays as an option (merged into research/roadless). B (i)
     counts a home freed only when its own ground reaches the street ("No, its own pocket must
-    open"), not when a neighbour cleared within 1 m does; free first frees by the same test. Open:
-    T or U (the owner asked what U's two fixes are, and whether a home's source belongs inside its
+    open"), not when a neighbour cleared within 1 m does; free first frees by the same test. Built
+    (research/own-ground, gap_complex.ENCLOSURE_REV 2 in every metric's name; a home with no open
+    ground within 1 m freed by any ground there, the controller's ruling; NOTES, "A home is freed
+    only when its own ground opens"): free first at D 0.05 leaves the same 28 homes walled in and
+    frees through their own ground all 27 the previous test freed through a neighbour alone (D per
+    unit freed over 1 on 30 of 119 blocks against 27, median 0.69 as before); T's clearing then
+    leaves 51 homes walled in on 25 blocks (28 on 6), U's 100 on 33 as before; the previous test
+    explains 23 of T's 221 far freed homes, not 31%. Open with it: a home is freed when any of its
+    own ground opens (91 of free first's 708 with their largest pocket sealed, 21 with under 10% of
+    it open), and when its own building is among those cleared (74 of 764). Open: T or U
+    (the owner asked what U's two fixes are, and whether a home's source belongs inside its
     footprint rather than on its outline's ring).
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the

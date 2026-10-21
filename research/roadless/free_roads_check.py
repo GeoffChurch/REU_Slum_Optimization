@@ -18,12 +18,15 @@ itself (`_Oracle`: the gap complex's flow model, its reach on the fixed mesh wit
 independent of the stage's own test on the complex rebuilt) finds the same walled-in homes, each
 held road frees its home (and every home its step says it frees) once the roads up to it are
 carved, what the roads leave walled in is the plan's share, and their true displacement under both
-weightings is the plan's and within its budget. Fault `one-short`: every held road one segment
-short (its last point dropped as the stage routes it): the stage itself raises, its road not
-freeing its home by the metric's test (each road refused, every home left `unfreed`). Fault
+weightings is the plan's and within its budget, and no held road runs more than
+free_roads.OBSTACLE_EDGE_M into the metric's barriers. Fault `one-short`: every held road one
+segment short (its last point dropped as the stage routes it): the stage itself raises, its road
+not freeing its home by the metric's test (each road refused, every home left `unfreed`). Fault
 `through-barriers`: the routing graph keeps the edges that run into the metric's barriers
-(free_roads._routing given no obstacle): on 24240 the road for home 405 crosses its water and the
-test refuses it. On its blocks the stage frees every home with no road refused. Its blocks: 20269,
+(free_roads._routing given no obstacle): on 24240 the road for home 405 crosses its water (under
+the previous test of a walled-in home the test refused it; under the own-ground test, its target
+its pocket, a road through the water that frees it is held, and the barrier check sees it). On its
+blocks the stage frees every home with no road refused. Its blocks: 20269,
 18895, 23597 and 24240 (1, 1, 6 and 6 homes walled in under RUNTIME; 23597's home 272 found the
 targets' reach missing the form's growth: NOTES, "Before the consolidated pass: three fixes";
 24240's water and railway the barriers' routing: NOTES, "The consolidated pass").
@@ -172,6 +175,12 @@ def free_roads(ids: list[str]) -> list[str]:
         if not p.enclosed:
             bad.append(f"{bid}: no home walled in at baseline: not a block for this guard")
             continue
+        # no held road runs into the metric's barriers (deeper than OBSTACLE_EDGE_M: the stage's
+        # routing rule, read off its roads)
+        core = shapely.buffer(sc.metric.exits.barriers.obstacle(b), -fr.OBSTACLE_EDGE_M)
+        across = [s.home for s in p.steps if shapely.intersects(core, s.road.geometry)]
+        if across:
+            bad.append(f"{bid}: the roads held for homes {across} run into the metric's barriers")
         if p.refused or p.unfreed or p.unreachable or p.over_budget:
             bad.append(f"{bid}: {p.refused} roads refused by the metric's test, unfreed "
                        f"{list(p.unfreed)}, unreachable {list(p.unreachable)}, over the budget "
