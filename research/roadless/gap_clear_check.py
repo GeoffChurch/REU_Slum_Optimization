@@ -35,8 +35,8 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S faces <ids,> [fault]          # fault: unsorted
     uv run python $S lazy-baseline <ids,> [fault]  # faults: atoms, eager
     uv run python $S uniform-control <ids,> [fault]   # faults: every-cell, placed-everywhere
-    uv run python $S pocket-escape <ids,> [fault]     # faults: pocket-unleaked, placement-dropped,
-                                                      # adjoint-unleaked
+    uv run python $S pocket-escape <ids,> [fault]     # faults: pocket-unleaked, placement-dropped
+    uv run python $S pocket-gradient <ids,> [fault]   # faults: adjoint-unleaked, pocket-unloaded
     uv run python $S pocket-count <ids,> [fault]      # fault: leak-seeded
     uv run python $S both-ways <guards,> <ids,|->  # each guard, then under each of its faults
 
@@ -248,14 +248,19 @@ Faults: `every-cell` (U's leak on every cell, the interiors and the shy zones to
 `placed-everywhere` (every home placed on its pocket's ground too, not only those T leaves
 without demand).
 `pocket-escape`: on blocks with walled-in homes, T leaves every one out (no demand, escape time
-nan), U walls in the same homes and gives each a finite positive escape time from its own pocket:
-its points on cells that leak and that the street does not reach, each pocket's leak draining
-exactly what its homes inject (to POCKET_TOL: the trips end there), the homes U leaves without
-demand having no open ground within ring_m at all; and U's gradient (J_1 and J_2, q 3) at a random
-x against differences on the walled-in homes and their nearest buildings, within GRAD_TOL. Faults:
-`pocket-unleaked` (OpenSites on the live cells only: the pockets drain nowhere),
-`placement-dropped` (PocketDemand placing as LiveDemand), `adjoint-unleaked` (as
-`leak-gradient`'s).
+nan), U walls in the same homes and gives each with open ground within ring_m a finite positive
+escape time from its own pocket: its points on cells that leak and that the street does not reach,
+each pocket's leak draining exactly what its homes inject (to POCKET_TOL: the trips end there);
+the homes U leaves without demand are exactly those with no open ground within ring_m at all
+(23597's home 93: its ring all footprint and shy zone). Faults: `pocket-unleaked` (OpenSites on
+the live cells only: the pockets drain nowhere), `placement-dropped` (PocketDemand placing as
+LiveDemand).
+`pocket-gradient`: U's gradient (J_1 and J_2, q 3, eps GRAD_EPS) at a random x against differences
+(`against_differences`) on the walled-in homes and their nearest buildings, GRAD_BUILDINGS in all,
+within GRAD_TOL; run on 19570 and 23597 (on 20269 the differences are roundoff-limited, T's as
+U's: up to 1.2e-4 for J_2 at h 1e-3 and worse at smaller steps, the gradient guard's own known
+case). Faults: `adjoint-unleaked` (as `leak-gradient`'s), `pocket-unloaded` (J_2's adjoint loaded
+without the homes placed in pockets, as code treating them as having no demand would).
 `pocket-count`: on blocks with walled-in homes, the walled-in homes and population a clearing
 leaves (B (i), by street reach) read the same under U's scorer as under T's, at the baseline, the
 ONE_K single clearings, REACH_RANDOM random clearings at BUDGET and free first's clearing under T.
@@ -2523,8 +2528,14 @@ def pocket_escape(ids: list[str]) -> list[str]:
         r0, c = st0.reach, mU.c
         leak = mU.sys.graph.leak
         S = mU.dem.S.tocsc()
+        # the homes with no open ground within ring_m: no demand under U either
+        open_tri = mU.factors(np.zeros(mU.n)).kt > 0
+        R = mU.fx.ring.tri.tocsr()
+        ground = np.array([bool(open_tri[R.indices[R.indptr[h]:R.indptr[h + 1]]].any())
+                           for h in range(mU.n)])
+        bare = bool(np.array_equal(mU.nodem, ~ground))
         homes = []
-        for h in np.flatnonzero(w):
+        for h in np.flatnonzero(w & ground):
             pts = S.indices[S.indptr[h]:S.indptr[h + 1]]
             tri = mU.fx.ptri[pts]
             cells = c.cell[tri[tri >= 0]]
@@ -2544,31 +2555,57 @@ def pocket_escape(ids: list[str]) -> list[str]:
             if inj > 0.0:
                 drains.append(abs(float((leak[on] * u[on]).sum()) / inj - 1.0))
         drain = max(drains) if drains else np.inf
-        # the homes U leaves without demand have no open ground within ring_m
-        open_tri = mU.factors(np.zeros(mU.n)).kt > 0
-        R = mU.fx.ring.tri.tocsr()
-        bare = [int(h) for h in np.flatnonzero(mU.nodem)
-                if open_tri[R.indices[R.indptr[h]:R.indptr[h + 1]]].any()]
-        # U's gradient at a random x against differences, on the walled-in homes and nearby
-        pick = _near(mU, np.flatnonzero(w), GRAD_BUILDINGS)
-        x0 = np.random.default_rng(SEED + 12).uniform(0.1, 0.4, mU.n)
-        gerr = {p: against_differences(mU.relaxation(p, q=3.0, eps=GRAD_EPS), x0, pick)
-                for p in (1.0, 2.0)}
         med = float(np.nanmedian(mU.u_pop0))
-        ok = (t_out and same and all(f for _h, f, _u in homes) and drain <= POCKET_TOL
-              and not bare and max(gerr.values()) <= GRAD_TOL)
+        ok = t_out and same and all(f for _h, f, _u in homes) and drain <= POCKET_TOL and bare
         print(f"{bid}: {int(w.sum())} walled in; T leaves them out {t_out}; U walls in the same "
               f"{same}, each escaping from its pocket's leak "
               + ", ".join(f"{h} {'ok' if f else 'NOT'} (u0 {uh / med:.3g} x the median)"
                           for h, f, uh in homes)
               + f"; {len(drains)} pockets' drainage against injection within {drain:.1e}; "
-              f"{int(mU.nodem.sum())} homes without demand, {len(bare)} of them with open ground; "
-              f"the gradient against differences " + ", ".join(f"J_{p:g} {e:.1e}"
-                                                              for p, e in gerr.items())
+              f"the homes without demand {np.flatnonzero(mU.nodem).tolist()}, those with no open "
+              f"ground {np.flatnonzero(~ground).tolist()} ({'alike' if bare else 'APART'})"
+              f" -> {'ok' if ok else 'FAILS'}", flush=True)
+        if not ok:
+            bad.append(bid)
+    return bad
+
+
+def pocket_gradient(ids: list[str]) -> list[str]:
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        m = _model(b, gcl.complex_of(metrics.UNIFORM, factorization=gap_factor.SuperLU()))
+        w = m.walled0 & m.dem.pocket
+        if not w.any():
+            bad.append(f"{bid}: no home placed in a pocket (the premise)")
+            continue
+        pick = _near(m, np.flatnonzero(w), GRAD_BUILDINGS)
+        x0 = np.random.default_rng(SEED + 12).uniform(0.1, 0.4, m.n)
+        gerr = {p: against_differences(m.relaxation(p, q=3.0, eps=GRAD_EPS), x0, pick)
+                for p in (1.0, 2.0)}
+        ok = max(gerr.values()) <= GRAD_TOL
+        print(f"{bid}: U's gradient at a random x on {pick.tolist()} ({int(w.sum())} homes in "
+              "pockets among them and near) against differences "
+              + ", ".join(f"J_{p:g} {e:.1e}" for p, e in gerr.items())
               + f" -> {'ok' if ok else 'FAILS'}", flush=True)
         if not ok:
             bad.append(bid)
     return bad
+
+
+def _sgrad_pocket_unloaded(self: gcl.Relaxation, x: np.ndarray) -> tuple[float, np.ndarray]:
+    """gap_clear.Relaxation.value_sgrad with J_p's adjoint (p != 1) loaded without the homes
+    placed in pockets (fault `pocket-unloaded`)."""
+    m = self.m
+    st = m.state(self.k_of(x))
+    J, u, uh = self._J(st)
+    p = self.power
+    lam = u if p == 1.0 else m.solve(
+        st, np.where(m.nodem | m.dem.pocket, 0.0, m.inj * p * np.nan_to_num(uh) ** (p - 1.0)))
+    g = m.grad(st, u, lam) * (1.0 - self.eps)
+    if self.q != 1.0:
+        g = g * self.q * np.maximum(self.proj(x), 1e-300) ** (self.q - 1.0)
+    return J, g
 
 
 def pocket_count(ids: list[str]) -> list[str]:
@@ -2614,7 +2651,8 @@ GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "street-boost": street_boost, "road-boost": road_boost, "underflow": underflow,
     "no-features": no_features,
     "faces": faces, "lazy-baseline": lazy_baseline, "uniform-control": uniform_control,
-    "pocket-escape": pocket_escape, "pocket-count": pocket_count}
+    "pocket-escape": pocket_escape, "pocket-gradient": pocket_gradient,
+    "pocket-count": pocket_count}
 
 
 def _fault_exits():
@@ -2671,9 +2709,11 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "pocket-escape": {"pocket-unleaked": lambda: _patched(gx.OpenSites, "cells",
                                                           lambda self, site: site.live),
                       "placement-dropped": lambda: _patched(gcl.PocketDemand, "demand",
-                                                            lambda self, g: gcl._live_demand(g)),
-                      "adjoint-unleaked": lambda: _patched(gcl.Relaxation, "value_sgrad",
-                                                           _sgrad_unleaked)},
+                                                            lambda self, g: gcl._live_demand(g))},
+    "pocket-gradient": {"adjoint-unleaked": lambda: _patched(gcl.Relaxation, "value_sgrad",
+                                                             _sgrad_unleaked),
+                        "pocket-unloaded": lambda: _patched(gcl.Relaxation, "value_sgrad",
+                                                            _sgrad_pocket_unloaded)},
     "pocket-count": {"leak-seeded": lambda: _patched(gcl.Graph, "_grounded", _leak_seeded)},
     "lazy-baseline": {"atoms": _baseline_on_atoms,
                       "eager": lambda: _patched(gcl.LazyBaseline, "__init__", _eager)},

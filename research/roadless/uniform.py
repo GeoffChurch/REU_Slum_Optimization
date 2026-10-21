@@ -37,6 +37,7 @@ Typed as `search.py`'s docstring says:
 """
 from __future__ import annotations
 
+import gc as pygc
 import socket
 import sys
 import time
@@ -104,6 +105,7 @@ def run_arm(arm: Arm, bid: str, device: str, *, replace: bool) -> None:
     if path.exists() and not replace:
         print(f"{bid} {arm.label}: its row stands ({path.relative_to(HERE)})", flush=True)
         return
+    pygc.collect()                      # the last model's plans freed before this one's
     t0 = time.time()
     if device == "gpu":
         with gap_calib.GpuPeak() as peak:
@@ -123,6 +125,46 @@ def _cleared(path: Path, n: int) -> np.ndarray:
     return x
 
 
+class Scored(NamedTuple):
+    """One metric's view of a block (`score`): its lens rows, per clearing (none, T's, U's) the
+    homes it leaves walled in, and the baseline's homes."""
+    rows: list[dict[str, object]]
+    left: tuple[np.ndarray, np.ndarray, np.ndarray]
+    walled0: np.ndarray
+    nodem: np.ndarray
+    u0: np.ndarray
+    pop: np.ndarray
+    cost: np.ndarray
+    pocket: np.ndarray
+    shadowed: np.ndarray
+    after_free: float
+    P0: float
+    J2_0: float
+
+
+CLEARINGS = ("none", "T", "U")      # the clearings scored, in Scored.left's order
+
+
+def score(bid: str, label: str, metric: gcl.ComplexMetric, xs: tuple[np.ndarray, ...],
+          held: np.ndarray) -> Scored:
+    """The clearings `xs` (CLEARINGS' order) of `bid` under `metric` (its model built here and
+    dropped on return: one model in memory at a time), and the population still walled in after
+    the free stage's buildings `held` alone."""
+    pygc.collect()                      # the last model's plans freed before this one's
+    [b] = common.build_blocks([bid])
+    m = metric.clearing(b, demand=POP)
+    rows, left = [], []
+    for clearing, x in zip(CLEARINGS, xs, strict=True):
+        L = m.base if clearing == "none" else m.lenses(x)
+        rows.append(dict(block=bid, scorer=label, clearing=clearing, n_cleared=int(x.sum()),
+                         D=float(m.cost[x].sum()), **rr._lens_row(m, L)))
+        left.append(m.walled0 & ~L.live)
+    return Scored(rows=rows, left=(left[0], left[1], left[2]), walled0=m.walled0, nodem=m.nodem,
+                  u0=m.u_pop0, pop=m.pop, cost=m.cost, pocket=m.dem.pocket,
+                  shadowed=m.dem.shadowed, after_free=m.enclosed_left(held), P0=m.base.P,
+                  J2_0=m.base.J2)
+
+
 def lenses(bid: str, device: str, *, replace: bool) -> None:
     """Every clearing of `bid` (none, T's, U's) under both metrics; the block's facts; its
     walled-in homes (module docstring)."""
@@ -131,62 +173,55 @@ def lenses(bid: str, device: str, *, replace: bool) -> None:
         clearings.check_new(o, replace=replace)
     t0 = time.time()
     arms = arms_on(device)
-    [b] = common.build_blocks([bid])
-    mT = arms.t.metric.clearing(b, demand=POP)
-    mU = arms.u.metric.clearing(b, demand=POP)
     rT = pd.read_parquet(arm_path(arms.t, bid)).iloc[0]
     rU = pd.read_parquet(arm_path(arms.u, bid)).iloc[0]
-    xs = {"none": np.zeros(mT.n, dtype=bool), "T": _cleared(arm_path(arms.t, bid), mT.n),
-          "U": _cleared(arm_path(arms.u, bid), mT.n)}
-    rows, left = [], {}
-    for scorer, m in (("T", mT), ("U", mU)):
-        for clearing, x in xs.items():
-            L = m.base if clearing == "none" else m.lenses(x)
-            rows.append(dict(block=bid, scorer=scorer, clearing=clearing, n_cleared=int(x.sum()),
-                             D=float(m.cost[x].sum()), **rr._lens_row(m, L)))
-            left[scorer, clearing] = m.walled0 & ~L.live
-    for clearing in xs:
-        if not np.array_equal(left["T", clearing], left["U", clearing]):
+    n = int(rT["n"])
+    xT, xU = _cleared(arm_path(arms.t, bid), n), _cleared(arm_path(arms.u, bid), n)
+    xs = (np.zeros(n, dtype=bool), xT, xU)
+    held = np.zeros(n, dtype=bool)
+    held[np.asarray(rT["free_cleared"], dtype=np.int64)] = True
+    sT = score(bid, "T", arms.t.metric, xs, held)
+    sU = score(bid, "U", arms.u.metric, xs, held)
+    for clearing, a, b in zip(CLEARINGS, sT.left, sU.left, strict=True):
+        if not np.array_equal(a, b):
             raise RuntimeError(f"{bid}: T's and U's scorers part on the homes {clearing!r} leaves "
                                "walled in")
-    w = mT.walled0
-    if not np.array_equal(mU.walled0, w):
+    w = sT.walled0
+    if not np.array_equal(sU.walled0, w):
         raise RuntimeError(f"{bid}: T and U wall in different homes at baseline")
-    held = np.zeros(mT.n, dtype=bool)
-    held[np.asarray(rT["free_cleared"], dtype=np.int64)] = True
-    after_free = mT.enclosed_left(held)
-    scored = ~mT.nodem
-    med = float(np.median(mU.u_pop0[scored])) if scored.any() else np.nan
-    share = mT.cost
-    pU = mU.pop * np.nan_to_num(mU.u_pop0)
-    j2U = mU.pop * np.nan_to_num(mU.u_pop0) ** 2
-    xT, xU = xs["T"], xs["U"]
+    scored = ~sT.nodem
+    med = float(np.median(sU.u0[scored])) if scored.any() else np.nan
+    share = sT.cost
+    pU = sU.pop * np.nan_to_num(sU.u0)
+    j2U = sU.pop * np.nan_to_num(sU.u0) ** 2
+    leftT, leftU = sT.left[1], sT.left[2]
     union = int((xT | xU).sum())
     block = dict(
-        block=bid, n=mT.n, n_walled=int(w.sum()), walled_share=float(share[w].sum()),
-        nodem_T=int(mT.nodem.sum()), nodem_U=int(mU.nodem.sum()),
-        pocket_U=int(mU.dem.pocket.sum()), pocket_not_walled=int((mU.dem.pocket & ~w).sum()),
-        P0_T=mT.base.P, P0_U=mU.base.P, J2_0_T=mT.base.J2, J2_0_U=mU.base.J2,
+        block=bid, n=n, n_walled=int(w.sum()), walled_share=float(share[w].sum()),
+        nodem_T=int(sT.nodem.sum()), nodem_U=int(sU.nodem.sum()),
+        walled_nodem_U=int((w & sU.nodem).sum()), pocket_U=int(sU.pocket.sum()),
+        pocket_not_walled=int((sU.pocket & ~w).sum()),
+        P0_T=sT.P0, P0_U=sU.P0, J2_0_T=sT.J2_0, J2_0_U=sU.J2_0,
         walled_P0_share_U=float(pU[w].sum() / pU.sum()),
         walled_J2_0_share_U=float(j2U[w].sum() / j2U.sum()),
         free_D=float(rT["free_D"]), free_n=int(held.sum()),
-        freed_by_free=float(share[w].sum()) - after_free,
+        freed_by_free=float(share[w].sum()) - sT.after_free,
         D_T=float(share[xT].sum()), D_U=float(share[xU].sum()),
         jaccard=float((xT & xU).sum() / union) if union else 1.0,
-        left_T=int(left["T", "T"].sum()), left_T_share=float(share[left["T", "T"]].sum()),
-        left_U=int(left["T", "U"].sum()), left_U_share=float(share[left["T", "U"]].sum()),
-        sealed_U_freed_T=int((left["T", "U"] & ~left["T", "T"]).sum()),
-        sealed_U_freed_T_share=float(share[left["T", "U"] & ~left["T", "T"]].sum()),
-        sealed_T_freed_U=int((left["T", "T"] & ~left["T", "U"]).sum()),
+        left_T=int(leftT.sum()), left_T_share=float(share[leftT].sum()),
+        left_U=int(leftU.sum()), left_U_share=float(share[leftU].sum()),
+        sealed_U_freed_T=int((leftU & ~leftT).sum()),
+        sealed_U_freed_T_share=float(share[leftU & ~leftT].sum()),
+        sealed_T_freed_U=int((leftT & ~leftU).sum()),
         t_T=float(rT["t"]), t_U=float(rU["t"]), wall_T=float(rT["wall"]),
         wall_U=float(rU["wall"]), median_u0=med, device=device, host=socket.gethostname(),
         metric_T=arms.t.metric.name, metric_U=arms.u.metric.name, plan_T=arms.t.plan.name,
         plan_U=arms.u.plan.name, wall_lenses=time.time() - t0)
     homes = pd.DataFrame(dict(
-        block=bid, home=np.flatnonzero(w), share=share[w], u0_U=mU.u_pop0[w],
-        u0_ratio=mU.u_pop0[w] / med, shadowed_U=mU.dem.shadowed[w], left_T=left["T", "T"][w],
-        left_U=left["T", "U"][w]))
-    for o, df in zip(outs, (pd.DataFrame(rows), pd.DataFrame([block]), homes), strict=True):
+        block=bid, home=np.flatnonzero(w), share=share[w], u0_U=sU.u0[w], u0_ratio=sU.u0[w] / med,
+        nodem_U=sU.nodem[w], shadowed_U=sU.shadowed[w], left_T=leftT[w], left_U=leftU[w]))
+    for o, df in zip(outs, (pd.DataFrame(sT.rows + sU.rows), pd.DataFrame([block]), homes),
+                     strict=True):
         clearings.write_once(df, o, replace=replace)
     print(f"{bid}: {int(w.sum())} walled in; T leaves {block['left_T']}, U {block['left_U']}; "
           f"Jaccard {block['jaccard']:.3f}; lenses {time.time() - t0:.0f}s", flush=True)
