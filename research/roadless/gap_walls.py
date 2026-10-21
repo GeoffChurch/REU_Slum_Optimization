@@ -13,7 +13,8 @@ within w / 2 of it (gap_clear.FullMesh.fzone: its footprint, its shy zone, and a
 w that two zones close): a triangle is INSIDE the set S(t) of standing buildings whose grown
 footprint holds it, OPEN with none (exactly T's open ground: the shy distance's factor 1 there).
 - Interiors conduct: an inside triangle's factor is `k_in` (no street boost: a building is no
-  street), an open triangle's the metric's (1, times the street boost on a paved way, as T).
+  street), an open triangle's the metric's (1, times the street boost on a paved way, as T); k_in
+  at most open ground's 1, so clearing a building never slows its ground and P stays monotone.
 - Walls are priced as a length: a passage e between triangles a and b with S(a) != S(b) crosses
   walls; from a to b it leaves the buildings S(a) less S(b) and enters S(b) less S(a), costing
   c = ell_out [it leaves one] + ell_in [it enters one], and conducts, in series with what it
@@ -137,6 +138,11 @@ class Walls(Protocol):
         """Out of a building (onto open ground, or the street through a street face)."""
         ...
 
+    @property
+    def ell_in(self) -> float:
+        """Into a building."""
+        ...
+
     def costs(self, leave: NDArray[np.bool_], enter: NDArray[np.bool_]
               ) -> tuple[NDArray[np.float64], NDArray[np.float64]]: ...
 
@@ -144,9 +150,11 @@ class Walls(Protocol):
 
 
 def _check_lengths(k_in: float, *ells: float) -> None:
-    if not (0.0 < k_in < math.inf and all(0.0 < e < math.inf for e in ells)):
-        raise ValueError(f"walls: k_in and each wall's length positive and finite: k_in {k_in}, "
-                         f"lengths {ells}")
+    """k_in in (0, 1] (a cleared building's ground conducting no slower than a standing interior,
+    so clearing never raises P), each length positive (a wall of length 0 is no wall) and finite."""
+    if not (0.0 < k_in <= 1.0 and all(0.0 < e < math.inf for e in ells)):
+        raise ValueError(f"walls: k_in in (0, 1] and each wall's length positive and finite: "
+                         f"k_in {k_in}, lengths {ells}")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -164,6 +172,10 @@ class SymmetricWalls:
 
     @property
     def ell_out(self) -> float:
+        return self.ell
+
+    @property
+    def ell_in(self) -> float:
         return self.ell
 
     def costs(self, leave: NDArray[np.bool_], enter: NDArray[np.bool_]
@@ -307,16 +319,7 @@ class WallModel:
         self.f_open = base.fm.Tf[c.pf]              # the open ground's (boosted, edged)
         self.g_tri = fm.fa[c.pg]                     # the obtuse exits (gap_clear's ground)
         self.g_len = np.hypot(*(fm.xy[fm.fu[c.pg]] - fm.xy[fm.fv[c.pg]]).T)
-        # the sources: each home's population over its own footprint's triangles by area
-        a, b_, c_ = (fm.xy[fm.tri[:, k]] for k in range(3))
-        area = 0.5 * np.abs((b_[:, 0] - a[:, 0]) * (c_[:, 1] - a[:, 1])
-                            - (b_[:, 1] - a[:, 1]) * (c_[:, 0] - a[:, 0]))
-        Wt = sp.csr_matrix(self.cover.multiply(area[:, None]))
-        A_h = np.asarray(Wt.sum(axis=0)).ravel()
-        self.nodem = A_h <= 0.0
-        C = sp.csr_matrix((np.ones(fm.nt), (np.arange(fm.nt), c.cell)), shape=(fm.nt, c.n))
-        self.Pc = (C.T @ Wt @ sp.diags(np.where(self.nodem, 0.0, 1.0 / np.maximum(A_h, 1e-300)))
-                   ).tocsr()
+        self.Pc, self.nodem = self.sources()
         self.PcT = self.Pc.T.tocsr()
         self.pop = base.pop
         self.cost = base.cost
@@ -333,7 +336,26 @@ class WallModel:
         self.inj_q = gcl.PQ.injection(self.pop, self.u_pop0, self.nodem)
         self.base_ = self._score(st0, solver0, s0)
 
+    def sources(self) -> tuple[sp.csr_matrix, NDArray[np.bool_]]:
+        """(cells x homes: each home's population over its own footprint's triangles (its cover)
+        by area; per home whether it has none: a footprint the band swallows)."""
+        fm, c = self.fm, self.sys.cells
+        a, b, d = (fm.xy[fm.tri[:, k]] for k in range(3))
+        area = 0.5 * np.abs((b[:, 0] - a[:, 0]) * (d[:, 1] - a[:, 1])
+                            - (b[:, 1] - a[:, 1]) * (d[:, 0] - a[:, 0]))
+        Wt = sp.csr_matrix(self.cover.multiply(area[:, None]))
+        A_h = np.asarray(Wt.sum(axis=0)).ravel()
+        nodem = A_h <= 0.0
+        C = sp.csr_matrix((np.ones(fm.nt), (np.arange(fm.nt), c.cell)), shape=(fm.nt, c.n))
+        Pc = (C.T @ Wt @ sp.diags(np.where(nodem, 0.0, 1.0 / np.maximum(A_h, 1e-300)))).tocsr()
+        return Pc, nodem
+
     # -- the state
+
+    def open_factor(self, standing: NDArray[np.bool_]) -> NDArray[np.float64]:
+        """Per triangle its factor where it is open (not inside a standing building): the
+        metric's, the street boost (a cleared building's ground among it)."""
+        return np.asarray(self.b_ways, dtype=np.float64)
 
     def standing_sets(self, standing: NDArray[np.bool_]
                       ) -> tuple[NDArray[np.bool_], NDArray[np.int64], NDArray[np.bool_],
@@ -360,7 +382,7 @@ class WallModel:
             raise ValueError(f"a clearing of {len(standing)} buildings, the block has {self.n}")
         inside, wall, leave, enter = self.standing_sets(standing)
         k_in = self.walls.k_in
-        f = np.where(inside, k_in, self.b_ways)
+        f = np.where(inside, k_in, self.open_factor(standing))
         fa, fb = f[self.pa], f[self.pb]
         T = self.T0 * (2.0 * fa * fb / (fa + fb))
         c_ab, c_ba = self.walls.costs(leave, enter)
@@ -425,8 +447,7 @@ class WallModel:
         sq = solver.solve(self.rhs(st, self.inj_q))
         uh = self.home_u(sp_.u)
         ok = ~self.nodem
-        bm = self.base
-        live = bm.live_homes_of(bm.factors(bm.k_of(~st.standing)))
+        live = self.street_reach(st)
         left = self.walled0 & ~live
         L = gcl.Lenses(P=float(self.rhs(st, self.pop) @ sp_.u),
                        Pq=float(self.rhs(st, self.inj_q) @ sq.u),
@@ -434,6 +455,12 @@ class WallModel:
                        enclosed=float(self.cost[left].sum()), n_enclosed=int(left.sum()), u=uh,
                        live=live, unknowns=int(st.unknown.sum()))
         return WallLenses(lenses=L, state=st, pop=sp_, q=sq)
+
+    def street_reach(self, st: WallState) -> NDArray[np.bool_]:
+        """Per home: the street reaches it (B (i)): the base model's reach through open ground
+        only, on its own factors (interiors closed), never through a wall."""
+        bm = self.base
+        return bm.live_homes_of(bm.factors(bm.k_of(~st.standing)))
 
     def lenses(self, removed: NDArray[np.bool_]) -> WallLenses:
         """The 0/1 clearing `removed` scored (module docstring)."""
