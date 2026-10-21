@@ -6,10 +6,10 @@
 
 **Architecture:** A wave's jobs are rows of a SQLite queue in `$HOME/reblock-waves/<w>/` (journal_mode DELETE, one IMMEDIATE transaction per operation, behind a `Queue` Protocol).
 Pool leases (kind `pool`, one per (node, class), continued and widened by the market through `cs.launches.width`) run `pool.py work`, which claims the longest job that fits its walltime, runs it as a child, counts the rows it writes, and promotes it a rung on an OOM; a steward lease per wave (kind `steward`) reaps dead claims on squeue's evidence, asks workers to step aside, writes `summary.json` and ends the wave; jobs no lease can hold run as `long` runs sized per job.
-This machine's `Waves` Campaigns says which runs are whose leases, `Pool.more` continues a lease from the steward's summary, and `cluster_demand` states the one `reblock` campaign's demand with every wave's lines.
+This machine's `Waves` Campaigns says which runs are whose leases and what the market starts for a class on a node (`Waves.template`: the wave with the most pending jobs there, at its own commit), `Pool.more` continues a lease from the steward's summary, and `cluster_demand` states the one `reblock` campaign's demand with every wave's lines.
 Every pooled script keeps the rows that stand (`clearings.Standing`, `Keep`), so a double claim or a killed job wastes a run and nothing else.
 
-**Tech Stack:** Python 3.12 (uv), sqlite3, pandas and pyarrow (the estimators' stored rows), GeoffChurch/cluster_submit pinned at 29f20c36 (`Kind`, `Campaigns`, `launches`, `gpu`, `gpuboard`, `remote`), Slurm 23.11 on ai.
+**Tech Stack:** Python 3.12 (uv), sqlite3, pandas and pyarrow (the estimators' stored rows), GeoffChurch/cluster_submit pinned at ec79a0eb (`Kind`, `Campaigns` with `template` and `starts`, `Template`, `launches`, `gpu`, `gpuboard`, `remote`), Slurm 23.11 on ai.
 
 **Spec:** docs/superpowers/specs/2026-10-21-lease-pool-design.md (approved by the owner 2026-10-21, "Lease-pool spec LGTM"; its section 9 records the decisions on its twelve questions), with its brief and GeoffChurch/mycooc's lessons in .superpowers/sdd/2026-10-21-lease-pool/.
 Read the spec whole before any task; section numbers below (3.2, 3.7, ...) are its.
@@ -23,15 +23,16 @@ Every task's requirements include this section.
 
 - **Tasks 1-9 run in the worktree** `/home/gchurchill/src/reblock/.worktrees/lease-pool` on branch research/lease-pool; push it after each commit (`git push origin research/lease-pool`).
   Why not research/roadless in the main checkout: the project's one watch timer (`cluster_submit-reblock-sync`) runs the main checkout's working-tree `research/roadless/cluster.py sync` on that checkout's registry, so a half-built cluster.py there would stop the syncs of cp-roads4-desire-g3a and -g3b, which must never be cancelled.
-- **Tasks 10-12 run on research/roadless in the main checkout** `/home/gchurchill/src/reblock`, after the controller merges research/lease-pool into it (Task 10 Step 1); push research/roadless after each commit.
+- **Tasks 10 and 11 run on research/roadless in the main checkout** `/home/gchurchill/src/reblock`, after the controller merges research/lease-pool into it (Task 10 Step 1); push research/roadless after each commit.
   Waves are only ever submitted from the main checkout: the timer syncs no other registry, so a wave submitted elsewhere would never be continued.
 - **Against the epistemetry move** (docs/superpowers/plans/2026-10-17-epistemetry-move.md, executing now on research/roadless in the main checkout):
   - Task 5 (`Standing`, which edits consolidated.py) starts only once that plan's Task 7 commit is on origin/research/roadless (its subject begins `research: roadless -- consolidated screen-report decides through epistemetry's advance`); merge origin/research/roadless into research/lease-pool first.
     Until then do Tasks 6-8, which touch no file of that plan's.
   - Its Task 8 deletes seqscreen.py and epireplay.py; neither calls clearings, so the order of that task and Task 5 does not matter.
   - Locate every edit to an existing file by function, class or heading name, never by a line number: the move's executor is editing consolidated.py, NOTES.md and BACKLOG.md now.
-- **Against the g3 runs:** Task 12 (the migration) waits for cp-roads4-desire-g3a and -g3b to finish and sync (their records are of kind `cpu`); its precondition step checks it.
-- **Against cluster_submit's template starts:** Task 11 waits for a cluster_submit commit carrying `Campaigns.template` and for the controller to confirm the pin bump with the owner; nothing before it depends on it.
+- **Against the g3 runs:** Task 11 (the migration) waits for cp-roads4-desire-g3a and -g3b to finish and sync (their records are of kind `cpu`); its precondition step checks it.
+- **cluster_submit is pinned at ec79a0eb** (research/roadless 335a735d, the owner's "Yes, bump to ec79a0e"): `Campaigns.template(ctx, campaign, node, bundle) -> cs.Template | cs.Done` and `Campaigns.starts(market)`, and no `Campaigns.commit`.
+  Read its README "GPU market" and docs/migrating/reblock.md's last "Also" section (`git -C ~/src/cluster_submit show ec79a0eb:<path>`) before Task 6: that section is what `Waves` answers.
 - The plan ends with the pool built, guarded and smoke-tested; the held re-run under the paved-only boost (.superpowers/sdd/2026-10-20-paved-boost/brief.md) is its first user and is not part of it.
 
 ### Rulings (the spec reconciled with what landed after it)
@@ -51,10 +52,12 @@ Every task's requirements include this section.
    `cluster.py gpu` at 2026-10-21T19:32Z shows g3a and g3b, submitted with 1 CPU, held at 0/2/850 and 0/2/540 (ai's CR_CORE_MEMORY holds both of a core's threads), so a 1-CPU class's demand line would never match what its workers hold, and the market's `held` and step-aside would miss them.
    Jobs stay single-threaded (cluster_env.sh).
    This overrules the spec's "cpu-score (1 CPU)".
-4. **Starts until the template call.**
-   At 29f20c36 the market starts a lease from the newest lease of a (node, bundle) at `Campaigns.commit(ctx, campaign)`, one commit for the campaign.
-   Until the pin carries `Campaigns.template` (Task 11), live waves share one commit and no two waves share a (node, class): `wave submit` refuses a wave that would break either, and `Waves.commit` answers that commit (Done with no live wave), so every start is the right wave's pool at the right commit.
-   Task 11 lifts both: the template names the wave and its commit (the controller's message, 2026-10-21: `Campaigns.template(ctx, campaign, node, bundle) -> Template | None`).
+4. **Starts from the campaign's template.**
+   The market starts every pool lease (ec79a0eb's `Campaigns.template`): for a (node, bundle) line of the campaign's demand that the allocation gives more units than its unfinished leases there hold, `Waves.template` answers the pool of the live wave with the most pending jobs of that class on that node (from the stewards' summaries; ties by wave name), at that wave's commit, named `<w>-<node>-<class>-s<N>` (N the first the registry lacks, so never a run it has nor a continuation's `-l<N>`), or `cs.Done(why)` when no live wave has work of that class there.
+   So waves of the one campaign share a node and class freely and run at different commits, and a class reached by promotion is started with nothing submitted by hand (the spec's 3.4 and 3.7, as cluster_submit's docs/migrating/reblock.md says).
+   `wave submit` therefore submits no pool: the steward's first summary puts the classes in the next sync's demand, the keeper allocates, and the sync after starts them; `wave <w> pools` hand-submits a first lease per class for a GPU file in shadow mode, where the market starts nothing.
+   `Waves.starts(market)` is `tuple(market())`.
+
 5. **Stepping aside across waves.**
    The allocation's `yields` are the campaign's per (node, bundle); each steward asks of its own live workers there its largest-remainder share of them, in proportion to every live wave's workers there as their latest summaries count them (ties by wave name), counting only its own asks since that allocation.
 6. **Progress and strikes.**
@@ -68,7 +71,7 @@ Every task's requirements include this section.
 8. **`Standing` replaces `replace: bool`.**
    `clearings.Standing` (`Refuse`, `Replace`, `Keep`) is resolved once per script by `clearings.standing_of(argv)` from `--replace` or `--keep-standing`; `check_new` and `replace_flag` go, and every caller moves to it in the same commit.
 9. **Leases are the preset's length** (`Ladder.lease_minutes`: 120 in both production presets, the active tier's 2 h), the plan's `--time`; the market caps a launched lease at its node's tier's, and a quiet node's 3 h is not used.
-10. **Throttles.** A CPU pool lease is submitted `--gpus CPU_NODES[node]` and a GPU one `--gpus PROJECT.max_gpus` (4, decision 5); continuations and starts keep a lease's throttle, so a widened lease runs whole.
+10. **Throttles.** A CPU pool lease runs `--gpus CPU_NODES[node]` and a GPU one `--gpus PROJECT.max_gpus` (4, decision 5): `Waves.template` puts it in its args and continuations keep it, so a widened lease runs whole.
 11. **The steward runs on orion with 2 CPUs and 3 GB**, a bundle no ladder's rung has (`pool_ladder.STEWARD`, a `cs.Bundle`), so its unit never joins a pool's demand line; its memory is measured in the smoke wave (the spec's question 1).
 12. **Requests go through the steward.** `wave <w> retry` and `wave <w> cancel` write a request file in the wave's directory, which the steward applies on its next round; `wave cancel` also cancels every pool run of the wave, and the steward then cancels the wave's pending and claimed jobs, writes the final snapshot and exits 0.
 13. **`summary.json` is read exactly** (format 1, every key by name); its format changes only while no wave is live.
@@ -81,7 +84,7 @@ Every task's requirements include this section.
 ### Code rules (~/.claude/CLAUDE.md)
 
 - No legacy shims: when a format or interface changes, migrate the data and delete the old path.
-  The old kinds stay only while their runs are live, and go in one commit (Task 12).
+  The old kinds stay only while their runs are live, and go in one commit (Task 11).
 - Strategy resolved upstream: a Protocol and an instance built where the command line is read, passed down; no `if mode == ...` at call sites.
   The name lookups (`LADDERS[name]`, `FAMILIES[name]`) are the command line's, resolved once, with no default (an unknown name is a SystemExit listing the names).
 - No `getattr` or `.get` defaults on closed sets; frozen dataclasses (`frozen=True, kw_only=True`) and NamedTuples; every JSON file (`jobs.json`, `summary.json`, a request) read by key at one boundary function, exactly.
@@ -96,10 +99,10 @@ Every task's requirements include this section.
 
 - `ENV="OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1 PYTHONPATH=."`; every guard runs from the repo root as `env $ENV uv run python research/roadless/<check>.py ...`.
 - pool_check.py follows screening_check.py's command line: `<guard> [fault]`, `both-ways <guards,>`, a `GUARDS` and a `FAULTS` dict.
-  Task 6 gives cluster_check.py the same `both-ways` (its `cpu` check stays a print until Task 12).
+  Task 6 gives cluster_check.py the same `both-ways` (its `cpu` check stays a print until Task 11).
 - Guards that read stored rows take the rows root as an argument (`<rows>`), because parquet rows are git-ignored and live in the main checkout only: from the worktree pass `/home/gchurchill/src/reblock/research/roadless`.
 - Ruff skips research/ (pyproject's `extend-exclude`), so name the paths: every new module passes `uv run ruff check <paths>`; a touched existing module passes `uv run ruff check --select F,E9 <path>` (check it passes before editing).
-- Types: `MYPYPATH=research/roadless uv run mypy --strict --follow-imports=silent <paths>` reports no error in a new module, nor in cluster.py, cluster_demand.py or cluster_check.py (clean at 4630922e); for another touched module the count of errors does not rise (record it before editing).
+- Types: `MYPYPATH=research/roadless uv run mypy --strict --follow-imports=silent <paths>` reports no error in a new module, nor in cluster.py, cluster_demand.py or cluster_check.py (clean at 335a735d); for another touched module the count of errors does not rise (record it before editing).
 
 ### Processes and the cluster
 
@@ -121,10 +124,10 @@ Claude-Session: https://claude.ai/code/session_01RoNpoEMZ1kz2hogCsAsmXJ" -- <pat
 
 ## Review Focus
 
-1. **A wave's first leases start before anything has made its queue, or before its steward has written a summary**: a worker makes the queue from the seed and runs; `Pool.more` raises (asked again next sync), never Done, with no summary.
+1. **A long run, or a lease started by hand, starts before anything has made its wave's queue, or before its steward has written a summary**: a worker makes the queue from the seed and runs; `Pool.more` raises (asked again next sync), never Done, with no summary.
    Pinned by Task 3's `worker` guard (a worker on an absent queue.db) and Task 6's `more` guard (no summary).
-2. **Two waves sharing a (node, bundle)**: the demand sums their lines, each steward asks only its share to step aside, and until Task 11 a second wave sharing a live wave's (node, class), or at another commit, is refused.
-   Pinned by Task 8's `demand` guard, Task 4's `aside` guard and Task 7's `wave` guard.
+2. **Two waves sharing a (node, bundle), at different commits**: the demand sums their lines, each steward asks only its share to step aside, and the market's start there goes to the wave with the most pending jobs of the class, at that wave's commit.
+   Pinned by Task 8's `demand` guard, Task 4's `aside` guard and Task 6's `template` guard.
 3. **A summary of another format, or one older than a lease's end** (the steward between its own leases, or a wave at an older commit after a format change): `Pool.more` raises, and the demand states that wave's running workers alone and says so.
    Pinned by Task 6's `more` guard and Task 8's `demand` guard.
 4. **An OOM that takes the worker with its job** (a cgroup that kills the whole step): the child starts at `oom_score_adj` 1000, so the kernel takes the job first; if the worker dies anyway its attempt is reaped as a strike, never looped; the smoke wave forces an OOM on ai.
@@ -143,12 +146,12 @@ Claude-Session: https://claude.ai/code/session_01RoNpoEMZ1kz2hogCsAsmXJ" -- <pat
 - Create `research/roadless/pool.py`: the cluster entry (`work`, `steward`), every Strategy built there.
 - Create `research/roadless/cluster_wave.py`: the `wave` verb.
 - Create `research/roadless/pool_check.py`: the guards `claim`, `transitions`, `class`, `walltime`, `oom`, `identity`, `worker`, `dead-claim`, `aside`, `end`, `keep`, `double-claim`, and `smoke-job`.
-- Modify `research/roadless/cluster.py`: kinds `Pool`, `Steward`, `Long`, the pull `WaveRecord`, `Waves` (Campaigns), `PROJECT`, the `wave` dispatch, `state_demand`, the docstring; Task 12 deletes `Blocks` and `Cpu`.
-- Modify `research/roadless/cluster_demand.py`: pool lines (Task 8); Task 12 drops `Stated.unplaced`.
-- Modify `research/roadless/cluster_check.py`: `both-ways`, guards `more`, `wave`, `demand`; Task 12 rewrites `cpu`, `ids` and `script` for waves.
+- Modify `research/roadless/cluster.py`: kinds `Pool`, `Steward`, `Long`, the pull `WaveRecord`, `Waves` (Campaigns: `lease`, `template`, `starts`), `PROJECT`, the `wave` dispatch, `state_demand`, the docstring; Task 11 deletes `Blocks` and `Cpu`.
+- Modify `research/roadless/cluster_demand.py`: pool lines (Task 8); Task 11 drops `Stated.unplaced`.
+- Modify `research/roadless/cluster_check.py`: `both-ways`, guards `kinds`, `more`, `template`, `wave`, `demand`; Task 11 rewrites `cpu`, `ids` and `script` for waves.
 - Modify `research/roadless/clearings.py` (`ROW_WRITTEN`, Task 3; `Standing`, Task 5) and clearings_check.py, and every caller of `check_new`, `write_once` or `replace_flag`: consolidated.py, road_rescore.py, arterial_study.py, uniform.py, gap_calib.py, polish_greedy.py, search.py, relax.py, pweight.py, region_leaks.py.
 - Modify `research/roadless/.gitignore`: `waves/`.
-- Modify `research/roadless/NOTES.md` (Task 10), `research/roadless/BACKLOG.md` (Task 12), `pyproject.toml` and `uv.lock` (Task 11), and .superpowers/sdd/2026-10-16-consolidated-pass/followup.md (Task 12).
+- Modify `research/roadless/NOTES.md` (Task 10), `research/roadless/BACKLOG.md` and .superpowers/sdd/2026-10-16-consolidated-pass/followup.md (Task 11).
 
 ---
 
@@ -449,27 +452,30 @@ Paths: `research/roadless/clearings.py research/roadless/clearings_check.py` and
 
 ---
 
-### Task 6: The kinds, the campaign and `more`
+### Task 6: The kinds, the campaign's leases and starts, and `more`
 
-The spec's 3.7 (its `more` and starts), 3.10, 3.11, with Rulings 2, 4, 9, 10, 11 and 13.
+The spec's 3.7 (its `more` and starts), 3.10, 3.11, with Rulings 2, 4, 9, 10, 11 and 13, on cluster_submit ec79a0eb's `Campaigns` (read its docs/migrating/reblock.md's last section first).
 
 **Files:**
 - Modify: `research/roadless/cluster.py` (kinds `Pool`, `Steward`, `Long`; pull `WaveRecord`; `Waves`; `pool_more`; `PROJECT`; constants `WAVES`, `CAMPAIGN`, `STEWARD_NODE`; the docstring's new paragraphs)
-- Modify: `research/roadless/cluster_check.py` (the `both-ways` harness; guards `kinds` and `more`)
+- Modify: `research/roadless/cluster_check.py` (the `both-ways` harness; guards `kinds`, `more` and `template`)
 - Modify: `research/roadless/.gitignore` (`waves/`)
 
 **Interfaces:**
-- Consumes: `LADDERS`, `class_name`, `STEWARD` (Task 1); `read_summary`, `Summary`, `WaveState` (Task 4).
+- Consumes: `LADDERS`, `class_name`, `STEWARD` (Task 1); `read_summary`, `Summary`, `WaveState` (Task 4); `cs.Template`, `cs.Done`, `cs.launches.Start`, `cs.launches.line_checked`, `cs.gpu.chain_base` (ec79a0eb).
 - Produces, in cluster.py:
   - `WAVES = "reblock-waves"` (below the cluster home), `CAMPAIGN = "reblock"` (= `PROJECT.name`), `STEWARD_NODE = "orion"`.
   - `Pool` (name `pool`, routine exits {75}, pull `IntoTree("research/roadless", ("*.parquet",))`): arguments `--wave`, `--preset` (a name of `LADDERS`), `--node`, `--mem` (a rung of the preset); its plan one task `python -u research/roadless/pool.py work --wave <w> --node <n> --class <class_name(cards, mem)>`, CPU only for cards 0, else a card (`gpu_gb` 8: the largest GPU peak stored is 7.6 GB), `Resources(cpus=ladder.cpus, mem_gb=mem, time=<lease_minutes as H:MM:SS>, node=node)`, no inputs, prelude `source research/roadless/cluster_env.sh`.
   - `Steward` (name `steward`, routine exits {75}, pull `WaveRecord`): arguments `--wave`, `--board`; one task `python -u research/roadless/pool.py steward --wave <w> --board <b> --stale-after-minutes <PROJECT.gpu_market's>`, `Resources(cpus=2, mem_gb=3, time="2:00:00", node=STEWARD_NODE)`.
   - `Long` (name `long`, no routine exits, pull as `Pool`'s): arguments `--wave`, `--preset`, `--job`, `--node`, `--mem`, `--minutes`; one task `pool.py work --wave <w> --job <id>`, `--time` the minutes as H:MM:SS, at most 7 days.
   - `WaveRecord` (a `Pull`): `pull` mirrors `<WAVES>/<w>/{summary.json,ledger.jsonl,final.db}` (those present) into `research/roadless/waves/<w>/`, replacing what is there (a mirror, not write-once results); `unpulled` and `retained` are `()`.
-  - `Waves` (a `cs.Campaigns`): `lease(ctx, rec)`: for a `pool` record, `cs.Lease(CAMPAIGN, args.node, cs.Bundle(cards=ladder.cards, cpus=ladder.cpus, mem_gb=args.mem))`, else None; `commit(ctx, campaign)`: the one commit of the unfinished stewards in the registry, `cs.Done` with none, SystemExit with several (Ruling 4).
+  - `Waves` (a `cs.Campaigns`):
+    - `lease(ctx, rec)`: for a `pool` record, `cs.Lease(CAMPAIGN, args.node, ladder.bundle(args.mem))`, else None (a steward, a long run, today's kinds);
+    - `template(ctx, campaign, node, bundle) -> cs.Template | cs.Done` (Ruling 4): the live waves (the registry's unfinished stewards), their summaries read with one `ctx.remote().probe`; among those whose ladder's `bundle(rung)` is `bundle` for some rung and whose summary has a line of that class on `node`, the one with the most pending jobs (ties by wave name): `cs.Template(kind="pool", run=f"{w}-{node}-{class_name(cards, rung)}-s{n}", commit=<its steward's commit>, args=("--wave", w, "--preset", p, "--node", node, "--mem", str(rung), "--gpus", str(<Ruling 10>)))`, `n` the first the registry lacks; `cs.Done(why)` when none has pending jobs there, the why naming the bundle and node; a live wave whose summary does not read is left out and named in a Done's why, and SystemExit when no live wave's reads (the next sync asks again);
+    - `starts(market)`: `tuple(market())`.
   - `pool_more(ctx: cs.Context, rec: cs.RunRecord, *, killed: tuple[str, ...]) -> cs.Continue | cs.Done` (`Pool.more`), in this order: no unfinished `steward` run of the wave in `ctx.registry`: Done; its summary (one `ctx.remote().probe("cat reblock-waves/<w>/summary.json")`) absent, unreadable or of another format: SystemExit; its `at` before `rec.gone_at`, or a task of `killed` not among its `reaped`: SystemExit; a task of `killed` reaped with `held_job` False: Done; no pending job of the lease's class on its node: Done; else `c = cs.launches.width(ctx, rec, today=lambda: cs.Continue(workers=min(cs.launches.width_of(rec), pending)))`, and a Continue capped at `pending`.
   - `Steward.more`: Continue(workers=1) unless the summary is FINISHED or CANCELLED (Done); SystemExit when it does not read.
-  - `PROJECT`: kinds `(Blocks(), Cpu(), Pool(), Steward(), Long())`, `campaigns=Waves()`; the rest as at 4630922e.
+  - `PROJECT`: kinds `(Blocks(), Cpu(), Pool(), Steward(), Long())`, `campaigns=Waves()`; the rest as at 335a735d.
 
 - [ ] **Step 1: Give cluster_check.py the `both-ways` harness, then write the guards**
 
@@ -479,32 +485,37 @@ cluster_check.py's command line becomes screening_check.py's (`GUARDS`, `FAULTS`
 - `more` (the spec's guard 8, Review Focus 1 and 3): a real `cs.Context` over a temporary registry, its runner answering the summary's `cat`, `cs.launches.width` patched (the market's arithmetic is cluster_submit's, not this guard's).
   Cases: three pending and a killed task reaped holding a job: Continue(2) for a lease two wide with `width` calling `today`, and Continue(3) with `width` patched to answer the market's Continue(10) (capped by the jobs pending); a killed task reaped idle: Done; a killed task not yet reaped: SystemExit; a summary older than the lease's `gone_at`: SystemExit; no summary: SystemExit; one of format 2: SystemExit; no unfinished steward: Done; nothing pending in the class: Done; the steward's own `more`: Continue(1) while CLOSED, Done when FINISHED.
   Fault `continue-idle`: the idle-kill rule removed: the idle kill is continued.
+- `template` (Ruling 4, Review Focus 2): a real `cs.Context` over a temporary registry with two live waves `a` and `b` (their stewards at two different commits), both with a summary line of (quadro2, `m12` of cpu-score) answering 3 and 7 pending jobs, and a pool lease of `b` there already named `b-quadro2-m12-s1`.
+  The template for (quadro2, Bundle(0, 2, 12)) is `b`'s: kind `pool`, run `b-quadro2-m12-s2`, commit `b`'s steward's, args `--wave b --preset cpu-score --node quadro2 --mem 12 --gpus 40`.
+  It passes every refusal of ec79a0eb's `launches.start`, checked with launches' own code: `ctx.parse(("submit", kind, run, "--at", commit, *args))` reads `at == commit` and not `dry`; `chain_base(run) == run`; `not ctx.registry.exists(run)`; the pool kind's plan of it passes `cs.launches.line_checked(plan, run, cs.launches.Start(...))` for that node and bundle.
+  A bundle no live wave has a line of, a node no wave serves, and lines with nothing pending: Done, its why naming the bundle and node; `Waves.starts(lambda: (s,))` is `(s,)`.
+  Faults, one per refusal the template must not trip and one for its choice: `other-mem` (the args' `--mem` the next rung: `line_checked` refuses the bundle), `other-node` (the args' `--node` another node), `continuation-name` (`<w>-<node>-<class>-l<N>`), `reused-name` (`n` not advanced past a run the registry has), `with-at` (the args carry `--at` HEAD's commit: the parse reads another commit than the template's), `first-wave` (the first live wave by name, whatever its pending jobs).
 
 - [ ] **Step 2: Run them to see them fail**
 
 Run: `env $ENV uv run python research/roadless/cluster_check.py kinds`
 Expected: argparse's refusal of the unknown kind `pool`.
 
-- [ ] **Step 3: Implement the kinds, the pull, `Waves` and `pool_more`**
+- [ ] **Step 3: Implement the kinds, the pull, `Waves` (`lease`, `template`, `starts`) and `pool_more`**
 
 The docstring gains the pool's paragraphs (what a wave is, the three kinds, the `wave` verb Task 7 adds, the market's widths and starts, and where a wave's state lives).
 `.gitignore` gains `waves/`.
 
 - [ ] **Step 4: Run both ways**
 
-Run: `env $ENV uv run python research/roadless/cluster_check.py both-ways ids,script,demand,kinds,more`
+Run: `env $ENV uv run python research/roadless/cluster_check.py both-ways ids,script,demand,kinds,more,template`
 Expected: each passes; every fault `FAILS on ...`; `as expected`.
 
 - [ ] **Step 5: Lint, types, commit, push**
 
-Subject: `research: roadless -- the pool's kinds in cluster.py (pool: a lease of identical workers per wave, node and class, continued while its class has jobs on its node and every walltime kill held one, at the market's width capped by the jobs pending; steward: one 2-CPU 3-GB lease a wave on orion, continued until its wave ends; long: a run sized per job) and Waves, the one campaign's Campaigns (a pool run is reblock's lease of its class's bundle; a start goes at the live waves' one commit); the steward's pull mirrors the wave's summary, ledger and final queue into waves/<w>/; cluster_check gains both-ways and guards kinds and more (fault continue-idle)`
+Subject: `research: roadless -- the pool's kinds in cluster.py (pool: a lease of identical workers per wave, node and class, continued while its class has jobs on its node and every walltime kill held one, at the market's width capped by the jobs pending; steward: one 2-CPU 3-GB lease a wave on orion, continued until its wave ends; long: a run sized per job) and Waves, the one campaign's Campaigns on cluster_submit ec79a0eb (a pool run is reblock's lease of its class's bundle; the market starts a class's lease from Waves.template: the live wave with the most pending jobs of that class on that node, at its own commit, a fresh chain <w>-<node>-<class>-s<N>); the steward's pull mirrors the wave's summary, ledger and final queue into waves/<w>/; cluster_check gains both-ways and guards kinds (fault lease-bundle), more (continue-idle) and template (other-mem, other-node, continuation-name, reused-name, with-at, first-wave)`
 Paths: `research/roadless/cluster.py research/roadless/cluster_check.py research/roadless/.gitignore`
 
 ---
 
 ### Task 7: The `wave` verb
 
-The spec's 3.8 and 3.9 with Rulings 4, 7, 10 and 12.
+The spec's 3.8 and 3.9 with Rulings 4, 7 and 12.
 
 **Files:**
 - Create: `research/roadless/cluster_wave.py`
@@ -517,24 +528,22 @@ The spec's 3.8 and 3.9 with Rulings 4, 7, 10 and 12.
   - `cluster.py wave submit <w> --preset <p> --family <f> --nodes <n,...> [--items <items,|@file>] [--unpack TAR] [--with FILE ...] [--board PATH] [--dry] <ids,|@file> -- <script> <args with {id} [and {item}]>`:
     1. the wave's commit is HEAD (`git rev-parse HEAD`); `<w>` is `project.NAME`, not `reblock`, and no record of the registry nor directory under `reblock-waves/` has it; the script is a file at the commit (`_script_at`); `{id}` in the command, and `{item}` exactly when `--items` is given;
     2. the bank written (`common.write_bank`, every id checked), areas (`areas_of`), the estimator (`FAMILIES[f](HERE)`, `history_of(HERE / "waves", f)`, `FIT_MIN_KM2`), the seed (`plan_wave`), each job's line `python -u <command with {id} and {item}> --keep-standing`, prefixed `python -u research/roadless/cluster_unpack.py "$CLUSTER_SUBMIT_INPUTS/<tar>" && ` with `--unpack`;
-    3. Ruling 4 checked against the registry's unfinished stewards and pools: the same commit, and none of this wave's (node, class) pairs held by a live wave's pool: else SystemExit naming them;
-    4. printed: jobs by node and class, the long ones, the estimates' sources counted (the spec's 3.4), the cards and core-hours estimated;
-    5. without `--dry`: the inputs (`jobs.json`, `bank.pkl`, the tars, the `--with` files) rsynced to `reblock-waves/<w>/inputs/` (Ruling 7); `submit steward <w>-steward --at <commit> --wave <w> --board <board>` (`--board` defaulting to `PROJECT.cluster.board()`: where the steward reads the allocation, which changes no row: Task 10 points a smoke wave at a hand-made one); for each (node, class) with POOL jobs `submit pool <w>-<node>-<class> --at <commit> --gpus <Ruling 10> --wave <w> --preset <p> --node <n> --mem <rung>`; for each LONG job `submit long <w>-long-<id> --at <commit> --wave <w> --preset <p> --job <id> --node <n> --mem <ceil gb> --minutes <min(1.5 x needed minutes, 7 days)>`.
-  - `cluster.py wave <w> status`: the summary (via ssh) by node and class, the reaped workers, the LONG jobs without a live long run, the classes with pending jobs and no unfinished pool lease of the wave (each named with the `wave <w> pools` that would start it), and the wave's runs in the registry with their states.
-  - `cluster.py wave <w> pools`: a first lease for each (node, class) with pending jobs and no unfinished pool lease of the wave there (a class reached by promotion: the spec's 3.4).
+    3. printed: jobs by node and class, the long ones, the estimates' sources counted (the spec's 3.4), the cards and core-hours estimated;
+    4. without `--dry`: the inputs (`jobs.json`, `bank.pkl`, the tars, the `--with` files) rsynced to `reblock-waves/<w>/inputs/` (Ruling 7); `submit steward <w>-steward --at <commit> --wave <w> --board <board>` (`--board` defaulting to `PROJECT.cluster.board()`: where the steward reads the allocation, which changes no row: Task 10 points a smoke wave at a hand-made one); for each LONG job `submit long <w>-long-<id> --at <commit> --wave <w> --preset <p> --job <id> --node <n> --mem <ceil gb> --minutes <min(1.5 x needed minutes, 7 days)>`. No pool is submitted: the market starts each class's leases from `Waves.template` (Ruling 4).
+  - `cluster.py wave <w> status`: the summary (via ssh) by node and class, the reaped workers, the LONG jobs without a live long run, the classes with pending jobs and no unfinished pool lease of the wave (the market starts them as the allocation gives them units; in shadow mode, `wave <w> pools`), and the wave's runs in the registry with their states.
+  - `cluster.py wave <w> pools`: by hand, a first lease for each (node, class) with pending jobs and no unfinished pool lease of the wave there, with `Waves.template`'s arguments: for a GPU file in shadow mode, where the market starts nothing (Ruling 4).
   - `cluster.py wave <w> long`: a long run for each LONG job without an unfinished long run of it, sized from the summary's `LongJob`.
   - `cluster.py wave <w> retry [<id>,...|failed]` and `cluster.py wave <w> cancel`: a request file (Ruling 12) written over ssh as cluster_demand's `board_script` writes (a temporary name, then a rename); `cancel` then `cs.main(PROJECT, ["cancel", run])` for every unfinished pool run of the wave (long runs only by name: `cluster.py cancel <run>`).
 
 - [ ] **Step 1: Write the guard `wave`**
 
 All under `--dry` (nothing leaves this machine), from command lines at HEAD:
-- `wave submit g-1 --preset cpu-score --family lineup-score --nodes orion,quadro2 --items clearance,resistance_lp <two large block ids> -- research/roadless/road_rescore.py lineup-score <scratch> {id} {item}`: the seed's jobs one per (block, item), each block's on one node, each line ending `--keep-standing`, the planned pool runs one per (node, class) named `g-1-<node>-m<GB>`, every planned run name a `project.NAME` (no block id in a name: ids have dots);
+- `wave submit g-1 --preset cpu-score --family lineup-score --nodes orion,quadro2 --items clearance,resistance_lp <two large block ids> -- research/roadless/road_rescore.py lineup-score <scratch> {id} {item}`: the seed's jobs one per (block, item), each block's on one node, each line ending `--keep-standing`, the classes per node printed and no pool run planned (the market starts them), every planned run name (the steward, each long run) a `project.NAME` (no block id in a name: ids have dots);
 - the misspelt id of the `ids` guard (`MISTYPED`) is refused by the bank's writer before anything is planned;
 - a script the commit lacks is refused naming the commit (as `script` does for today's kinds);
 - `{item}` without `--items`, and `--items` without `{item}`: refused;
-- with a stub registry holding a live wave's steward at another commit: refused; with one holding a live pool of (orion, `m12`) at this commit: refused naming it (Review Focus 2);
 - a job the estimator puts past the lease (a stored wall over 110 minutes): a LONG job and a planned `long` run of `--mem` 1.5 times its peak.
-Faults: `shared-class` (Ruling 4's check removed: the wave sharing (orion, `m12`) plans), `no-keep` (the job lines without `--keep-standing`).
+Faults: `no-keep` (the job lines without `--keep-standing`), `block-names` (long runs named `<w>-long-<block>`: no `project.NAME`).
 
 - [ ] **Step 2: Run it to see it fail**
 
@@ -548,12 +557,12 @@ The inputs go up with `Remote(PROJECT.cluster.host, SubprocessRunner()).rsync(..
 
 - [ ] **Step 4: Run both ways**
 
-Run: `env $ENV uv run python research/roadless/cluster_check.py both-ways ids,script,demand,kinds,more,wave`
+Run: `env $ENV uv run python research/roadless/cluster_check.py both-ways ids,script,demand,kinds,more,template,wave`
 Expected: `as expected`.
 
 - [ ] **Step 5: Lint, types, commit, push**
 
-Subject: `research: roadless -- cluster.py wave: submit (the wave's commit HEAD, every run --at it; the bank, seed, tars and --with files rsynced to reblock-waves/<w>/inputs once; a steward, a first lease per node and class, a long run per job no lease holds; until cluster_submit's template call, live waves share a commit and no node and class), status, pools, long, retry and cancel (requests the steward applies); guard wave (faults shared-class, no-keep)`
+Subject: `research: roadless -- cluster.py wave: submit (the wave's commit HEAD, every run --at it; the bank, seed, tars and --with files rsynced to reblock-waves/<w>/inputs once; a steward and a long run per job no lease holds, no pool: the market starts each class's leases from Waves.template), status, pools (by hand, for shadow mode), long, retry and cancel (requests the steward applies); guard wave (faults no-keep, block-names)`
 Paths: `research/roadless/cluster_wave.py research/roadless/cluster.py research/roadless/cluster_check.py`
 
 ---
@@ -593,7 +602,7 @@ The docstring's paragraphs on the one campaign and on units say how pool lines a
 
 - [ ] **Step 4: Run both ways**
 
-Run: `env $ENV uv run python research/roadless/cluster_check.py both-ways demand,more,wave`
+Run: `env $ENV uv run python research/roadless/cluster_check.py both-ways demand,more,template,wave`
 Expected: `demand: passes`; each of `finished-named`, `no-throttle`, `any-reason`, `no-running`, `count-done`, `every-node`, `queue-only` `FAILS on ...`; `as expected`.
 
 - [ ] **Step 5: Lint, types, commit, push**
@@ -675,21 +684,21 @@ From the main checkout, `--dry`:
 - `smoke-cases`: 3 small blocks, `--items big,oom,slow`, `--nodes quadro2`, `--board reblock-waves/smoke-cases/board` (the hand-made allocation's: Step 6).
 - `smoke-gpu`: 2 small blocks, `--items gpu`, `--preset gpu-presets`, on the GPU node whose capacity has a card (`cluster.py gpu`).
 Expected: smoke-claim's 200 jobs on two nodes, class `m2`; smoke-cases' `big` in `m4`, `oom` and `slow` in `m2`, none LONG; smoke-gpu's two jobs in `g16`.
-smoke-cases shares (quadro2, `m2`) with smoke-claim: it waits for smoke-claim's end (Ruling 4 refuses it while smoke-claim lives: check that it does).
+smoke-cases shares (quadro2, `m2`) with smoke-claim, and the two run at once (Step 3): the market's starts there go to the wave with more pending jobs (Review Focus 2).
 
-- [ ] **Step 3: smoke-claim (the controller confirms)**
+- [ ] **Step 3: smoke-claim and smoke-cases (the controller confirms)**
 
-Submit it; `cluster.py wait smoke-claim-steward` in the background.
-While it runs: `cluster.py gpu` shows reblock's lines (orion, 0/2/2) and (quadro2, 0/2/2) with `held` equal to the workers running there (Ruling 3: if `held` is 0 while they run, the bundle Slurm holds is not the class's; stop and report), and the market's starts (`reblock-<node>-s<N>`) or continuations (`-l<N>`) widen the pools.
+Submit both; `cluster.py wait smoke-claim-steward` and `cluster.py wait smoke-cases-steward` in the background.
+While it runs: `cluster.py gpu` shows reblock's lines (orion, 0/2/2) and (quadro2, 0/2/2) with `held` equal to the workers running there (Ruling 3: if `held` is 0 while they run, the bundle Slurm holds is not the class's; stop and report), the market starts each class's pools (`<w>-<node>-<class>-s<N>`: `wave submit` submits none) and their continuations (`-l<N>`) take the market's widths, and each start on (quadro2, 0/2/2), which both waves use, goes to the wave with more pending jobs there (the start's log line and the run's `--wave`).
 After: the final queue in `research/roadless/waves/smoke-claim/final.db`: 200 jobs DONE, each with one DONE attempt and no two attempts overlapping in time (the claim guard on ai's home, across two nodes); every row of `pool_smoke_rows` for its ids; `reblock-waves/smoke-claim/inputs/bank.pkl` gone; the steward's peak memory from its log against its 3 GB (Ruling 11); the `reblock` demand with no line of the wave once its workers exited.
 
 - [ ] **Step 4: smoke-gpu (the controller confirms)**
 
 Submit it; wait; both jobs DONE on a card (the job's log names the device), the lease's record a GPU array of `gpu_gb` 8 on that node.
 
-- [ ] **Step 5: smoke-cases (the controller confirms)**
+- [ ] **Step 5: smoke-cases' cases**
 
-Submit it after smoke-claim has finished; wait.
+Once its steward has finished (Step 3):
 - `big`: DONE in `m4` from its first attempt.
 - `oom`: its first attempt's outcome OOM with the worker's log naming its evidence (`cgroup v2 ...` or `v1`), the job promoted to `m4` and DONE there (the live half of guard 6; decision 9: an `Unreadable` evidence makes it a strike instead: report which ai gives, and stop if the worker itself was killed: Review Focus 4).
 - `slow`: killed at its 20-minute walltime, reaped with `walltime` True and its estimate raised past the lease, LONG; `wave smoke-cases long` submits `smoke-cases-long-<id>`, which runs it to DONE.
@@ -701,48 +710,14 @@ Expected: the steward's ledger records one ask; that worker's log says it was as
 
 - [ ] **Step 7: The records**
 
-NOTES: a section at the end, `### The lease pool (<the date of the smoke waves>)`, wrapped at 99, current numbers only: what a wave is now (the queue, pools by class, the steward, the long lane, the `wave` verb), the rulings that departed from the spec and why (one campaign with this machine's step as its writer; a whole core per CPU class with g3's held bundles; the interim starts until the template call; strikes on reaped attempts), the smoke waves' numbers (jobs, attempts, widths and starts seen, the OOM evidence ai gives, the walltime kill, the step-aside, the steward's peak), and the guards with their faults.
+NOTES: a section at the end, `### The lease pool (<the date of the smoke waves>)`, wrapped at 99, current numbers only: what a wave is now (the queue, pools by class, the steward, the long lane, the `wave` verb), the rulings that departed from the spec and why (one campaign with this machine's step as its writer; a whole core per CPU class with g3's held bundles; starts from the campaign's template, by the most pending jobs; strikes on reaped attempts), the smoke waves' numbers (jobs, attempts, widths and starts seen, the OOM evidence ai gives, the walltime kill, the step-aside, the steward's peak), and the guards with their faults.
 Then remove `research/roadless/pool_smoke_rows/` and `research/roadless/waves/smoke-*/` (git-ignored test rows) and `rm -r` the smoke waves' directories under `reblock-waves/` on ai (`ssh ai rm -r reblock-waves/smoke-claim reblock-waves/smoke-cases reblock-waves/smoke-gpu`).
 Subject: `research: roadless -- NOTES "The lease pool": built and smoke-tested on ai (` then Steps 3-6's numbers: smoke-claim's jobs, attempts, workers and starts per node; the OOM evidence ai gives; the walltime kill to the long lane; the step-aside; the steward's peak `)`
 Paths: `research/roadless/NOTES.md`
 
 ---
 
-### Task 11: Starts from the campaign's template
-
-**Precondition:** a GeoffChurch/cluster_submit commit whose `Campaigns` Protocol has `template(ctx, campaign, node, bundle) -> Template | None` (the mycooc session's, announced 2026-10-21), and the controller's word that the owner approved the pin bump.
-If either is missing, skip this task and say so.
-
-**Files:**
-- Modify: `pyproject.toml` (`[tool.uv.sources]`'s cluster_submit `rev`), `uv.lock` (`uv lock`: only cluster-submit's entry moves)
-- Modify: `research/roadless/cluster.py` (`Waves.template`; `Waves.commit` deleted if the Protocol drops it), `research/roadless/cluster_wave.py` (Ruling 4's check deleted), `research/roadless/cluster_check.py` (guard `template`; the `wave` guard's `shared-class` cases and fault go with the check)
-
-**Interfaces:**
-- Consumes: cluster_submit's `Template` (the kind, the submit arguments without width or walltime, the commit, the run's name), read from its source at the new pin before writing anything.
-- Produces: `Waves.template(ctx, campaign, node, bundle) -> Template | None`: among the live waves (the registry's unfinished stewards), those with a summary line of `bundle` on `node`; the one with the most pending jobs there (ties by name), None when none has any; its `pool` submit arguments (`--wave`, `--preset`, `--node`, `--mem`, `--gpus` as Ruling 10), its wave's commit, and the run name `<w>-<node>-<class>-s<N>`, N the first the registry lacks.
-
-- [ ] **Step 1: Read the new pin's README "GPU market" and `launches.py`, and bump the pin**
-
-`git -C ~/src/cluster_submit show <sha>:README.md` and `:src/cluster_submit/launches.py`; then the `rev` in pyproject.toml and `uv lock`; `git diff uv.lock` shows only cluster-submit's entry.
-
-- [ ] **Step 2: Write the guard `template`**
-
-A real `cs.Context` over a temporary registry with two live waves (stewards at two different commits) both holding a pool of (quadro2, Bundle(0, 2, 12)), their summaries answering 3 and 7 pending there: the template is the second wave's, at its commit, named `<w>-quadro2-m12-s1`; with `s1` in the registry, `s2`; a bundle no live wave has a line of: None; every wave's pending 0: None.
-Fault `first-wave`: the first live wave by name, whatever its pending jobs.
-
-- [ ] **Step 3: Run it to see it fail; implement; run both ways**
-
-Run: `env $ENV uv run python research/roadless/cluster_check.py both-ways template,wave,kinds,more,demand`
-Expected: `as expected`.
-
-- [ ] **Step 4: Lint, types, commit, push**
-
-Subject: `research: roadless -- cluster_submit pinned at <sha> (Campaigns.template; owner's approval via the controller): the market starts a wave's pool from Waves.template (the live wave with the most pending jobs of that class on that node, at its own commit, a fresh chain <w>-<node>-<class>-s<N>), so waves of one campaign may share a node and class and run at different commits: wave submit's interim check goes; guard template (fault first-wave)`
-Paths: `pyproject.toml uv.lock research/roadless/cluster.py research/roadless/cluster_wave.py research/roadless/cluster_check.py`
-
----
-
-### Task 12: The migration: the pool replaces `blocks` and `cpu`
+### Task 11: The migration: the pool replaces `blocks` and `cpu`
 
 The spec's section 5, decision 6, with Ruling 1 (cluster_demand.py stays).
 
@@ -776,7 +751,7 @@ Archived records stay JSON as they were (their kind is what ran); desire_fit.py 
 
 - [ ] **Step 4: Run every guard both ways, and a sync**
 
-Run: `env $ENV uv run python research/roadless/cluster_check.py both-ways cpu,ids,script,demand,kinds,more,wave` (and `template` if Task 11 landed), `env $ENV uv run python research/roadless/pool_check.py both-ways <every guard>`, then `uv run python research/roadless/cluster.py sync` and `status`.
+Run: `env $ENV uv run python research/roadless/cluster_check.py both-ways cpu,ids,script,demand,kinds,more,template,wave`, `env $ENV uv run python research/roadless/pool_check.py both-ways <every guard>`, then `uv run python research/roadless/cluster.py sync` and `status`.
 Expected: `as expected`; the sync reads every record (no "unreadable records", no "has no kind").
 
 - [ ] **Step 5: The records**
@@ -794,7 +769,7 @@ Paths: `research/roadless/cluster.py research/roadless/cluster_check.py research
 ## Execution notes for the controller
 
 - Subagent-driven, implementers and reviewers on opus; each task's reviewer runs its `both-ways` lines and the gates before approving.
-- Order: 1, 2, 3, 4, then 6, 7, 8 (and 5 as soon as the epistemetry move's Task 7 is on origin/research/roadless), 9 after 5, 10 after 1-9, 11 when its precondition holds, 12 when its precondition holds.
+- Order: 1, 2, 3, 4, then 6, 7, 8 (and 5 as soon as the epistemetry move's Task 7 is on origin/research/roadless), 9 after 5, 10 after 1-9, 11 when its precondition holds (the g3 runs settled).
   Tasks 1-4 depend on each other's Interfaces in order; 6-8 consume 1-4; 9 consumes 3 and 5.
-- Stop points that need the owner or the controller: a smoke-wave submit (each); Task 10 Step 3's `held` at 0 while workers run (the bundle Slurm holds is not the class's); Task 10 Step 5's OOM killing the worker, or ai's OOM count unreadable; Task 11's pin bump.
+- Stop points that need the owner or the controller: a smoke-wave submit (each); Task 10 Step 3's `held` at 0 while workers run (the bundle Slurm holds is not the class's); Task 10 Step 5's OOM killing the worker, or ai's OOM count unreadable.
 - If the epistemetry move's Task 7 is far off when Tasks 6-8 are done, Task 5 waits; nothing else does, but Task 10 needs Task 9, which needs Task 5.
