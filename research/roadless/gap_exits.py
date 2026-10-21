@@ -40,16 +40,23 @@ EDGE (`Edge`): `OpenEdge`, the street's faces ground (as the per-block metric ha
 `ClosedEdge`, no street face grounds, so every trip ends at a leak: the reference the constants
 are chosen on (its leaks on the cells the open edge's street reaches).
 
-BOOST (`Boost`): `NoBoost`; `StreetBoost(factor, classes)`: the sheet conductance times `factor`
-on the triangles whose centroid lies within BOOST_M of the line of an OSM way whose highway tag
-(`_link` folded) is one of `classes` (a passage by the harmonic mean of its two triangles'
-factors, a street face by its triangle's). The streets' lever (owner 2026-10-16: "it rewards the
-infrastructure investment"; "a 10x boost is I think reasonable"), on the drivable streets.
+BOOST (`Boost`): `NoBoost`; `StreetBoost(factor, surfaces, classes)`: the sheet conductance times
+`factor` on the triangles whose centroid lies within BOOST_M of the line of an OSM way whose
+highway tag (`_link` folded) is one of `classes` and whose surface tag `surfaces` takes
+(`SurfaceIn`: one of its values, so an untagged way is not boosted; `AnySurface`: any), and on the
+triangles of a proposed road's corridor (`Boost.road`, gap_clear.Model.mesh_of); a passage by the
+harmonic mean of its two triangles' factors, a street face by its triangle's (`boosted`). The
+streets' lever (owner 2026-10-16: "it rewards the infrastructure investment"; "a 10x boost is I
+think reasonable"), on the paved drivable streets (owner 2026-10-20: "only boost if it's
+explicitly tagged paved"; 94% of 5810's boosted lanes were tagged unpaved: NOTES, "The street
+boost on paved ways only") and on the roads a method proposes, paved by being built (owner
+2026-10-20: "proposed roads should get the same 10x boost as existing drivable streets").
 
 THE NAME. The per-block metric (no barriers, no leak, no boost, the edge open: the block's whole
 street ring the exit) has no suffix, so its name and digest are as before. Any other names its
-parts in a suffix `+x[B<line_m>c<cross_m>][E0][L[o<open_m>][b<foot_m>]][S<factor>h<classes>]
-v<EXITS_CODE>` (the classes joined by `-`) before the search's `@e<eps>` (a number as `:g` spells
+parts in a suffix `+x[B<line_m>c<cross_m>][E0][L[o<open_m>][b<foot_m>]][S<factor>[s<surfaces>]
+h<classes>]v<EXITS_CODE>` (the surfaces by their label, none for any; the classes joined by `-`)
+before the search's `@e<eps>` (a number as `:g` spells
 it, or its repr where that would round it);
 EXITS_CODE digests this module's constants (digests.constants_of), so editing them renames only
 the metrics that use them. `exits_of` parses a suffix back.
@@ -98,9 +105,9 @@ BOOST_M = 3.0           # StreetBoost: a triangle within this of a way's line is
 class Osm(NamedTuple):
     """A region's OSM features meeting its face (regions.osm_of, read from the country's Geofabrik
     extract where the region is built, Block.attrs["osm"]), in the block's CRS, their tags as
-    columns ("" where absent): `ways` (lines: highway, railway, waterway; bridge and tunnel, a tag
-    other than "no"), `nodes` (points: railway) and `areas` (multipolygons: natural, landuse,
-    waterway)."""
+    columns ("" where absent): `ways` (lines: highway, railway, waterway, surface; bridge and
+    tunnel, a tag other than "no"), `nodes` (points: railway) and `areas` (multipolygons: natural,
+    landuse, waterway)."""
     ways: gpd.GeoDataFrame
     nodes: gpd.GeoDataFrame
     areas: gpd.GeoDataFrame
@@ -310,14 +317,82 @@ def _across(track: Any, node: Any, half: float) -> Any:
 
 # ------------------------------------------------------------------ the street boost
 
-class Boost(Protocol):
-    """The sheet conductance's boost on the OSM ways (module docstring)."""
+class Surfaces(Protocol):
+    """Which surface tags the street boost takes (module docstring), spelt in its name."""
 
     @property
     def name(self) -> str: ...
 
-    def mesh(self, fm: gap_clear.FullMesh, geo: gc.Geometry,
-             block: Block) -> gap_clear.FullMesh: ...
+    def of(self, surface: Any) -> NDArray[np.bool_]: ...
+
+
+@dataclass(frozen=True)
+class AnySurface:
+    """Every way, whatever its surface tag or none."""
+
+    @property
+    def name(self) -> str:
+        return ""
+
+    def of(self, surface: Any) -> NDArray[np.bool_]:
+        return np.ones(len(surface), dtype=bool)
+
+
+@dataclass(frozen=True, kw_only=True)
+class SurfaceIn:
+    """The ways whose surface tag is one of `values` (sorted, distinct): an explicit tag, so an
+    untagged way is not one; spelt `s<label>`."""
+    label: str
+    values: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not (re.fullmatch(r"[a-z]+", self.label) and self.values
+                and self.values == tuple(sorted(set(self.values)))
+                and all(re.fullmatch(r"[a-z_:]+", v) for v in self.values)):
+            raise ValueError(f"a surface set's label [a-z]+ and its values sorted, distinct, "
+                             f"[a-z_:]+: {self.label}, {self.values}")
+
+    @property
+    def name(self) -> str:
+        return f"s{self.label}"
+
+    def of(self, surface: Any) -> NDArray[np.bool_]:
+        return np.asarray(surface.isin(self.values).to_numpy(), dtype=bool)
+
+
+# The paved surfaces: the OSM wiki's paved group of the surface key (Key:surface, "paved"), as
+# tagged; a way untagged, or tagged a value outside it, is not paved (owner 2026-10-20: "only
+# boost if it's explicitly tagged paved")
+PAVED = SurfaceIn(label="paved", values=(
+    "asphalt", "bricks", "chipseal", "cobblestone", "concrete", "concrete:lanes",
+    "concrete:plates", "grass_paver", "metal", "metal_grid", "paved", "paving_stones",
+    "paving_stones:lanes", "rubber", "sett", "stepping_stones", "tiles", "unhewn_cobblestone",
+    "wood"))
+SURFACES = (PAVED,)     # the surface sets a name can spell, by label
+
+
+class Boost(Protocol):
+    """The sheet conductance's boost (module docstring): per triangle its factor on the block's
+    OSM ways (`factors`), and a proposed road's on its corridor (`road`)."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def road(self) -> float: ...
+
+    def factors(self, fm: gap_clear.FullMesh, geo: gc.Geometry,
+                block: Block) -> NDArray[np.float64]: ...
+
+
+def boosted(fm: gap_clear.FullMesh, b: NDArray[np.float64]) -> gap_clear.FullMesh:
+    """`fm` with the sheet conductance times `b` per triangle: a passage by the harmonic mean of
+    its two triangles' factors, a street face by its triangle's (`fm` itself where every factor is
+    1)."""
+    if (b == 1.0).all():
+        return fm
+    hm = 2.0 * b[fm.pa] * b[fm.pb] / (b[fm.pa] + b[fm.pb])
+    return dataclasses.replace(fm, T=fm.T * hm, Tf=fm.Tf * b[fm.fa])
 
 
 @dataclass(frozen=True)
@@ -326,16 +401,22 @@ class NoBoost:
     def name(self) -> str:
         return ""
 
-    def mesh(self, fm: gap_clear.FullMesh, geo: gc.Geometry,
-             block: Block) -> gap_clear.FullMesh:
-        return fm
+    @property
+    def road(self) -> float:
+        return 1.0
+
+    def factors(self, fm: gap_clear.FullMesh, geo: gc.Geometry,
+                block: Block) -> NDArray[np.float64]:
+        return np.ones(fm.nt)
 
 
 @dataclass(frozen=True, kw_only=True)
 class StreetBoost:
-    """sigma x `factor` on the triangles on an OSM way of one of `classes` (module docstring:
-    highway tags, sorted and distinct, `_link` folded)."""
+    """sigma x `factor` on the triangles on an OSM way of one of `classes` whose surface tag
+    `surfaces` takes (module docstring: highway tags, sorted and distinct, `_link` folded), and on
+    a proposed road's corridor."""
     factor: float
+    surfaces: AnySurface | SurfaceIn
     classes: tuple[str, ...]
 
     def __post_init__(self) -> None:
@@ -347,13 +428,19 @@ class StreetBoost:
 
     @property
     def name(self) -> str:
-        return f"S{num(self.factor)}h{'-'.join(self.classes)}"
+        return f"S{num(self.factor)}{self.surfaces.name}h{'-'.join(self.classes)}"
+
+    @property
+    def road(self) -> float:
+        return self.factor
 
     def on_way(self, fm: gap_clear.FullMesh, geo: gc.Geometry, block: Block) -> NDArray[np.bool_]:
         """Per triangle of `fm`: its centroid within BOOST_M of a way of `block` of one of the
-        classes (its attrs' `osm`; a block without one raises)."""
+        classes, its surface one the boost takes (its attrs' `osm`; a block without one
+        raises)."""
         ways = osm_in(block).ways
-        of = ways.highway.str.removesuffix("_link").isin(self.classes).to_numpy()
+        of = (ways.highway.str.removesuffix("_link").isin(self.classes).to_numpy()
+              & self.surfaces.of(ways.surface))
         lines = geo.local(ways.geometry.to_numpy()[of])
         cen = fm.xy[fm.tri].mean(axis=1)
         qi, _qw = shapely.STRtree(lines).query(shapely.points(cen[:, 0], cen[:, 1]),
@@ -362,11 +449,9 @@ class StreetBoost:
         on[qi] = True
         return on
 
-    def mesh(self, fm: gap_clear.FullMesh, geo: gc.Geometry,
-             block: Block) -> gap_clear.FullMesh:
-        b = np.where(self.on_way(fm, geo, block), self.factor, 1.0)
-        hm = 2.0 * b[fm.pa] * b[fm.pb] / (b[fm.pa] + b[fm.pb])
-        return dataclasses.replace(fm, T=fm.T * hm, Tf=fm.Tf * b[fm.fa])
+    def factors(self, fm: gap_clear.FullMesh, geo: gc.Geometry,
+                block: Block) -> NDArray[np.float64]:
+        return np.where(self.on_way(fm, geo, block), self.factor, 1.0)
 
 
 # ------------------------------------------------------------------ the edge
@@ -427,15 +512,16 @@ def per_block() -> Exits:
 
 
 _N = r"[0-9]+(?:\.[0-9]+)?(?:e[-+]?[0-9]+)?"
-# the suffix as gap_clear's name grammar embeds it: barriers, edge, leak, boost, digest (8 groups)
+# the suffix as gap_clear's name grammar embeds it: barriers, edge, leak, boost, digest (9 groups)
 SUFFIX_RE = (rf"(?:\+x(?:B({_N})c({_N}))?(E0)?(?:L(?:o({_N}))?(?:b({_N}))?)?"
-             rf"(?:S({_N})h([a-z_]+(?:-[a-z_]+)*))?v([0-9a-f]+))?")
+             rf"(?:S({_N})(?:s({'|'.join(s.label for s in SURFACES)}))?h([a-z_]+(?:-[a-z_]+)*))?"
+             rf"v([0-9a-f]+))?")
 
 
 def exits_of(groups: tuple[str | None, ...]) -> Exits:
     """The Exits SUFFIX_RE's groups name (none matched: the per-block exits); a digest not this
     code's raises (the rows are another code's)."""
-    line, cross, closed, open_m, foot_m, factor, classes, code = groups
+    line, cross, closed, open_m, foot_m, factor, surfaces, classes, code = groups
     if code is None:
         return per_block()
     if code != EXITS_CODE:
@@ -448,7 +534,10 @@ def exits_of(groups: tuple[str | None, ...]) -> Exits:
         open_m=math.inf if open_m is None else float(open_m),
         foot_m=math.inf if foot_m is None else float(foot_m)))
     boost: NoBoost | StreetBoost = (NoBoost() if factor is None else StreetBoost(
-        factor=float(factor), classes=tuple(str(classes).split("-"))))
+        factor=float(factor),
+        surfaces=(AnySurface() if surfaces is None
+                  else {s.label: s for s in SURFACES}[surfaces]),
+        classes=tuple(str(classes).split("-"))))
     return Exits(barriers=barriers, edge=edge, leak=leak, boost=boost)
 
 

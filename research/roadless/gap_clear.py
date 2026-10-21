@@ -696,12 +696,14 @@ class Carving(NamedTuple):
     distance's factor is exact on the atoms. Homes (the demand, the ring, the population and B (i))
     stay the buildings. No networks: every building one atom, the plain mesh. `polys` per atom its
     footprint, `parent` its building, `stop` per atom and network the stop it is carved from;
-    `stops` per network its stops; `digest` the corridors' identity (the mesh cache's file name;
-    '' for none)."""
+    `stops` per network its stops; `corridors` per network its stops' corridors (the roads' paved
+    ground, which the exits boost as a road: Model.mesh_of); `digest` the corridors' identity (the
+    mesh cache's file name; '' for none)."""
     polys: NDArray[np.object_]
     parent: NDArray[np.int64]
     stop: NDArray[np.int64]               # (atoms, networks)
     stops: tuple[int, ...]
+    corridors: tuple[tuple[Any, ...], ...]
     digest: str
 
     @property
@@ -711,14 +713,17 @@ class Carving(NamedTuple):
     def shifted(self, by: tuple[float, float]) -> Carving:
         """The same atoms in a frame where every point's coordinates are its coordinates here
         plus `by` (a block's local frame moved by its barriers' cut: ComplexMetric.fixed)."""
-        return self._replace(polys=shapely.transform(self.polys, lambda xy: xy + np.array(by)))
+        def move(g: Any) -> Any:
+            return shapely.transform(g, lambda xy: xy + np.array(by))
+        return self._replace(polys=move(self.polys),
+                             corridors=tuple(tuple(move(c) for c in cs) for cs in self.corridors))
 
     @staticmethod
     def none(geo: gc.Geometry) -> Carving:
         """No roads: every building one atom (the plain fixed mesh)."""
         n = len(geo.polys)
         return Carving(polys=geo.polys, parent=np.arange(n, dtype=np.int64),
-                       stop=np.zeros((n, 0), dtype=np.int64), stops=(), digest="")
+                       stop=np.zeros((n, 0), dtype=np.int64), stops=(), corridors=(), digest="")
 
     @staticmethod
     def of(geo: gc.Geometry, networks: list[list[Any]]) -> Carving:
@@ -774,17 +779,33 @@ class Carving(NamedTuple):
                                              output_dimension=2, byte_order=1)))
             h.update(b"|")
         return Carving(polys=polys[o], parent=parent[o], stop=tag[o],
-                       stops=tuple(len(cs) for cs in nets), digest=h.hexdigest()[:16])
+                       stops=tuple(len(cs) for cs in nets),
+                       corridors=tuple(tuple(cs) for cs in nets), digest=h.hexdigest()[:16])
+
+    def _check(self, prefix: Prefix) -> None:
+        if not 1 <= prefix.stop <= self.stops[prefix.net]:
+            raise ValueError(f"{prefix}: network {prefix.net} has stops 1 .. "
+                             f"{self.stops[prefix.net]}")
 
     def carved(self, prefix: Prefix) -> NDArray[np.bool_]:
         """Per atom: carved by `prefix` (stop 0: none)."""
         if prefix.stop == 0:
             return np.zeros(self.n, dtype=bool)
-        if not 1 <= prefix.stop <= self.stops[prefix.net]:
-            raise ValueError(f"{prefix}: network {prefix.net} has stops 1 .. "
-                             f"{self.stops[prefix.net]}")
+        self._check(prefix)
         s = self.stop[:, prefix.net]
         return (s >= 1) & (s <= prefix.stop)
+
+    def paved(self, prefix: Prefix, xy: NDArray[np.float64]) -> NDArray[np.bool_]:
+        """Per point of `xy` (n x 2, the atoms' frame): inside `prefix`'s corridor (a road
+        prefix's: stop from 1)."""
+        self._check(prefix)
+        c = self.corridors[prefix.net][prefix.stop - 1]
+        x0, y0, x1, y1 = shapely.bounds(c)
+        near = np.flatnonzero((xy[:, 0] >= x0) & (xy[:, 0] <= x1) & (xy[:, 1] >= y0)
+                              & (xy[:, 1] <= y1))
+        out = np.zeros(len(xy), dtype=bool)
+        out[near] = shapely.contains_xy(c, xy[near, 0], xy[near, 1])
+        return out
 
     def atom_k(self, k: NDArray[np.float64], *, prefix: Prefix) -> NDArray[np.float64]:
         """Per atom its clearing: its building's k, or 1 where `prefix` carves it."""
@@ -1218,11 +1239,13 @@ class System:
 
 class State(NamedTuple):
     """A clearing's state on one System of the fixed mesh: the road prefix carved (`prefix`: none,
-    or a Carving's network at a stop), the factors (per atom `k`, per triangle `kt`, per passage
-    `kp`, whether its fill binds), its reach and, once factored, its operator on the pattern
-    (cells x cells) and the operator's factorization."""
+    or a Carving's network at a stop), the mesh it conducts on (`fm`: Model.mesh_of), the factors
+    (per atom `k`, per triangle `kt`, per passage `kp`, whether its fill binds), its reach and,
+    once factored, its operator on the pattern (cells x cells) and the operator's
+    factorization."""
     sys: System
     prefix: Prefix
+    fm: FullMesh
     k: NDArray[np.float64]
     kt: NDArray[np.float64]
     kp: NDArray[np.float64]
@@ -1301,7 +1324,8 @@ class Model:
     faces', the leaks on the cells live at baseline with the edge open; the barriers are in
     `block` and its mesh already: ComplexMetric.fixed and .model). The mesh's atoms (fx.carving: the buildings, or a road network's pieces) carry the
     width form's factors; a clearing k is per building and each atom takes its building's k, or 1
-    where the state's road prefix (`stop`) carves it (`road_state`); the homes are the
+    where the state's road prefix (`stop`) carves it (`road_state`), and a road prefix's
+    corridor is boosted as the exits boost a proposed road (`mesh_of`); the homes are the
     buildings."""
 
     def __init__(self, block, fx: Fixed, *, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width,
@@ -1312,8 +1336,10 @@ class Model:
         self.tension_eps = tension_eps
         self.exits = exits
         self.geo = gc.geometry(block)
-        fm_open = exits.boost.mesh(fx.fm, self.geo, block)
+        self.b_ways = exits.boost.factors(fx.fm, self.geo, block)
+        fm_open = gx.boosted(fx.fm, self.b_ways)
         self.fm = exits.edge.mesh(fm_open)
+        self.cen_ = fx.fm.xy[fx.fm.tri].mean(axis=1)
         self.n_ = len(self.geo.polys)
         self.carving = fx.carving
         if self.carving.parent.max(initial=-1) >= self.n_:
@@ -1365,17 +1391,28 @@ class Model:
 
     # -- the state
 
+    def mesh_of(self, prefix: Prefix) -> FullMesh:
+        """The mesh a state of `prefix` conducts on: the exits' (`fm`) with no road; a road
+        prefix's with its corridor's triangles (by centroid) boosted as the exits boost a proposed
+        road (gap_exits.Boost.road; a triangle on a way too takes the larger factor)."""
+        if prefix.stop == 0:
+            return self.fm
+        on = self.carving.paved(prefix, self.cen_)
+        b = np.where(on, np.maximum(self.b_ways, self.exits.boost.road), self.b_ways)
+        return self.exits.edge.mesh(gx.boosted(self.fx.fm, b))
+
     def _factors(self, sys: System, k: NDArray[np.float64], *, prefix: Prefix) -> State:
         t = time.time()
+        fm = self.mesh_of(prefix)
         ka = self.carving.atom_k(k, prefix=prefix)
         kt = self.terms.value(ka)
-        kp, binds = _passage_factors(self.fm, kt, ka, self.fill)
+        kp, binds = _passage_factors(fm, kt, ka, self.fill)
         self.timing.add("factors", time.time() - t)
         t = time.time()
-        r = sys.graph.reach(self.fm, kt, kp)
+        r = sys.graph.reach(fm, kt, kp)
         self.timing.add("reach", time.time() - t)
-        return State(sys=sys, prefix=prefix, k=ka, kt=kt, kp=kp, binds=binds, reach=r, A=None,
-                     factor=None)
+        return State(sys=sys, prefix=prefix, fm=fm, k=ka, kt=kt, kp=kp, binds=binds, reach=r,
+                     A=None, factor=None)
 
     def _state(self, sys: System, k: NDArray[np.float64], *, prefix: Prefix) -> State:
         st = self._factors(sys, k, prefix=prefix)
@@ -1460,7 +1497,7 @@ class Model:
         -du dlam per conductance, through each passage's harmonic mean and each triangle's terms
         (Width.terms.vjp: ties shared)."""
         t = time.time()
-        fm, c = self.fm, st.sys.cells
+        fm, c = st.fm, st.sys.cells
         gt, gp = _grad_tri(c.pe, c.ea, c.eb, fm.pa, fm.pb, fm.T, st.kt, st.binds, c.pf, c.fc,
                            fm.fa, fm.Tf, u, lam, fm.nt)
         dk = self.terms.vjp(st.k, gt)
@@ -1788,7 +1825,8 @@ def complex_of(name: str, *, factorization: gap_factor.Factorization) -> Complex
     if m is None:
         raise ValueError(f"unknown complex metric {name!r}: cx+<form><w>+s<s>r<ring>b<band>+"
                          "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped]+v<code>"
-                         "[+x[B<line>c<cross>][E0][L[o<open>][b<foot>]][S<boost>h<classes>]v<exits code>]"
+                         "[+x[B<line>c<cross>][E0][L[o<open>][b<foot>]][S<boost>[s<surfaces>]h<classes>]"
+                         "v<exits code>]"
                          "[@e<search eps>]")
     (kind, w, ramp_s, s_, ring, band, R, levels, grade, quad, sigma, ox, oy,
      lumped, code, *exits, search) = m.groups()

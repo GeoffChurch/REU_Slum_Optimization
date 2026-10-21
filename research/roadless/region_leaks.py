@@ -189,13 +189,14 @@ CHEAP = polish_greedy.CHEAP
 BARRIERS = metrics.BARRIERS             # RUNTIME's since the consolidated pass
 STREET_CLASSES = ("residential", "living_street", "unclassified")   # a formal home's street
 DRIVE_CLASSES = metrics.DRIVE_CLASSES   # the drivable streets: a deep home is far from all of them
-# The street boost (gap_exits.StreetBoost): 3x on every way with a highway tag on 5810@major (the
-# region test's check, its classes spelt out, `_link` folded), and 10x on the drivable streets
-# alone (owner 2026-10-16: "a 10x boost is I think reasonable"; footways, paths and tracks not)
+# The street boost (gap_exits.StreetBoost): 3x on every way with a highway tag on 5810@major, any
+# surface (the region test's check, its classes spelt out, `_link` folded), and 10x on the paved
+# drivable streets alone (owner 2026-10-16: "a 10x boost is I think reasonable"; footways, paths
+# and tracks not; 2026-10-20: "only boost if it's explicitly tagged paved")
 REGION_HIGHWAYS = ("footway", "motorway", "path", "residential", "secondary", "service",
                    "services", "tertiary", "track", "unclassified")
-BOOST = gx.StreetBoost(factor=3.0, classes=REGION_HIGHWAYS)
-DRIVE_BOOST = metrics.BOOST             # 10x on DRIVE_CLASSES: RUNTIME's
+BOOST = gx.StreetBoost(factor=3.0, surfaces=gx.AnySurface(), classes=REGION_HIGHWAYS)
+DRIVE_BOOST = metrics.BOOST             # 10x on DRIVE_CLASSES tagged paved: RUNTIME's
 TRIP_M = 500.0          # the median trip the constants are chosen for, on the closed reference (m;
                         # owner 2026-10-15: "What if we just use T=500m?")
 SHARES = (0.9, 0.75, 1.0)   # the share of the leak at buildings on the closed reference: the

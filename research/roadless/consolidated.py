@@ -22,9 +22,10 @@ polish_greedy.py, search.py, road_rescore.py), keyed by the metric's name.
 
 `features`: per block (the store's 303: clearings.Store's blocks), its OSM features (attrs["osm"])
 as the metric reads them: the barriers' cut (gap_exits.OsmBarriers.parts within the block: its
-area, the railway's and water's, the crossings), and the highway lines meeting it by class, each
-split into the length on its edge (within EDGE_M of the street ring) and inside (deeper: a way
-the boost raises inside the block, not a street of its ring). Rows ROWS/features/<id>.parquet.
+area, the railway's and water's, the crossings), and the highway lines meeting it by class (a
+drivable one the boost's: of DRIVE_CLASSES and tagged paved), each split into the length on its
+edge (within EDGE_M of the street ring) and inside (deeper: a way the boost raises inside the
+block, not a street of its ring). Rows ROWS/features/<id>.parquet.
 
 `presets`: the lineup's presets on a block under RUNTIME, one after another on one device
 (items_of: SIMP's default `.p256w8x2`, the hard-block preset `.p256w8x2.GS0.01cate1`, the cheap
@@ -144,7 +145,7 @@ def _features_one(bid: str) -> str | None:
         inside = shapely.intersection(geom, poly)
         on_edge = shapely.length(shapely.intersection(inside, edge))
         deep = shapely.length(inside) - on_edge
-        drive = cls.isin(metrics.DRIVE_CLASSES).to_numpy()
+        drive = cls.isin(metrics.DRIVE_CLASSES).to_numpy() & metrics.BOOST.surfaces.of(hw.surface)
         foot = cls.isin(("footway", "path", "pedestrian", "steps", "track", "cycleway")).to_numpy()
         row.update(drive_edge_m=float(on_edge[drive].sum()),
                    drive_inside_m=float(deep[drive].sum()),

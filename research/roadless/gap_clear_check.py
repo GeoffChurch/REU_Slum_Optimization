@@ -28,7 +28,8 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S loop-index - [fault]          # fault: uncontracted
     uv run python $S trip-calibration - [fault]    # faults: boundary-trips, wrong-home
     uv run python $S closed-edge - [fault]         # fault: edge-open
-    uv run python $S street-boost <-|ids,> [fault]  # fault: classes-dropped
+    uv run python $S street-boost <-|ids,> [fault]  # faults: classes-dropped, surfaces-dropped
+    uv run python $S road-boost <-|ids,> [fault]    # faults: unboosted-road, ways-dropped
     uv run python $S no-features <ids,> [fault]    # fault: neighbour-features
     uv run python $S underflow - [fault]           # fault: unfloored
     uv run python $S faces <ids,> [fault]          # fault: unsorted
@@ -180,13 +181,23 @@ as trips), `wrong-home` (each home's trips measured from the next home's injecti
 a leak and the cells live are the open edge's, the street drains nothing and the leaks the
 injection, and the pooled median trip is the method of images' with the images added. Fault
 `edge-open`: ClosedEdge.mesh leaving the edge open.
-`street-boost`: on STREET_BOOST_BLOCK (a residential way, a footway and a tertiary link), the boost
-on residential and tertiary at 10x boosts every triangle within BOOST_M of the residential way and
-the link (`_link` folded) and none near the footway, and multiplies a passage between boosted
-triangles by 10 and the others by 1; and on each real block named (a drivable way and a footway
-inside it), RUNTIME's boost raises every triangle near a drivable way, none near only a footway or
-path, a passage between boosted triangles 10x and the others 1x. Fault `classes-dropped`: every way
-with a highway tag boosted.
+`street-boost`: on STREET_BOOST_BLOCK (an asphalt residential way, an asphalt footway, a paved
+tertiary link, an unpaved residential way and an untagged tertiary), the boost on paved residential
+and tertiary at 10x boosts every triangle within BOOST_M of the asphalt residential way and the
+link (`_link` folded) and none near the footway, the unpaved way or the untagged one, and
+multiplies a passage between boosted triangles by 10 and the others by 1; and on each real block
+named (a paved drivable way, one not tagged paved and a footway inside it), RUNTIME's boost raises
+every triangle near a paved drivable way, none near only a footway or path or a drivable way not
+tagged paved, a passage between boosted triangles 10x and the others 1x. Faults
+`classes-dropped`: every way with a highway tag boosted; `surfaces-dropped`: a drivable way
+boosted whatever its surface.
+`road-boost` (owner 2026-10-20: "proposed roads should get the same 10x boost as existing drivable
+streets"): on STREET_BOOST_BLOCK under that block's boost and under no boost, and on each real block
+named under RUNTIME, each carved by the faces guard's two nested stops, every road prefix's state
+conducts the exits' road factor times the unboosted mesh on the passages between two triangles in
+its corridor (by centroid), the exits' mesh outside it, and reaches on its own mesh; a clearing's
+state is on the exits' mesh. Faults `unboosted-road`: a prefix on the exits' mesh;
+`ways-dropped`: the corridor boosted on the unboosted mesh.
 `no-features` (RUNTIME's switch, NOTES "The consolidated pass"): on each block named, carrying its
 own features less every drivable way and barrier feature (no real block lacks a drivable street
 on its ring), RUNTIME's baseline (P0, P_{1/2},0, J_2,0, every home's escape time, the homes walled
@@ -1471,7 +1482,7 @@ def _barrier_block(*, node: bool, bridge: bool, path: bool = True) -> Block:
     keep = [True, path, True]
     ways = gpd.GeoDataFrame(
         {"highway": ["", "footway", "footway"], "railway": ["rail", "", ""],
-         "waterway": ["", "", ""], "bridge": [False, False, bridge],
+         "waterway": ["", "", ""], "surface": ["", "", ""], "bridge": [False, False, bridge],
          "tunnel": [False, False, False]},
         geometry=[shapely.LineString([(-10, 40), (130, 40)]),
                   shapely.LineString([(30, 20), (30, 60)]),
@@ -1703,15 +1714,21 @@ def _gap_closed(self: gx.OsmBarriers, block: Block) -> gx.BarrierParts:
 # ------------------------------------------------------------------ the street boost
 
 def _boost_block() -> Block:
-    """STREET_BOOST_BLOCK: 120 x 80 m, its south edge the street; a residential way across it
-    (y 40), a footway (y 65) and a tertiary link (x 20, y 5 -- 30); homes clear of them."""
+    """STREET_BOOST_BLOCK: 120 x 80 m, its south edge the street; an asphalt residential way
+    across it (y 40), an asphalt footway (y 65), a paved tertiary link (x 20, y 5 -- 30), an
+    unpaved residential way (y 25, x 30 -- 110) and an untagged tertiary (x 112, y 5 -- 30); homes
+    clear of them."""
+    n = 5
     ways = gpd.GeoDataFrame(
-        {"highway": ["residential", "footway", "tertiary_link"], "railway": ["", "", ""],
-         "waterway": ["", "", ""], "bridge": [False, False, False],
-         "tunnel": [False, False, False]},
+        {"highway": ["residential", "footway", "tertiary_link", "residential", "tertiary"],
+         "railway": [""] * n, "waterway": [""] * n,
+         "surface": ["asphalt", "asphalt", "paved", "unpaved", ""],
+         "bridge": [False] * n, "tunnel": [False] * n},
         geometry=[shapely.LineString([(-10, 40), (130, 40)]),
                   shapely.LineString([(10, 65), (110, 65)]),
-                  shapely.LineString([(20, 5), (20, 30)])])
+                  shapely.LineString([(20, 5), (20, 30)]),
+                  shapely.LineString([(30, 25), (110, 25)]),
+                  shapely.LineString([(112, 5), (112, 30)])])
     empty = gpd.GeoDataFrame({"railway": []}, geometry=[])
     areas = gpd.GeoDataFrame({"natural": [], "landuse": [], "waterway": []}, geometry=[])
     homes = [_square(x, y, 4.0) for x, y in ((60.0, 15.0), (95.0, 50.0), (40.0, 72.0))]
@@ -1721,7 +1738,7 @@ def _boost_block() -> Block:
 
 
 def street_boost(ids: list[str]) -> list[str]:
-    boost = gx.StreetBoost(factor=10.0, classes=("residential", "tertiary"))
+    boost = gx.StreetBoost(factor=10.0, surfaces=gx.PAVED, classes=("residential", "tertiary"))
     b = _boost_block()
     m = _model(b, dataclasses.replace(METRIC, exits=gx.Exits(
         barriers=gx.NoBarriers(), edge=gx.OpenEdge(), leak=gx.NoLeak(), boost=boost)))
@@ -1729,10 +1746,11 @@ def street_boost(ids: list[str]) -> list[str]:
     cen = fm0.xy[fm0.tri].mean(axis=1)
     pts = shapely.points(cen[:, 0], cen[:, 1])
     geo = m.geo
-    lines = {k: geo.local(g) for k, g in zip(gx.osm_in(b).ways.highway,
-                                             gx.osm_in(b).ways.geometry, strict=True)}
+    ways = gx.osm_in(b).ways
+    lines = {f"{h} {u}": geo.local(g) for h, u, g in zip(ways.highway, ways.surface,
+                                                         ways.geometry, strict=True)}
     near = {k: np.asarray(shapely.dwithin(g, pts, gx.BOOST_M - 0.5)) for k, g in lines.items()}
-    far = ~np.asarray(shapely.dwithin(lines["residential"], pts, gx.BOOST_M + 0.5))
+    far = ~np.asarray(shapely.dwithin(lines["residential asphalt"], pts, gx.BOOST_M + 0.5))
     on = boost.on_way(fm0, geo, b)
     # the passages' weights: 10x between two boosted triangles, as they were between two others
     both = on[fm0.pa] & on[fm0.pb]
@@ -1740,18 +1758,25 @@ def street_boost(ids: list[str]) -> list[str]:
     fin = np.isfinite(fm0.T) & (fm0.T > 0)
     ratio_on = m.fm.T[both & fin] / fm0.T[both & fin]
     ratio_off = m.fm.T[none & fin] / fm0.T[none & fin]
-    res = int((near["residential"] & on).sum()), int(near["residential"].sum())
-    link = int((near["tertiary_link"] & on).sum()), int(near["tertiary_link"].sum())
-    foot = int((near["footway"] & far & on).sum()), int((near["footway"] & far).sum())
+    def count(k: str, mask: np.ndarray) -> tuple[int, int]:
+        return int((near[k] & mask & on).sum()), int((near[k] & mask).sum())
+    every = np.ones(len(on), dtype=bool)
+    res, link = count("residential asphalt", every), count("tertiary_link paved", every)
+    foot = count("footway asphalt", far)
+    unpaved, untagged = count("residential unpaved", far), count("tertiary ", every)
     ok = (res[0] == res[1] > 0 and link[0] == link[1] > 0 and foot[0] == 0 < foot[1]
+          and unpaved[0] == 0 < unpaved[1] and untagged[0] == 0 < untagged[1]
           and bool(np.allclose(ratio_on, 10.0, rtol=1e-12))
           and bool(np.allclose(ratio_off, 1.0, rtol=1e-12)))
-    print(f"street-boost ({boost.name}): boosted triangles on the residential way {res[0]} of "
-          f"{res[1]}, on the tertiary link {link[0]} of {link[1]}, on the footway {foot[0]} of "
-          f"{foot[1]}; passages between boosted triangles x{float(ratio_on.min()):.12g} -- "
+    print(f"street-boost ({boost.name}): boosted triangles on the asphalt residential way "
+          f"{res[0]} of {res[1]}, on the paved tertiary link {link[0]} of {link[1]}, on the "
+          f"asphalt footway {foot[0]} of {foot[1]}, on the unpaved residential way {unpaved[0]} "
+          f"of {unpaved[1]}, on the untagged tertiary {untagged[0]} of {untagged[1]}; passages "
+          f"between boosted triangles x{float(ratio_on.min()):.12g} -- "
           f"{float(ratio_on.max()):.12g}, between others x{float(ratio_off.min()):.12g} -- "
           f"{float(ratio_off.max()):.12g} -> {'ok' if ok else 'FAILS'}", flush=True)
-    out = [] if ok else [f"residential {res}, link {link}, footway {foot}"]
+    out = [] if ok else [f"residential {res}, link {link}, footway {foot}, unpaved {unpaved}, "
+                         f"untagged {untagged}"]
     for b in common.build_blocks(ids):
         out += _boost_on_block(b)
     return out
@@ -1761,11 +1786,12 @@ FOOT_CLASSES = ("footway", "path")      # the real block's ways the boost must l
 
 
 def _boost_on_block(b: Block) -> list[str]:
-    """A real block with a drivable way and a footway inside it (the premise, from its own
-    features read afresh): under RUNTIME every triangle within BOOST_M - 0.5 m of a drivable way
-    is boosted, none within BOOST_M - 0.5 m of a footway or path and beyond BOOST_M + 0.5 m of
-    every drivable way, and a passage between two boosted triangles conducts 10x, between two
-    others as before."""
+    """A real block with a paved drivable way, an unpaved or untagged one and a footway inside it
+    (the premise, from its own features read afresh): under RUNTIME every triangle within
+    BOOST_M - 0.5 m of a paved drivable way is boosted, none within BOOST_M - 0.5 m of a footway or
+    path, or of a drivable way not tagged paved, and beyond BOOST_M + 0.5 m of every paved
+    drivable way, and a passage between two boosted triangles conducts 10x, between two others as
+    before."""
     bid = b.block_id
     runtime = _runtime()
     boost = metrics.BOOST
@@ -1774,11 +1800,16 @@ def _boost_on_block(b: Block) -> list[str]:
     pts = _centroids(fm0)
     ways = common.own_osm(b).ways
     cls = ways.highway.str.removesuffix("_link")
-    drive = geo.local(shapely.union_all(ways.geometry[cls.isin(boost.classes)].to_numpy()))
+    paved = ways.surface.isin(gx.PAVED.values)
+    drive = geo.local(shapely.union_all(
+        ways.geometry[cls.isin(boost.classes) & paved].to_numpy()))
+    rough = geo.local(shapely.union_all(
+        ways.geometry[cls.isin(boost.classes) & ~paved].to_numpy()))
     foot = geo.local(shapely.union_all(ways.geometry[cls.isin(FOOT_CLASSES)].to_numpy()))
     near_drive = np.asarray(shapely.dwithin(drive, pts, gx.BOOST_M - 0.5))
     far_drive = ~np.asarray(shapely.dwithin(drive, pts, gx.BOOST_M + 0.5))
     near_foot = np.asarray(shapely.dwithin(foot, pts, gx.BOOST_M - 0.5)) & far_drive
+    near_rough = np.asarray(shapely.dwithin(rough, pts, gx.BOOST_M - 0.5)) & far_drive
     on = boost.on_way(fm0, geo, b)
     both = on[fm0.pa] & on[fm0.pb]
     none = ~on[fm0.pa] & ~on[fm0.pb]
@@ -1787,14 +1818,16 @@ def _boost_on_block(b: Block) -> list[str]:
     ratio_off = m.fm.T[none & fin] / fm0.T[none & fin]
     d = int((near_drive & on).sum()), int(near_drive.sum())
     f = int((near_foot & on).sum()), int(near_foot.sum())
-    ok = (d[0] == d[1] > 0 and f[0] == 0 < f[1] and len(ratio_on) > 0
+    r = int((near_rough & on).sum()), int(near_rough.sum())
+    ok = (d[0] == d[1] > 0 and f[0] == 0 < f[1] and r[0] == 0 < r[1] and len(ratio_on) > 0
           and bool(np.allclose(ratio_on, boost.factor, rtol=1e-12))
           and bool(np.allclose(ratio_off, 1.0, rtol=1e-12)))
-    print(f"street-boost on {bid}: boosted triangles near a drivable way {d[0]} of {d[1]}, near a "
-          f"footway or path only {f[0]} of {f[1]}; passages between boosted triangles "
+    print(f"street-boost on {bid}: boosted triangles near a paved drivable way {d[0]} of {d[1]}, "
+          f"near a footway or path only {f[0]} of {f[1]}, near a drivable way not tagged paved "
+          f"only {r[0]} of {r[1]}; passages between boosted triangles "
           f"x{float(ratio_on.min()) if len(ratio_on) else float('nan'):.12g}, between others "
           f"x{float(ratio_off.max()):.12g} -> {'ok' if ok else 'FAILS'}", flush=True)
-    return [] if ok else [f"{bid}: drivable {d}, footway {f}"]
+    return [] if ok else [f"{bid}: paved drivable {d}, footway {f}, not paved {r}"]
 
 
 _ON_WAY = gx.StreetBoost.on_way
@@ -1806,6 +1839,76 @@ def _every_class(self: gx.StreetBoost, fm: gcl.FullMesh, geo: gc.Geometry,
     `classes-dropped`)."""
     every = sorted(set(gx.osm_in(block).ways.highway.str.removesuffix("_link")) - {""})
     return np.asarray(_ON_WAY(dataclasses.replace(self, classes=tuple(every)), fm, geo, block))
+
+
+def _any_surface(self: gx.StreetBoost, fm: gcl.FullMesh, geo: gc.Geometry,
+                 block: Block) -> np.ndarray:
+    """StreetBoost.on_way with its surface filter dropped: a way of its classes boosted whatever
+    its surface tag (fault `surfaces-dropped`)."""
+    return np.asarray(_ON_WAY(dataclasses.replace(self, surfaces=gx.AnySurface()), fm, geo,
+                              block))
+
+
+# ------------------------------------------------------------------ the road boost
+
+def road_boost(ids: list[str]) -> list[str]:
+    boost = gx.StreetBoost(factor=10.0, surfaces=gx.PAVED, classes=("residential", "tertiary"))
+    b = _boost_block()
+    out = _road_boost_on(b, dataclasses.replace(METRIC, exits=gx.Exits(
+        barriers=gx.NoBarriers(), edge=gx.OpenEdge(), leak=gx.NoLeak(), boost=boost)))
+    out += _road_boost_on(b, METRIC)
+    for b in common.build_blocks(ids):
+        out += _road_boost_on(b, _runtime())
+    return out
+
+
+def _road_boost_on(b: Block, metric: gcl.ComplexMetric) -> list[str]:
+    """`b` carved by _cross_carving, on `metric`: at each road prefix a passage between two
+    triangles whose centroids lie in its corridor conducts the exits' road factor times the
+    unboosted mesh's, one between two triangles outside it as the exits' mesh (the ways' boost
+    kept there), and the state's reach is its mesh's; a clearing's state is on the exits' mesh."""
+    bid = b.block_id
+    with tempfile.TemporaryDirectory() as tmp:
+        fx = metric.fixed(b, cache=Path(tmp), carving=_cross_carving(gc.geometry(b)))
+    m = metric.model(b, fx, demand=POP)
+    road = metric.exits.boost.road
+    fm0 = m.fx.fm
+    cen = fm0.xy[fm0.tri].mean(axis=1)
+    fin = np.isfinite(fm0.T) & (fm0.T > 0)
+    ok = m.factors(np.zeros(m.n)).fm is m.fm
+    parts = []
+    for stop in range(1, m.carving.stops[0] + 1):
+        st = m.road_factors(gcl.Prefix(net=0, stop=stop))
+        inside = shapely.contains_xy(m.carving.corridors[0][stop - 1], cen[:, 0], cen[:, 1])
+        both_in = inside[fm0.pa] & inside[fm0.pb] & fin
+        both_out = ~inside[fm0.pa] & ~inside[fm0.pb]
+        ratio = st.fm.T[both_in] / fm0.T[both_in]
+        same_out = bool(np.array_equal(st.fm.T[both_out], m.fm.T[both_out]))
+        tp = bool(np.array_equal(st.reach.Tp, m.sys.graph.reach(st.fm, st.kt, st.kp).Tp))
+        ok = (ok and int(both_in.sum()) > 0 and bool(np.allclose(ratio, road, rtol=1e-12))
+              and same_out and tp)
+        parts.append(f"stop {stop}: {int(both_in.sum())} passages inside its corridor "
+                     f"x{float(ratio.min()):.12g} -- {float(ratio.max()):.12g} (the road's "
+                     f"x{road:g}), outside {'as' if same_out else 'APART FROM'} the exits' mesh, "
+                     f"its reach {'its mesh' if tp else 'NOT its mesh'}")
+    print(f"road-boost on {bid} ({metric.exits.boost.name or 'no boost'}): " + "; ".join(parts)
+          + f" -> {'ok' if ok else 'FAILS'}", flush=True)
+    return [] if ok else [f"{bid} ({metric.exits.boost.name or 'no boost'})"]
+
+
+def _road_unboosted(self: gcl.Model, prefix: gcl.Prefix) -> gcl.FullMesh:
+    """Model.mesh_of leaving a road prefix's corridor unboosted (fault `unboosted-road`)."""
+    return self.fm
+
+
+def _road_without_ways(self: gcl.Model, prefix: gcl.Prefix) -> gcl.FullMesh:
+    """Model.mesh_of boosting a road prefix's corridor on the unboosted mesh, the ways' boost
+    dropped (fault `ways-dropped`)."""
+    if prefix.stop == 0:
+        return self.fm
+    on = self.carving.paved(prefix, self.cen_)
+    return self.exits.edge.mesh(gx.boosted(self.fx.fm,
+                                           np.where(on, self.exits.boost.road, 1.0)))
 
 
 # ------------------------------------------------------------------ the exits' identity
@@ -2258,7 +2361,8 @@ GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "enclosure": enclosure, "leak-gradient": leak_gradient, "leak-scale": leak_scale,
     "barriers": barriers, "exits-identity": exits_identity, "loop-index": loop_index,
     "trip-calibration": trip_calibration, "closed-edge": closed_edge,
-    "street-boost": street_boost, "underflow": underflow, "no-features": no_features,
+    "street-boost": street_boost, "road-boost": road_boost, "underflow": underflow,
+    "no-features": no_features,
     "faces": faces, "lazy-baseline": lazy_baseline}
 
 
@@ -2303,7 +2407,11 @@ FAULTS: dict[str, dict[str, Callable]] = {
                                                           property(_suffix_without_leak))},
     "loop-index": {"uncontracted": lambda: _patched_item(_CONTRACT, 0, False)},
     "closed-edge": {"edge-open": lambda: _patched(gx.ClosedEdge, "mesh", lambda self, fm: fm)},
-    "street-boost": {"classes-dropped": lambda: _patched(gx.StreetBoost, "on_way", _every_class)},
+    "street-boost": {"classes-dropped": lambda: _patched(gx.StreetBoost, "on_way", _every_class),
+                     "surfaces-dropped": lambda: _patched(gx.StreetBoost, "on_way",
+                                                          _any_surface)},
+    "road-boost": {"unboosted-road": lambda: _patched(gcl.Model, "mesh_of", _road_unboosted),
+                   "ways-dropped": lambda: _patched(gcl.Model, "mesh_of", _road_without_ways)},
     "underflow": {"unfloored": lambda: _patched(gap_factor, "_residual", _residual_unfloored)},
     "faces": {"unsorted": lambda: _patched(gcl, "_by_face", _unsorted)},
     "lazy-baseline": {"atoms": _baseline_on_atoms,

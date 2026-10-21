@@ -7,10 +7,14 @@ delete them when shown dominated. Status tags: **prioritized** (the owner wants 
 Baselines (NOTES.md, "The consolidated pass: every block under the final metric"): every block of
 the store (220 small, 60 large, 22 oversized) and 5810@major under RUNTIME, the one metric: the shy
 distance at w 0.5 m on the gap complex, the railways and water as barriers (open at real
-crossings), the leaks' central constants, 10x on the drivable streets, the edge open (a block's
-street ring its exit):
+crossings), the leaks' central constants, 10x on the drivable streets tagged paved and on a
+proposed road's corridor (since 2026-10-20: NOTES, "The street boost on paved ways only, and on
+proposed roads"), the edge open (a block's street ring its exit):
 
-    cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a+xB8c3Lo6214b562S10hliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedva03a092b
+    cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75
+
+The numbers below are the previous boost's (every drivable way, whatever its surface; proposed
+roads unboosted) until the re-run under this one (Next).
 
 The presets below, each free first and optimizing P, are scored on P, P_{1/2} and J_2: Lens A at
 area D 0.05 (`D_LENS`) and Lens B (B's order: the people left walled in first, then the lens).
@@ -32,8 +36,14 @@ RUNTIME, free first, optimizing P at area D 0.05; Lens A of P, mean over the blo
   blocks (ahead on 38 of 60) at 73 s: both on the frontier, the owner's call (Open, the
   consolidated pass's question (3)).
 
-**Next** (owner 2026-10-13): the site, README and examples revamp; then the vulnerability score
-with vehicle access (Owner's decisions, below). Left from the consolidated pass: cycle_desire on
+**Next** (owner 2026-10-20): **the re-run under the paved-only boost** (owner: "Let's only boost if
+it's explicitly tagged paved"; "proposed roads should get the same 10x boost as existing drivable
+streets"): consolidated `features` and `baselines`, the presets on every block of the store and
+5810@major, and every lineup network's lens rows, scored (not re-proposed) in the new
+lineup_rows() root; with it the cheap preset takes S0.005cat (owner yes, Open (3)); then the flow
+roads (New methods, "Roads from the flow"). After them (owner 2026-10-13): the site, README and
+examples revamp; then the vulnerability score with vehicle access (Owner's decisions, below).
+Left from the consolidated pass: cycle_desire on
 five oversized blocks (g3, still on orion: item 4; g2a's three are in), the speed-first arterial on
 the three blocks where the quality-first one was cancelled (item 4), and the owner's three
 questions (Open, below). research/arterial-speed's Task 7 is done (item 4).
@@ -41,7 +51,8 @@ questions (Open, below). research/arterial-speed's Task 7 is done (item 4).
 **The revamp's scope** (owner 2026-10-20, "SGTM"): lead the site, README and examples with the
 roadless presets (P against the ramped destroyed area by building area) and their pictures (block
 5810's flow atlas, the corridor pictures from gap_maps, the flow over a no-buildings prior; NOTES,
-"Visualization: block 5810"), the road methods beside them on the same yardstick; say what P
+"Visualization: block 5810"; redrawn under the paved-only boost, since the old pictures' corridors
+along the lanes were the boost's), the road methods beside them on the same yardstick; say what P
 scores (walking, not vehicles) until the vulnerability score lands; decide what of
 research/roadless the public package takes (the branch carries the private cluster group and the
 1.8 GB gpu group, so it cannot merge as it is); a spec first. The items already deferred to the
@@ -446,7 +457,11 @@ items up front"), in the order proposed:
    10x on the drivable streets with the central constants (T500b90D10) moves the clearing toward
    5810 (its share 0.21 / 0.29, the formal grid's 0.78 / 0.68; Jaccard with the unboosted 0.35 /
    0.31) and changes its worth (each clearing loses 13 -- 16% of Lens A under the other's model),
-   Lens A 0.261 / 0.243. Who each cleared building helps (leave-one-out, a measurement): on the 13
+   Lens A 0.261 / 0.243. **Since 2026-10-20** (owner: "Let's only boost if it's explicitly tagged
+   paved") the boost takes a drivable way only when tagged paved, and a proposed road's corridor
+   (`S10spavedh<classes>`; NOTES, "The street boost on paved ways only, and on proposed roads"):
+   94% of 5810's boosted lanes were tagged unpaved. Who each cleared building helps
+   (leave-one-out, a measurement): on the 13
    blocks a fifth of the cleared buildings raise the escape times of fewer people than they
    displace by 5% (13 -- 16% of the displaced; the median helps ten times its own), almost none at
    1% (the median seventy times); on the region's central SIMP clearing (a sample of 142 of 707)
@@ -785,6 +800,22 @@ Not pursued, with what would change that:
 
 ## New methods
 
+- **Roads from the flow** (owner 2026-10-20, **prioritized** after the re-run; in the main
+  conversation, not a subagent): a road where the walking flow dissipates the most power
+  (dP/dsigma = -(du)^2 per unit conductance: paving a strip at 10x gains to first order 9x the
+  power in it). The frozen version first, as P_{1/2} stands to J_2: the flow solved once at the
+  baseline and turned into roads without solving again (the nested-quantile ridges of the power
+  off the paved ways, betweenness.ridges.ridge_desire, joined to the streets and ordered by frozen
+  gain per destroyed area; or the power as a desire field in the existing builders, DemandGreedy
+  and DesireWarpedSubstrate); then re-solving. Three lenses (the owner): roads alone (today's
+  lineup); clear, then pave (roads from the cleared block's flow); pave, then clear (the flow
+  roads first, then SIMP on the rest of the same D: relax.py with a prefix held, Model.mesh_of
+  already gives the prefix's state its boosted mesh). On 5810 clearing spreads the power (the
+  hottest 1% of pixels hold 32% of it before SIMP, 22% after, 18% with no buildings), so the
+  baseline's flow is the one to pave. The pilot: the six study blocks (6310, 20269, 40144, 39240,
+  8480, 38616) and 5810, with resistance_lp, cycle_desire and SIMP alongside. Under the paved-only
+  boost the corridors are the flow's own (on 5810 unboosted, the lanes hold 18% of the power on
+  15.5% of the open ground).
 - **Add/remove subset search** (built 2026-10-09; NOTES "The add/remove search as one
   Strategy"). search.py: a Round (rank, refine, build, evaluate, accept) under a schedule; the
   greedy's pickers, exchange (the polish), grow-then-prune and floating search are its
