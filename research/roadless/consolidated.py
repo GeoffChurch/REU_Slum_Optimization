@@ -71,6 +71,9 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import shapely
+from epistemetry.design.decide import KEEP
+from epistemetry.design.screen import (Bootstrap, ProportionalTo, Screen, ValueOfMoreUnits,
+                                       VetoBelow)
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -81,6 +84,7 @@ import gap_clear as gcl  # noqa: E402
 import gap_complex as gc  # noqa: E402
 import gap_exits as gx  # noqa: E402
 import metrics  # noqa: E402
+import screening  # noqa: E402
 
 ROWS = HERE / "consolidated_rows"
 EDGE_M = 3.0            # a way within this of the street ring runs on the block's edge (m: the
@@ -338,6 +342,68 @@ SCREENS = {   # variant -> the plan's suffix on SIMP's default ("": the default 
     "mma": ".umma0.2",      # MMA's update (BACKLOG, "Damped OC or MMA")
     "doc": ".uoc0.3m0.2",   # damped OC (eta 0.3)
 }
+
+# The screens' rule and its numbers, set here at the edge (screening.py: the rule a Strategy, each
+# preset an epistemetry Screen whose record is the run's identity), each with where it came from.
+RATES_PER_GPU_SECOND = (2e-6, 1.9e-5)   # Lens A per GPU-second, bracketed by two calls on record
+                        # (NOTES): .p256w8x2 adopted over .p64w8 at +0.00019 for 10.4 s a block (at
+                        # most 1.9e-5), late sampling closed at +0.0001 for ~76 s (at least ~2e-6)
+RATE_POINTS = 5         # rates across the bracket (geometric, equally weighted) the rule averages
+FUTURE = 820.0          # block runs a decision governs, the 82 large blocks about ten times over;
+                        # replayed from 82 to 8200 it moved one screen's stop, 15 -> 24 blocks (NOTES)
+SCREEN_FLOOR = 15       # replayed on six held-out screens (NOTES): lower realized loss than 20 at 11
+                        # of 15 rates x futures, than 10 at 9; below 15 the bootstrap's 90% interval
+                        # misses the 46-block mean 12 -- 21% of the time at 10 blocks
+SCREEN_STEP = 1         # blocks a screen runs past the floor before deciding again: one, as
+                        # seqscreen re-decided after every block
+COLLAPSE = 0.1          # BACKLOG, "Screen before the full run": a block this far below the default
+                        # (Lens A) stops the variant at once, the default kept
+SCREEN_OUTER = 4000     # outer draws of the next blocks a value is read from (seqscreen's DRAWS,
+                        # its Polya-urn paths per value)
+SCREEN_INNER = 200      # inner draws of the rest given them (the replays')
+SCREEN_BLOCKS = 20      # batch-means blocks of a value's Monte Carlo standard error (the replays')
+SCREEN_DRAWS = 4000     # draws a stop and a call read (seqscreen's DRAWS)
+SCREEN_SEED = (0,)      # the live screens' draws, keyed by it and each draw's place (epistemetry
+                        # `stream`)
+# The rule's rate points, a tuple of floats: a record holds a tuple, and an array (as seqscreen
+# builds its rates) would not record.
+SCREEN_RATES = tuple(float(r) for r in np.geomspace(*RATES_PER_GPU_SECOND, RATE_POINTS))
+
+
+def screen_presets() -> dict[str, Screen]:
+    """The screens' presets, by the name a command line gives: each an epistemetry Screen over the
+    bracket's RATE_POINTS geometric rates (SCREEN_RATES), equally weighted, over FUTURE uses, with
+    no Monte Carlo margin (seqscreen had none), its rule (screening.Rule) the one difference."""
+    weights = (1.0 / RATE_POINTS,) * RATE_POINTS
+
+    def screen_of(rule: screening.Rule) -> Screen:
+        # The horizons: one Screen per preset, whatever the population. ValueOfMoreUnits caps each
+        # horizon at the blocks left, so a screen of u <= 46 blocks values 1..left exactly as the
+        # fourth replay's range(1, u + 1) did; a screen of more blocks than the horizons is refused
+        # (screening_check.designs refuses such a fixture).
+        policy = ValueOfMoreUnits(
+            belief=Bootstrap(), functionals=((1.0, 0.0), (0.0, 1.0)),  # gain, extra GPU-s
+            target=rule.target_of(), horizons=tuple(range(1, len(common.HELD) + 1)),
+            step=SCREEN_STEP, cost=ProportionalTo(covariate="base_seconds"), stop=rule.stop(),
+            floor=SCREEN_FLOOR, outer=SCREEN_OUTER, inner=SCREEN_INNER, blocks=SCREEN_BLOCKS,
+            draws=SCREEN_DRAWS)
+        return Screen(policy=policy, drop=VetoBelow(threshold=-COLLAPSE, column=0, call=KEEP),
+                      seed=SCREEN_SEED)
+
+    return {
+        # The default. Optimizes the realized loss: AdoptKeepAskByStake over the bracket's rates, a
+        # wrong call losing |gain - rate x extra GPU-seconds| over FUTURE uses; the lowest realized
+        # loss at every rate in the fourth replay. Gives up: more wrong calls (67 against
+        # fewest-wrong's 37 in 1,400 distinct pairwise runs), for fewer asks (284 against 318).
+        "realized-loss": screen_of(screening.RealizedLoss(rates=SCREEN_RATES, weights=weights,
+                                                          uses=FUTURE, margin=0.0)),
+        # Optimizes the wrong calls: AdoptKeepAsk over the bracket's ends, each arm priced by its
+        # own stake; 37 wrong calls against 67 in 1,400 distinct pairwise runs of the fourth replay
+        # (each design without the veto, C1m4/p64 with it too). Gives up: more asks (318 against
+        # 284), and more realized loss at the bracket's bottom and middle.
+        "fewest-wrong": screen_of(screening.ZeroOne(rates=SCREEN_RATES, weights=weights,
+                                                    uses=FUTURE, margin=0.0)),
+    }
 
 
 def screen_plan(variant: str) -> Any:

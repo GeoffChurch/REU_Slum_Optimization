@@ -110,7 +110,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import seqscreen as ss  # noqa: E402
 
-DESIGNS = HERE / "epireplay_designs.json"      # committed: the designs, frozen
+DESIGNS = HERE / "screen_designs.json"         # committed: the designs, frozen
 JOBS = HERE / "epireplay4_jobs"                # git-ignored, a parquet a job: a rerun resumes
 ROWS = HERE / "epireplay4.parquet"             # git-ignored: every job's rows, gathered by report
 SCREENS = HERE / "epireplay4_screens.parquet"  # git-ignored: `report`'s judged screens
