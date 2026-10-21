@@ -91,7 +91,7 @@ class Fixture(NamedTuple):
         return Design(outcomes=np.stack([self.gain, self.seconds - self.base_seconds[:, None]],
                                         axis=2),
                       costs=self.seconds, base_costs=np.zeros(u),
-                      covariates={"base_seconds": self.base_seconds})
+                      covariates={screening.BASE_SECONDS: self.base_seconds})
 
 
 def _fixture(d: Mapping[str, Any]) -> Fixture:
@@ -102,7 +102,10 @@ def _fixture(d: Mapping[str, Any]) -> Fixture:
     gain = np.ascontiguousarray(np.array(d["gain"], dtype=float).T)
     seconds = np.ascontiguousarray(np.array(d["seconds"], dtype=float).T)
     base_seconds = np.array(d["base_seconds"], dtype=float)
-    blocks = tuple(str(b) for b in d["blocks"])
+    blocks = tuple(d["blocks"])
+    odd = [b for b in blocks if not isinstance(b, str)]
+    if odd:
+        raise ValueError(f"{name}: a block id is a string, got {odd}")
     u, k = len(blocks), len(d["arms"])
     orders = tuple(np.array(o, dtype=int) for o in d["orders"])
     if gain.shape != (u, k) or seconds.shape != (u, k) or base_seconds.shape != (u,):
@@ -200,8 +203,12 @@ def target() -> list[str]:
     presets, e = consolidated.screen_presets(), _edge()
     if set(presets) != {name for name, _ in TARGET_CHECKS}:
         return [f"presets {sorted(presets)}, checked {[name for name, _ in TARGET_CHECKS]}"]
-    bad: list[str] = []
     pairwise = [f for f in designs().values() if not f.many]
+    unknown = sorted(set(READ_OFF) - {f.name for f in pairwise})
+    if unknown or READ_AT not in PREFIXES:
+        return [f"READ_OFF names {unknown}, no pairwise design" if unknown
+                else f"READ_AT {READ_AT} is not among PREFIXES {PREFIXES}"]
+    bad: list[str] = []
     i = 0
     for name, checks in TARGET_CHECKS:
         policy = presets[name].policy
@@ -236,12 +243,14 @@ def target() -> list[str]:
                 at += 1
                 i += 1
         counts = {check: (ok, read if check == "reading" else at) for check, ok in held.items()}
-        wrong = [f"{check} ({total - ok} of {total})" for check, (ok, total) in counts.items()
-                 if ok != total] + ([] if stop else ["its stop"])
+        wrong = ([f"{check} ({total - ok} of {total})" for check, (ok, total) in counts.items()
+                  if ok != total] + ([] if stop else ["its stop"])
+                 + ([] if read == len(READ_OFF) else [f"{read} decisions read of {len(READ_OFF)}"]))
         print(f"{name}: {at} prefixes of {len(pairwise)} designs, {read} decisions read; "
               + ", ".join(f"{check} {ok} of {total}" for check, (ok, total) in counts.items())
               + f"; stop {'ok' if stop else policy.stop}"
-              + (f" -> FAILS (first: {first})" if wrong else " -> ok"), flush=True)
+              + (" -> ok" if not wrong else f" -> FAILS (first: {first})" if first
+                 else " -> FAILS"), flush=True)
         bad += [f"{name} {w}" for w in wrong]
     return bad
 

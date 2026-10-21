@@ -349,11 +349,12 @@ RATES_PER_GPU_SECOND = (2e-6, 1.9e-5)   # Lens A per GPU-second, bracketed by tw
                         # (NOTES): .p256w8x2 adopted over .p64w8 at +0.00019 for 10.4 s a block (at
                         # most 1.9e-5), late sampling closed at +0.0001 for ~76 s (at least ~2e-6)
 RATE_POINTS = 5         # rates across the bracket (geometric, equally weighted) the rule averages
-FUTURE = 820.0          # block runs a decision governs, the 82 large blocks about ten times over;
-                        # replayed from 82 to 8200 it moved one screen's stop, 15 -> 24 blocks (NOTES)
-SCREEN_FLOOR = 15       # replayed on six held-out screens (NOTES): lower realized loss than 20 at 11
-                        # of 15 rates x futures, than 10 at 9; below 15 the bootstrap's 90% interval
-                        # misses the 46-block mean 12 -- 21% of the time at 10 blocks
+FUTURE = 820.0          # block runs a decision governs, the 82 large blocks about ten times
+                        # over; replayed from 82 to 8200 it moved one screen's stop, 15 -> 24
+                        # blocks (NOTES)
+SCREEN_FLOOR = 15       # replayed on six held-out screens (NOTES): lower realized loss than 20 at
+                        # 11 of 15 rates x futures, than 10 at 9; below 15 the bootstrap's 90%
+                        # interval misses the 46-block mean 12 -- 21% of the time at 10 blocks
 SCREEN_STEP = 1         # blocks a screen runs past the floor before deciding again: one, as
                         # seqscreen re-decided after every block
 COLLAPSE = 0.1          # BACKLOG, "Screen before the full run": a block this far below the default
@@ -379,12 +380,14 @@ def screen_presets() -> dict[str, Screen]:
     def screen_of(rule: screening.Rule) -> Screen:
         # The horizons: one Screen per preset, whatever the population. ValueOfMoreUnits caps each
         # horizon at the blocks left, so a screen of u <= 46 blocks values 1..left exactly as the
-        # fourth replay's range(1, u + 1) did; a screen of more blocks than the horizons is refused
-        # (screening_check.designs refuses such a fixture).
+        # fourth replay's range(1, u + 1) did. A screen of more blocks would value only the first
+        # 46: at this commit only the fixture's loader refuses one (screening_check.designs); the
+        # live screens' data is not checked here yet.
         policy = ValueOfMoreUnits(
             belief=Bootstrap(), functionals=((1.0, 0.0), (0.0, 1.0)),  # gain, extra GPU-s
             target=rule.target_of(), horizons=tuple(range(1, len(common.HELD) + 1)),
-            step=SCREEN_STEP, cost=ProportionalTo(covariate="base_seconds"), stop=rule.stop(),
+            step=SCREEN_STEP, cost=ProportionalTo(covariate=screening.BASE_SECONDS),
+            stop=rule.stop(),
             floor=SCREEN_FLOOR, outer=SCREEN_OUTER, inner=SCREEN_INNER, blocks=SCREEN_BLOCKS,
             draws=SCREEN_DRAWS)
         return Screen(policy=policy, drop=VetoBelow(threshold=-COLLAPSE, column=0, call=KEEP),

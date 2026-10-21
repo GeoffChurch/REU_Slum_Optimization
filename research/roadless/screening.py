@@ -27,6 +27,7 @@ full SHA). A pin moves so:
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Protocol
@@ -48,6 +49,10 @@ from epistemetry.stats.records import Recordable
 
 #: A call as the summaries spell it (epistemetry's calls are int rows at 165f98b, the truth's too).
 CALLS: Mapping[int, str] = {KEEP: "keep", ASK: "ask", ADOPT: "adopt"}
+
+#: The design covariate a screen's cost model scales by (ProportionalTo): the default's GPU-seconds
+#: on each block, known before the variant runs it.
+BASE_SECONDS = "base_seconds"
 
 
 class Rule(Protocol):
@@ -109,6 +114,20 @@ class ZeroOne:
     weights: tuple[float, ...]
     uses: float
     margin: float
+
+    def __post_init__(self) -> None:
+        # AdoptKeepAskByStake's checks, which RealizedLoss gets from epistemetry: the price below
+        # is rates @ weights, and OwnStake's bracket the rates' ends.
+        r = np.asarray(self.rates, dtype=float)
+        if (r.ndim != 1 or len(r) == 0 or not np.all(np.isfinite(r)) or np.any(r <= 0.0)
+                or np.any(np.diff(r) <= 0.0)):
+            raise ValueError(f"the rates must be one or more finite positive numbers, strictly "
+                             f"increasing; got {self.rates}")
+        w = np.asarray(self.weights, dtype=float)
+        if (w.shape != r.shape or not np.all(np.isfinite(w)) or np.any(w <= 0.0)
+                or not math.isclose(float(w.sum()), 1.0, abs_tol=1e-9)):
+            raise ValueError(f"the weights must be one positive number per rate, summing to 1; got "
+                             f"{self.weights} for {len(self.rates)} rates")
 
     def target_of(self) -> TargetOf:
         return OwnStake(low=self.rates[0], high=self.rates[-1],
