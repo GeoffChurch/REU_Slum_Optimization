@@ -545,12 +545,6 @@ def reuse_networks(scratch: Path) -> None:
 
 # ------------------------------------------------------------------ report
 
-TUNING = ("ZAF.9.3.1_1_1558", "ZAF.9.3.1_1_18895", "ZAF.9.3.1_1_20269", "ZAF.9.3.1_1_20543",
-          "ZAF.9.3.1_1_22422", "ZAF.9.3.1_1_23597", "ZAF.9.3.1_1_30848", "ZAF.9.3.1_1_33717",
-          "ZAF.9.3.1_1_38616", "ZAF.9.3.1_1_46841", "ZAF.9.3.1_1_5810", "ZAF.9.5.4_1_9712",
-          "ZAF.9.5.4_1_9717")      # seqscreen.TUNING (not imported: its loaders read the rows)
-
-
 def _read(d: Path) -> pd.DataFrame:
     fs = sorted(d.glob("*.parquet"))
     return pd.concat([pd.read_parquet(f) for f in fs], ignore_index=True) if fs else pd.DataFrame()
@@ -597,7 +591,7 @@ def report() -> None:
     out.to_csv(ROWS / "summary_switch.csv", index=False)
     cols = [str(c) for c in out.columns if str(c).endswith(("_leak", "_bar", "_runtime", "_all"))
             and not str(c).startswith("walled")]
-    for name, sub in (("THE 13 TUNING BLOCKS", out[out.block.isin(TUNING)]),
+    for name, sub in (("THE 13 TUNING BLOCKS", out[out.block.isin(common.TUNING)]),
                       ("THE STORE", out)):
         print(f"\n{name} ({len(sub)} blocks): each part's move of the baseline, relative to the "
               "part before it (median [min, max])")

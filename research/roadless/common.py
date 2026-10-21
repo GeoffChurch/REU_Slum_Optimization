@@ -61,6 +61,33 @@ def large_blocks() -> list[str]:
     return sorted(pd.read_parquet(LARGE, columns=["block"])["block"])
 
 
+# The 13 large blocks the presets were tuned on (BACKLOG, "Tune on the 13, report on the 44").
+TUNING: tuple[str, ...] = (
+    "ZAF.9.3.1_1_1558", "ZAF.9.3.1_1_18895", "ZAF.9.3.1_1_20269", "ZAF.9.3.1_1_20543",
+    "ZAF.9.3.1_1_22422", "ZAF.9.3.1_1_23597", "ZAF.9.3.1_1_30848", "ZAF.9.3.1_1_33717",
+    "ZAF.9.3.1_1_38616", "ZAF.9.3.1_1_46841", "ZAF.9.3.1_1_5810", "ZAF.9.5.4_1_9712",
+    "ZAF.9.5.4_1_9717")
+
+# The held-out blocks the screens run on, 46 (the other large blocks that fit the retired raster's
+# greedy at h 0.5): the large blocks large82_simp_vs_greedy.parquet holds, less TUNING, in
+# seqscreen's order (default_rng(0)'s permutation of them sorted), the order phase 5 ran them in;
+# frozen 2026-10-17. The order is data: no seed regenerates it (epistemetry's random_orders draws
+# from stream(seed, PERMUTE, o)).
+HELD: tuple[str, ...] = (
+    "ZAF.9.3.1_1_18739", "ZAF.9.3.1_1_8152", "ZAF.9.3.1_1_18947", "ZAF.9.3.1_1_22673",
+    "ZAF.9.3.1_1_22659", "ZAF.9.3.1_1_8480", "ZAF.9.3.1_1_20952", "ZAF.9.3.1_1_17608",
+    "ZAF.9.3.1_1_22640", "ZAF.9.3.1_1_23735", "ZAF.9.3.1_1_30796", "ZAF.9.3.1_1_38988",
+    "ZAF.9.3.1_1_19161", "ZAF.9.3.1_1_44602", "ZAF.9.3.1_1_20423", "ZAF.9.3.1_1_18910",
+    "ZAF.9.3.1_1_6310", "ZAF.9.3.1_1_22591", "ZAF.9.3.1_1_39240", "ZAF.9.3.1_1_41806",
+    "ZAF.9.3.1_1_24240", "ZAF.9.3.1_1_41515", "ZAF.9.3.1_1_20023", "ZAF.9.3.1_1_44775",
+    "ZAF.9.5.4_1_8235", "ZAF.9.3.1_1_22633", "ZAF.9.1.4_1_6312", "ZAF.9.3.1_1_38254",
+    "ZAF.9.3.1_1_38366", "ZAF.9.3.1_1_43708", "ZAF.9.3.1_1_38528", "ZAF.9.3.1_1_6316",
+    "ZAF.9.3.1_1_20080", "ZAF.9.3.1_1_45876", "ZAF.9.3.1_1_5706", "ZAF.9.3.1_1_21777",
+    "ZAF.9.3.1_1_21252", "ZAF.9.3.1_1_19810", "ZAF.9.5.4_1_9710", "ZAF.9.3.1_1_18985",
+    "ZAF.9.3.1_1_22267", "ZAF.9.3.1_1_40144", "ZAF.9.3.1_1_7662", "ZAF.9.3.1_1_43547",
+    "ZAF.9.3.1_1_22336", "ZAF.9.3.1_1_41673")
+
+
 CHECK_BATCH = 40     # ids_of's check builds the blocks this many at a time: memory only
 
 

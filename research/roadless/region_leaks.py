@@ -167,7 +167,6 @@ import metrics  # noqa: E402
 import polish_greedy  # noqa: E402
 import relax  # noqa: E402
 import search  # noqa: E402
-import seqscreen  # noqa: E402
 
 if TYPE_CHECKING:
     from shapely.geometry.base import BaseGeometry
@@ -487,10 +486,9 @@ def members(procs: int) -> None:
 
 # ------------------------------------------------------------------ one metric everywhere
 
-TUNING = seqscreen.TUNING      # the 13 large blocks the presets were tuned on
-# their stored preset clearings under the per-block metric (per_block), P at area D BUDGET:
-# SIMP's default (relax_rows) and the cheap preset, the translucent search (the acceptance's
-# per-device rows, phase 3: no polish_rows of its own)
+# common.TUNING's stored preset clearings under the per-block metric (per_block), P at area D
+# BUDGET: SIMP's default (relax_rows) and the cheap preset, the translucent search (the
+# acceptance's per-device rows, phase 3: no polish_rows of its own)
 CHEAP_ROWS = gap_calib.rows_of(per_block("cpu").name) / "preset" / "gpu" / "cheap@e0.05"
 
 
@@ -559,7 +557,7 @@ def _block_one(bid: str) -> str | None:
 def blocks(procs: int) -> None:
     """The per-block check (module docstring) on TUNING."""
     (ROWS / "blocks").mkdir(parents=True, exist_ok=True)
-    todo = [i for i in TUNING if not (ROWS / "blocks" / f"{i}.parquet").exists()]
+    todo = [i for i in common.TUNING if not (ROWS / "blocks" / f"{i}.parquet").exists()]
     with multiprocessing.get_context("fork").Pool(procs, maxtasksperchild=1) as pool:
         failed = [f for f in pool.imap_unordered(_block_one, todo) if f]
     if failed:
@@ -635,7 +633,7 @@ def _loo_block(bid: str) -> str | None:
 def loo_blocks(procs: int) -> None:
     """leave_one_out on TUNING's stored presets' clearings, under the per-block metric."""
     (ROWS / "loo").mkdir(parents=True, exist_ok=True)
-    todo = [i for i in TUNING if not loo_path(i, "cheap").exists()]
+    todo = [i for i in common.TUNING if not loo_path(i, "cheap").exists()]
     with multiprocessing.get_context("fork").Pool(procs, maxtasksperchild=1) as pool:
         failed = [f for f in pool.imap_unordered(_loo_block, todo) if f]
     if failed:
