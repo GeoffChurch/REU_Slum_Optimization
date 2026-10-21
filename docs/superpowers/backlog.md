@@ -660,6 +660,21 @@ live Strategy precisely so that comparison can be run without touching the build
 **Not yet done:** nothing calls this builder in a shipped path -- the Phase 3 donor-material test it
 gates has not been written.
 
+**Queued (owner 2026-10-20): the objective test on real fabric, with circle scores that are not
+built on perimeter.** The tie argument above rules out only the perimeter quotient. Two circle
+scores that read area instead pass the same necessary condition: the normalized second moment
+A^2 / (2 pi I), 1 for a disc, and Reock's A / area(minimum enclosing circle). On the 5x5 example
+both separate the 1x3 strip from the L-tromino (moment 0.57 against 0.78, Reock 0.38 against 0.48)
+and grow the 2x2 (0.95, 0.64), checked by hand 2026-10-20. So "square, not circle" is still open.
+The test: each as a `ShapeObjective` (two new classes; no builder change) beside `Squareness`,
+`Rectangularity` and `Isoperimetric`, on regions grown from real seeds at several budgets, scored
+by the spec's criterion, the outline's share of inter-region GW distance variance from the pair
+matrix. Name the consumer first: the criterion serves the Phase 3 donor-material test, and the
+single-donor transplant was found dominated by clearance on every measured axis
+(`docs/superpowers/notes/2026-09-23-consensus-re-measured.md`; kept as a research method). The
+live consumers are the site's region stage and region-level comparisons under a pooled budget,
+where the criterion would be the outline's share of the variance of the regions' scores instead.
+
 ## Open Buildings footprint SIZE is the best informality signal measured — unused (2026-08-08)
 
 **The screen could be better than what shipped, at the cost of a download.** Measured on Cape Town
