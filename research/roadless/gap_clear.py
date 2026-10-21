@@ -1838,6 +1838,11 @@ class Relaxation:
         incumbent's and the polish's scorer."""
         return Relaxation(self.m, self.power_, q=1.0, eps=eps)
 
+    def scorer(self, eps: float) -> Relaxation | None:
+        """relax.Incumbent's scorer at the plan's scoring eps (relax.Plan.kscore): the eps world
+        at `eps` (metric_world), or none at 0 (every candidate scored exactly, no polish)."""
+        return self.metric_world(eps) if eps > 0 else None
+
 
 # ------------------------------------------------------------------ the run's metric
 
