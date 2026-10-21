@@ -248,6 +248,10 @@ class Cpu:
 # sacct_grace: how long a run is out of squeue before a task of it with no exit code and no sacct
 # row is taken as cancelled before it started (cluster_submit's "Settling a run": 10 minutes, the
 # cluster's accounting lag many times over; cx-raster, 2026-10-15, had 19 such tasks).
+# attribute_cache: how long ai's login node may answer a stat from cached attributes (its NFSv3
+# home's acregmax and acdirmax, the client's defaults: 60 s), so a run is finished, with its last
+# pull, only once it has been out of squeue that long (cluster_submit's "Settling a run": mycooc's
+# ev2-lib-20k-c, finished a second after it left squeue, lost its last row so, 2026-10-21).
 # market: the disk market of ai's home (its keeper holds reblock's files once a launch publishes
 # them). checkout_setup: nothing to link into a checkout. gpu_market None: reblock's waves are held
 # outside the GPU market's shadow accounts (never `keeper install` from here: it would remove the
@@ -256,6 +260,7 @@ class Cpu:
 PROJECT = cs.Project(name="reblock", repo=REPO, cluster=cs.load_cluster("ai"),
                      kinds=(Blocks(), Cpu()), max_gpus=4,   # owner, 2026-10-03: a shared cluster
                      checkout_setup=(), sacct_grace=timedelta(minutes=10),
+                     attribute_cache=timedelta(seconds=60),
                      market=cs.load_market("ai"), gpu_market=None, campaigns=cs.NoCampaigns())
 
 if __name__ == "__main__":
