@@ -61,13 +61,16 @@ its population), P_{1/2} (common.PriorityDemand(0.5), its weights from the basel
 on this mesh) and J_2, over the homes with demand; the enclosed population: the homes walled in at
 baseline (no ring triangle reaching the street: Placement's test) that a clearing leaves walled in,
 by the flow model's own reach from the street (`live_homes_of`: Reach.street, never a pocket's
-leak). The optimizers' objective is J_power under the run's demand (common.Demand; J_1 is P).
+leak) of each home's own ground (gap_complex's HOMES, Fixed.own: owner 2026-10-21, "No, its own
+pocket must open": a neighbour cleared within ring_m frees it only by opening its pocket; a
+groundless home, with no open ground within ring_m, by any ground there). The optimizers'
+objective is J_power under the run's demand (common.Demand; J_1 is P).
 
 FREE FIRST (`Model.free_first`): gap_complex.free_first on the complex grown as the form grows its
 footprints, read at the form's filtration width (the shy distance: grown by w / 2, at 0: its own
 geometry exactly, where the unrown filtration at w lets a gap a few millimetres under w through by
-its apertures' error), its walled-in homes and the homes it frees checked home for home against
-the flow model's reach.
+its apertures' error), on the fixed mesh's groundless homes, its walled-in homes and the homes it
+frees checked home for home against the flow model's reach.
 
 THE OPTIMIZERS run on these types themselves: `Model` (search.py's state, relax.py's and
 polish_greedy.py's model), its eps world `Relaxation`, its `Tension` and `ComplexMetric`, the run's
@@ -830,11 +833,12 @@ def _polygons(g: Any) -> list[Any]:
 
 # ------------------------------------------------------------------ the fixed mesh, cached
 
-_CACHE_FORMAT = 3      # what a cached mesh's file holds (in its key; a storage detail, no score's):
+_CACHE_FORMAT = 4      # what a cached mesh's file holds (in its key; a storage detail, no score's):
                        # 2 the baseline's grown complex beside the plain mesh (a carved mesh's file
                        # never held one that any code read: carved meshes are built in temporary
                        # directories, and road scoring never frees first); 3 the demand's pocket
-                       # homes (gap_flow.PointDemand.pocket)
+                       # homes (gap_flow.PointDemand.pocket); 4 each home's own ground's ring and
+                       # the groundless homes, in place of the ring
 
 
 def _baseline_arrays(geo: gc.Geometry, spec: gc.Spec, grow: float) -> dict[str, NDArray[Any]]:
@@ -972,14 +976,18 @@ class Fixed(NamedTuple):
     footprints' atoms (`carving`: the buildings themselves, or a road network's pieces), the
     demand where the placement puts it with every footprint standing (`Placement`: on the
     triangles reaching the street, gap_flow.demand_on, and a walled-in home's in its pocket or not;
-    per point its triangle `ptri`, -1 in the band), each home's ring (gap_flow.ring_of) and the
-    complex grown as the form grows its footprints with every footprint standing (`cx0`, free
-    first's baseline: the plain mesh's built with it and stored, a carved mesh's built on use).
-    The demand, the rings and cx0 are the buildings', whatever the atoms."""
+    per point its triangle `ptri`, -1 in the band), the groundless homes (gap_flow.groundless: no
+    open ground within ring_m), each home's ground that frees it (`own`, gap_flow.own_ring: its
+    ring's triangles open with every footprint standing, a groundless home's whole ring;
+    gap_complex's HOMES) and the complex grown as the form grows its footprints with every
+    footprint standing (`cx0`, free first's baseline: the plain mesh's built with it and stored, a
+    carved mesh's built on use). The demand, the rings and cx0 are the buildings', whatever the
+    atoms."""
     fm: FullMesh
     dem: gf.PointDemand
     ptri: NDArray[np.int64]
-    ring: gf.Ring
+    groundless: NDArray[np.bool_]
+    own: gf.Ring
     cx0: Baseline
     t_build: float
     carving: Carving
@@ -1022,21 +1030,24 @@ class Fixed(NamedTuple):
                       ).reach(fm, kt, kp).live[cells.cell]
         _ib, band_open = gc._open_ground(geo, np.ones(len(geo.polys), dtype=bool), spec.band_m,
                                          carve=None, grow=0.0)
+        open0 = kt > 0
         dem, ptri = placement.demand(Ground(geo=geo, spec=spec, quad=fs.quad, fm=fm, live0=live0,
-                                            open0=kt > 0, band_open=band_open))
+                                            open0=open0, band_open=band_open))
         ring = gf.ring_of(geo, spec.ring_m, fm.xy, fm.tri, band_open)
+        bare = gf.groundless(geo, spec.ring_m, fs.quad, fm.xy, fm.tri,
+                             ring.tri @ sp.diags(open0.astype(np.float64)), dem.walled)
         # free first's baseline: the plain mesh's built now and stored with it, a carved mesh's
         # on use
         cx0: Baseline = (LazyBaseline(geo, spec, form.grow) if carving.stops else
                          StoredBaseline(arrays=_baseline_arrays(geo, spec, form.grow), spec=spec))
-        fx = cls(fm=fm, dem=dem, ptri=ptri, ring=ring, cx0=cx0, t_build=time.time() - t0,
-                 carving=carving)
+        fx = cls(fm=fm, dem=dem, ptri=ptri, groundless=bare, own=gf.own_ring(ring, open0, bare),
+                 cx0=cx0, t_build=time.time() - t0, carving=carving)
         cls._store(fx, path)
         return fx
 
     @staticmethod
     def _store(fx: Fixed, path: Path) -> None:
-        fm, dem, ring = fx.fm, fx.dem, fx.ring
+        fm, dem, own = fx.fm, fx.dem, fx.own
         arrs: dict[str, NDArray[Any]] = {}
         for name in ("xy", "tri", "face", "pa", "pb", "pu", "pv", "T", "fa", "fu", "fv", "Tf",
                      "obstacle"):
@@ -1048,12 +1059,13 @@ class Fixed(NamedTuple):
         arrs["fm_scalars"] = np.array([fm.sigma, fm.unflat, fm.splits, fm.rounds, fm.flat,
                                        fm.skipped, fx.t_build])
         arrs["ptri"] = fx.ptri
+        arrs["groundless"] = fx.groundless
         for name in ("xy", "band", "walled", "shadowed", "pocket"):
             arrs[f"dem_{name}"] = getattr(dem, name)
-        for name, M in (("dem_S", dem.S.tocsr()), ("ring_tri", ring.tri.tocsr())):
+        for name, M in (("dem_S", dem.S.tocsr()), ("own_tri", own.tri.tocsr())):
             arrs[f"{name}_data"], arrs[f"{name}_indices"] = M.data, M.indices
             arrs[f"{name}_indptr"], arrs[f"{name}_shape"] = M.indptr, np.array(M.shape)
-        arrs["ring_band"] = ring.band
+        arrs["own_band"] = own.band
         arrs.update({f"cx_{name}": a for name, a in fx.cx0.stored().items()})
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(f"{path.stem}.{os.getpid()}.tmp.npz")
@@ -1088,8 +1100,8 @@ class Fixed(NamedTuple):
             if not arrays:
                 raise ValueError(f"{path.name}: a plain mesh's file without its baseline complex")
             cx0 = StoredBaseline(arrays=arrays, spec=spec)
-        return cls(fm=fm, dem=dem, ptri=z["ptri"],
-                   ring=gf.Ring(tri=csr("ring_tri"), band=z["ring_band"]), cx0=cx0,
+        return cls(fm=fm, dem=dem, ptri=z["ptri"], groundless=z["groundless"],
+                   own=gf.Ring(tri=csr("own_tri"), band=z["own_band"]), cx0=cx0,
                    t_build=float(t_build), carving=carving)
 
 
@@ -1589,18 +1601,21 @@ class Model:
         return float((inj[ok] * u_home[ok] ** power).sum())
 
     def live_homes_of(self, st: State) -> NDArray[np.bool_]:
-        """Per home: some triangle within ring_m of its outline reaches the street in the state
-        (or the open band does): the flow model's own reach from the street (Reach.street: a
-        pocket's leak frees no home)."""
-        return np.asarray(self.fx.ring.live(st.reach.street[st.sys.cells.cell]))
+        """Per home: some of its own ground (a triangle within ring_m of its outline open with every
+        footprint standing; a groundless home's, any triangle within ring_m) reaches the street in
+        the state, or the open band lies within ring_m (Fixed.own): the flow model's own reach from
+        the street (Reach.street: a pocket's leak frees no home)."""
+        return np.asarray(self.fx.own.live(st.reach.street[st.sys.cells.cell]))
 
     def complex_live(self, removed: NDArray[np.bool_]) -> NDArray[np.bool_]:
-        """Per home: it reaches the street on the complex rebuilt without `removed`, grown as the
-        form grows its footprints, read at the form's filtration width (gap_complex's test, free
-        first's): the reference the flow model's reach is checked against, home for home."""
+        """Per home: its own ground reaches the street on the complex rebuilt without `removed`,
+        grown as the form grows its footprints, read at the form's filtration width (gap_complex's
+        test, free first's, on the fixed mesh's groundless homes): the reference the flow model's
+        reach is checked against, home for home."""
+        own = gc.own_of(self.geo, self.fx.cx0.complex(), self.fx.groundless)
         cx = gc.build(self.geo, self.spec, ~removed, carve=None, grow=self.form.grow)
-        return np.asarray(~gc.walled(gc.home_exits(gc.homes_of(self.geo, cx), gc.exit_widths(cx)),
-                                     self.form.filtration_w))
+        return np.asarray(~gc.walled(gc.home_exits(gc.homes_own(self.geo, own, cx),
+                                                   gc.exit_widths(cx)), self.form.filtration_w))
 
     def grad(self, st: State, u: NDArray[np.float64],
              lam: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -1700,11 +1715,12 @@ class Model:
 
     def free_first(self, *, budget: float, held: NDArray[np.bool_]) -> NDArray[np.bool_]:
         """gap_complex.free_first on the complex grown as the form grows its footprints, read at
-        its filtration width (module docstring), checked home for home by the flow model's own
-        reach: its walled-in homes at baseline, and those it leaves walled in."""
+        its filtration width, on the fixed mesh's groundless homes (module docstring), checked
+        home for home by the flow model's own reach: its walled-in homes at baseline, and those it
+        leaves walled in."""
         fr = gc.free_first(self.geo, self.spec, w=self.form.filtration_w, grow=self.form.grow,
                            budget=budget, cost=self.cost_, pop=self.pop, held0=held,
-                           cx0=self.fx.cx0.complex())
+                           cx0=self.fx.cx0.complex(), groundless=self.fx.groundless)
         bid = self.block.block_id
         if not np.array_equal(fr.target, self.walled0):
             raise RuntimeError(f"{bid}: the complex walls in homes "

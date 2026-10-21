@@ -9,13 +9,17 @@ What it does, per block:
    runtime's: gap_clear.complex_of), a home is walled in when no ground within its ring reaches
    the street on the complex grown as the width form grows the footprints, read at the form's
    filtration width (gap_complex.walled: free first's test, which the flow model's reach agrees
-   with home for home, gap_clear_check reach).
+   with home for home, gap_clear_check reach). A road frees it only by opening its own ground
+   (gap_complex's HOMES: owner 2026-10-21, "No, its own pocket must open"), a groundless one's
+   (no open ground within ring_m: gap_flow.groundless, by Placement's points on the complex) by
+   any ground within ring_m.
 2. For each, a road on the METHOD'S OWN routing graph (the one it built, handed in), from the
    street or a road already held, whose corridor, carved as the metric carves a road (Carve:
    exactly the corridor, every road buffered by half its width), opens ground that frees the
-   home: ground within ring_m of its outline (its own footprint's included), or the sealed pocket
-   of the complex those touch (its components at the filtration width that hold a ring triangle
-   and not the street). Every edge and node of the graph within half the width of that region,
+   home: the sealed pocket of the complex its own ground lies in (its components at the
+   filtration width that hold a ring triangle and not the street); a groundless home's, ground
+   within ring_m of its outline (its own footprint's included), or the sealed pocket of the
+   complex those touch. Every edge and node of the graph within half the width of that region,
    less the width form's growth and `target_margin_m` (for the polygonal buffer), is a TARGET:
    the footprints a corridor cuts grow back into it by the form's growth (the shy distance's w /
    2), so only its ground that deep inside is open (23597's home 272: a corridor 0.80 m from it,
@@ -82,6 +86,7 @@ import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
 import gap_complex as gc  # noqa: E402
 import gap_factor  # noqa: E402
+import gap_flow as gf  # noqa: E402
 
 from reblock.budget import road_corridor  # noqa: E402
 from reblock.contracts import Block  # noqa: E402
@@ -92,7 +97,7 @@ from reblock.methods.substrates import RoutingGraph  # noqa: E402
 from reblock.permeability import with_width  # noqa: E402
 
 # This module's code and its research imports', in every identity: no reblock closure reaches them.
-CODE = source_hash(Path(__file__), Path(common.__file__), Path(gc.__file__))
+CODE = source_hash(Path(__file__), Path(common.__file__), Path(gc.__file__), Path(gf.__file__))
 # The research lineup's stage (BACKLOG 5's TODO, made the road methods' default in the consolidated
 # pass: road_rescore.lineup_arms) and the free-roads guard's (free_roads_check.FREE)
 FREE_BUDGET = 0.05       # the stage's displacement budget (Lens A's: the transparency experiment's)
@@ -219,7 +224,7 @@ class FreeEnclosed:
         # the block as the metric meshes it: its barriers cut out (its scorer's reach, which the
         # leaks and the boost do not change)
         geo = gc.geometry(metric.exits.barriers.block(block))
-        reach0 = _Reach.of(geo, metric, carve=None)
+        reach0, own = _Reach.baseline(geo, metric)
         enclosed = np.flatnonzero(~reach0.live)
         if not len(enclosed):
             return Plan(block_id=bid, enclosed=(), steps=(), unreachable=(), over_budget=(),
@@ -231,7 +236,7 @@ class FreeEnclosed:
         g = _routing(block, graph, width_m, w, self.length_tie,
                      metric.exits.barriers.obstacle(block))
         reach = width_m / 2.0 - metric.form.grow - self.target_margin_m
-        targets = _targets(geo, reach0, graph, g, enclosed, reach, metric.form.filtration_w)
+        targets = _targets(geo, reach0, own, graph, g, enclosed, reach, metric.form.filtration_w)
         street = unary_union(list(block.streets.geometry))
         seeds = np.flatnonzero(shapely.dwithin(shapely.points(graph.pts), street, graph.net_tol)
                                & ~g.blocked)
@@ -286,7 +291,8 @@ class FreeEnclosed:
                 break
             h, road, target, after, after_key = best
             held.append(road)
-            freed = _Reach.of(geo, metric, carve=geo.local(road_corridor(frame(held)))).live
+            freed = _Reach.of(geo, metric, own,
+                              carve=geo.local(road_corridor(frame(held)))).live
             if not freed[h]:
                 # the targets are the metric's reach read off the graph, near a barrier not
                 # always its test: the road dropped, the home tries its next target
@@ -329,17 +335,33 @@ class FreeEnclosed:
 
 class _Reach(NamedTuple):
     """The metric's reach on the complex with a corridor carved (gap_complex.build on the
-    footprints less `carve`, grown as the width form grows them): the complex, each home's ring,
-    and whether each home reaches the street at the form's filtration width."""
+    footprints less `carve`, grown as the width form grows them): the complex, each home's ground
+    that frees it (gap_complex.homes_own), and whether each home reaches the street at the form's
+    filtration width."""
     cx: gc.Complex
     homes: gc.Homes
     live: NDArray[np.bool_]
 
     @staticmethod
-    def of(geo: gc.Geometry, metric: gcl.ComplexMetric, *, carve: BaseGeometry | None) -> _Reach:
-        cx = gc.build(geo, metric.spec, np.ones(len(geo.polys), dtype=bool), carve=carve,
+    def baseline(geo: gc.Geometry, metric: gcl.ComplexMetric) -> tuple[_Reach, gc.Own]:
+        """The reach with nothing carved (each home's ground its ring: its own ground then), and
+        each home's own ground (the groundless among the homes walled in, by Placement's points
+        on the complex: gap_flow.groundless)."""
+        cx = gc.build(geo, metric.spec, np.ones(len(geo.polys), dtype=bool), carve=None,
                       grow=metric.form.grow)
         hm = gc.homes_of(geo, cx)
+        live = np.asarray(~gc.walled(gc.home_exits(hm, gc.exit_widths(cx)),
+                                     metric.form.filtration_w))
+        own = gc.own_of(geo, cx, gf.groundless(geo, metric.spec.ring_m, metric.fs.quad, cx.xy,
+                                               cx.tri, hm.ring, ~live))
+        return _Reach(cx=cx, homes=hm, live=live), own
+
+    @staticmethod
+    def of(geo: gc.Geometry, metric: gcl.ComplexMetric, own: gc.Own, *,
+           carve: BaseGeometry) -> _Reach:
+        cx = gc.build(geo, metric.spec, np.ones(len(geo.polys), dtype=bool), carve=carve,
+                      grow=metric.form.grow)
+        hm = gc.homes_own(geo, own, cx)
         live = ~gc.walled(gc.home_exits(hm, gc.exit_widths(cx)), metric.form.filtration_w)
         return _Reach(cx=cx, homes=hm, live=np.asarray(live))
 
@@ -380,12 +402,13 @@ def _routing(block: Block, graph: RoutingGraph, width_m: float, w: NDArray[np.fl
     return _Graph(ui=ui, uj=uj, segs=segs, weight=weight, matrix=matrix, blocked=blocked)
 
 
-def _targets(geo: gc.Geometry, r: _Reach, graph: RoutingGraph, g: _Graph,
+def _targets(geo: gc.Geometry, r: _Reach, own: gc.Own, graph: RoutingGraph, g: _Graph,
              homes: NDArray[np.intp], reach: float, w: float) -> dict[int, _Targets]:
-    """Per home, its targets: the ground that frees it is within ring_m of its outline (its own
-    footprint's included) and the sealed pocket of the complex its ring touches (the components,
-    at the filtration width w, of its ring's triangles that do not hold the street); a node or an
-    edge within `reach` of that region is a target."""
+    """Per home, its targets: the ground that frees it is the sealed pocket of the complex its own
+    ground lies in (the components, at the filtration width w, of its ring's triangles at baseline,
+    `r`, that do not hold the street); a groundless home's (`own`) is within ring_m of its outline
+    (its own footprint's included) and the sealed pocket its ring touches. A node or an edge within
+    `reach` of that region is a target."""
     comp, street = gc.components(r.cx, w)
     ring = r.homes.ring.tocsr()
     nodes = shapely.points(graph.pts)
@@ -395,8 +418,8 @@ def _targets(geo: gc.Geometry, r: _Reach, graph: RoutingGraph, g: _Graph,
         pockets = np.unique(comp[tris])
         pockets = pockets[pockets != street]
         sealed = np.flatnonzero(np.isin(comp, pockets))
-        region = shapely.union_all([shapely.buffer(geo.polys[h], r.cx.spec.ring_m),
-                                    *r.cx.tri_geom[sealed]])
+        near = [shapely.buffer(geo.polys[h], r.cx.spec.ring_m)] if own.groundless[h] else []
+        region = shapely.union_all([*near, *r.cx.tri_geom[sealed]])
         region = geo.utm(region)
         shapely.prepare(region)
         out[int(h)] = _Targets(
