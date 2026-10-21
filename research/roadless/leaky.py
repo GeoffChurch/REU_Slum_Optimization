@@ -24,7 +24,8 @@ solves, P's and P_{1/2}'s), and W's passes per solve.
 `report`: per block (summary_blocks.csv) and pooled over the walled-in blocks and over the controls
 (summary_groups.csv): (1) of the open homes (connected under T at baseline, with T's demand) the
 share whose escape time moves by more than MOVED from T's, and the ratio W / T's median, p10 and
-p90; (2) the walled-in homes' escape time against their block's median home under W (median, p90,
+p90 (a home with no footprint in the mesh, under a barrier's cut, has no escape time under W and
+is left out); (2) the walled-in homes' escape time against their block's median home under W (median, p90,
 max); (3) their share of W's P0 and J_2,0; (4) the own wall's share, median and p90, for open and
 walled-in homes apart; (5) the through-traffic and the dissipation's shares; (6) the unknowns and
 times W / T, and the passes.
@@ -194,7 +195,7 @@ def block_run(bid: str, part: str, *, replace: bool) -> None:
     u_W = wl.lenses.u
     ok_w = ~wm.nodem
     med = float(np.median(u_W[ok_w]))
-    open_ = ~walled & ~nodem_T
+    open_ = ~walled & ~nodem_T & ~wm.nodem    # connected under T, an escape time under each
     ratio = u_W / u_T
     pU = pop * np.nan_to_num(u_W)
     j2 = pop * np.nan_to_num(u_W) ** 2
@@ -258,7 +259,7 @@ def report(part: str) -> None:
                       ("all", blk.control | ~blk.control)):
         g = blk[sel]
         hm = homes[homes.block.isin(g.index)]
-        op = hm[~hm.walled & ~hm.nodem_T]
+        op = hm[~hm.walled & ~hm.nodem_T & ~hm.nodem_W]
         wh = hm[hm.walled]
         r = op.ratio
         row: dict[str, object] = dict(

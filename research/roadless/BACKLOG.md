@@ -662,6 +662,18 @@ Open:
     open"), not when a neighbour cleared within 1 m does; free first frees by the same test. Open:
     T or U (the owner asked what U's two fixes are, and whether a home's source belongs inside its
     footprint rather than on its outline's ring).
+- **Walls that leak** (running, one setting at a time; owner 2026-10-21: "can't they go through
+  other buildings, just slowly?", "everyone would pay to get out of their own home", "walls be
+  (imperfect/leaky) diodes", "launch these one at a time so we can be adaptive"; NOTES, "Walls that
+  leak: every home's source inside it, each wall priced as a length"; built on
+  research/leaky-walls: gap_walls, leaky.py, leaky_check.py). Scoring only on UNIFORM's mesh, leaks
+  and doors, against T, on the 77 small walled-in blocks and five controls. First setting,
+  symmetric 200 m, k_in 1 (`Wk1l200`): open homes 91% moved by over 5% (W / T median 1.21, p10
+  0.67, p90 4.79); walled-in homes 1.97x their block's median (U: 208x), 1.2% of P0; own wall 39%
+  of an open home's escape time; through-traffic 5% from open ground, 6% from neighbours; 3.1x the
+  unknowns, 5.6x the time. Next setting: the controller's and owner's pick. Stage 2 (SIMP's
+  interpolation of a partly cleared building's walls) after a setting is picked; a
+  leaks-in-interiors variant later.
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
   owner's answer moves an end of the bracket to that screen's break-even rate. One is live,
