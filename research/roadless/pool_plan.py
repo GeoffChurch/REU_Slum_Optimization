@@ -126,7 +126,7 @@ def _measure(root: Path, path: Path, *, block: object, item: object, peak_gb: fl
                     source=f"rows:{where}")
 
 
-def _demanding(peak: Observed, wall: Observed) -> Observed:
+def _demanding(*, peak: Observed, wall: Observed) -> Observed:
     """A (block, item)'s stored basis: the largest stored peak (`peak`'s) and, taken apart from
     it, the longest stored wall (`wall`'s: the spec's 3.4, time estimates come the same way; one
     run's wall understated another's by up to 3.5 times); its source names both runs when they
@@ -157,7 +157,7 @@ class _Rows(ABC):
                 peak[k] = o
             if k not in wall or o.minutes > wall[k].minutes:
                 wall[k] = o
-        return {k: _demanding(p, wall[k]) for k, p in peak.items()}
+        return {k: _demanding(peak=p, wall=wall[k]) for k, p in peak.items()}
 
     def stored(self, block: str, item: str) -> Observed | None:
         k = (block, item)
@@ -409,8 +409,9 @@ class Estimator:
 
     def estimate(self, block: str, item: str) -> Estimate:
         """(block, item)'s estimate: the newest wave's measure of it, else the family's most
-        demanding stored run (both with the ladder's stored_mem and stored_time), else the fit
-        (`_fitted`)."""
+        demanding stored basis (its largest stored peak with its longest stored wall, possibly
+        from different runs: `_demanding`), both with the ladder's stored_mem and stored_time,
+        else the fit (`_fitted`)."""
         seen = next((o for o in self.history if (o.block, o.item) == (block, item)), None)
         if seen is None:
             seen = self.family.stored(block, item)
@@ -520,8 +521,8 @@ def areas_of(features_csv: Path, bank: Mapping[str, object]) -> dict[str, float]
 #: nodes and quadro2, 376 less 128; 1,381 on orion): cluster_submit's site and GPU files at the
 #: pin (ec79a0eb) hold neither a node's memory (sinfo's) nor its reserve (fitted at run time into
 #: the board's tiers.json from other users' jobs). A node not here cannot be planned on.
-USABLE_GB: dict[str, float] = {"h100": 248.0, "quadro1": 248.0, "quadro2": 248.0,
-                               "tesla1": 248.0, "tesla2": 248.0, "orion": 1381.0}
+USABLE_GB: Mapping[str, float] = {"h100": 248.0, "quadro1": 248.0, "quadro2": 248.0,
+                                  "tesla1": 248.0, "tesla2": 248.0, "orion": 1381.0}
 
 
 class Sized(NamedTuple):
@@ -535,7 +536,7 @@ class Sized(NamedTuple):
     hold_gb: float
 
 
-def _sized(e: Estimate, ladder: Ladder) -> Sized:
+def _sized(e: Estimate, *, ladder: Ladder) -> Sized:
     """`e`'s job: a pool's, of the class of the smallest rung holding its gb, when a rung does and
     its needed minutes fit a fresh lease (pool_queue.fresh_minutes); else the long lane's, of that
     rung's class (the top rung's past it), needing `fit_mem` times its peak."""
@@ -547,7 +548,7 @@ def _sized(e: Estimate, ladder: Ladder) -> Sized:
     return Sized(lane=pq.Lane.LONG, cls=cls, gb=gb, hold_gb=gb)
 
 
-def _able(nodes: Sequence[str], usable_gb: Mapping[str, float], need: float) -> list[str]:
+def _able(nodes: Sequence[str], *, usable_gb: Mapping[str, float], need: float) -> list[str]:
     """The nodes of `nodes` (in order) whose usable memory holds `need` GB."""
     return [n for n in nodes if need <= usable_gb[n]]
 
@@ -578,7 +579,7 @@ def plan_wave(*, wave: str, commit: str, family: str, ladder: Ladder, estimator:
                          f"(nodes: {', '.join(usable_gb)})")
     work = [(b, i) for b in ids for i in items]
     est = {w: estimator.estimate(*w) for w in work}
-    size = {w: _sized(e, ladder) for w, e in est.items()}
+    size = {w: _sized(e, ladder=ladder) for w, e in est.items()}
     pooled = dict.fromkeys(ids, 0.0)                     # a group's pool minutes
     largest: dict[str, tuple[str, str]] = {}              # a group's largest job
     for w, s in size.items():
@@ -591,7 +592,7 @@ def plan_wave(*, wave: str, commit: str, family: str, ladder: Ladder, estimator:
     node_of: dict[str, str] = {}
     for b in sorted(pooled, key=lambda b: -pooled[b]):   # stable: ties in ids' order
         top = size[largest[b]]
-        able = _able(nodes, usable_gb, top.hold_gb)
+        able = _able(nodes, usable_gb=usable_gb, need=top.hold_gb)
         if not able:
             raise SystemExit(f"wave {wave}: no node of {', '.join(nodes)} holds {b}'s "
                              f"{largest[b][1] or 'job'} ({top.lane} needing {top.hold_gb:.0f} GB; "
