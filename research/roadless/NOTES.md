@@ -8397,4 +8397,11 @@ footway or path); new fault `surfaces-dropped` (the unpaved and untagged ways bo
 two triangles in a prefix's corridor conducts the road factor times the unboosted mesh's (x10 on
 558 and 2,219 synthetic passages, 19,828 and 34,243 on 4241; x1 with no boost), the exits' mesh
 outside, and each state reaches on its own mesh; faults `unboosted-road` (a prefix on the exits'
-mesh: x1) and `ways-dropped` (the corridor boosted on the unboosted mesh: outside apart).
+mesh: x1) and `ways-dropped` (the corridor boosted on the unboosted mesh: outside apart). Every
+guard both ways at 7e3af8dc (the pass's sweep with street-boost on 4241 and road-boost added: 100
+runs, 10.2 process-h): 97 as expected; `no-features` under `neighbour-features` passed, its
+neighbour chosen by the drivable way it shares, none of which was paved: the neighbour is now the
+one sharing the most of the boost's ways (bd9256ef; 19570 then fails under it, homes 0.88 apart);
+`roads` both ways in the main checkout, whose road_rows its prefixes are in (18895's
+resistance_lp, as expected), and `exits-identity` both ways there over the 56 migrated stored
+names (as expected).

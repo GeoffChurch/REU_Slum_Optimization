@@ -41,7 +41,9 @@ it's explicitly tagged paved"; "proposed roads should get the same 10x boost as 
 streets"): consolidated `features` and `baselines`, the presets on every block of the store and
 5810@major, and every lineup network's lens rows, scored (not re-proposed) in the new
 lineup_rows() root; with it the cheap preset takes S0.005cat (owner yes, Open (3)); then the flow
-roads (New methods, "Roads from the flow"). After them (owner 2026-10-13): the site, README and
+roads (New methods, "Roads from the flow"). **Held** (2026-10-21) until the owner has the uniform
+rule's measurement (Coverage and model, "Walled-in homes by one rule"), which would change the
+metric again: the re-run's brief is .superpowers/sdd/2026-10-20-paved-boost/brief.md. After them (owner 2026-10-13): the site, README and
 examples revamp; then the vulnerability score with vehicle access (Owner's decisions, below).
 Left from the consolidated pass: cycle_desire on
 five oversized blocks (g3, still on orion: item 4; g2a's three are in), the speed-first arterial on
@@ -893,6 +895,15 @@ Not pursued, with what would change that:
 
 ## Coverage and model
 
+- **Walled-in homes by one rule** (owner 2026-10-21: "I'd like to measure that trade-off. A uniform
+  rule would be nicer if it works"; **running**, research/uniform-leak, the brief in
+  .superpowers/sdd/2026-10-21-uniform-leak/): the internal destinations on every open cell, sealed
+  pockets included, every home's demand on its own open ground, and no free first, so P itself
+  decides whether to free a pocket; against today's (the leaks on the cells live at baseline,
+  walled-in homes out of P, free first, Lens B counting them first) on the 121 blocks with
+  walled-in homes under RUNTIME (792 homes). The 2026-10-11 uniform-walls study (every footprint
+  at eps 1e-4) is the precedent the owner then declined ("B SGTM"): its walls moved 3.9% of the
+  open homes by over 5%; a pocket's destinations touch no connected home.
 - **A price per displaced person in place of the budget** (owner 2026-10-16: "Write down the price
   per displaced person in place of the budget idea so we don't forget it"; the concern: "Clearing N
   people's homes to provide access to n<N people's homes seems unfair"). Today a run clears up to a
