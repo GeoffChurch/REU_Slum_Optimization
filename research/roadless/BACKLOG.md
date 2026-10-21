@@ -41,12 +41,13 @@ it's explicitly tagged paved"; "proposed roads should get the same 10x boost as 
 streets"): consolidated `features` and `baselines`, the presets on every block of the store and
 5810@major, and every lineup network's lens rows, scored (not re-proposed) in the new
 lineup_rows() root; with it the cheap preset takes S0.005cat (owner yes, Open (3)); then the flow
-roads (New methods, "Roads from the flow"). **Held** (2026-10-21) until the owner has the uniform
-rule's measurement (Coverage and model, "Walled-in homes by one rule"), which would change the
-metric again: the re-run's brief is .superpowers/sdd/2026-10-20-paved-boost/brief.md. After them (owner 2026-10-13): the site, README and
-examples revamp; then the vulnerability score with vehicle access (Owner's decisions, below).
-Left from the consolidated pass: cycle_desire on
-five oversized blocks (g3, still on orion: item 4; g2a's three are in), the speed-first arterial on
+roads (New methods, "Roads from the flow"). **Held** (2026-10-21) until the owner decides the
+uniform rule (Open, "A uniform rule for walled-in homes", measured) and B (i) counts a home freed
+only when its own ground opens (owner 2026-10-21), both of which change the metric again: the
+re-run's brief is .superpowers/sdd/2026-10-20-paved-boost/brief.md. After them (owner 2026-10-13):
+the site, README and examples revamp; then the vulnerability score with vehicle access (Owner's
+decisions, below). Left from the consolidated pass: cycle_desire on five oversized blocks (g3,
+still on orion: item 4; g2a's three are in), the speed-first arterial on
 the three blocks where the quality-first one was cancelled (item 4), and the owner's three
 questions (Open, below). research/arterial-speed's Task 7 is done (item 4).
 
@@ -635,6 +636,32 @@ Open:
     for clearance, clearance_looped, cycle_native and resistance_lp, 4.3 h at most; cycle_desire
     0.5 h on the large blocks and 10 -- 55 h on the oversized) would make the lineup's networks
     what its code proposes.
+- **A uniform rule for walled-in homes** (the owner's call, 2026-10-21: "A uniform rule would be
+  nicer if it works"; NOTES, "A uniform rule for walled-in homes: destinations in their pockets, no
+  free first"; built on research/uniform-leak: metrics.UNIFORM, relax's `.f0`). Measured on the 121
+  blocks with walled-in homes (792) and five controls, SIMP's default at area D 0.05:
+  - For T (free first, today's): U leaves 100 homes walled in on 33 blocks where T leaves 28 on 6
+    (all homes with no open ground); 79 of U's are among the 84 homes with no open ground within
+    ring_m, which its demand cannot reach, 21 (12 blocks) are pocket homes SIMP's optimum or the
+    budget's better use leaves sealed. U's clearing costs the homes T scores a mean -0.012 of Lens
+    A (L_P, L_{P_1/2}, L_J2 alike, the intervals excluding 0; small -0.015, large -0.006), behind
+    on 88 of 121. U's lens is dominated by the walled-in homes (a median 208x the block's median
+    escape time, 44% of P0, 98% of J_2,0), and its optimizer ends below T's clearing by its own
+    measure on 32 blocks.
+  - For U (one rule): no free stage, and so none of its unfair trades (D per unit of population
+    freed over 1 on 27 of 119 blocks, 21.5 at worst); the homes it frees are served (10% over 10x
+    the median against 31% of T's: T's "freed" is often a neighbour cleared within 1 m, the home's
+    own ground still sealed); no connected home moves at baseline (the walls study's A moved 3.9%
+    by over 5%); ahead under its own metric (+0.073 L_P, +0.16 P_{1/2}, +0.17 J_2).
+  - Variants that would answer U's failures, not built: the no-ground homes given demand (on their
+    own footprint, leaking as a pocket), and free first's crossings offered to U's incumbent as a
+    candidate rather than held. If T is kept, the frontier rule asks whether U's code stays as an
+    option (it leads on the freed homes' service and on fairness) or goes to the wiki's dead ends.
+  - Decided (owner 2026-10-21): U's code stays as an option (merged into research/roadless). B (i)
+    counts a home freed only when its own ground reaches the street ("No, its own pocket must
+    open"), not when a neighbour cleared within 1 m does; free first frees by the same test. Open:
+    T or U (the owner asked what U's two fixes are, and whether a home's source belongs inside its
+    footprint rather than on its outline's ring).
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
   owner's answer moves an end of the bracket to that screen's break-even rate. One is live,
@@ -895,15 +922,6 @@ Not pursued, with what would change that:
 
 ## Coverage and model
 
-- **Walled-in homes by one rule** (owner 2026-10-21: "I'd like to measure that trade-off. A uniform
-  rule would be nicer if it works"; **running**, research/uniform-leak, the brief in
-  .superpowers/sdd/2026-10-21-uniform-leak/): the internal destinations on every open cell, sealed
-  pockets included, every home's demand on its own open ground, and no free first, so P itself
-  decides whether to free a pocket; against today's (the leaks on the cells live at baseline,
-  walled-in homes out of P, free first, Lens B counting them first) on the 121 blocks with
-  walled-in homes under RUNTIME (792 homes). The 2026-10-11 uniform-walls study (every footprint
-  at eps 1e-4) is the precedent the owner then declined ("B SGTM"): its walls moved 3.9% of the
-  open homes by over 5%; a pocket's destinations touch no connected home.
 - **A price per displaced person in place of the budget** (owner 2026-10-16: "Write down the price
   per displaced person in place of the budget idea so we don't forget it"; the concern: "Clearing N
   people's homes to provide access to n<N people's homes seems unfair"). Today a run clears up to a

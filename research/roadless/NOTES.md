@@ -8405,3 +8405,159 @@ one sharing the most of the boost's ways (bd9256ef; 19570 then fails under it, h
 `roads` both ways in the main checkout, whose road_rows its prefixes are in (18895's
 resistance_lp, as expected), and `exits-identity` both ways there over the 56 migrated stored
 names (as expected).
+
+### A uniform rule for walled-in homes: destinations in their pockets, no free first (owner 2026-10-21)
+
+**The question.** The metric has internal destinations (the leaks), so can free first go? The
+owner: "I'd like to measure that trade-off. A uniform rule would be nicer if it works". Today (T)
+the leaks sit on the cells live at baseline, a walled-in home has no demand point (Model.nodem: out
+of P, P_{1/2} and J_2), relax.py frees first (the cheapest crossings, least D per person freed,
+held) and Lens B counts the people left walled in first. The uniform rule (U): destinations on all
+open ground, sealed pockets included; every home's demand on its own open ground, a walled-in
+home's in its pocket, so its trips end at the pocket's leak and its escape time is finite but
+large; no free first, SIMP's default optimizing P over every home.
+
+**The rule as built** (three Strategies, each in the run's identity; brief
+.superpowers/sdd/2026-10-21-uniform-leak, its rulings in progress.md there):
+- Where the leak sits: gap_exits.InternalLeak's `sites`, LiveSites (T) or OpenSites (U: every cell
+  open at baseline, a triangle's factor positive with every footprint standing, not ground). That
+  is T's set without the street-reach test: the shy zones and the interiors stay leak-free, as
+  cleared ground is in T. Spelt `Lp` in the exits' name; no module constant, so EXITS_CODE
+  (65531d75) and the stored names stand.
+- Where the demand sits: gap_clear.Placement, LiveDemand (T) or PocketDemand (U, `+pockets` in the
+  metric's name and in Fixed.key: every cached mesh re-keys, _CACHE_FORMAT 3). PocketDemand keeps
+  T's placement for every home T places and places each home T leaves without demand by
+  Placement's own rule on the open ground no street reaches at baseline (gap_flow.in_pockets: its
+  ring's points there, else the shadow rule within ring_m); a connected home whose ring also
+  touches a pocket keeps its T demand (else the pockets would move connected homes). It refuses
+  a leak not on OpenSites (a pocket's home would escape at once).
+- No free first: relax's plan option `.f0` (relax.FreeStage: FreeFirst, unnamed; NoFree).
+- B (i) reads gap_clear.Reach.street, the reach from the street faces, the ground cells and the
+  leaks on cells live at baseline (T and the closed edge's calibration unchanged): a pocket's leak
+  drains its homes and frees none, so B (i) does not read 0 because every home now leaks. Each
+  clearing's walled-in count is the same under both scorers (uniform.py refuses a block where
+  they part; none did).
+
+    metrics.UNIFORM = cx+shy0.5+s0.125r1b1+R0.5g4x2q4+pockets+v34d40e8a+xB8c3Lpo6214b562S10spavedh<classes>v65531d75
+
+**Guards** (gap_clear_check; each both ways). `uniform-control` (41940, 41779, none walled in): U's
+demand T's element for element, its leak T's but on the pockets (349 cells and 8.5 m^2 on 41940,
+477 and 13.2 m^2 on 41779: slivers sealed between footprints' shy zones, 1.6e-5 and 2.2e-5 of the
+leak, no demand there), P0 and every home's escape time T's to 3e-14 -- 7e-14 (tolerance 1e-12).
+SIMP's value and gradient are not T's to floating point: the demand-free pockets' leak moves the
+gradient in the eps world by 1.4e-5 -- 3.6e-5 of its largest at SIMP's start (7e-8 -- 8e-7 at a
+random x), which is the uniform rule itself, so the guard holds it to GRAD_TOL (1e-4, the adjoint's
+own tolerance against differences). Faults `every-cell` (the leak on interiors and zones: gradient
+9.5e-5 -- 4.4e-4) and `placed-everywhere` (every home on its pocket ground too) fail.
+`pocket-escape` (20269, 23597): T leaves the walled-in homes out (nan), U walls in the same ones
+and each with open ground escapes from its own pocket (u0 57x the block median on 20269, 506 --
+508x on 23597; each pocket's leak drains its homes' injection to 2.2e-9 and 5.8e-9, tolerance
+1e-7); U's homes without demand are exactly those with no open ground within ring_m (23597's home
+93, its ring all footprint and shy zone). Faults `pocket-unleaked`, `placement-dropped`.
+`pocket-gradient` (19570, 23597): U's gradient against differences on the walled-in homes and
+their neighbours, J_1 9.6e-7 and 7.7e-6, J_2 3.0e-7 and 1.1e-5 (on 20269 the differences are
+roundoff-limited, T's as U's: the gradient guard's known case); faults `adjoint-unleaked`,
+`pocket-unloaded` (J_2's adjoint without the pocket homes: 0.11, 0.66). `pocket-count` (20269,
+23597): the walled-in homes left read the same under both scorers at the baseline, three single
+clearings, two random clearings and T's free first; fault `leak-seeded` (U then reads 0 and 1 of
+1 and 6). `enclosure` and `leak-assembly` now run each leak on both sites; enclosure's fault
+`every-cell` can no longer fail (the street reach ignores a leak off the live cells by
+construction) and is `leak-seeded`. `exits-identity` (56 names of 56 configurations), `identity`
+(UNIFORM spells back), `constants` (28, 34d40e8a), baseline, free, reach, pattern, leak-fold,
+leak-gradient, leak-scale, closed-edge, trip-calibration, barriers, lazy-baseline, no-features
+(with bd9256ef), street-boost, road-boost, gradient (19570, 38136 and 20269: passes), weights,
+flux, convex, loop-index, underflow, faces: as expected both ways (`roads` needs the main
+checkout's road_rows).
+
+**The measurement** (uniform.py; rows uniform_rows/, parquet ignored; summaries
+summary_{blocks,homes,sizes}.csv). The 121 blocks with walled-in homes under RUNTIME (792 homes:
+77 small with 327, 39 large with 416, 5 oversized with 49) and five controls with none (small
+20954, 41940, 41779; large 8152, 20023: a seeded draw). Two arms at area D 0.05 optimizing P with
+SIMP's default: T, RUNTIME with free first; U, UNIFORM with `.f0`. Every clearing scored under both
+metrics: Lens A of P, P_{1/2} and J_2 (T's over the homes T scores, U's over every home with
+demand) and B (i) by street reach; paired differences U - T with 95% Bayesian-bootstrap intervals.
+
+**People left walled in** (B (i), homes). T leaves 28 on 6 blocks (at most 0.10% of a block's
+population), U 100 on 33 blocks (a median 0.12% where it leaves any, 2.4% on 63718); U leaves 72
+that T frees (on 30 blocks), T none that U frees. They split in two:
+- 708 walled-in homes have open ground in a pocket. T frees all; U frees 687 and leaves 21 on 12
+  blocks (7 small, 5 large; none oversized). On 5 of the 12 U's own metric prefers T's clearing
+  (SIMP's local optimum, the gate free first was built for: 3786 by 0.44 L_P); on the other 7 it
+  prefers spending the budget elsewhere.
+- 84 have no open ground within ring_m at all (their ring all footprint and shy zone: 3.4% of the
+  small blocks' walled-in homes, 14% of the large's, 27% of the oversized's). U gives them no
+  demand, so its objective cannot see them, and leaves 79; T's free first frees 56 and finds no
+  crossing for 28 (the 28 T leaves).
+And of those freed, how well (U's metric, escape time after the clearing against the block's
+median at baseline): of the 708 pocket homes T frees, 221 (31%) stay over 10x the median, freed
+through a cleared neighbour's ground within 1 m while their pocket stays sealed (median 3.6x);
+of U's 687, 70 (10%; median 1.38x). B (i)'s "freed" is generous: T never scores a freed home's
+access (it has no demand), U scores only its pocket's (its demand is fixed at baseline, so a
+neighbour's clearing does nothing for it: 40185's home 21, 756x before and after T's clearing,
+0.21x after U's).
+
+**Lens A**, U's clearing less T's, mean [95% Bayesian-bootstrap interval] over the blocks:
+
+                     L_P                       L_{P_1/2}                 L_J2
+    T's metric
+      small (77)     -0.0146 [-0.024, -0.006]  -0.0161 [-0.028, -0.007]  -0.0159 [-0.028, -0.007]
+      large (39)     -0.0066 [-0.011, -0.003]  -0.0037 [-0.007, -0.001]  -0.0061 [-0.011, -0.003]
+      oversized (5)  -0.0047 [-0.016, +0.001]  -0.0032 [-0.013, +0.002]  -0.0052 [-0.018, +0.001]
+      all (121)      -0.0116 [-0.018, -0.006]  -0.0116 [-0.019, -0.005]  -0.0123 [-0.020, -0.006]
+    U's metric
+      small (77)     +0.094 [+0.058, +0.134]   +0.175 [+0.108, +0.248]   +0.186 [+0.118, +0.259]
+      large (39)     +0.039 [+0.020, +0.067]   +0.143 [+0.077, +0.217]   +0.160 [+0.085, +0.235]
+      oversized (5)  +0.0044 [+0.001, +0.010]  +0.038 [+0.004, +0.105]   +0.048 [+0.005, +0.134]
+      all (121)      +0.073 [+0.049, +0.101]   +0.159 [+0.112, +0.213]   +0.172 [+0.124, +0.224]
+
+Under T's metric the median L_P difference is -0.004 (small -0.008, large -0.002, oversized 0) and
+U is ahead on 29 blocks, behind on 88; under U's, +0.020, ahead on 85, behind on 32.
+
+T's arm under T's metric: L_P 0.4778 small, 0.4109 large, 0.2497 oversized. Under U's metric U's
+own optimizer ends below T's clearing on 32 of 121 blocks (22 small, 10 large; median -0.005, at
+worst -0.44 on 3786). The clearings' Jaccard: median 0.61 small, 0.80 large, 0.88 oversized
+(0.12 at least); identical on 4 walled-in blocks and every control. The arms spend D 0.0497 (T)
+and 0.0495 (U) on average.
+
+**How strongly P sees them** (U at baseline). A walled-in home's escape time is 208x its block's
+median home (p10 79x, p90 478x, from 15.5x to 2,184x): its pocket's leak is small. The walled-in
+homes hold a median 44% of U's P0 (at most 93%) and 98% of J_2,0 (at most 99.9%), so U's Lens A
+is mostly whether the pockets open. The homes T scores keep T's escape times exactly (P over them
+within 3e-12 on 118 of 121 blocks; on 63612, 24240 and 30796 four homes T leaves without demand
+though B (i) calls them connected get pocket demand under U, +18%, +5.1% and +0.35% of P0).
+
+**Free first's fairness** (T; the owner's "Clearing N people's homes to provide access to n<N
+people's homes seems unfair"): the free stage spends a mean D 0.0048 (10% of the budget) and, per
+unit of the population it frees, a median 0.69 (pooled 0.49, p90 1.6), over 1 on 27 of the 119
+blocks where it frees anyone and over 2 on 8: 21.5 on 42404 (D 0.0139 for a home of 0.00065),
+10.1 on 38616, 7.1 on 20080.
+
+**Against the uniform-walls study** (2026-10-11, "Uniform walls: one number against two"). Its A
+(every footprint conducting eps 1e-4) rescued the enclosed homes but moved 3.9% of the open homes'
+escape times by more than 5%; U moves none at baseline (a pocket's leak touches no connected home),
+and in the eps world only by the micro-pockets' 1e-5 of the gradient. But U weighs the walled-in
+homes far more: A's had a median r of 12 and a median 41% of J_2 at 1e-4, U's a median 208x the
+block median and 98% of J_2,0, an exchange rate set by each pocket's own leak (its area and its
+homes' footprints) where A's was set by eps and the walls. As there, a finite exchange rate makes
+the walled-in homes a toll the lens is dominated by; U puts it on P rather than ordering by B (i)
+first.
+
+**What it says.** U does not free the walled-in people by itself: it leaves 100 homes on 33 blocks
+against T's 28 on 6, 79 of them homes with no open ground that its demand cannot reach and 21
+pocket homes (12 blocks) that SIMP's optimum, or the budget's better use under U's lens, leaves
+sealed. It costs the others' Lens A under T's metric a mean -0.012 (L_P, P_{1/2}, J_2 alike; the
+interval excludes 0; small blocks -0.015, large -0.006). It is not dominated: under its own metric
+it is ahead (+0.073 L_P, +0.16 P_{1/2}, +0.17 J_2), it serves the homes it frees better (10% left
+over 10x the median against T's 31%: T's "freed" is often a neighbour cleared within 1 m, the
+home's own ground still sealed), it spends no D on free first's unfair trades (ratio over 1 on 27
+blocks), and it is one rule. The owner's call (BACKLOG, "A uniform rule for walled-in homes"),
+with two variants that would answer U's two failures: demand for the no-ground homes (on their
+own footprint, leaking as a pocket), and free first's crossings offered to U's incumbent (the
+gate) without holding them.
+
+**Compute.** GPU (cluster, at most 4 cards, b395b3d4): ul-oversized (5 blocks, 4.86 task-h, about
+1.5 h) and ul-large (41 blocks, 7.02 task-h, 1.9 h), 11.9 task-h, a task 2.2x the consolidated
+pass's default wall on one card (two arms, two meshes, two models for the lenses), at most 1.47 h
+(63612; its process's peak RSS 55.8 GB of the task's 64, GPU 6.9 GB). The U arm took 0.93x T's
+wall (0.84x SIMP's own time). Here, single-threaded, at most 2 processes: the 80 small blocks 2.1
+process-h (0.96x the default's wall), the guards and diagnostics about 8 process-h.

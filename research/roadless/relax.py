@@ -26,17 +26,20 @@ plus the Frank-Wolfe relaxation and bound if fw > 0), rows in relax_rows/<metric
 path: nested budgets D 0.01 .. 0.15, rows in the greedy's format (clear.rows_dir, picker
 SIMP<plan>).
 
-Both free first (B's first stage, gap_clear.Model.free_first): the crossings that free the homes
-walled in at baseline, cheapest per unit of population, within the budget, held at 1 through SIMP,
-its roundings and the polish, which search with the rest of the budget; where no home is walled in
-nothing is held. one's rows add free_D (the free stage's D), free_cleared (its buildings) and
-enclosed (B (i) of the answer: the population share it leaves walled in,
-gap_clear.Model.enclosed_left). A greedy's seed or track (.g, .G) starts from the held buildings
-as polish_greedy's greedy does (since the consolidated pass), its polish never moving them. fw and
-.m are not built for held buildings: a block whose free stage holds any raises.
+Both free first (B's first stage, gap_clear.Model.free_first) unless the plan says not (`.f0`,
+NoFree: NOTES, "A uniform rule for walled-in homes: destinations in their pockets, no free first",
+for a metric whose walled-in homes have demand in their pockets, so the objective decides whether
+to free them): the crossings that free the homes walled in at baseline, cheapest per unit of
+population, within the budget, held at 1 through SIMP, its roundings and the polish, which search
+with the rest of the budget; where no home is walled in nothing is held. one's rows add free_D (the
+free stage's D), free_cleared (its buildings) and enclosed (B (i) of the answer: the population
+share it leaves walled in, gap_clear.Model.enclosed_left). A greedy's seed or track (.g, .G) starts
+from the held buildings as polish_greedy's greedy does (since the consolidated pass), its polish
+never moving them. fw and .m are not built for held buildings: a block whose free stage holds any
+raises.
 
 plan: fw<FW iterations, 0 = start SIMP from uniform x>.q<final q>.i<OC updates per q>, e.g.
-fw0.q3.i10; the optional suffixes are Plan's (.e .b .k[s] .r[l] .p .w .m .g .G .u). (The raster's
+fw0.q3.i10; the optional suffixes are Plan's (.e .b .k[s] .r[l] .p .w .m .g .G .u .f0). (The raster's
 coarse plans, `.c` and `.C`, its grids, `.h`, `.a` and `.g<d0>x<smax>...`, and its solve
 tolerance `.t<rtol>` went with it: every solve on the complex is direct. The raster's rows keep
 their names, `.t` and all: records, read by no code; NOTES, "The consolidated pass".)
@@ -304,6 +307,41 @@ class _MMAStep:
 DEFAULT_UPDATE = OC()
 
 
+class FreeStage(Protocol):
+    """B's first stage (module docstring): its part of the plan's name and the buildings it holds,
+    from `held`, within `budget`."""
+
+    @property
+    def suffix(self) -> str: ...
+
+    def held(self, c: gap_clear.Model, *, budget: float, held: np.ndarray) -> np.ndarray: ...
+
+
+@dataclass(frozen=True)
+class FreeFirst:
+    """Free first (gap_clear.Model.free_first): the crossings that free the homes walled in at
+    baseline, cheapest per unit of population, held."""
+
+    @property
+    def suffix(self) -> str:
+        return ""
+
+    def held(self, c: gap_clear.Model, *, budget: float, held: np.ndarray) -> np.ndarray:
+        return c.free_first(budget=budget, held=held)
+
+
+@dataclass(frozen=True)
+class NoFree:
+    """No free stage: nothing held beyond `held` (`.f0`)."""
+
+    @property
+    def suffix(self) -> str:
+        return ".f0"
+
+    def held(self, c: gap_clear.Model, *, budget: float, held: np.ndarray) -> np.ndarray:
+        return held.copy()
+
+
 class Plan(NamedTuple):
     """How a block is solved: `fw` Frank-Wolfe iterations from x = 0 (0: start SIMP from the
     uniform x = D, no bound), SIMP continuation q = 1.5, 2, ... `qmax` with up to `iters`
@@ -332,10 +370,12 @@ class Plan(NamedTuple):
     > 0 (path only): each budget after the first starts from the last budget's x (the free
     buildings lifted to the uniform share) with `warm` updates per stage; `starts` > 1 (one
     only): that many SIMP runs (start_x), one incumbent over all of them; `update` the design
-    update rule (`.u<name>`; OC's classic rule is not named)."""
+    update rule (`.u<name>`; OC's classic rule is not named); `free` the free stage (FreeStage:
+    free first, not named, or none, `.f0`)."""
     fw: int
     qmax: float
     iters: int
+    free: FreeFirst | NoFree
     eps: float = EPS
     b0: float = 0.0
     bmax: float = 0.0
@@ -372,7 +412,8 @@ class Plan(NamedTuple):
                 + (f".g{self.seed}" if self.seed else "")
                 + (f".G{self.track}" if self.track else "")
                 + (f"e{self.track_gate:g}" if self.track and self.track_gate >= 0 else "")
-                + (f".u{self.update.name}" if self.update != DEFAULT_UPDATE else ""))
+                + (f".u{self.update.name}" if self.update != DEFAULT_UPDATE else "")
+                + self.free.suffix)
 
     @property
     def stages(self) -> tuple[tuple[float, float], ...]:
@@ -400,7 +441,8 @@ def plan_of(spec: str) -> Plan:
                      r"(?:\.(?P<pset>p|P|pP)(?P<p>\d+)w(?P<pw>\d+)(?P<px>x2)?(?P<pe>E?))?"
                      r"(?:\.w(?P<w>\d+))?(?:\.m(?P<m>\d+))?"
                      r"(?:\.g(?P<g>S[0-9.]+cat(?:w\d+)?))?(?:\.G(?P<G>S[0-9.]+cat(?:w\d+)?)(?:e(?P<Ge>[0-9.]+))?)?"
-                     r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?",
+                     r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?"
+                     r"(?P<f0>\.f0)?",
                      spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
@@ -408,7 +450,8 @@ def plan_of(spec: str) -> Plan:
     update: Update = (OC(float(g["oc"]), float(g["ocm"])) if g["oc"] is not None
                       else MMA(float(g["mma"])) if g["mma"] is not None
                       else DEFAULT_UPDATE)
-    return Plan(fw=int(g["fw"]), qmax=float(g["q"]), iters=int(g["i"]),
+    free: FreeFirst | NoFree = FreeFirst() if g["f0"] is None else NoFree()
+    return Plan(fw=int(g["fw"]), qmax=float(g["q"]), iters=int(g["i"]), free=free,
                 eps=EPS if g["e"] is None else float(g["e"]),
                 b0=0.0 if g["b0"] is None else float(g["b0"]),
                 bmax=0.0 if g["bmax"] is None else float(g["bmax"]),
@@ -580,9 +623,10 @@ def one(bid: str, power: float, metric: gap_clear.ComplexMetric, plan: Plan, bud
     rel = c.relaxation(power, q=1.0, eps=plan.eps)
     log = lambda s: print(f"{bid} {s}", flush=True)  # noqa: E731
     t0 = time.time()
-    # B's first stage: the crossings that free the enclosed homes, held at 1 through SIMP (xlo),
-    # the incumbent's roundings (first) and its polish (not movable); none enclosed, none held
-    held = c.free_first(budget=budget, held=np.zeros(c.n, dtype=bool))
+    # B's first stage (plan.free): the crossings that free the enclosed homes, held at 1 through
+    # SIMP (xlo), the incumbent's roundings (first) and its polish (not movable); none enclosed,
+    # or no free stage, none held
+    held = plan.free.held(c, budget=budget, held=np.zeros(c.n, dtype=bool))
     if held.any() and not built_for_holds(plan):
         raise NotImplementedError(f"{bid}: the free stage holds {int(held.sum())} buildings, and "
                                   f"fw and .m are not built for held buildings: {plan.name}")
@@ -684,9 +728,9 @@ def path(bid: str, power: float, metric: gap_clear.ComplexMetric, plan: Plan, *,
     ~ q x^(q-1) ~ 0 and multiplicative updates, so it never comes back -- measured: -0.076 Lens
     A against the greedy), round, score exactly. plan.warm > 0: after the first budget, the
     rest start from the last x lifted to at least that even share (so none is trapped at
-    XMIN), and each stage gets plan.warm updates. Each budget frees first (Model.free_first
-    within D, from the held set): its crossings join the held set before SIMP. Rows in the
-    greedy's format: `cleared` = the buildings new at this step, the free stage's among them."""
+    XMIN), and each stage gets plan.warm updates. Each budget's free stage (plan.free: free first
+    within D from the held set, Model.free_first, or none) joins the held set before SIMP. Rows in
+    the greedy's format: `cleared` = the buildings new at this step, the free stage's among them."""
     if plan.polish > 0 or plan.starts > 1 or plan.seed or plan.track:
         raise ValueError(f"polish, multi-start and greedy seeds are not built for path: "
                          f"{plan.name}")
@@ -701,7 +745,7 @@ def path(bid: str, power: float, metric: gap_clear.ComplexMetric, plan: Plan, *,
     t0 = time.time()
     for i, D in enumerate(PATH_DS):
         last = fixed
-        fixed = c.free_first(budget=D, held=last)
+        fixed = plan.free.held(c, budget=D, held=last)
         rest = max(D - float(c.cost[fixed].sum()), 0.0)
         even = rest / max(float(c.cost[~fixed].sum()), 1e-12)
         warm = plan.warm > 0 and i > 0

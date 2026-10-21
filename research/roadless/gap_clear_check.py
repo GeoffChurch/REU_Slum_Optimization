@@ -19,7 +19,7 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S device-roads <ids,> [fault]   # fault: perturb (on a GPU)
     uv run python $S leak-assembly <ids,> [fault]  # faults: drop-one, not-live
     uv run python $S leak-fold <ids,> [fault]      # fault: shares-swapped
-    uv run python $S enclosure <ids,> [fault]      # fault: every-cell
+    uv run python $S enclosure <ids,> [fault]      # fault: leak-seeded
     uv run python $S leak-gradient <ids,> [fault]  # fault: adjoint-unleaked
     uv run python $S leak-scale - [fault]          # fault: per-cell
     uv run python $S barriers <-|ids,> [fault]     # faults: not-inserted, gap-closed,
@@ -34,6 +34,10 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S underflow - [fault]           # fault: unfloored
     uv run python $S faces <ids,> [fault]          # fault: unsorted
     uv run python $S lazy-baseline <ids,> [fault]  # faults: atoms, eager
+    uv run python $S uniform-control <ids,> [fault]   # faults: every-cell, placed-everywhere
+    uv run python $S pocket-escape <ids,> [fault]     # faults: pocket-unleaked, placement-dropped
+    uv run python $S pocket-gradient <ids,> [fault]   # faults: adjoint-unleaked, pocket-unloaded
+    uv run python $S pocket-count <ids,> [fault]      # fault: leak-seeded
     uv run python $S both-ways <guards,> <ids,|->  # each guard, then under each of its faults
 
 `baseline`: the fixed mesh (the runtime's metric, METRIC) against the complex rebuilt
@@ -116,21 +120,26 @@ The region model's exits (gap_exits; NOTES, "Exits as leaks: the region model on
 (5810@major)" and "The region's leaks: destinations at buildings and on open ground"), the
 internal leak at LEAK_LAM on the runtime's metric at each building share of LEAK_SHARES (all on
 open ground, all at buildings, half and half):
-`leak-assembly`: with leaks, at the baseline, a random 0/1 clearing, the most populous building
-cleared alone, a fractional state and the eps world, the operator on the fixed pattern against
-`_operator`'s assembly afresh plus a leak computed independently from its definition (each cell's
-triangles' area, the cells live at baseline found by a search of their own, the injection per cell
-from the demand's points): equal to PATTERN_TOL on the unknowns, the structure the pattern's, and P
-against a direct solve to PATTERN_P_TOL. Faults: `drop-one` (the largest leak dropped),
-`not-live` (a leak on the largest cell not live at baseline).
+`leak-assembly`: with leaks on each site (gap_exits.LiveSites and OpenSites), at the baseline, a
+random 0/1 clearing, the most populous building cleared alone, a fractional state and the eps
+world, the operator on the fixed pattern against `_operator`'s assembly afresh plus a leak computed
+independently from its definition (each cell's triangles' area, the cells live at baseline found by
+a search of their own, or the cells open then from the faces no footprint's zone holds, the
+injection per cell from the demand's points): equal to PATTERN_TOL on the unknowns, the structure
+the pattern's, and P against a direct solve to PATTERN_P_TOL. Faults: `drop-one` (the largest leak
+dropped), `not-live` (a leak on the largest cell not live at baseline).
 `leak-fold` (the two families folded into one): at FOLD_SHARES, the leak per cell on the model's
 own cells against the region test's two formulas (`_uniform_was`, `_home_was`: UniformLeak's and
 HomeLeak's per_cell before the fold, verbatim) mixed as s says, bit for bit at s 0 and 1 and to
 PATTERN_TOL between, and against the definition's independent oracle (as `leak-assembly`'s) to
 PATTERN_TOL; the baseline's operator against `_operator`'s plus the oracle to PATTERN_TOL. Fault
 `shares-swapped`: the open ground's share 1 - s applied to the buildings (and s to open ground).
-`enclosure`: under each share the homes walled in at baseline are exactly those walled in without
-leaks (on blocks with walled-in homes). Fault `every-cell`: the leak on every cell.
+`enclosure`: under each share, the leak on each site (gap_exits.LiveSites, and OpenSites with the
+sealed pockets leaking), the homes walled in at baseline are exactly those walled in without leaks
+(on blocks with walled-in homes): B (i) reads the street's reach (gap_clear.Reach.street), never a
+leak's. Fault `leak-seeded`: the street reach seeded by every leak, the pockets' among them (the
+fault `every-cell`, the leak on every cell, went with OpenSites: the street reach is blind to a
+leak off the cells live at baseline by construction).
 `leak-gradient`: the `gradient` guard's states and powers on the runtime's form under each share.
 Fault `adjoint-unleaked`: J_2's adjoint solved on the system without its leaks.
 `leak-scale`: on SCALE_BLOCK (open ground SCALE_L wide, its edge the street, one small home at its
@@ -224,6 +233,38 @@ Fault `unsorted`: each face's footprints in the tree query's order, not ascendin
 it equals the plain mesh's array for array (the plain one's stored, and read back). Faults:
 `atoms` (the carved mesh's baseline built on the carving's atoms, not the buildings), `eager` (a
 carved mesh's baseline built with it).
+
+The uniform rule for walled-in homes (NOTES, "A uniform rule for walled-in homes: destinations in
+their pockets, no free first"): metrics.UNIFORM (U: the leak on every cell open at baseline,
+gap_exits.OpenSites; each walled-in home's demand in its pocket, gap_clear.PocketDemand) against
+RUNTIME (T), each meshed afresh.
+`uniform-control`: on a block with no home walled in and none without demand under T (the
+premise), U's demand is T's (points, triangles and shares, element for element), its leak T's on
+every cell but the sealed pockets' (open at baseline and not live, holding no demand), P0 and
+every home's escape time T's to UNIFORM_TOL, and SIMP's value and gradient (J_1 and J_2, q 3, eps
+GRAD_EPS, at SIMP's start and at a random x) within GRAD_TOL of T's largest: the adjoint's own
+tolerance against differences, the demand-free pockets' leak moving them in the eps world only.
+Faults: `every-cell` (U's leak on every cell, the interiors and the shy zones too),
+`placed-everywhere` (every home placed on its pocket's ground too, not only those T leaves
+without demand).
+`pocket-escape`: on blocks with walled-in homes, T leaves every one out (no demand, escape time
+nan), U walls in the same homes and gives each with open ground within ring_m a finite positive
+escape time from its own pocket: its points on cells that leak and that the street does not reach,
+each pocket's leak draining exactly what its homes inject (to POCKET_TOL: the trips end there);
+the homes U leaves without demand are exactly those with no open ground within ring_m at all
+(23597's home 93: its ring all footprint and shy zone). Faults: `pocket-unleaked` (OpenSites on
+the live cells only: the pockets drain nowhere), `placement-dropped` (PocketDemand placing as
+LiveDemand).
+`pocket-gradient`: U's gradient (J_1 and J_2, q 3, eps GRAD_EPS) at a random x against differences
+(`against_differences`) on the walled-in homes and their nearest buildings, GRAD_BUILDINGS in all,
+within GRAD_TOL; run on 19570 and 23597 (on 20269 the differences are roundoff-limited, T's as
+U's: up to 1.2e-4 for J_2 at h 1e-3 and worse at smaller steps, the gradient guard's own known
+case). Faults: `adjoint-unleaked` (as `leak-gradient`'s), `pocket-unloaded` (J_2's adjoint loaded
+without the homes placed in pockets, as code treating them as having no demand would).
+`pocket-count`: on blocks with walled-in homes, the walled-in homes and population a clearing
+leaves (B (i), by street reach) read the same under U's scorer as under T's, at the baseline, the
+ONE_K single clearings, REACH_RANDOM random clearings at BUDGET and free first's clearing under T.
+Fault `leak-seeded` (as `enclosure`'s: U then reads every home freed by its pocket's leak).
 """
 from __future__ import annotations
 
@@ -645,7 +686,7 @@ def _raster_names() -> list[str]:
 def identity(_ids: list[str]) -> list[str]:
     bad = []
     for name in (NAME, f"cx+close0.125+s0.125r1b1+R0.5g4x2q4+v{gcl.CODE}",
-                 f"cx+ramp0.5s0.5+s0.125r1b1+R0.25q4+lumped+v{gcl.CODE}"):
+                 f"cx+ramp0.5s0.5+s0.125r1b1+R0.25q4+lumped+v{gcl.CODE}", metrics.UNIFORM):
         try:
             back = gcl.complex_of(name, factorization=gap_factor.SuperLU()).name
         except ValueError as e:
@@ -661,7 +702,8 @@ def identity(_ids: list[str]) -> list[str]:
                 return raster
         try:
             colliding = Colliding(spec=METRIC.spec, fs=METRIC.fs, form=METRIC.form,
-                                  lumped=False, search_eps=METRIC.search_eps,
+                                  lumped=False, placement=METRIC.placement,
+                                  search_eps=METRIC.search_eps,
                                   exits=METRIC.exits, factorization=METRIC.factorization)
         except ValueError:
             refused += 1
@@ -1124,7 +1166,8 @@ def flux(ids: list[str]) -> list[str]:
     for bid in ids:
         [b] = common.build_blocks([bid])
         m = _model(b)
-        ml = _model(b, _leaky(gx.InternalLeak(open_m=LEAK_LAM, foot_m=math.inf)))
+        ml = _model(b, _leaky(gx.InternalLeak(open_m=LEAK_LAM, foot_m=math.inf,
+                                              sites=gx.LiveSites())))
         rng = np.random.default_rng(SEED + 6)
         states = {"baseline": (m, np.zeros(m.n))}
         for k in range(FLUX_RANDOM):
@@ -1161,7 +1204,9 @@ def _flip_one() -> contextlib.AbstractContextManager[None]:
 
 # ------------------------------------------------------------------ the exits: leaks
 
-LEAKS = tuple(gx.InternalLeak(open_m=o, foot_m=f) for o, f in LEAK_PAIRS)
+LEAKS = tuple(gx.InternalLeak(open_m=o, foot_m=f, sites=gx.LiveSites()) for o, f in LEAK_PAIRS)
+SITED = (*LEAKS, *(dataclasses.replace(leak, sites=gx.OpenSites()) for leak in LEAKS))   # each
+                         # leak on both sites: the live cells', and every open cell's (the pockets)
 
 
 def _leaky(leak: gx.NoLeak | gx.InternalLeak, *,
@@ -1181,11 +1226,12 @@ def _tri_area(fm: gcl.FullMesh) -> np.ndarray:
 
 def _leak_oracle(m: gcl.Model, leak: gx.InternalLeak) -> np.ndarray:
     """The leak per cell from its definition, independently of gap_exits and the model's Graph:
-    each cell's triangles' area, the cells live at baseline by a search of their own (scipy's
-    components over the passages conducting at baseline and a street node joined to the cells
-    with a conducting street face or a ground cell), the injection per cell from the demand's
-    points with each building's footprint area; sigma / open_m^2 per m^2 of open ground,
-    sigma / foot_m^2 per m^2 of footprint injected."""
+    each cell's triangles' area, its sites (the cells live at baseline by a search of their own:
+    scipy's components over the passages conducting at baseline and a street node joined to the
+    cells with a conducting street face or a ground cell; with the leak in the pockets, the cells
+    open at baseline: a triangle of a face no footprint's zone holds, the ground cells apart), the
+    injection per cell from the demand's points with each building's footprint area; sigma /
+    open_m^2 per m^2 of open ground, sigma / foot_m^2 per m^2 of footprint injected."""
     from scipy.sparse.csgraph import connected_components
     fm, c = m.fm, m.c
     area = np.bincount(c.cell, weights=_tri_area(fm), minlength=c.n)
@@ -1201,13 +1247,16 @@ def _leak_oracle(m: gcl.Model, leak: gx.InternalLeak) -> np.ndarray:
     is_ground = np.zeros(c.n, dtype=bool)
     is_ground[ground] = True
     live = (lab[:c.n] == lab[street]) & ~is_ground
+    unzoned = np.diff(fm.fzone.tocsr().indptr)[fm.face] == 0
+    opened = (np.bincount(c.cell, weights=unzoned, minlength=c.n) > 0) & ~is_ground
+    on = opened if leak.pockets else live
     sigma = m.fs.sigma
     pts = np.flatnonzero(m.fx.ptri >= 0)
     foot_area = np.asarray(shapely.area(np.asarray(m.block.buildings.outlines)))
     foot = np.bincount(c.cell[m.fx.ptri[pts]], weights=np.asarray(m.dem.S @ foot_area)[pts],
                        minlength=c.n)
-    return (np.where(live, sigma * area / leak.open_m ** 2, 0.0)
-            + np.where(live, sigma * foot / leak.foot_m ** 2, 0.0))
+    return (np.where(on, sigma * area / leak.open_m ** 2, 0.0)
+            + np.where(on, sigma * foot / leak.foot_m ** 2, 0.0))
 
 
 def _uniform_was(site: gx.LeakSite, lam: float) -> np.ndarray:
@@ -1238,7 +1287,8 @@ def leak_fold(ids: list[str]) -> list[str]:
             # the region test's (s, LEAK_LAM) as the two constants on this block (unrounded)
             leak = gx.InternalLeak(
                 open_m=LEAK_LAM / math.sqrt(1.0 - s) if s < 1.0 else math.inf,
-                foot_m=LEAK_LAM * math.sqrt(foot_m2 / (s * open_m2)) if s > 0.0 else math.inf)
+                foot_m=LEAK_LAM * math.sqrt(foot_m2 / (s * open_m2)) if s > 0.0 else math.inf,
+                sites=gx.LiveSites())
             m = _leaky(leak).model(b, fx, demand=POP)
             got = m.sys.graph.leak
             was = ((1.0 - s) * _uniform_was(m.leak_site, LEAK_LAM)
@@ -1270,7 +1320,8 @@ _INTERNAL_PER_CELL = gx.InternalLeak.per_cell
 def _lengths_swapped(self: gx.InternalLeak, site: gx.LeakSite) -> np.ndarray:
     """InternalLeak.per_cell with the open ground's length applied to the footprints and the
     footprints' to open ground (fault `lengths-swapped`)."""
-    return _INTERNAL_PER_CELL(gx.InternalLeak(open_m=self.foot_m, foot_m=self.open_m), site)
+    return _INTERNAL_PER_CELL(gx.InternalLeak(open_m=self.foot_m, foot_m=self.open_m,
+                                              sites=self.sites), site)
 
 
 def leak_assembly(ids: list[str]) -> list[str]:
@@ -1278,7 +1329,7 @@ def leak_assembly(ids: list[str]) -> list[str]:
     bad = []
     for bid in ids:
         [b] = common.build_blocks([bid])
-        for leak in LEAKS:
+        for leak in SITED:
             m = _model(b, _leaky(leak))
             oracle = _leak_oracle(m, leak)
             rng = np.random.default_rng(SEED + 7)
@@ -1337,9 +1388,13 @@ def _not_live(leak: np.ndarray, site: gx.LeakSite) -> np.ndarray:
     return out
 
 
-def _every_cell(leak: np.ndarray, site: gx.LeakSite) -> np.ndarray:
-    """The leak on every cell, live at baseline or not (fault `every-cell`)."""
-    return site.sigma * site.area / LEAK_LAM ** 2
+_GROUNDED = gcl.Graph._grounded
+
+
+def _leak_seeded(self: gcl.Graph, leak: np.ndarray, live0: np.ndarray) -> None:
+    """Graph._grounded with the street reach seeded by every leak, a sealed pocket's among them
+    (fault `leak-seeded`)."""
+    _GROUNDED(self, leak, np.ones(len(live0), dtype=bool))
 
 
 def enclosure(ids: list[str]) -> list[str]:
@@ -1350,7 +1405,9 @@ def enclosure(ids: list[str]) -> list[str]:
             fx = METRIC.fixed(b, cache=Path(tmp), carving=gcl.Carving.none(gc.geometry(b)))
         plain = METRIC.model(b, fx, demand=POP)
         parts = [f"{int(plain.walled0.sum())} walled in without leaks"]
-        for leak in LEAKS:
+        if not plain.walled0.any():
+            bad.append(f"{bid}: no home walled in (the premise)")
+        for leak in SITED:
             m = _leaky(leak).model(b, fx, demand=POP)
             d = np.flatnonzero(m.walled0 ^ plain.walled0)
             parts.append(f"{leak.name}: {int(m.walled0.sum())} walled in, {len(d)} apart")
@@ -1391,7 +1448,8 @@ def _sgrad_unleaked(self: gcl.Relaxation, x: np.ndarray) -> tuple[float, np.ndar
     if p == 1.0:
         lam = u
     else:
-        bare = m.sys.with_graph(m.sys.graph.with_leak(np.zeros(m.sys.n)))
+        bare = m.sys.with_graph(m.sys.graph.with_leak(np.zeros(m.sys.n),
+                                                      live0=m.leak_site.live))
         st2 = m._state(bare, self.k_of(x), prefix=gcl._NO_ROADS)
         lam = m.solve(st2, np.where(m.nodem, 0.0, m.inj * p * np.nan_to_num(uh) ** (p - 1.0)))
     g = m.grad(st, u, lam) * (1.0 - self.eps)
@@ -1428,7 +1486,7 @@ def leak_scale(_ids: list[str]) -> list[str]:
         fx = METRIC.fixed(b, cache=Path(tmp), carving=gcl.Carving.none(gc.geometry(b)))
     bad = []
     for open_m, foot_m in SCALE_PAIRS:
-        leak = gx.InternalLeak(open_m=open_m, foot_m=foot_m)
+        leak = gx.InternalLeak(open_m=open_m, foot_m=foot_m, sites=gx.LiveSites())
         m = _leaky(leak).model(b, fx, demand=POP)
         st = m.state(np.zeros(m.n))
         u = m.solve(st, m.pop)
@@ -1580,7 +1638,7 @@ def _barriers_on_block(b: Block) -> list[str]:
         core = geo.local(shapely.buffer(want, -BARRIER_EDGE_M))
         counts[key] = int(shapely.contains(core, _centroids(fx.fm)).sum())
     runtime = _runtime()
-    keys = {k: gcl.Fixed.key(blk, runtime.spec, runtime.fs, runtime.form)
+    keys = {k: gcl.Fixed.key(blk, runtime.spec, runtime.fs, runtime.form, runtime.placement)
             for k, blk in (("cut", bar.block(b)), ("uncut", b))}
     # the atoms are the footprints in the cut mesh's own frame (a cut at the block's edge moves
     # its origin), and the complex's walled-in homes are the flow model's (Model.free_first)
@@ -1935,17 +1993,20 @@ def exits_identity(_ids: list[str]) -> list[str]:
         bad.append(f"RUNTIME {metrics.RUNTIME} is not the per-block metric with metrics.EXITS "
                    "read back, or not the region's T500b90D10")
     configs = {label: c.exits for label, c in region_leaks.CONFIGS.items()}
-    for leak in (gx.InternalLeak(open_m=math.inf, foot_m=135.57463805510008),
-                 gx.InternalLeak(open_m=250.0, foot_m=math.inf),
-                 gx.InternalLeak(open_m=1581.0, foot_m=148.0),
-                 gx.InternalLeak(open_m=0.1 + 0.2, foot_m=3e-7)):
+    for leak in (gx.InternalLeak(open_m=math.inf, foot_m=135.57463805510008, sites=gx.LiveSites()),
+                 gx.InternalLeak(open_m=250.0, foot_m=math.inf, sites=gx.LiveSites()),
+                 gx.InternalLeak(open_m=1581.0, foot_m=148.0, sites=gx.LiveSites()),
+                 gx.InternalLeak(open_m=0.1 + 0.2, foot_m=3e-7, sites=gx.LiveSites()),
+                 gx.InternalLeak(open_m=6214.0, foot_m=562.0, sites=gx.OpenSites()),
+                 gx.InternalLeak(open_m=250.0, foot_m=math.inf, sites=gx.OpenSites())):
         configs[f"{leak.name}S3"] = gx.Exits(barriers=region_leaks.BARRIERS, edge=gx.OpenEdge(),
                                             leak=leak, boost=region_leaks.BOOST)
         configs[f"{leak.name} closed"] = gx.Exits(barriers=region_leaks.BARRIERS,
                                                   edge=gx.ClosedEdge(), leak=leak,
                                                   boost=gx.NoBoost())
     configs["Lo500 alone"] = gx.Exits(barriers=gx.NoBarriers(), edge=gx.OpenEdge(),
-                                      leak=gx.InternalLeak(open_m=500.0, foot_m=math.inf),
+                                      leak=gx.InternalLeak(open_m=500.0, foot_m=math.inf,
+                                                            sites=gx.LiveSites()),
                                       boost=gx.NoBoost())
     names: dict[str, str] = {}
     for label, exits in configs.items():
@@ -2051,7 +2112,7 @@ def _image_rows(srcs: np.ndarray, box: tuple[float, float, float, float], lam: f
 def trip_calibration(_ids: list[str]) -> list[str]:
     bad = []
     def open_only(lam: float) -> gx.InternalLeak:
-        return gx.InternalLeak(open_m=lam, foot_m=math.inf)
+        return gx.InternalLeak(open_m=lam, foot_m=math.inf, sites=gx.LiveSites())
     lam0 = TRIP_T / K0_MEDIAN
     # the calibration on one home at the centre: the screened point source's median
     m = _model(_scale_block(), _leaky(open_only(lam0)))
@@ -2115,7 +2176,7 @@ def _two_homes(edge_m: float) -> Block:
 def closed_edge(_ids: list[str]) -> list[str]:
     bad = []
     b = _two_homes(CLOSED_EDGE_M)
-    leak = gx.InternalLeak(open_m=TRIP_LAM, foot_m=math.inf)
+    leak = gx.InternalLeak(open_m=TRIP_LAM, foot_m=math.inf, sites=gx.LiveSites())
     with tempfile.TemporaryDirectory() as tmp:
         fx = METRIC.fixed(b, cache=Path(tmp), carving=gcl.Carving.none(gc.geometry(b)))
     m_open = _leaky(leak).model(b, fx, demand=POP)
@@ -2356,6 +2417,234 @@ _LAZY_INIT = gcl.LazyBaseline.__init__
 
 # ------------------------------------------------------------------ the run
 
+# ------------------------------------------------------------------ the uniform rule: pockets
+
+UNIFORM_TOL = 1e-12      # uniform-control: P0 and every home's escape time, U against T
+                         # (relative: one solve on the same cells but the pockets', which hold no
+                         # demand; 3e-14 -- 7e-14 apart on 41940 and 41779)
+POCKET_TOL = 1e-7        # pocket-escape: a pocket's leak drainage against its homes' injection
+                         # (relative: the refined solve's backward error read in a pocket whose
+                         # leak is ~1e-7 of the system's conductances, 2.2e-9 on 20269 and 5.8e-9
+                         # on 23597; a pocket that drains nowhere is off by all of it)
+
+
+def _tu(b: Block) -> tuple[gcl.Model, gcl.Model]:
+    """The block's models under RUNTIME (T) and metrics.UNIFORM (U), each meshed afresh."""
+    t, u = (gcl.complex_of(name, factorization=gap_factor.SuperLU())
+            for name in (metrics.RUNTIME, metrics.UNIFORM))
+    return _model(b, t), _model(b, u)
+
+
+def _every_site(self: gx.OpenSites, site: gx.LeakSite) -> np.ndarray:
+    """OpenSites on every cell, the interiors and the shy zones too (fault `every-cell`)."""
+    return np.ones(len(site.area), dtype=bool)
+
+
+_IN_POCKETS = gf.in_pockets
+
+
+def _every_home_in_pockets(dem: gf.PointDemand, geo: gc.Geometry, spec: gc.Spec, quad: int,
+                           xy: np.ndarray, tri: np.ndarray) -> tuple[gf.PointDemand, np.ndarray]:
+    """gap_flow.in_pockets placing every home on its pocket's ground, not only those `dem` leaves
+    without demand (fault `placed-everywhere`)."""
+    every = dataclasses.replace(dem, walled=np.ones(len(dem.walled), dtype=bool))
+    out, rows = _IN_POCKETS(every, geo, spec, quad, xy, tri)
+    return dataclasses.replace(out, walled=dem.walled & ~out.pocket), rows
+
+
+def uniform_control(ids: list[str]) -> list[str]:
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        mT, mU = _tu(b)
+        if mT.walled0.any() or mT.nodem.any():
+            bad.append(f"{bid}: {int(mT.walled0.sum())} walled in, {int(mT.nodem.sum())} without "
+                       "demand under T: no control (the premise)")
+            continue
+        dT, dU = mT.dem, mU.dem
+        same_dem = bool(np.array_equal(dU.walled, dT.walled) and np.array_equal(dU.xy, dT.xy)
+                        and np.array_equal(mU.fx.ptri, mT.fx.ptri) and (dU.S != dT.S).nnz == 0
+                        and not dU.pocket.any())
+        site = mU.leak_site
+        pk = site.open & ~site.live
+        lT, lU = mT.sys.graph.leak, mU.sys.graph.leak
+        leak_ok = bool(np.array_equal(lU[~pk], lT[~pk]) and (lT[pk] == 0).all()
+                       and mU.sys.Pc[np.flatnonzero(pk)].nnz == 0)
+        dP = abs(mU.base.P / mT.base.P - 1.0)
+        du = float(np.max(np.abs(mU.u_pop0 / mT.u_pop0 - 1.0)))
+        rng = np.random.default_rng(SEED + 11)
+        grads = {}
+        for where, x in (("start", np.full(mT.n, BUDGET)),
+                         ("random", rng.uniform(0.1, 0.4, mT.n))):
+            for power in (1.0, 2.0):
+                JT, gT = mT.relaxation(power, q=3.0, eps=GRAD_EPS).value_grad(x)
+                JU, gU = mU.relaxation(power, q=3.0, eps=GRAD_EPS).value_grad(x)
+                grads[f"{where} J_{power:g}"] = (abs(JU / JT - 1.0),
+                                                 float(np.abs(gU - gT).max() / np.abs(gT).max()))
+        worst = max(max(v) for v in grads.values())
+        ok = same_dem and leak_ok and dP <= UNIFORM_TOL and du <= UNIFORM_TOL and worst <= GRAD_TOL
+        print(f"{bid}: U against T with none walled in: the demand alike {same_dem}; the leak "
+              f"alike but on {int(pk.sum())} pocket cells ({float(site.area[pk].sum()):.1f} m^2, "
+              f"{float(lU[pk].sum() / lU.sum()):.1e} of the leak, no demand there) {leak_ok}; "
+              f"P0 {dP:.1e}, homes' u0 within {du:.1e}; SIMP's value, gradient "
+              + ", ".join(f"{k} {a:.1e}, {g:.1e}" for k, (a, g) in grads.items())
+              + f" -> {'ok' if ok else 'FAILS'}", flush=True)
+        if not ok:
+            bad.append(bid)
+    return bad
+
+
+def _components(st: gcl.State, cells: np.ndarray) -> np.ndarray:
+    """Per cell its component among `cells` over the state's conducting pairs (-1 off them)."""
+    from scipy.sparse.csgraph import connected_components
+    A = st.A
+    assert A is not None
+    sub = A[cells][:, cells].tocoo()
+    off = (sub.row != sub.col) & (sub.data != 0.0)
+    _k, lab = connected_components(sp.csr_matrix((np.ones(int(off.sum())),
+                                                  (sub.row[off], sub.col[off])),
+                                                 shape=(len(cells), len(cells))), directed=False)
+    out = -np.ones(st.sys.n, dtype=np.int64)
+    out[cells] = lab
+    return out
+
+
+def _near(m: gcl.Model, homes: np.ndarray, k: int) -> np.ndarray:
+    """`homes` and the buildings nearest them, k in all (the gradient's picks)."""
+    near = list(dict.fromkeys(int(h) for h in homes))
+    for h in homes:
+        d = shapely.distance(m.polys[h], m.polys)
+        near += [int(j) for j in np.argsort(d, kind="stable") if int(j) not in near][:k]
+    return np.asarray(near[:k], dtype=np.int64)
+
+
+def pocket_escape(ids: list[str]) -> list[str]:
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        mT, mU = _tu(b)
+        w = mT.walled0
+        if not w.any():
+            bad.append(f"{bid}: no home walled in (the premise)")
+            continue
+        t_out = bool(mT.nodem[w].all() and np.isnan(mT.u_pop0[w]).all())
+        same = bool(np.array_equal(mU.walled0, w))
+        st0 = mU.state(np.zeros(mU.n))
+        r0, c = st0.reach, mU.c
+        leak = mU.sys.graph.leak
+        S = mU.dem.S.tocsc()
+        # the homes with no open ground within ring_m: no demand under U either
+        open_tri = mU.factors(np.zeros(mU.n)).kt > 0
+        R = mU.fx.ring.tri.tocsr()
+        ground = np.array([bool(open_tri[R.indices[R.indptr[h]:R.indptr[h + 1]]].any())
+                           for h in range(mU.n)])
+        bare = bool(np.array_equal(mU.nodem, ~ground))
+        homes = []
+        for h in np.flatnonzero(w & ground):
+            pts = S.indices[S.indptr[h]:S.indptr[h + 1]]
+            tri = mU.fx.ptri[pts]
+            cells = c.cell[tri[tri >= 0]]
+            own = bool(len(pts) and (tri >= 0).all() and not r0.street[cells].any()
+                       and (leak[cells] > 0).all() and r0.unknown[cells].all())
+            u = float(mU.u_pop0[h])
+            homes.append((int(h), own and np.isfinite(u) and u > 0.0, u))
+        # each pocket's leak drains what its homes inject
+        u = mU.solve(st0, mU.pop)
+        rhs = mU._rhs(st0, mU.pop)
+        pocket = np.flatnonzero(r0.unknown & ~r0.street)
+        comp = _components(st0, pocket)
+        drains = []
+        for k in np.unique(comp[pocket]):
+            on = comp == k
+            inj = float(rhs[on].sum())
+            if inj > 0.0:
+                drains.append(abs(float((leak[on] * u[on]).sum()) / inj - 1.0))
+        drain = max(drains) if drains else np.inf
+        med = float(np.nanmedian(mU.u_pop0))
+        ok = t_out and same and all(f for _h, f, _u in homes) and drain <= POCKET_TOL and bare
+        print(f"{bid}: {int(w.sum())} walled in; T leaves them out {t_out}; U walls in the same "
+              f"{same}, each escaping from its pocket's leak "
+              + ", ".join(f"{h} {'ok' if f else 'NOT'} (u0 {uh / med:.3g} x the median)"
+                          for h, f, uh in homes)
+              + f"; {len(drains)} pockets' drainage against injection within {drain:.1e}; "
+              f"the homes without demand {np.flatnonzero(mU.nodem).tolist()}, those with no open "
+              f"ground {np.flatnonzero(~ground).tolist()} ({'alike' if bare else 'APART'})"
+              f" -> {'ok' if ok else 'FAILS'}", flush=True)
+        if not ok:
+            bad.append(bid)
+    return bad
+
+
+def pocket_gradient(ids: list[str]) -> list[str]:
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        m = _model(b, gcl.complex_of(metrics.UNIFORM, factorization=gap_factor.SuperLU()))
+        w = m.walled0 & m.dem.pocket
+        if not w.any():
+            bad.append(f"{bid}: no home placed in a pocket (the premise)")
+            continue
+        pick = _near(m, np.flatnonzero(w), GRAD_BUILDINGS)
+        x0 = np.random.default_rng(SEED + 12).uniform(0.1, 0.4, m.n)
+        gerr = {p: against_differences(m.relaxation(p, q=3.0, eps=GRAD_EPS), x0, pick)
+                for p in (1.0, 2.0)}
+        ok = max(gerr.values()) <= GRAD_TOL
+        print(f"{bid}: U's gradient at a random x on {pick.tolist()} ({int(w.sum())} homes in "
+              "pockets among them and near) against differences "
+              + ", ".join(f"J_{p:g} {e:.1e}" for p, e in gerr.items())
+              + f" -> {'ok' if ok else 'FAILS'}", flush=True)
+        if not ok:
+            bad.append(bid)
+    return bad
+
+
+def _sgrad_pocket_unloaded(self: gcl.Relaxation, x: np.ndarray) -> tuple[float, np.ndarray]:
+    """gap_clear.Relaxation.value_sgrad with J_p's adjoint (p != 1) loaded without the homes
+    placed in pockets (fault `pocket-unloaded`)."""
+    m = self.m
+    st = m.state(self.k_of(x))
+    J, u, uh = self._J(st)
+    p = self.power
+    lam = u if p == 1.0 else m.solve(
+        st, np.where(m.nodem | m.dem.pocket, 0.0, m.inj * p * np.nan_to_num(uh) ** (p - 1.0)))
+    g = m.grad(st, u, lam) * (1.0 - self.eps)
+    if self.q != 1.0:
+        g = g * self.q * np.maximum(self.proj(x), 1e-300) ** (self.q - 1.0)
+    return J, g
+
+
+def pocket_count(ids: list[str]) -> list[str]:
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        mT, mU = _tu(b)
+        if not mT.walled0.any():
+            bad.append(f"{bid}: no home walled in (the premise)")
+            continue
+        rng = np.random.default_rng(SEED + 13)
+        states = {"baseline": np.zeros(mT.n, dtype=bool)}
+        for j in _largest(mT, ONE_K):
+            x = np.zeros(mT.n, dtype=bool)
+            x[j] = True
+            states[f"{j} cleared"] = x
+        for k in range(REACH_RANDOM):
+            states[f"random {k}"] = _random(mT, rng)
+        states["free first"] = mT.free_first(budget=BUDGET, held=np.zeros(mT.n, dtype=bool))
+        parts, ok = [], bool(np.array_equal(mU.walled0, mT.walled0))
+        for name, x in states.items():
+            left = [m.walled0 & ~m.live_homes_of(m.factors(m.k_of(x))) for m in (mT, mU)]
+            share = [m.enclosed_left(x) for m in (mT, mU)]
+            same = bool(np.array_equal(left[0], left[1]) and share[0] == share[1])
+            ok &= same
+            parts.append(f"{name} {int(left[0].sum())} / {int(left[1].sum())}"
+                         + ("" if same else " APART"))
+        print(f"{bid}: walled in left, T / U: " + ", ".join(parts)
+              + f" -> {'ok' if ok else 'FAILS'}", flush=True)
+        if not ok:
+            bad.append(bid)
+    return bad
+
+
 GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "baseline": baseline, "weights": weights, "reach": reach, "gradient": gradient,
     "free": free, "identity": identity, "convex": convex, "pattern": pattern,
@@ -2366,7 +2655,9 @@ GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "trip-calibration": trip_calibration, "closed-edge": closed_edge,
     "street-boost": street_boost, "road-boost": road_boost, "underflow": underflow,
     "no-features": no_features,
-    "faces": faces, "lazy-baseline": lazy_baseline}
+    "faces": faces, "lazy-baseline": lazy_baseline, "uniform-control": uniform_control,
+    "pocket-escape": pocket_escape, "pocket-gradient": pocket_gradient,
+    "pocket-count": pocket_count}
 
 
 def _fault_exits():
@@ -2393,7 +2684,7 @@ FAULTS: dict[str, dict[str, Callable]] = {
                       "not-live": lambda: _leak_fault(_not_live)},
     "leak-fold": {"lengths-swapped": lambda: _patched(gx.InternalLeak, "per_cell",
                                                       _lengths_swapped)},
-    "enclosure": {"every-cell": lambda: _leak_fault(_every_cell)},
+    "enclosure": {"leak-seeded": lambda: _patched(gcl.Graph, "_grounded", _leak_seeded)},
     "leak-gradient": {"adjoint-unleaked": lambda: _patched(gcl.Relaxation, "value_sgrad",
                                                            _sgrad_unleaked)},
     "leak-scale": {"per-cell": lambda: _leak_fault(_per_cell)},
@@ -2417,6 +2708,18 @@ FAULTS: dict[str, dict[str, Callable]] = {
                    "ways-dropped": lambda: _patched(gcl.Model, "mesh_of", _road_without_ways)},
     "underflow": {"unfloored": lambda: _patched(gap_factor, "_residual", _residual_unfloored)},
     "faces": {"unsorted": lambda: _patched(gcl, "_by_face", _unsorted)},
+    "uniform-control": {"every-cell": lambda: _patched(gx.OpenSites, "cells", _every_site),
+                        "placed-everywhere": lambda: _patched(gf, "in_pockets",
+                                                              _every_home_in_pockets)},
+    "pocket-escape": {"pocket-unleaked": lambda: _patched(gx.OpenSites, "cells",
+                                                          lambda self, site: site.live),
+                      "placement-dropped": lambda: _patched(gcl.PocketDemand, "demand",
+                                                            lambda self, g: gcl._live_demand(g))},
+    "pocket-gradient": {"adjoint-unleaked": lambda: _patched(gcl.Relaxation, "value_sgrad",
+                                                             _sgrad_unleaked),
+                        "pocket-unloaded": lambda: _patched(gcl.Relaxation, "value_sgrad",
+                                                            _sgrad_pocket_unloaded)},
+    "pocket-count": {"leak-seeded": lambda: _patched(gcl.Graph, "_grounded", _leak_seeded)},
     "lazy-baseline": {"atoms": _baseline_on_atoms,
                       "eager": lambda: _patched(gcl.LazyBaseline, "__init__", _eager)},
     "trip-calibration": {"boundary-trips": lambda: _patched(gap_maps, "leak_drain",
