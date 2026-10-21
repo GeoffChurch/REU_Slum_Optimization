@@ -193,7 +193,7 @@ On a local queue under `cpu-score` (lease 120, margin 10, strikes 3), each case 
 - `finish DONE` -> DONE.
 - `finish FAILED` with two `wrote` -> PENDING, strikes 0; with none, three times -> PENDING (1), PENDING (2), FAILED (3).
 - `finish OOM` with peak 10 from class `m4` -> PENDING in `m12`, `peak_gb` 10; from `m88` with peak 90 -> LONG, lane LONG, `gb` 135 (1.5 x 90).
-- `reap` of a worker holding a job, `now` before its `ends_at`: with a row written -> PENDING, strikes 0; without -> strikes 1 (Ruling 6); `now` after `ends_at`, the attempt having run 50 minutes on a job estimated 30 -> PENDING with `minutes` 50, outcome WALLTIME, strikes 0; having run 115 -> LONG (past 120 - 10).
+- `reap` of a worker holding a job, `now` before its `ends_at`: with a row written -> PENDING, strikes 0; without -> strikes 1 (Ruling 6); `now` after `ends_at`, the attempt having run 50 minutes on a job estimated 30 -> PENDING with `minutes` 50, outcome WALLTIME, strikes 0; having run 110 -> LONG (past `fresh_minutes`, 120 - 10 - 5).
 - a reaped worker's late `finish DONE` -> the attempt recorded, the job left as the reaper left it (Spec 3.2, "Done").
 - `retry` of a FAILED job -> PENDING, strikes 0; `cancel` -> every PENDING and LONG job CANCELLED, CLAIMED ones untouched.
 - `claim_job` of a LONG job -> CLAIMED; its `finish FAILED` without rows -> LONG, strikes 1.
@@ -269,7 +269,7 @@ Expected: ImportError naming pool_plan.
 
 - [ ] **Step 3: Implement pool_plan.py**
 
-`plan_wave`: one job per (id, item) (`items == [""]` for a command without `{item}`), its id its index in that order from 1; `group` the block; groups to nodes by longest-processing-time first on needed minutes (ties by node order); `cls` from `rung_of(estimate.gb(), ladder)`; lane LONG when the needed minutes pass `lease_minutes - margin_minutes` or the gb passes the top rung, with `gb` then `1.5 * peak_gb`; `closed=True` (the `Fixed` feed); `source` the estimate's.
+`plan_wave`: one job per (id, item) (`items == [""]` for a command without `{item}`), its id its index in that order from 1; `group` the block; groups to nodes by longest-processing-time first on needed minutes (ties by node order); `cls` from `rung_of(estimate.gb(), ladder)`; lane LONG when the needed minutes pass `pool_queue.fresh_minutes(ladder)` (lease less margin less startup: 105 in the production presets) or the gb passes the top rung, with `gb` then `1.5 * peak_gb`; `closed=True` (the `Fixed` feed); `source` the estimate's.
 pool_plan.py reads rows with pandas; nothing on the cluster imports it.
 
 - [ ] **Step 4: Run both ways**
@@ -542,7 +542,7 @@ All under `--dry` (nothing leaves this machine), from command lines at HEAD:
 - the misspelt id of the `ids` guard (`MISTYPED`) is refused by the bank's writer before anything is planned;
 - a script the commit lacks is refused naming the commit (as `script` does for today's kinds);
 - `{item}` without `--items`, and `--items` without `{item}`: refused;
-- a job the estimator puts past the lease (a stored wall over 110 minutes): a LONG job and a planned `long` run of `--mem` 1.5 times its peak.
+- a job the estimator puts past the lease (a stored wall whose estimate passes `fresh_minutes`, 105 minutes): a LONG job and a planned `long` run of `--mem` 1.5 times its peak.
 Faults: `no-keep` (the job lines without `--keep-standing`), `block-names` (long runs named `<w>-long-<block>`: no `project.NAME`).
 
 - [ ] **Step 2: Run it to see it fail**
