@@ -24,11 +24,17 @@ solves, P's and P_{1/2}'s), and W's passes per solve.
 `report`: per block (summary_blocks.csv) and pooled over the walled-in blocks and over the controls
 (summary_groups.csv): (1) of the open homes (connected under T at baseline, with T's demand) the
 share whose escape time moves by more than MOVED from T's, and the ratio W / T's median, p10 and
-p90 (a home with no footprint in the mesh, under a barrier's cut, has no escape time under W and
-is left out); (2) the walled-in homes' escape time against their block's median home under W (median, p90,
-max); (3) their share of W's P0 and J_2,0; (4) the own wall's share, median and p90, for open and
-walled-in homes apart; (5) the through-traffic and the dissipation's shares; (6) the unknowns and
-times W / T, and the passes.
+p90 (a home with no footprint in the mesh, under a barrier's cut, has no escape time under W and is
+left out); (2) the walled-in homes' escape time against their block's median home under W (median,
+p90, max); (3) their share of W's P0 and J_2,0; (4) the own wall's share, median and p90, for open
+and walled-in homes apart; (5) the through-traffic and the dissipation's shares; (6) the unknowns
+and times W / T, and the passes; (7) the open homes' rank agreement with T (Spearman's correlation
+of their escape times under W and T, by block: median, p10, min); (8) P0 under W over T's, by block
+(median, p10, p90); (9) the walls' dissipation split by the way its current crosses (out of a
+building onto open ground, the inside street faces among them; into one from open ground; party
+walls, building to building, a shared zone's two steps among them), median and pooled;
+(10) the diode's passes per solve (median, max; a block whose loop hits its cap raises and has no
+row).
 
 The blocks: BLOCKS (the small blocks with walled-in homes under RUNTIME, and the uniform rule's five
 controls).
@@ -50,6 +56,7 @@ from typing import NamedTuple
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+from scipy import stats
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -77,12 +84,17 @@ class Own(NamedTuple):
 class Flow(NamedTuple):
     """W's flow at a state under the population's demand (`flow`): the injection, the current
     entering buildings from open ground and from another building (a party wall, or a zone two
-    buildings share entered from one of them), the dissipation in walls, in interiors and in
-    all."""
+    buildings share entered from one of them), the dissipation in walls (split by the way its
+    current crosses them: out of a building onto open ground, the inside street faces among
+    them; into one from open ground; party walls, from one building's grown footprint to
+    another's, a shared zone's two steps among them), in interiors and in all."""
     injected: float
     entering: float
     entering_bld: float
     walls: float
+    walls_out: float
+    walls_in: float
+    walls_party: float
     interiors: float
     total: float
 
@@ -143,14 +155,20 @@ def flow(wm: gw.WallModel, wl: gw.WallLenses) -> Flow:
     i_w = np.abs(cur[w])
     enters = np.where(fwd, st.enter, st.leave)
     from_in = np.where(fwd, ia[w], ib[w])
+    party = ia[w] & ib[w]                   # inside on both sides: building to building
+    d_w = diss[w]
     cell_in = np.zeros(c.n, dtype=bool)
     cell_in[c.cell[st.inside]] = True
     rhs = wm.rhs(st, wm.pop)
     graph = wm.sys.graph
     total = float(diss.sum() + ((st.G + graph.leak) * s.u ** 2)[st.unknown].sum())
+    street_walls = float((st.G * s.u ** 2)[cell_in & st.unknown].sum())
     return Flow(injected=float(rhs.sum()), entering=float(i_w[enters & ~from_in].sum()),
                 entering_bld=float(i_w[enters & from_in].sum()),
-                walls=float(diss[wall].sum() + (st.G * s.u ** 2)[cell_in & st.unknown].sum()),
+                walls=float(d_w.sum()) + street_walls,
+                walls_out=float(d_w[~party & ~enters].sum()) + street_walls,
+                walls_in=float(d_w[~party & enters].sum()),
+                walls_party=float(d_w[party].sum()),
                 interiors=float(diss[ia & ib & ~wall].sum()), total=total)
 
 
@@ -216,6 +234,8 @@ def block_run(bid: str, part: str, *, replace: bool) -> None:
         injected=fl.injected, entering=fl.entering, through=fl.entering / fl.injected,
         entering_bld=fl.entering_bld, through_bld=fl.entering_bld / fl.injected,
         diss_total=fl.total, diss_walls=fl.walls / base.P, diss_interiors=fl.interiors / base.P,
+        diss_walls_out=fl.walls_out / base.P, diss_walls_in=fl.walls_in / base.P,
+        diss_walls_party=fl.walls_party / base.P,
         energy_rel=fl.total / base.P - 1.0,
         walls=len(st.wall), inside_street_faces=int(st.inside[wm.f_tri].sum()),
         inside_obtuse_exits=int(st.inside[wm.g_tri].sum()),
@@ -252,6 +272,11 @@ def report(part: str) -> None:
     blk["control"] = sizes["control"].reindex(blk.index)
     blk["unknowns_x"] = blk.unknowns_W / blk.unknowns_T
     blk["time_x"] = blk.t_W / blk.t_T
+    blk["P0_x"] = blk.P0_W / blk.P0_T
+    # (7) the open homes' rank agreement with T, by block
+    op_all = homes[~homes.walled & ~homes.nodem_T & ~homes.nodem_W]
+    blk["spearman"] = op_all.groupby("block").apply(
+        lambda h: float(stats.spearmanr(h.u_T, h.u_W).statistic)).reindex(blk.index)
     blk.reset_index().to_csv(ROWS / part / "summary_blocks.csv", index=False)
     homes = homes.merge(blk[["control"]].reset_index(), on="block")
     out = []
@@ -285,6 +310,17 @@ def report(part: str) -> None:
             through_bld_pooled=float(g.entering_bld.sum() / g.injected.sum()),
             diss_walls_median=float(g.diss_walls.median()),
             diss_interiors_median=float(g.diss_interiors.median()),
+            diss_walls_out_median=float(g.diss_walls_out.median()),
+            diss_walls_in_median=float(g.diss_walls_in.median()),
+            diss_walls_party_median=float(g.diss_walls_party.median()),
+            diss_walls_out_pooled=float((g.diss_walls_out * g.P0_W).sum() / g.P0_W.sum()),
+            diss_walls_in_pooled=float((g.diss_walls_in * g.P0_W).sum() / g.P0_W.sum()),
+            diss_walls_party_pooled=float((g.diss_walls_party * g.P0_W).sum() / g.P0_W.sum()),
+            spearman_median=float(g.spearman.median()), spearman_p10=_q(g.spearman, 0.1),
+            spearman_min=float(g.spearman.min()),
+            P0_x_median=float(g.P0_x.median()), P0_x_p10=_q(g.P0_x, 0.1),
+            P0_x_p90=_q(g.P0_x, 0.9),
+            passes_median=float(np.median(np.concatenate([g.passes_pop, g.passes_q]))),
             energy_rel_max=float(g.energy_rel.abs().max()),
             unknowns_x_median=float(g.unknowns_x.median()),
             unknowns_x_max=float(g.unknowns_x.max()),

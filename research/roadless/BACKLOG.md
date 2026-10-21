@@ -671,7 +671,10 @@ Open:
   symmetric 200 m, k_in 1 (`Wk1l200`): open homes 91% moved by over 5% (W / T median 1.21, p10
   0.67, p90 4.79); walled-in homes 1.97x their block's median (U: 208x), 1.2% of P0; own wall 39%
   of an open home's escape time; through-traffic 5% from open ground, 6% from neighbours; 3.1x the
-  unknowns, 5.6x the time. Next setting: the controller's and owner's pick. Stage 2 (SIMP's
+  unknowns, 5.6x the time. Second, the diode out 10 m, in 1,000 m (`Wk1o10i1000n64`): open homes'
+  ranks kept better (Spearman by block median 0.93 against 0.91) but P0 halved (0.52x T's, below on
+  every block); walled-in homes 2.8x the median (max 11.5x), 1.6% of P0; own wall 14%; 8 passes a
+  solve (max 11), 82x T's time. Next setting: the controller's and owner's pick. Stage 2 (SIMP's
   interpolation of a partly cleared building's walls) after a setting is picked; a
   leaks-in-interiors variant later.
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose

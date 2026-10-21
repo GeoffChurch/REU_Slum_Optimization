@@ -8716,3 +8716,51 @@ neighbours).
 large controls 0.17 of it, meshing T's and U's afresh: they ran on the cluster in the uniform
 study; the small blocks' meshes were the uniform study's, hard-linked), peak RSS 7.6 GB (8152);
 the guards about 2 process-h; the diagnostics 0.2.
+
+**Four more measures** (the controller's, for the second setting on: the >5% measure no longer
+parts settings), leaky.py's report: (7) the open homes' rank agreement with T, Spearman's
+correlation of their escape times under W and under T, by block; (8) P0 under W over T's, by
+block; (9) the walls' dissipation split by the way the current crosses: outward (out of a
+building onto open ground, the inside street faces among it), inward (into one from open ground),
+party (building to building: a party wall proper never occurs on a real block, two buildings
+crossing through a shared zone in two one-way steps, so a wall passage inside on both sides is
+party); (10) the diode's passes per solve. Both settings re-run for (9) (the first's other numbers
+the same). The first setting's: (7) median 0.914, p10 0.732, min 0.663 (43874); (8) median 1.09,
+p10 0.68, p90 1.55; (9) outward 44% of P0 (pooled 40%), inward 1.1% (2.0%), party 3.2% (4.1%).
+
+**The second setting: a diode, ell_out 10 m, ell_in 1,000 m, k_in 1, cap 64**
+(`Wk1o10i1000n64`; the controller's pick of the first report's suggestion: cheap to leave one's
+own home, dear to cut through another's; leaky_rows/Wk1o10i1000n64/summary_{blocks,groups}.csv).
+The same 82 blocks.
+1. Open homes: 97.6% move by more than 5% (by block 92% -- 100%), now mostly down: W / T median
+   0.63, p10 0.30, p90 0.99 (89% fall by more than 5%, 9% rise).
+2. Walled-in homes: a median 2.8x their block's median home (p90 5.8, max 11.5).
+3. They hold a median 1.6% of P0 (43% at most, 63718) and 2.6% of J_2,0 (55% at most).
+4. Own wall: a median 14% of an open home's escape time (p90 75%), 16% of a walled-in home's (p90
+   53%).
+5. Through-traffic: 7.4% of the current enters buildings from open ground (pooled 8.8%), 2.7% from
+   another building (3.3%). The walls dissipate a median 21% of P0, the interiors 3.7%.
+6. Cost: unknowns as the first setting's (3.1x T's); the baseline's scoring a median 82x T's time
+   (256x at most; 0.10 s -> 8.8 s on a small block, 3.9 s -> 176 s on 8152): each of P's and
+   P_{1/2}'s solves loops on its own, every pass a factorization.
+7. Rank agreement with T: Spearman median 0.926, p10 0.861, min 0.744 (43817), higher than the
+   first setting's at every quantile.
+8. P0 W / T: median 0.52, p10 0.35, p90 0.66; below T's on all 82 blocks (0.15 -- 0.88).
+9. Walls: outward 10% of P0 (pooled 8.3%), inward 6.8% (9.1%), party 2.6% (4.0%).
+10. Passes per solve: median 8, max 11 (164 solves: 6 -- 11); no block reached the cap of 64.
+Against the first setting: leaving one's home now costs little (own wall 14% of an open home's
+escape time, not 39%) and the homes keep T's order better (Spearman 0.93 against 0.91), but P0
+halves: with exits cheap, each home's own interior at k_in 1 is a wide way to its best side, and
+the open homes' escape times fall below T's on 89% of them. The walled-in homes' toll rises (2.8x
+the median, not 2.0x; up to 11.5x) as the dearer entry makes their way through neighbours cost
+more, and through-traffic shifts from neighbour-to-neighbour (2.7%, not 6.0%) to open ground into
+a building (7.4%, not 5.2%). The diode costs 15x the symmetric setting's scoring time.
+
+**Beside the second setting** (19570, 41940, 38486, 63718; diagnostics, not settings): k_in is a
+small lever under this diode. At k_in 0.3 and 0.1 P0 W / T rises from 0.18 -- 0.88 to 0.21 --
+0.93 and 0.29 -- 1.05, the open homes' median W / T from 0.23 -- 0.63 to 0.33 -- 0.83, Spearman
+moves by at most 0.02, and the walled-in homes' toll against the median falls (38486's courtyard
+from 11x to 7.6x: the median home slows more than they do).
+
+**Compute, the second setting** (here, 2 processes): its 82 blocks twice (once more for (9)), 0.7
+process-h each pass; the first setting's re-run 0.16; the diagnostics 0.15.
