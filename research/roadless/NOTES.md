@@ -8561,3 +8561,158 @@ pass's default wall on one card (two arms, two meshes, two models for the lenses
 (63612; its process's peak RSS 55.8 GB of the task's 64, GPU 6.9 GB). The U arm took 0.93x T's
 wall (0.84x SIMP's own time). Here, single-threaded, at most 2 processes: the 80 small blocks 2.1
 process-h (0.96x the default's wall), the guards and diagnostics about 8 process-h.
+
+### Walls that leak: every home's source inside it, each wall priced as a length (owner 2026-10-21)
+
+**The question.** On the uniform rule's walled-in homes the owner asked: "can't they go through
+other buildings, just slowly? This is actually more realistic than it sounds, since nobody is
+actually blocked in in a slum"; "What if the interior of a building conducts at some rate that we
+can set to match that of open ground ... and the boundary has higher resistance?"; "everyone
+would pay to get out of their own home" (trips starting on a moat outside the walls rejected: it
+ignores the walk across a large building's interior); "A middle-ground could have walls be
+(imperfect/leaky) diodes"; "we should launch these one at a time so we can be adaptive". The
+brief and its rulings: .superpowers/sdd/2026-10-21-leaky-walls (progress.md).
+
+**The model (W)**, gap_walls.py: an option beside T (gap_clear.Model untouched), scoring only (the
+baseline and any 0/1 clearing on the base metric's fixed mesh: UNIFORM's mesh, leaks, doors and
+B (i)); no optimizer, SIMP's interpolation of a partly cleared building's walls being stage 2.
+- Each standing building owns its grown footprint, the faces within w / 2 of it (FullMesh.fzone:
+  its footprint, its shy zone, a gap narrower than w that two zones close). A triangle is inside
+  the set S of standing buildings whose grown footprint holds it, open with none: exactly T's open
+  ground.
+- Interiors conduct k_in times open ground (no street boost: a building is no street). k_in is at
+  most 1, so clearing never slows the ground and P stays monotone.
+- A passage from triangle a to b with S(a) != S(b) leaves S(a) less S(b) and enters S(b) less
+  S(a), costing c = ell_out [it leaves one] + ell_in [it enters one], and conducts 1 / (1 / T_e +
+  c / (sigma |e|)), T_e what it conducts with no wall: sigma |e| / (d_e + c) at factor 1. Open
+  ground into a building ell_in, out ell_out; a party wall (S(a) = {A}, S(b) = {B}: two grown
+  footprints meeting in a line) ell_out + ell_in both ways, a linear resistor; two buildings closer
+  than w share a zone, crossed in two steps of ell_in and ell_out, the same total each way.
+- An inside triangle's street face is its building's wall onto the street (c = ell_out: the
+  potential is never negative, so its current only leaves); an inside obtuse exit (gap_clear's
+  ground cell) conducts sigma |f| / ell_out and is no ground. 64 of the 82 blocks below have
+  inside street faces (25,126 in all), 333 inside obtuse exits.
+- A cleared building is open ground: no walls, its interior and zone the metric's open ground.
+- Every home's source is inside it: its population over its own footprint's triangles (its cover,
+  not its zone) by area, its escape time the injection-weighted mean potential there. Every home
+  has demand but one whose footprint lies wholly outside the meshed region (5618's home 209, under
+  the railway's cut: no interior triangle, so no source, out of P).
+- The leaks are UNIFORM's to the cell: the open ground's on every cell open at baseline, the
+  sealed pockets among them, and each building's destination at its doors (where U's placement
+  puts its home's points, on open ground). Interiors leak nothing (the leaks-in-interiors variant
+  is a later run).
+- B (i) is the base model's: the street's reach through open ground only, never through a wall.
+- The solve is a Strategy resolved where the name is read: SymmetricWalls (ell_out == ell_in, one
+  factorization a state) or DiodeWalls (an active-set loop: each wall passage's side guessed out
+  of its building first, solved, sides taken from the currents' signs, the same pattern refactored
+  until none changes; a passage within SIDE_REL 1e-12 of the largest potential keeps its side;
+  unsettled within the cap its name carries, it raises; the passes recorded per solve).
+- The name: `+Wk<k_in>l<ell>` (symmetric) or `+Wk<k_in>o<ell_out>i<ell_in>n<cap>` after the
+  placement's part, in gap_clear's grammar (_NAME's `walls` group), which complex_of refuses (no
+  optimizer runs W unawares) and gap_walls.walls_of reads back. No constant of gap_clear's
+  modules changed: CODE 34d40e8a and every cached mesh's key stand. Runner leaky.py (block,
+  report; rows leaky_rows/<setting>/, parquet ignored), guards leaky_check.py. (walls.py was the
+  2026-10-11 study's, deleted at 9e10bbf; the new files are named apart.)
+
+    the first setting: cx+shy0.5+s0.125r1b1+R0.5g4x2q4+pockets+Wk1l200+v34d40e8a+xB8c3Lpo6214b562S10spavedh<classes>v65531d75
+
+**Rulings** (how the existing pieces meet W).
+- The shy zone and the closed narrow gaps belong to the building's interior: the wall sits on the
+  grown footprint's outline, where T's open ground begins, so T's open ground and its passable
+  width are untouched (a lane still conducts W - w). The other readings fail: the zone kept as
+  today (closed) seals every source in; a wall on the footprint's own outline needs the zone to
+  conduct as open ground, which widens every lane by w.
+- The street band: an inside street face is a wall onto the street (above).
+- Road prefixes: W refuses a carved mesh; T's road code is untouched.
+- W's sources are not a gap_clear.Placement: the Fixed's placement also seats the buildings'
+  destinations (the leak's foot reads its points), which this run keeps on open ground at the
+  doors; points placed inside would drop those leaks (OpenSites has no interior) or need a second
+  cached demand (a cache format change, re-keying every mesh). W keeps U's placement for the doors
+  and U's cached meshes, and injects inside by its own rule (WallModel.sources).
+
+**Guards** (leaky_check.py, each both ways; its walls SYM, ell 200 m, and DIODE, out 50 m, in
+300 m, k_in 1). `direction` (a strip 60 x 12 m, its east edge the street, a building B across it
+between two alleys, a home H in the west one): the current through each wall group from the
+potentials and the definition alone (sigma |e| / (d_e + c), c ell_in entering and ell_out leaving)
+equals conservation's: H's wall out 0.2353 of 0.2353 (its residents pay ell_out), B's west wall in
+0.2353 and its east wall out 2 of 2 (through-current pays ell_in + ell_out), the diode in 2
+passes; fault `in-out-swapped`: 1.40, 0.039 and 11.9. `party` (buildings A and B w apart across a
+strip, the street east, then west): 80 party passages carry 1 and -1 toward B at ell_out + ell_in;
+fault `one-side` (a party passage charged ell_out alone one way): 0.143 of 1. `settles` (the
+direction block, 19570): every asymmetric wall passage on its current's side after 2 and 6 passes;
+fault `one-pass`: 96 of 352 and 24,038 of 68,212 off it. `energy` (the direction block, 19570, each
+walls, the baseline and a random clearing): P = q . u against the dissipation under the
+current-voltage curve (each passage at its current's side's conductance, not the solver's record)
+3e-12 -- 1.7e-10 apart, every unknown cell's imbalance at most 9.6e-11 of the largest current
+through a cell; fault `wrong-side` (one wall passage settled on the wrong side): 5.4e-3 and
+2.7e-2 apart on the direction block, the loop unsettled on 19570. `monotone` (19570, three orders
+of eight buildings cleared one by one, each walls): P never rises (largest step -6e-5 -- -1.3e-3);
+fault `cleared-slow` (a cleared building's ground at 1e-3): +7.9e-3 and +1.5e-2. `walled-count`
+(20269, 23597): the walled-in homes a clearing leaves read the same under W as under T at the
+baseline, three single clearings, two random ones and T's free first (1 and 6 at baseline, 0
+after free first); fault `through-walls` (B (i) from W's own reach). `sources` (19570, 20269,
+23597): every home's sources on its own footprint by area against a shapely oracle (centroids
+within its polygon) to 8e-8 -- 1.8e-7 of its population (tolerance 1e-6: slivers within the
+linework's snap read either side by a centroid), every source cell an unknown, no home without
+demand; fault `doors` (the sources at the base's demand points: W's own baseline check refuses
+them, on open obtuse exits). `walls-identity`: 12 names on UNIFORM, RUNTIME and the
+per-block metric read back, complex_of refuses each, walls_of refuses a name without walls, a
+diode of equal lengths, a k_in over 1 and a zero wall are refused, gap_walls's constants are
+SIDE_REL alone; fault `part-dropped`. gap_clear_check's guards that touch the mesh, demand, leaks
+or identity, as expected both ways at this code: enclosure, leak-assembly, exits-identity,
+identity, constants (28, 34d40e8a), baseline, uniform-control, pocket-escape, pocket-count, faces,
+flux (`roads` needs the main checkout's road_rows: not run).
+
+**The first setting: symmetric, ell_in = ell_out = 200 m, k_in 1, leaks on open ground**
+(`Wk1l200`; leaky_rows/Wk1l200/summary_{blocks,groups}.csv). The 77 small blocks with walled-in
+homes (17,107 homes, 327 walled in) and the uniform rule's five controls (small 20954, 41940,
+41779; large 8152, 20023: 2,670 homes), at baseline, against T (RUNTIME).
+1. Open homes (connected under T at baseline, 19,449): 91.4% move by more than 5% from T's escape
+   time (by block a median 94%, 68% -- 99%; controls 94%). The ratio W / T: median 1.21, p10 0.67,
+   p90 4.79 (walled-in blocks 1.16, 0.65, 5.01; controls 1.38, 1.05, 3.62); 62% rise by more than
+   5% and 29% fall. A block's P0 is a median 1.09x T's (T's over the homes it scores; 0.40 --
+   1.98, below T's on 36 of 82), J_2,0 0.74x (0.04 -- 2.94).
+2. Walled-in homes (327): their escape time is a median 1.97x their block's median home (p90 2.88,
+   max 3.95); under U a median 208x (its 121 blocks).
+3. They hold a median 1.2% of W's P0 (35% at most, 63718: 77 walled-in homes) and 1.7% of J_2,0
+   (46% at most); under U a median 44% and 98%.
+4. A home's own wall carries a median 39% of an open home's escape time (p90 84%), 15% of a
+   walled-in home's (p90 27%): a walled-in home's trip is long after its own wall.
+5. Through-traffic: the current entering buildings from open ground is a median 5.2% of the
+   current injected (pooled 6.4%; controls 0.8%; 41% on 63718), and from another building (a party
+   wall, or a zone two buildings share) 6.0% more (pooled 7.0%). The walls dissipate a median 51%
+   of P0, the interiors 0.8%.
+6. Cost: the system's unknowns are a median 3.1x T's (1.8x -- 7.8x; small blocks 75 k -> 245 k at
+   the median; the large controls 1.08 M -> 1.98 M and 1.83 M -> 3.90 M), the baseline's scoring
+   (the state, the factorization, P's and P_{1/2}'s solves) a median 5.6x T's time (14x at most;
+   0.10 s -> 0.57 s on a small block, 3.9 s -> 13.6 s on 8152); one factorization, one pass (the
+   symmetric walls are linear). The energy identity held on every block to 2.5e-10.
+
+**What the first setting says.** At 200 m the walls do not act as the brief's "about 400 m of
+walking" for anyone but a lone walker: a wall's length is per unit of its width, and a home's
+whole outline conducts in parallel, so a 26 m outline at 200 m conducts sigma 26 / 200, what about
+4 m of a lane 0.5 m wide past the shy distance conducts. With every home's own interior a wide
+conductor at k_in 1 (its current crosses it toward the street side before leaving) and the
+neighbours' interiors a way round the alleys' contention, W's escape times sit near T's in level
+(P0 1.09x at the median) but not home for home: the source moved inside and the toll every home
+pays at its own wall reorder them (the open home nearest the street pays most relative to T). The
+walled-in homes are no longer outliers (2x the median, not U's 208x; 1.2% of P0, not 44%): the
+leaky walls answer "nobody is actually blocked in". A check that the machinery is T's where no
+current crosses a wall (41940, ell 100 km): the potential on the open ground just outside each
+home's walls is T's escape time to a median 1.03 (p10 0.95, p90 1.27).
+
+**Beside the setting** (four small blocks, 19570, 41940, 38486, 63718; diagnostics, not settings,
+for the next choice). Symmetric ell 1,000 -- 30,000 m: P0 1.7 -- 4.7x T's at 1,000, 10 -- 38x at
+10,000; the open homes move by more than 5% at every length (91 -- 100%); the walled-in homes
+stay within 0.7 -- 4x of the median (the own wall is a toll on every home alike, and grows with
+ell as theirs does); the own wall's share of an open home's escape time 0.56 -- 0.76 at 1,000,
+0.88 -- 0.95 at 30,000. Diodes, out 10 or 50 m and in 1,000 or 10,000 m: 6 -- 13 passes; the open
+homes' escape times fall below T's (median 0.23 -- 0.90 of T's: a home leaves cheaply through its
+own wide interior), still more than 5% off on 90 -- 100%; the walled-in homes 0.8 -- 11x the
+median at in 1,000 m and 1.6 -- 79x at in 10,000 m (38486's courtyard, its way out through
+neighbours).
+
+**Compute.** Here, single-threaded, at most 2 processes: the 82 blocks 0.29 process-h (the two
+large controls 0.17 of it, meshing T's and U's afresh: they ran on the cluster in the uniform
+study; the small blocks' meshes were the uniform study's, hard-linked), peak RSS 7.6 GB (8152);
+the guards about 2 process-h; the diagnostics 0.2.
