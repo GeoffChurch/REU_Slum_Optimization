@@ -686,9 +686,14 @@ Open:
   B shift 7.3x B's; Spearman of dP / D, symmetric 3,000 m against the 10 m diode 0.63, against
   setting 4 0.74); symmetric walls would change which buildings are cleared. Every W setting ranks
   the clearings that free walled-in homes at the top (T does not). The warm start built
-  (gap_walls.WarmStart: 9 passes a solve to 5). Next: the controller's and owner's pick. Stage 2
-  (SIMP's interpolation of a partly cleared building's walls) after a setting is picked; a
-  leaks-in-interiors variant later.
+  (gap_walls.WarmStart: 9 passes a solve to 5). Worse or just different (the owner): symmetric
+  walls at the entry price (3,000 m) somewhat worse (its greedy clearings lose 17% and 10% under
+  the diodes' metrics, theirs 5 -- 7% under its; 14% of its top gains spare a demolished home's
+  residents their walls); symmetric 200 m not worse there (its clearings lose about 0 under the
+  diodes'), at a tenth of the cost, but a lower walled-in toll and more people left walled in;
+  greedy over single gains crude (joint gain 0.44 of the singles' sum), so SIMP under each would
+  settle it. Next: the controller's and owner's pick. Stage 2 (SIMP's interpolation of a partly
+  cleared building's walls) after a setting is picked; a leaks-in-interiors variant later.
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
   owner's answer moves an end of the bracket to that screen's break-even rate. One is live,

@@ -8865,3 +8865,50 @@ at baseline; a random clearing 4 warm, 6 cold).
 
 **Compute** (here, 2 processes): the six blocks 3.65 process-h (63718 1.87 h: B and C 81% of it),
 the warm start's test and `settles` 0.15, over the ~3 asked.
+
+**Worse, or just different?** (owner 2026-10-21: "Symmetric walls might not be equivalent, but
+are they *worse*? Or just different? ... we would hopefully be able to default to the symmetric
+case if it's not worse"; the diode costs about 10x the symmetric walls' scoring, 5x warm.)
+leaky_split.py on the same blocks and settings (rows leaky_rows/single/{decomp,regret}/,
+summary_{split,split_pairs,regret,left}.csv).
+1. Each single clearing's gain split exactly, dP_j = self_j + others_j, self_j = pop_j (u_j,0 -
+   u_j,j): the cleared home's own residents (the metric keeps their demand: their escape time
+   falls to what the open ground they are left on gives, they are not removed). Over the top 10 by
+   dP_j / D_j, self is a median 14% of the gain under A (3% -- 26% by block), 12.5% under S1, 5%
+   under C, -1% under B (its residents lose a little: their footprint becomes a way through for
+   others) and 4% under T; over the top 5% the same. So A's gains are mostly others' too, and
+   others_j / D_j ranks differently as well: Spearman A-B 0.66 (0.54 -- 0.74), A-C 0.77, B-C
+   0.95, B-S1 0.89, C-S1 0.97; against T 0.24 (A), 0.46 (B), 0.43 (C), 0.47 (S1). A's difference
+   is partly the displaced residents' own wall (it rewards demolishing a home to spare its
+   residents its walls) and partly the price on the frontage a clearing opens to its neighbours,
+   who leave through it at A's 3,000 m and B's 10 m. (B and C on four blocks: 19570's and 63718's
+   left out for the budget; A, S1 and T on all six.)
+2. The regret matrix: per setting X a clearing greedy over its single gains (largest dP_j / D_j
+   first to area D 0.05), scored under every setting Y; the shortfall (G_Y(c_Y) - G_Y(c_X)) /
+   G_Y(c_Y), median over the six blocks (rows X, columns Y):
+
+                 A       B       C       S1      T
+       A         0       0.168   0.103   0.232   0.457
+       B         0.050   0       0.008   0.172   0.433
+       C         0.070   0.006   0       0.084   0.449
+       S1        0.149  -0.009  -0.024   0       0.302
+       T         0.696   0.508   0.514   0.405   0
+
+   A's clearing loses 17% and 10% of the diodes' gains under their metrics, theirs 5% and 7%
+   under A's: A is the more parochial. S1's (symmetric 200 m) loses nothing under B's and C's
+   (-1%, -2%) and the least under T's (30%). People left walled in by T's street reach (102 walled
+   in on the six blocks): A 29, C 31, B 33, S1 51, T 83 (T's greedy over P frees none on purpose: T
+   gives walled-in homes no demand; its optimizer frees first).
+   The greedy is crude: a clearing's joint gain is a median 0.44 of its buildings' single gains
+   summed (0.25 -- 0.73), and on 24 of the 150 entries another setting's clearing beats a metric's
+   own greedy under that metric (up to 20%: S1's under B on 38486). Differences under ~20% are not
+   settled here; SIMP under each metric would settle them.
+What it says: symmetric walls at the entry price (A, 3,000 m) are somewhat worse, not just
+different: its clearings serve the diodes' objectives less than theirs serve its own, part of its
+gain is demolishing homes to spare their residents their walls (14% of its top gains, about 0
+under the diodes), and it agrees least with T. Symmetric walls nearer the exit price (S1, 200 m)
+are not worse on this test: their clearings do as well as the diodes' under the diodes' metrics.
+What S1 gives up is the walled-in homes' toll (2.0x the block median, setting 4's 3.9x) and it
+leaves more people walled in (51 against 29 -- 33).
+
+**Compute** (here, 2 processes): the decompositions and the regret 1.7 process-h.
