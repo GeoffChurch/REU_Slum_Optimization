@@ -8457,8 +8457,10 @@ clearings, two random clearings and T's free first; fault `leak-seeded` (U then 
 `every-cell` can no longer fail (the street reach ignores a leak off the live cells by
 construction) and is `leak-seeded`. `exits-identity` (56 names of 56 configurations), `identity`
 (UNIFORM spells back), `constants` (28, 34d40e8a), baseline, free, reach, pattern, leak-fold,
-leak-gradient, leak-scale, closed-edge, trip-calibration, barriers, lazy-baseline, no-features,
-street-boost, road-boost: as expected both ways (`roads` needs the main checkout's road_rows).
+leak-gradient, leak-scale, closed-edge, trip-calibration, barriers, lazy-baseline, no-features
+(with bd9256ef), street-boost, road-boost, gradient (19570, 38136 and 20269: passes), weights,
+flux, convex, loop-index, underflow, faces: as expected both ways (`roads` needs the main
+checkout's road_rows).
 
 **The measurement** (uniform.py; rows uniform_rows/, parquet ignored; summaries
 summary_{blocks,homes,sizes}.csv). The 121 blocks with walled-in homes under RUNTIME (792 homes:
@@ -8551,4 +8553,4 @@ gate) without holding them.
 pass's default wall on one card (two arms, two meshes, two models for the lenses), at most 1.47 h
 (63612; its process's peak RSS 55.8 GB of the task's 64, GPU 6.9 GB). The U arm took 0.93x T's
 wall (0.84x SIMP's own time). Here, single-threaded, at most 2 processes: the 80 small blocks 2.1
-process-h (0.96x the default's wall), the guards about 7.5 process-h.
+process-h (0.96x the default's wall), the guards and diagnostics about 8 process-h.
