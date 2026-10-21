@@ -38,10 +38,26 @@ DRIVE_CLASSES = ("living_street", "motorway", "primary", "residential", "seconda
 # 500 m median trip with 90% of the leak at buildings (`Lo6214b562`: region_leaks.CALIBRATED); the
 # paved drivable streets' conductance 10x, and a proposed road's corridor's (`S10spavedh<classes>`)
 BARRIERS = gx.OsmBarriers(line_m=8.0, cross_m=3.0)
-LEAK = gx.InternalLeak(open_m=6214.0, foot_m=562.0)
+LEAK = gx.InternalLeak(open_m=6214.0, foot_m=562.0, sites=gx.LiveSites())
 BOOST = gx.StreetBoost(factor=10.0, surfaces=gx.PAVED, classes=DRIVE_CLASSES)
 EXITS = gx.Exits(barriers=BARRIERS, edge=gx.OpenEdge(), leak=LEAK, boost=BOOST)
 RUNTIME = PER_BLOCK + EXITS.suffix
+# The uniform rule for walled-in homes, measured beside RUNTIME (owner 2026-10-21: "A uniform rule
+# would be nicer if it works"; NOTES, "A uniform rule for walled-in homes: destinations in their
+# pockets, no free first"): RUNTIME with the leak on every cell open at baseline, the sealed
+# pockets among them (`Lp`: gap_exits.OpenSites), and each walled-in home's demand on its own
+# pocket's open ground (`+pockets`: gap_clear.PocketDemand); its optimizers run without free first
+# (relax's `.f0`)
+UNIFORM_EXITS = dataclasses.replace(EXITS, leak=dataclasses.replace(LEAK, sites=gx.OpenSites()))
+
+
+def _uniform() -> str:
+    runtime = gap_clear.complex_of(RUNTIME, factorization=gap_factor.SuperLU())
+    return dataclasses.replace(runtime, placement=gap_clear.PocketDemand(),
+                               exits=UNIFORM_EXITS).name
+
+
+UNIFORM = _uniform()
 
 
 def metric_of(token: str, *, device: str) -> gap_clear.ComplexMetric:

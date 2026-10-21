@@ -52,13 +52,16 @@ exempt with their reasons (`_EXEMPT`). Editing a constant renames the metric, an
 key carries the digest too.
 
 THE SCORER (`Model`). The demand is gap_flow's (the raster's Placement rule on the complex), fixed
-at baseline on the triangles reaching the street then; each home's escape time the
-injection-weighted mean potential over its points. P (each home injecting its population), P_{1/2}
-(common.PriorityDemand(0.5), its weights from the baseline's escape times on this mesh) and J_2,
-over the homes with demand; the enclosed population: the homes walled in at baseline (no ring
-triangle reaching the street: Placement's test) that a clearing leaves walled in, by the flow
-model's own reach (`live_homes`). The optimizers' objective is J_power under the run's demand
-(common.Demand; J_1 is P).
+at baseline where the run's PLACEMENT puts it (`Placement`, a Strategy in the metric's name and the
+mesh's cache key: `LiveDemand` on the triangles reaching the street then; `PocketDemand` also each
+home walled in then on its own pocket's open ground, which needs a leak there: gap_exits.OpenSites;
+NOTES, "A uniform rule for walled-in homes: destinations in their pockets, no free first"); each
+home's escape time the injection-weighted mean potential over its points. P (each home injecting
+its population), P_{1/2} (common.PriorityDemand(0.5), its weights from the baseline's escape times
+on this mesh) and J_2, over the homes with demand; the enclosed population: the homes walled in at
+baseline (no ring triangle reaching the street: Placement's test) that a clearing leaves walled in,
+by the flow model's own reach from the street (`live_homes_of`: Reach.street, never a pocket's
+leak). The optimizers' objective is J_power under the run's demand (common.Demand; J_1 is P).
 
 FREE FIRST (`Model.free_first`): gap_complex.free_first on the complex grown as the form grows its
 footprints, read at the form's filtration width (the shy distance: grown by w / 2, at 0: its own
@@ -827,10 +830,11 @@ def _polygons(g: Any) -> list[Any]:
 
 # ------------------------------------------------------------------ the fixed mesh, cached
 
-_CACHE_FORMAT = 2      # what a cached mesh's file holds (in its key; a storage detail, no score's):
+_CACHE_FORMAT = 3      # what a cached mesh's file holds (in its key; a storage detail, no score's):
                        # 2 the baseline's grown complex beside the plain mesh (a carved mesh's file
                        # never held one that any code read: carved meshes are built in temporary
-                       # directories, and road scoring never frees first)
+                       # directories, and road scoring never frees first); 3 the demand's pocket
+                       # homes (gap_flow.PointDemand.pocket)
 
 
 def _baseline_arrays(geo: gc.Geometry, spec: gc.Spec, grow: float) -> dict[str, NDArray[Any]]:
@@ -886,10 +890,88 @@ class LazyBaseline:
         return {}
 
 
+class Ground(NamedTuple):
+    """What a placement reads of a block's baseline (Fixed.of): the buildings (`geo`), the Spec,
+    the demand's quadrature, the fixed mesh, per triangle whether it reaches the street with every
+    footprint standing (`live0`: the ground cells among them) and whether it is open then (`open0`:
+    its factor positive, the sealed pockets' ground among them), and the open street band."""
+    geo: gc.Geometry
+    spec: gc.Spec
+    quad: int
+    fm: FullMesh
+    live0: NDArray[np.bool_]
+    open0: NDArray[np.bool_]
+    band_open: Any
+
+
+def _live_demand(g: Ground) -> tuple[gf.PointDemand, NDArray[np.int64]]:
+    """The demand on the triangles reaching the street at baseline (gap_flow.demand_on), per point
+    its triangle (-1 in the band)."""
+    ids = np.flatnonzero(g.live0)
+    dem = gf.demand_on(g.geo, g.spec, g.quad, g.fm.xy, g.fm.tri[ids], g.band_open)
+    nin = len(ids) * g.quad
+    ptri = -np.ones(len(dem.xy), dtype=np.int64)
+    ptri[:nin] = ids[np.arange(nin) // g.quad]
+    return dem, ptri
+
+
+class Placement(Protocol):
+    """Where the demand sits (module docstring, THE SCORER): its name's part (in the metric's name
+    and the mesh's cache key), the baseline's demand with per point its triangle (-1 in the band),
+    and the leaks it needs (`check`: refuses a leak its homes cannot end their trips at)."""
+
+    @property
+    def name(self) -> str: ...
+
+    def demand(self, g: Ground) -> tuple[gf.PointDemand, NDArray[np.int64]]: ...
+
+    def check(self, leak: gx.NoLeak | gx.InternalLeak) -> None: ...
+
+
+@dataclass(frozen=True)
+class LiveDemand:
+    """Every home on its ground reaching the street at baseline (Placement's rule); a home walled
+    in then has no demand (Model.nodem: out of P, P_{1/2} and J_2)."""
+
+    @property
+    def name(self) -> str:
+        return ""
+
+    def demand(self, g: Ground) -> tuple[gf.PointDemand, NDArray[np.int64]]:
+        return _live_demand(g)
+
+    def check(self, leak: gx.NoLeak | gx.InternalLeak) -> None:
+        return None
+
+
+@dataclass(frozen=True)
+class PocketDemand:
+    """LiveDemand, and each home it leaves without demand placed on its own pocket's open ground
+    (gap_flow.in_pockets: the open ground no street reaches at baseline), whose leak ends its trips
+    (a leak on gap_exits.OpenSites: refused without one, where its escape time would be 0); a home
+    with no open ground at all has none. Spelt `+pockets`."""
+
+    @property
+    def name(self) -> str:
+        return "pockets"
+
+    def demand(self, g: Ground) -> tuple[gf.PointDemand, NDArray[np.int64]]:
+        dem, ptri = _live_demand(g)
+        pk = np.flatnonzero(g.open0 & ~g.live0)
+        dem, rows = gf.in_pockets(dem, g.geo, g.spec, g.quad, g.fm.xy, g.fm.tri[pk])
+        return dem, np.concatenate([ptri, pk[rows]])
+
+    def check(self, leak: gx.NoLeak | gx.InternalLeak) -> None:
+        if not leak.pockets:
+            raise ValueError(f"the demand in the pockets needs a leak there (gap_exits.OpenSites), "
+                             f"not {leak!r}: a pocket's home would escape at once")
+
+
 class Fixed(NamedTuple):
     """A block's fixed mesh and what its baseline fixes (module docstring): the mesh, built on the
     footprints' atoms (`carving`: the buildings themselves, or a road network's pieces), the
-    demand on the triangles reaching the street with every footprint standing (gap_flow.demand_on;
+    demand where the placement puts it with every footprint standing (`Placement`: on the
+    triangles reaching the street, gap_flow.demand_on, and a walled-in home's in its pocket or not;
     per point its triangle `ptri`, -1 in the band), each home's ring (gap_flow.ring_of) and the
     complex grown as the form grows its footprints with every footprint standing (`cx0`, free
     first's baseline: the plain mesh's built with it and stored, a carved mesh's built on use).
@@ -903,27 +985,27 @@ class Fixed(NamedTuple):
     carving: Carving
 
     @staticmethod
-    def key(block, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width) -> str:
+    def key(block, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width, placement: Placement) -> str:
         """The identity: the block's footprints (clearings.fingerprint), its streets and boundary,
-        the configurable constants and the code's (CODE: every constant that can move a mesh
-        among them)."""
+        the configurable constants (the demand's placement among them) and the code's (CODE:
+        every constant that can move a mesh among them)."""
         geo = gc.geometry(block)
         ident = dict(
             block=block.block_id, footprints=clearings.fingerprint(block.buildings.outlines),
             streets=hashlib.sha256(shapely.to_wkb(geo.streets)).hexdigest(),
             boundary=hashlib.sha256(shapely.to_wkb(geo.boundary)).hexdigest(),
             spec=spec.name, flow=fs.name, sigma=fs.sigma, offset=fs.offset, form=form.name,
-            code=CODE, format=_CACHE_FORMAT)
+            placement=placement.name, code=CODE, format=_CACHE_FORMAT)
         return hashlib.sha256(json.dumps(ident, sort_keys=True).encode()).hexdigest()[:24]
 
     @classmethod
     def of(cls, block, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width, *, cache: Path,
-           carving: Carving) -> Fixed:
-        """The block's fixed mesh on the atoms `carving` (Carving.none: the buildings): from
-        `cache` if built before, else built and stored there (a carved mesh's file named by its
-        corridors' digest beside the block's identity)."""
+           carving: Carving, placement: Placement) -> Fixed:
+        """The block's fixed mesh on the atoms `carving` (Carving.none: the buildings), its demand
+        where `placement` puts it: from `cache` if built before, else built and stored there (a
+        carved mesh's file named by its corridors' digest beside the block's identity)."""
         tag = f"__c{carving.digest}" if carving.stops else ""
-        path = cache / f"{block.block_id}{tag}__{cls.key(block, spec, fs, form)}.npz"
+        path = cache / f"{block.block_id}{tag}__{cls.key(block, spec, fs, form, placement)}.npz"
         geo = gc.geometry(block)
         if path.exists():
             return cls._load(path, carving, geo=geo, spec=spec, grow=form.grow)
@@ -936,14 +1018,12 @@ class Fixed(NamedTuple):
         kt = form.terms(atoms, fm, fs.quad).value(k0)
         fe, fb = form.fill_pairs(fm)
         kp, _binds = _passage_factors(fm, kt, k0, Fill(e=fe, b=fb))
-        live0 = Graph(fm, cells, leak=np.zeros(cells.n)).reach(fm, kt, kp).live[cells.cell]
+        live0 = Graph(fm, cells, leak=np.zeros(cells.n), live0=np.zeros(cells.n, dtype=bool)
+                      ).reach(fm, kt, kp).live[cells.cell]
         _ib, band_open = gc._open_ground(geo, np.ones(len(geo.polys), dtype=bool), spec.band_m,
                                          carve=None, grow=0.0)
-        ids = np.flatnonzero(live0)
-        dem = gf.demand_on(geo, spec, fs.quad, fm.xy, fm.tri[ids], band_open)
-        nin = len(ids) * fs.quad
-        ptri = -np.ones(len(dem.xy), dtype=np.int64)
-        ptri[:nin] = ids[np.arange(nin) // fs.quad]
+        dem, ptri = placement.demand(Ground(geo=geo, spec=spec, quad=fs.quad, fm=fm, live0=live0,
+                                            open0=kt > 0, band_open=band_open))
         ring = gf.ring_of(geo, spec.ring_m, fm.xy, fm.tri, band_open)
         # free first's baseline: the plain mesh's built now and stored with it, a carved mesh's
         # on use
@@ -968,7 +1048,7 @@ class Fixed(NamedTuple):
         arrs["fm_scalars"] = np.array([fm.sigma, fm.unflat, fm.splits, fm.rounds, fm.flat,
                                        fm.skipped, fx.t_build])
         arrs["ptri"] = fx.ptri
-        for name in ("xy", "band", "walled", "shadowed"):
+        for name in ("xy", "band", "walled", "shadowed", "pocket"):
             arrs[f"dem_{name}"] = getattr(dem, name)
         for name, M in (("dem_S", dem.S.tocsr()), ("ring_tri", ring.tri.tocsr())):
             arrs[f"{name}_data"], arrs[f"{name}_indices"] = M.data, M.indices
@@ -997,7 +1077,8 @@ class Fixed(NamedTuple):
                       sigma=float(sig), unflat=int(unflat), splits=int(splits),
                       rounds=int(rounds), flat=int(flat), skipped=int(skipped))
         dem = gf.PointDemand(xy=z["dem_xy"], band=z["dem_band"], S=csr("dem_S"),
-                             walled=z["dem_walled"], shadowed=z["dem_shadowed"])
+                             walled=z["dem_walled"], shadowed=z["dem_shadowed"],
+                             pocket=z["dem_pocket"])
         if fm.fcov.shape[1] != carving.n:
             raise ValueError(f"{path.name}: a mesh of {fm.fcov.shape[1]} atoms, the carving has "
                              f"{carving.n}")
@@ -1048,12 +1129,15 @@ def _harmonic(kt, pa, pb):
 
 
 class Reach(NamedTuple):
-    """A state's cells: `live` (reached from the street through conducting passages), `ground`
-    (a conducting obtuse exit's), `unknown` (live and not ground: the system's unknowns); per
-    static passage (FullCells.pe) its conductance `Tp`, per finite street face its `Gf`, per cell
-    its conductance to the street `G` (its faces'), per pair of cells their conductance `W` (the
-    sum of their passages')."""
+    """A state's cells: `live` (reached through conducting passages from the street or a leak),
+    `street` (reached so from the street and the leaks on cells live at baseline, not from a sealed
+    pocket's leak: B (i)'s reach, `live` itself unless the leak sits in the pockets), `ground` (a
+    conducting obtuse exit's), `unknown` (live and not ground: the system's unknowns); per static
+    passage (FullCells.pe) its conductance `Tp`, per finite street face its `Gf`, per cell its
+    conductance to the street `G` (its faces'), per pair of cells their conductance `W` (the sum of
+    their passages')."""
     live: NDArray[np.bool_]
+    street: NDArray[np.bool_]
     ground: NDArray[np.bool_]
     unknown: NDArray[np.bool_]
     Tp: NDArray[np.float64]
@@ -1131,11 +1215,14 @@ class Graph:
     the diagonal's -1), per static passage its pair (`pair`), and per cell its fixed conductance
     to ground (`leak`: the region model's leaks, gap_exits; zero for the per-block exits). A
     state's reach is a search through the conducting pairs from the cells joined to ground (the
-    street's faces, the ground cells, the leaking cells), its operator's values one pass over the
-    pattern (`_values`): every state on the one pattern, a closed passage an explicit zero, a cell
-    off the unknowns an identity row, a leak on its cell's diagonal."""
+    street's faces, the ground cells, the leaking cells), its street reach (B (i)'s) one from the
+    street and the leaking cells live at baseline (`live0`: a sealed pocket's leak drains its
+    homes but frees none), its operator's values one pass over the pattern (`_values`): every
+    state on the one pattern, a closed passage an explicit zero, a cell off the unknowns an
+    identity row, a leak on its cell's diagonal."""
 
-    def __init__(self, fm: FullMesh, c: FullCells, *, leak: NDArray[np.float64]):
+    def __init__(self, fm: FullMesh, c: FullCells, *, leak: NDArray[np.float64],
+                 live0: NDArray[np.bool_]):
         n = c.n
         self.c = c
         ea, eb = c.ea.astype(np.int64), c.eb.astype(np.int64)
@@ -1165,21 +1252,27 @@ class Graph:
         street[c.fc] = True
         street[c.gcell] = True
         self.street = street
-        self._grounded(leak)
+        self._grounded(leak, live0)
 
-    def _grounded(self, leak: NDArray[np.float64]) -> None:
-        if len(leak) != self.c.n or (leak < 0).any():
-            raise ValueError("a leak is a non-negative conductance per cell")
+    def _grounded(self, leak: NDArray[np.float64], live0: NDArray[np.bool_]) -> None:
+        if len(leak) != self.c.n or (leak < 0).any() or len(live0) != self.c.n:
+            raise ValueError("a leak is a non-negative conductance per cell, live0 a flag per cell")
         self.leak = leak
+        self.anchor = (leak > 0) & live0      # the leaks the street reach starts from too
         self.seed_all = self.street | (leak > 0)
-        self.live_all = _bfs(self.pattern.indptr, self.pattern.indices, self.epair,
-                             np.ones(self.npair), self.seed_all)
+        self.anchor_all = self.street | self.anchor
+        ones = np.ones(self.npair)
+        self.live_all = _bfs(self.pattern.indptr, self.pattern.indices, self.epair, ones,
+                             self.seed_all)
+        self.street_all = (self.live_all if np.array_equal(self.anchor_all, self.seed_all) else
+                           _bfs(self.pattern.indptr, self.pattern.indices, self.epair, ones,
+                                self.anchor_all))
 
-    def with_leak(self, leak: NDArray[np.float64]) -> Graph:
-        """This pattern with `leak` per cell (one search for the eps world's reach; the pattern,
-        and so a factorization's plan of it, unchanged)."""
+    def with_leak(self, leak: NDArray[np.float64], *, live0: NDArray[np.bool_]) -> Graph:
+        """This pattern with `leak` per cell, the cells live at baseline `live0` (one search for
+        the eps world's reach; the pattern, and so a factorization's plan of it, unchanged)."""
         g = copy.copy(self)
-        g._grounded(leak)
+        g._grounded(leak, live0)
         return g
 
     def reach(self, fm: FullMesh, kt: NDArray[np.float64], kp: NDArray[np.float64]) -> Reach:
@@ -1193,12 +1286,22 @@ class Graph:
         ground[c.gcell[kf[c.pg] > 0]] = True
         G = np.bincount(c.fc, weights=Gf, minlength=c.n)
         p = self.pattern
-        seed = ground | (G > 0) | (self.leak > 0)
-        if (self.npair == 0 or W.min() > 0) and np.array_equal(seed, self.seed_all):
+        faces = ground | (G > 0)
+        seed = faces | (self.leak > 0)
+        anchor = faces | self.anchor
+        pairs = self.npair == 0 or W.min() > 0
+        if pairs and np.array_equal(seed, self.seed_all):
             live = self.live_all            # every pair, street face and leak conducts
         else:
             live = _bfs(p.indptr, p.indices, self.epair, W, seed)
-        return Reach(live=live, ground=ground, unknown=live & ~ground, Tp=Tp, Gf=Gf, G=G, W=W)
+        if np.array_equal(anchor, seed):
+            street = live                   # no leak beyond the cells live at baseline
+        elif pairs and np.array_equal(anchor, self.anchor_all):
+            street = self.street_all
+        else:
+            street = _bfs(p.indptr, p.indices, self.epair, W, anchor)
+        return Reach(live=live, street=street, ground=ground, unknown=live & ~ground, Tp=Tp,
+                     Gf=Gf, G=G, W=W)
 
     def values(self, r: Reach) -> NDArray[np.float64]:
         """The state's operator on the pattern: its passages, its street faces and the leaks."""
@@ -1321,12 +1424,12 @@ class Model:
     run's (gap_factor: its device); `lumped` every building's interior one cell; `tension_eps`
     the eps world the tension ranks in (clear.EPS, or the translucent search's); `exits` the
     region model's (gap_exits: the street boost on the mesh's weights, a closed edge on its street
-    faces', the leaks on the cells live at baseline with the edge open; the barriers are in
-    `block` and its mesh already: ComplexMetric.fixed and .model). The mesh's atoms (fx.carving: the buildings, or a road network's pieces) carry the
-    width form's factors; a clearing k is per building and each atom takes its building's k, or 1
-    where the state's road prefix (`stop`) carves it (`road_state`), and a road prefix's
-    corridor is boosted as the exits boost a proposed road (`mesh_of`); the homes are the
-    buildings."""
+    faces', the leaks on their sites, the cells live at baseline with the edge open or every cell
+    open then; the barriers are in `block` and its mesh already: ComplexMetric.fixed and .model).
+    The mesh's atoms (fx.carving: the buildings, or a road network's pieces) carry the width
+    form's factors; a clearing k is per building and each atom takes its building's k, or 1 where
+    the state's road prefix (`stop`) carves it (`road_state`), and a road prefix's corridor is
+    boosted as the exits boost a proposed road (`mesh_of`); the homes are the buildings."""
 
     def __init__(self, block, fx: Fixed, *, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width,
                  pop: NDArray[np.float64], demand: common.Demand,
@@ -1354,20 +1457,26 @@ class Model:
         self.tree_ = shapely.STRtree(self.polys_)
         self.timing = Timing()
         cells = full_cells(self.fm, lumped=lumped)
-        bare = System(cells, graph=Graph(self.fm, cells, leak=np.zeros(cells.n)), dem=fx.dem,
-                      ptri=fx.ptri, factorization=factorization)
-        # the leaks on the cells that are unknowns at baseline (every footprint standing) with the
-        # edge open (a closed edge grounds no face: its leaks lie where the open edge's street
-        # reaches, the cells ground there among them), fixed
+        bare = System(cells, graph=Graph(self.fm, cells, leak=np.zeros(cells.n),
+                                         live0=np.zeros(cells.n, dtype=bool)),
+                      dem=fx.dem, ptri=fx.ptri, factorization=factorization)
+        # the leaks on their sites (gap_exits.Sites): the cells that are unknowns at baseline
+        # (every footprint standing) with the edge open (a closed edge grounds no face: its leaks
+        # lie where the open edge's street reaches, the cells ground there among them), or every
+        # cell open then (a triangle's factor positive) and not ground there, fixed
         a, b, c = (self.fm.xy[self.fm.tri[:, k]] for k in range(3))
         tri_area = 0.5 * np.abs((b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1])
                                 - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0]))
         f0 = self._factors(bare, np.zeros(self.n_), prefix=_NO_ROADS)
+        r0 = bare.graph.reach(fm_open, f0.kt, f0.kp)
+        open0 = (np.bincount(cells.cell, weights=f0.kt > 0, minlength=cells.n) > 0) & ~r0.ground
+        if (r0.unknown & ~open0).any():
+            raise RuntimeError("a cell live at baseline that is not open then")
         self.leak_site = gx.LeakSite(
-            area=np.bincount(cells.cell, weights=tri_area, minlength=cells.n),
-            live=bare.graph.reach(fm_open, f0.kt, f0.kp).unknown,
-            foot=np.asarray(bare.Pc @ shapely.area(self.polys_)), sigma=fs.sigma)
-        self.sys = bare.with_graph(bare.graph.with_leak(exits.leak.per_cell(self.leak_site)))
+            area=np.bincount(cells.cell, weights=tri_area, minlength=cells.n), live=r0.unknown,
+            open=open0, foot=np.asarray(bare.Pc @ shapely.area(self.polys_)), sigma=fs.sigma)
+        self.sys = bare.with_graph(bare.graph.with_leak(exits.leak.per_cell(self.leak_site),
+                                                        live0=self.leak_site.live))
         self.dem = fx.dem
         self.nodem = fx.dem.walled            # the homes with no demand point: out of every J
         # the baseline, every footprint standing: the walled-in homes, the escape times under the
@@ -1439,7 +1548,8 @@ class Model:
         """The state of the clearing k (no road carved) with `leak` in place of the exits' own,
         on the same cells (leak_site), pattern and plan: a leak's other lam without the model
         built again (region_leaks' trip calibration)."""
-        sys = self.sys.with_graph(self.sys.graph.with_leak(leak.per_cell(self.leak_site)))
+        sys = self.sys.with_graph(self.sys.graph.with_leak(leak.per_cell(self.leak_site),
+                                                           live0=self.leak_site.live))
         return self._state(sys, k, prefix=_NO_ROADS)
 
     def road_factors(self, prefix: Prefix) -> State:
@@ -1480,8 +1590,9 @@ class Model:
 
     def live_homes_of(self, st: State) -> NDArray[np.bool_]:
         """Per home: some triangle within ring_m of its outline reaches the street in the state
-        (or the open band does): the flow model's own reach."""
-        return np.asarray(self.fx.ring.live(st.reach.live[st.sys.cells.cell]))
+        (or the open band does): the flow model's own reach from the street (Reach.street: a
+        pocket's leak frees no home)."""
+        return np.asarray(self.fx.ring.live(st.reach.street[st.sys.cells.cell]))
 
     def complex_live(self, removed: NDArray[np.bool_]) -> NDArray[np.bool_]:
         """Per home: it reaches the street on the complex rebuilt without `removed`, grown as the
@@ -1734,7 +1845,9 @@ class Relaxation:
 class ComplexMetric:
     """The metric on the complex: its identity the complex's Spec (s, ring, band),
     the FlowSpec (R, its grading, sigma, the demand's quadrature, the lattice offset), the width
-    form, `lumped` (one node per building: the study's alternative) and the code's constants
+    form, `lumped` (one node per building: the study's alternative), the demand's `placement`
+    (`Placement`: its name's `+pockets` for PocketDemand, which needs the exits' leak in the
+    pockets, refused otherwise) and the code's constants
     (CODE), every one in its name, which no raster conductance's can be (`check_disjoint`): its rows
     never read as the raster's. `search_eps`: the eps world the tension ranks in (the greedy's
     and the polish's ranking: clear.EPS, the metric's own, or a larger one, the translucent search,
@@ -1747,17 +1860,20 @@ class ComplexMetric:
     fs: gf.FlowSpec
     form: gf.Width
     lumped: bool
+    placement: LiveDemand | PocketDemand
     search_eps: float
     exits: gx.Exits
     factorization: gap_factor.Factorization
 
     def __post_init__(self) -> None:
         check_disjoint(self.name)
+        self.placement.check(self.exits.leak)
 
     @property
     def name(self) -> str:
         return (f"cx+{self.form.name}+s{self.spec.s:g}r{self.spec.ring_m:g}b{self.spec.band_m:g}"
-                f"+{self.fs.name}" + ("+lumped" if self.lumped else "") + f"+v{CODE}"
+                f"+{self.fs.name}" + ("+lumped" if self.lumped else "")
+                + (f"+{self.placement.name}" if self.placement.name else "") + f"+v{CODE}"
                 + self.exits.suffix
                 + ("" if self.search_eps == clear.EPS else f"@e{self.search_eps:g}"))
 
@@ -1785,7 +1901,8 @@ class ComplexMetric:
         (x0, y0), (x1, y1) = gc.origin_of(block), gc.origin_of(cut)
         by = (x0 - x1, y0 - y1)
         return Fixed.of(cut, self.spec, self.fs, self.form, cache=cache,
-                        carving=carving if by == (0.0, 0.0) else carving.shifted(by))
+                        carving=carving if by == (0.0, 0.0) else carving.shifted(by),
+                        placement=self.placement)
 
     def clearing(self, block, *, demand: common.Demand) -> Model:
         return self.model(block, self.fixed(block, cache=CACHE,
@@ -1814,7 +1931,7 @@ def check_disjoint(name: str) -> None:
 _NUM = r"([0-9]+(?:\.[0-9]+)?(?:e-?[0-9]+)?)"
 _NAME = re.compile(rf"cx\+(close|shy|ramp){_NUM}(?:s{_NUM})?\+s{_NUM}r{_NUM}b{_NUM}"
                    rf"\+R{_NUM}(?:g([0-9]+)x{_NUM})?q([0-9]+)(?:k{_NUM})?"
-                   rf"(?:o(-?{_NUM[1:-1]}),(-?{_NUM[1:-1]}))?(\+lumped)?"
+                   rf"(?:o(-?{_NUM[1:-1]}),(-?{_NUM[1:-1]}))?(\+lumped)?(\+pockets)?"
                    rf"\+v([0-9a-f]+){gx.SUFFIX_RE}(?:@e{_NUM})?")
 
 
@@ -1824,12 +1941,12 @@ def complex_of(name: str, *, factorization: gap_factor.Factorization) -> Complex
     m = _NAME.fullmatch(name)
     if m is None:
         raise ValueError(f"unknown complex metric {name!r}: cx+<form><w>+s<s>r<ring>b<band>+"
-                         "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped]+v<code>"
-                         "[+x[B<line>c<cross>][E0][L[o<open>][b<foot>]][S<boost>[s<surfaces>]h<classes>]"
-                         "v<exits code>]"
+                         "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped][+pockets]"
+                         "+v<code>[+x[B<line>c<cross>][E0][L[p][o<open>][b<foot>]]"
+                         "[S<boost>[s<surfaces>]h<classes>]v<exits code>]"
                          "[@e<search eps>]")
     (kind, w, ramp_s, s_, ring, band, R, levels, grade, quad, sigma, ox, oy,
-     lumped, code, *exits, search) = m.groups()
+     lumped, pockets, code, *exits, search) = m.groups()
     if code != CODE:
         raise ValueError(f"{name!r}: code {code}, but this code's constants digest to {CODE} "
                          "(its rows are another code's)")
@@ -1844,8 +1961,9 @@ def complex_of(name: str, *, factorization: gap_factor.Factorization) -> Complex
                      grade=0.0 if grade is None else float(grade),
                      sigma=gf.SIGMA_ISO if sigma is None else float(sigma), quad=int(quad),
                      offset=gf.OFFSET if ox is None else (float(ox), float(oy)))
+    placement: LiveDemand | PocketDemand = LiveDemand() if pockets is None else PocketDemand()
     metric = ComplexMetric(spec=gc.Spec(s=float(s_), ring_m=float(ring), band_m=float(band)),
-                           fs=fs, form=form, lumped=lumped is not None,
+                           fs=fs, form=form, lumped=lumped is not None, placement=placement,
                            search_eps=clear.EPS if search is None else float(search),
                            exits=gx.exits_of(tuple(exits)), factorization=factorization)
     if metric.name != name:

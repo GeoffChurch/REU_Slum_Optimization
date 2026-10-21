@@ -38,7 +38,10 @@ triangles, u = 0) carry area / QUAD each; a sub-point within ring_m of a home's 
 nearest building it is belongs to that home's ring; a home injects its population over its ring's
 sub-points by area, those that reach the street at width w (`allowed`). A home with no allowed
 ring point but an allowed point within ring_m of its outline is SHADOWED and injects over those;
-with none it is walled in (gap_complex's test, counted apart).
+with none it is walled in (gap_complex's test, counted apart). On the fixed mesh a walled-in home
+may instead be placed in its POCKET (`in_pockets`, gap_clear.PocketDemand: NOTES, "A uniform rule
+for walled-in homes"): the same rule on the open ground no street reaches at baseline, its ring's
+points there, else (shadowed) any within ring_m of its outline; with none it has no demand.
 
 The run's identity: gap_complex.Spec (s, ring_m, band_m), FlowSpec (R, sigma, quad, offset) and
 the Width (its w, and the ramp's s), required, keyword-only.
@@ -741,13 +744,16 @@ def quad_bary(quad: int) -> NDArray[np.float64]:
 class PointDemand:
     """The raster's Placement on the complex (module docstring), fixed at baseline: sub-points `xy`
     (the open ground's triangles' and the open band's, `band` True for the latter: u = 0), `S`
-    (points x homes) each home's injection share per point (a live home's column sums to 1),
-    `walled` the homes walled in at baseline at the run's width, `shadowed`."""
+    (points x homes) each home's injection share per point (a column with demand sums to 1),
+    `walled` the homes with no demand point (walled in at baseline at the run's width, or with
+    `in_pockets` no open ground at all), `shadowed`, `pocket` the homes placed in a pocket
+    (`in_pockets`: walled in at baseline, their points on open ground no street reaches)."""
     xy: NDArray[np.float64]
     band: NDArray[np.bool_]
     S: sp.csr_matrix
     walled: NDArray[np.bool_]
     shadowed: NDArray[np.bool_]
+    pocket: NDArray[np.bool_]
 
 
 def _points_of(xy, tri, quad: int) -> tuple[NDArray[np.float64], NDArray[np.float64],
@@ -782,29 +788,57 @@ def demand_on(geo: gc.Geometry, spec: gc.Spec, quad: int, xy: NDArray[np.float64
     pxy = np.concatenate([P, BP])
     w = np.concatenate([wt, bwt])
     band = np.concatenate([np.zeros(len(P), dtype=bool), np.ones(len(BP), dtype=bool)])
+    n = len(geo.polys)
+    S, shadowed, placed = _placed(geo, spec.ring_m, pxy, w, np.ones(n, dtype=bool))
+    return PointDemand(xy=pxy, band=band, S=S, walled=~placed, shadowed=shadowed,
+                       pocket=np.zeros(n, dtype=bool))
+
+
+def _placed(geo: gc.Geometry, ring_m: float, pxy: NDArray[np.float64], w: NDArray[np.float64],
+            homes: NDArray[np.bool_]
+            ) -> tuple[sp.csr_matrix, NDArray[np.bool_], NDArray[np.bool_]]:
+    """Placement's rule (module docstring) for the homes `homes` on the points `pxy` of weights
+    `w`: (S, points x homes, each placed home's column summing to 1 and every other column empty;
+    the homes placed by the shadow rule; the homes placed)."""
     polys = geo.polys
     n = len(polys)
     pts = shapely.points(pxy[:, 0], pxy[:, 1])
-    tree = shapely.STRtree(polys)
-    (pi, hi), dist = tree.query_nearest(pts, return_distance=True, all_matches=False)
-    ring = dist <= spec.ring_m
+    (pi, hi), dist = shapely.STRtree(polys).query_nearest(pts, return_distance=True,
+                                                          all_matches=False)
+    ring = (dist <= ring_m) & homes[hi]
     pi, hi = pi[ring], hi[ring]
     has = np.bincount(hi, minlength=n) > 0
     rows, cols = [pi], [hi]
     # shadowed: no ring point of its own, but allowed points within ring_m of its outline
-    lack = np.flatnonzero(~has)
+    lack = np.flatnonzero(~has & homes)
     shadowed = np.zeros(n, dtype=bool)
     if len(lack):
-        qi, qh = shapely.STRtree(pts).query(polys[lack], predicate="dwithin",
-                                            distance=spec.ring_m)
+        qi, qh = shapely.STRtree(pts).query(polys[lack], predicate="dwithin", distance=ring_m)
         shadowed[lack[np.unique(qi)]] = True
         rows.append(qh)
         cols.append(lack[qi])
     r, cl = np.concatenate(rows), np.concatenate(cols)
     tot = np.bincount(cl, weights=w[r], minlength=n)
-    S = sp.csr_matrix((w[r] / tot[cl], (r, cl)), shape=(len(pxy), n))
-    walled = tot == 0
-    return PointDemand(xy=pxy, band=band, S=S, walled=walled, shadowed=shadowed)
+    return (sp.csr_matrix((w[r] / tot[cl], (r, cl)), shape=(len(pxy), n)), shadowed,
+            tot > 0)
+
+
+def in_pockets(dem: PointDemand, geo: gc.Geometry, spec: gc.Spec, quad: int,
+               xy: NDArray[np.float64], tri: NDArray[np.int64]
+               ) -> tuple[PointDemand, NDArray[np.int64]]:
+    """`dem` with each home it leaves without demand (`walled`) placed in its pocket (module
+    docstring): Placement's rule on the triangles `tri` (of vertices xy: the open ground no street
+    reaches at baseline) for those homes alone, their points appended after dem's (the points
+    serving none of them dropped). Returns (the demand, per appended point its row of `tri`)."""
+    P, wt, t = _points_of(xy, tri, quad)
+    S2, shadowed, placed = _placed(geo, spec.ring_m, P, wt, dem.walled)
+    used = np.flatnonzero(np.diff(S2.indptr) > 0)
+    S2 = S2[used]
+    return (PointDemand(xy=np.concatenate([dem.xy, P[used]]),
+                        band=np.concatenate([dem.band, np.zeros(len(used), dtype=bool)]),
+                        S=sp.vstack([dem.S, S2]).tocsr(), walled=dem.walled & ~placed,
+                        shadowed=dem.shadowed | (shadowed & placed), pocket=placed),
+            t[used])
 
 
 def locate(m: Mesh, xy: NDArray[np.float64]) -> NDArray[np.int64]:

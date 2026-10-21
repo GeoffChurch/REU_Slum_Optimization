@@ -212,8 +212,9 @@ LAMS = (250.0, 500.0, 1000.0)    # the region test's nominal lam (m), at s 0 and
 # the bootstrap's sd 3.2 m)
 CALIBRATED: dict[float, gx.InternalLeak] = {
     0.9: metrics.LEAK,                                      # RUNTIME's: open_m 6214, foot_m 562
-    0.75: gx.InternalLeak(open_m=3608.0, foot_m=565.0),     # 500.1 m
-    1.0: gx.InternalLeak(open_m=math.inf, foot_m=552.0),    # 492.2 m (sd 3.3 m)
+    0.75: gx.InternalLeak(open_m=3608.0, foot_m=565.0, sites=gx.LiveSites()),   # 500.1 m
+    1.0: gx.InternalLeak(open_m=math.inf, foot_m=552.0,
+                         sites=gx.LiveSites()),                  # 492.2 m (sd 3.3 m)
 }
 
 
@@ -233,9 +234,10 @@ def region_test_leak(s: float, lam: float) -> gx.InternalLeak:
     is on 5810@major with the barriers: its total sigma REF_OPEN_M2 / lam^2 all on open ground
     (open_m lam) or all at the footprints (foot_m lam sqrt(REF_FOOT_M2 / REF_OPEN_M2))."""
     if s == 0.0:
-        return gx.InternalLeak(open_m=lam, foot_m=math.inf)
+        return gx.InternalLeak(open_m=lam, foot_m=math.inf, sites=gx.LiveSites())
     if s == 1.0:
-        return gx.InternalLeak(open_m=math.inf, foot_m=lam * math.sqrt(REF_FOOT_M2 / REF_OPEN_M2))
+        return gx.InternalLeak(open_m=math.inf, foot_m=lam * math.sqrt(REF_FOOT_M2 / REF_OPEN_M2),
+                               sites=gx.LiveSites())
     raise ValueError(f"the region test's shares were 0 and 1, not {s}")
 
 
@@ -1038,7 +1040,8 @@ def pair_of(share: float, scale: float, *, open_m2: float, foot_m2: float) -> gx
         return x if x == math.inf else float(max(round(x / LAM_RES_M), 1) * LAM_RES_M)
     return gx.InternalLeak(
         open_m=whole(scale / math.sqrt(1.0 - share)) if share < 1.0 else math.inf,
-        foot_m=whole(scale * math.sqrt(foot_m2 / (share * open_m2))) if share > 0.0 else math.inf)
+        foot_m=whole(scale * math.sqrt(foot_m2 / (share * open_m2))) if share > 0.0 else math.inf,
+        sites=gx.LiveSites())
 
 
 class ClosedCheck(NamedTuple):
@@ -1074,7 +1077,8 @@ def calibrate(share: float, target: float, start: float, procs: int) -> None:
     search from the scale `start` (m: recorded)."""
     [b] = common.build_blocks([REGION])
     exits = gx.Exits(barriers=BARRIERS, edge=gx.ClosedEdge(),
-                     leak=gx.InternalLeak(open_m=target, foot_m=target), boost=gx.NoBoost())
+                     leak=gx.InternalLeak(open_m=target, foot_m=target, sites=gx.LiveSites()),
+                     boost=gx.NoBoost())
     metric = dataclasses.replace(metrics.metric_of(metrics.RUNTIME, device="cpu"), exits=exits)
     t0 = time.time()
     m = metric.clearing(b, demand=POP)

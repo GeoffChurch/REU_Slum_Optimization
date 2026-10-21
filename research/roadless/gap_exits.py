@@ -19,11 +19,17 @@ way's line. A
 barrier changes the mesh: the fixed mesh is built on the cut block, so its cache key (the block's
 boundary) and the metric's name (the suffix) both carry it.
 
-LEAKS (`Leak`), conductances to ground on the diagonal of the system, on the cells that are
-unknowns at baseline (live and not ground with every footprint standing, the edge open) and
-nowhere else, the same for every state: B's enclosed homes stay enclosed, a cleared building's
-interior and shy zone conduct but do not leak, the sparsity pattern is unchanged and P stays
-convex in the clearing. `NoLeak`: the boundary only. `InternalLeak(open_m, foot_m)`: destinations
+LEAKS (`Leak`), conductances to ground on the diagonal of the system, on the cells its SITES
+say (`Sites`, a Strategy of the leak's, spelt in its name) and nowhere else, the same for every
+state: a cleared building's interior and shy zone conduct but do not leak, the sparsity pattern is
+unchanged and P stays convex in the clearing. `LiveSites`: the cells that are unknowns at baseline
+(live and not ground with every footprint standing, the edge open). `OpenSites` (`p` after the
+`L`; NOTES, "A uniform rule for walled-in homes: destinations in their pockets, no free first"):
+every cell open at baseline (its factor positive with every footprint standing, and not ground),
+the sealed pockets no street reaches among them, so a walled-in home placed on its pocket's ground
+(gap_clear.PocketDemand) ends its trips there. Either way B (i) reads the street's reach, never a
+leak's (gap_clear.Graph: the reach from the street and the leaks on cells live at baseline, the
+pockets' apart). `NoLeak`: the boundary only. `InternalLeak(open_m, foot_m, sites)`: destinations
 inside, two constants of the model, the same on every block and region (owner 2026-10-15: "set
 the hyperparameters once and they would apply to all blocks"; NOTES, "The region's leaks:
 destinations at buildings and on open ground (5810@major)"). The open ground leaks sigma /
@@ -54,8 +60,9 @@ boost on paved ways only") and on the roads a method proposes, paved by being bu
 
 THE NAME. The per-block metric (no barriers, no leak, no boost, the edge open: the block's whole
 street ring the exit) has no suffix, so its name and digest are as before. Any other names its
-parts in a suffix `+x[B<line_m>c<cross_m>][E0][L[o<open_m>][b<foot_m>]][S<factor>[s<surfaces>]
-h<classes>]v<EXITS_CODE>` (the surfaces by their label, none for any; the classes joined by `-`)
+parts in a suffix `+x[B<line_m>c<cross_m>][E0][L[p][o<open_m>][b<foot_m>]][S<factor>[s<surfaces>]
+h<classes>]v<EXITS_CODE>` (`p` the leak on OpenSites; the surfaces by their label, none for any; the
+classes joined by `-`)
 before the search's `@e<eps>` (a number as `:g` spells
 it, or its repr where that would round it);
 EXITS_CODE digests this module's constants (digests.constants_of), so editing them renames only
@@ -126,19 +133,71 @@ def osm_in(block: Block) -> Osm:
 class LeakSite(NamedTuple):
     """What a leak reads of a block's model (gap_clear.Model), per cell of its fixed mesh: `area`
     (m^2), `live` (an unknown at baseline with the edge open: live and not ground, every footprint
-    standing), `foot` (the footprint area its homes inject there, m^2: gap_clear.System.Pc @ each
-    building's footprint area), and the sheet conductance `sigma`."""
+    standing), `open` (open at baseline: its factor positive with every footprint standing, and
+    not ground; `live` and the sealed pockets), `foot` (the footprint area its homes inject there,
+    m^2: gap_clear.System.Pc @ each building's footprint area), and the sheet conductance
+    `sigma`."""
     area: NDArray[np.float64]
     live: NDArray[np.bool_]
+    open: NDArray[np.bool_]
     foot: NDArray[np.float64]
     sigma: float
 
 
-class Leak(Protocol):
-    """A leak family: its name's part and its conductance to ground per cell."""
+class Sites(Protocol):
+    """Where an internal leak sits (module docstring): its name's letter, its cells, and whether
+    those reach into the sealed pockets (a home placed there needs them: gap_clear.PocketDemand)."""
 
     @property
     def name(self) -> str: ...
+
+    @property
+    def pockets(self) -> bool: ...
+
+    def cells(self, site: LeakSite) -> NDArray[np.bool_]: ...
+
+
+@dataclass(frozen=True)
+class LiveSites:
+    """The cells live at baseline (unknowns with every footprint standing, the edge open)."""
+
+    @property
+    def name(self) -> str:
+        return ""
+
+    @property
+    def pockets(self) -> bool:
+        return False
+
+    def cells(self, site: LeakSite) -> NDArray[np.bool_]:
+        return site.live
+
+
+@dataclass(frozen=True)
+class OpenSites:
+    """Every cell open at baseline, the sealed pockets among them (spelt `p`)."""
+
+    @property
+    def name(self) -> str:
+        return "p"
+
+    @property
+    def pockets(self) -> bool:
+        return True
+
+    def cells(self, site: LeakSite) -> NDArray[np.bool_]:
+        return site.open
+
+
+class Leak(Protocol):
+    """A leak family: its name's part, its conductance to ground per cell, and whether it drains
+    the sealed pockets (`pockets`)."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def pockets(self) -> bool: ...
 
     def per_cell(self, site: LeakSite) -> NDArray[np.float64]: ...
 
@@ -150,6 +209,10 @@ class NoLeak:
     @property
     def name(self) -> str:
         return ""
+
+    @property
+    def pockets(self) -> bool:
+        return False
 
     def per_cell(self, site: LeakSite) -> NDArray[np.float64]:
         return np.zeros(len(site.area))
@@ -164,11 +227,12 @@ def num(x: float) -> str:
 
 @dataclass(frozen=True, kw_only=True)
 class InternalLeak:
-    """Destinations inside (module docstring): sigma / open_m^2 per m^2 of the open ground live
-    at baseline, and sigma / foot_m^2 per m^2 of a building's footprint where its homes inject;
-    a length inf: none of that leak."""
+    """Destinations inside (module docstring): sigma / open_m^2 per m^2 of the open ground on its
+    `sites` (the cells live at baseline, or every cell open then), and sigma / foot_m^2 per m^2 of
+    a building's footprint where its homes inject there; a length inf: none of that leak."""
     open_m: float
     foot_m: float
+    sites: LiveSites | OpenSites
 
     def __post_init__(self) -> None:
         if not (self.open_m > 0.0 and self.foot_m > 0.0
@@ -178,8 +242,12 @@ class InternalLeak:
 
     @property
     def name(self) -> str:
-        return ("L" + (f"o{num(self.open_m)}" if self.open_m < math.inf else "")
+        return ("L" + self.sites.name + (f"o{num(self.open_m)}" if self.open_m < math.inf else "")
                 + (f"b{num(self.foot_m)}" if self.foot_m < math.inf else ""))
+
+    @property
+    def pockets(self) -> bool:
+        return self.sites.pockets
 
     def per_foot(self, site: LeakSite) -> float:
         """The buildings' leak per m^2 of footprint: sigma / foot_m^2 (a home's own building's
@@ -188,8 +256,9 @@ class InternalLeak:
         return site.sigma / self.foot_m ** 2
 
     def per_cell(self, site: LeakSite) -> NDArray[np.float64]:
-        open_ground = np.where(site.live, site.sigma * site.area / self.open_m ** 2, 0.0)
-        buildings = np.where(site.live, site.sigma * site.foot / self.foot_m ** 2, 0.0)
+        on = self.sites.cells(site)
+        open_ground = np.where(on, site.sigma * site.area / self.open_m ** 2, 0.0)
+        buildings = np.where(on, site.sigma * site.foot / self.foot_m ** 2, 0.0)
         return open_ground + buildings
 
 
@@ -512,8 +581,9 @@ def per_block() -> Exits:
 
 
 _N = r"[0-9]+(?:\.[0-9]+)?(?:e[-+]?[0-9]+)?"
-# the suffix as gap_clear's name grammar embeds it: barriers, edge, leak, boost, digest (9 groups)
-SUFFIX_RE = (rf"(?:\+x(?:B({_N})c({_N}))?(E0)?(?:L(?:o({_N}))?(?:b({_N}))?)?"
+# the suffix as gap_clear's name grammar embeds it: barriers, edge, leak (its sites, lengths),
+# boost, digest (10 groups)
+SUFFIX_RE = (rf"(?:\+x(?:B({_N})c({_N}))?(E0)?(?:L(p)?(?:o({_N}))?(?:b({_N}))?)?"
              rf"(?:S({_N})(?:s({'|'.join(s.label for s in SURFACES)}))?h([a-z_]+(?:-[a-z_]+)*))?"
              rf"v([0-9a-f]+))?")
 
@@ -521,7 +591,7 @@ SUFFIX_RE = (rf"(?:\+x(?:B({_N})c({_N}))?(E0)?(?:L(?:o({_N}))?(?:b({_N}))?)?"
 def exits_of(groups: tuple[str | None, ...]) -> Exits:
     """The Exits SUFFIX_RE's groups name (none matched: the per-block exits); a digest not this
     code's raises (the rows are another code's)."""
-    line, cross, closed, open_m, foot_m, factor, surfaces, classes, code = groups
+    line, cross, closed, pockets, open_m, foot_m, factor, surfaces, classes, code = groups
     if code is None:
         return per_block()
     if code != EXITS_CODE:
@@ -532,7 +602,8 @@ def exits_of(groups: tuple[str | None, ...]) -> Exits:
     edge: OpenEdge | ClosedEdge = OpenEdge() if closed is None else ClosedEdge()
     leak: NoLeak | InternalLeak = (NoLeak() if open_m is None and foot_m is None else InternalLeak(
         open_m=math.inf if open_m is None else float(open_m),
-        foot_m=math.inf if foot_m is None else float(foot_m)))
+        foot_m=math.inf if foot_m is None else float(foot_m),
+        sites=LiveSites() if pockets is None else OpenSites()))
     boost: NoBoost | StreetBoost = (NoBoost() if factor is None else StreetBoost(
         factor=float(factor),
         surfaces=(AnySurface() if surfaces is None
