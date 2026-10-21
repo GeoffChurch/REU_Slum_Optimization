@@ -14,12 +14,13 @@ the wave is configured, and from it the job's class, lane and node.
   (`history_of`: their final queues), then the family's stored run, each with the ladder's
   `stored_mem` and `stored_time` margins (1.2 and 1.25 in every preset); with neither, the fit,
   with `fit_mem` (1.5) and no time margin (the worst rate is its margin), over the family's jobs
-  and the earlier waves': on a block of at least `fit_min_km2` (FIT_MIN_KM2, desire_fit.out's 1
-  km2, where a job's fixed overhead is a small share), the worst per-km2 peak (and wall) of the
-  jobs on such blocks times the block's area; on a smaller block, the largest peak (and wall) of
-  the jobs on blocks under it. Taken over every block, the worst rate is a small block's overhead
-  (20 GB/km2 on 0.08 km2 against 8.8 on the large ones), which would class every large block past
-  every node.
+  and the earlier waves' on the block's side of `fit_min_km2` (FIT_MIN_KM2, desire_fit.out's 1
+  km2, where a job's fixed overhead is a small share), the item's own when they are on at least
+  `fit_min_blocks` blocks there (FIT_MIN_BLOCKS), else every item's: on a block of at least
+  `fit_min_km2`, their worst per-km2 peak (and wall) times the block's area; on a smaller block,
+  their largest peak (and wall). Taken over every block, the worst rate is a small block's
+  overhead (20 GB/km2 on 0.08 km2 against 8.8 on the large ones), which would class every large
+  block past every node.
 - **A plan** (`plan_wave`): one job per (block, item); its class the smallest rung holding its
   estimate (pool_ladder.rung_of); the long lane's when its needed minutes pass a fresh lease's
   (pool_queue.fresh_minutes) or its memory the top rung, then needing `fit_mem` times its peak (a
@@ -31,7 +32,6 @@ Rows are read with pandas, here only: nothing on the cluster imports this module
 """
 from __future__ import annotations
 
-import json
 import math
 import sqlite3
 from abc import ABC, abstractmethod
@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property
 from pathlib import Path
-from typing import NamedTuple, Protocol
+from typing import Literal, NamedTuple, Protocol
 
 import pandas as pd
 import pool_queue as pq
@@ -52,6 +52,13 @@ from reblock.contracts import Block
 #: The fit's floor (Ruling 15, desire_fit.out's choice): the worst per-km2 rate is taken over the
 #: jobs on blocks of at least this many km2, where a job's fixed overhead is a small share.
 FIT_MIN_KM2 = 1.0
+
+#: An item's own fit needs its jobs on at least this many blocks on the fit's side of FIT_MIN_KM2
+#: (Ruling 15 as the controller amended it): on fewer, its worst rate is too few blocks' word, and
+#: the family's worst rate stands, the conservative default for the unseen. One fit for every item
+#: would class a cheap method's scoring at cycle_desire's 13.8 GB/km2; a misfit of an item's own
+#: costs an OOM's promotion, never a drop.
+FIT_MIN_BLOCKS = 5
 
 
 class Observed(NamedTuple):
@@ -227,12 +234,22 @@ class Lenses(_Rows):
 #: (consolidated.py's lineup readers skip them too).
 NOT_NETWORKS = ("__plain.parquet", "__homes.parquet")
 
+#: The lineup roots whose tasks proposed each network and scored it in one process (road_rescore
+#: lineup-one: NOTES, "The road methods under free first"), live and superseded alike, so a row's
+#: peak is the proposal's as often as the scoring's (62803's cycle_desire: 165 GB there, 16.6 GB
+#: scored alone in lineup-f8fa4e53).
+PROPOSED_AND_SCORED = frozenset({"lineup-caf14fa2"})
+
 
 @dataclass(frozen=True, kw_only=True)
 class LineupScore(_Rows):
     """A lineup network scored (one job per block and method), from every
-    `road_rows/**/area_*/<id>__<item>.parquet`, the superseded included: item the method, a file's
-    rows (one per budget) one job, its peak and its total wall."""
+    `road_rows/**/area_*/<id>__<item>.parquet` but those under a root of PROPOSED_AND_SCORED: item
+    the method, a file's rows (one per budget) one job, its peak and its total wall. An estimate
+    measures only the job it estimates (the controller's ruling): a scoring job's basis is a run
+    that only scored (lineup-f8fa4e53, lineup-e6131880, the old metric's rows and later roots of
+    scoring alone), never one that proposed its network as well, whose peak would class the
+    scoring of cycle_desire's large networks past every rung."""
 
     root: Path
 
@@ -243,7 +260,8 @@ class LineupScore(_Rows):
     def _read(self) -> tuple[Observed, ...]:
         out = []
         for f in sorted(self.root.glob("road_rows/**/area_*/*__*.parquet")):
-            if f.name.endswith(NOT_NETWORKS):
+            if f.name.endswith(NOT_NETWORKS) or PROPOSED_AND_SCORED & set(
+                    f.relative_to(self.root).parts):
                 continue
             t = pd.read_parquet(f, columns=["block", "method", "peak_rss_gb", "t_total"])
             jobs = set(zip(t["block"], t["method"], strict=True))
@@ -342,17 +360,36 @@ def _worst_rate(rates: Sequence[float]) -> float:
     return max(rates)
 
 
+class Pool(NamedTuple):
+    """The jobs a fit is taken over, and whose they are: the item's own (`item`) or every item's
+    of the family (`family`)."""
+
+    scope: Literal["item", "family"]
+    runs: list[Observed]
+
+
+def _pool(runs: Sequence[Observed], *, item: str, fit_min_blocks: int) -> Pool:
+    """Of `runs` (one side of the fit's floor), the fit's: `item`'s own when they are on at least
+    `fit_min_blocks` blocks, else the family's every one."""
+    mine = [o for o in runs if o.item == item]
+    if len({o.block for o in mine}) >= fit_min_blocks:
+        return Pool(scope="item", runs=mine)
+    return Pool(scope="family", runs=list(runs))
+
+
 @dataclass(frozen=True, kw_only=True)
 class Estimator:
     """A wave's estimates (the module's doc): of `family`'s work, under `ladder`'s margins, from
     `history` (earlier waves' measures of the family, newest wave first: history_of), the family's
-    stored runs, or the fit, by `areas` (km2) with its floor `fit_min_km2`."""
+    stored runs, or the fit, by `areas` (km2) with its floor `fit_min_km2`, an item's own once its
+    jobs are on `fit_min_blocks` blocks."""
 
     family: Family
     ladder: Ladder
     areas: Mapping[str, float]
     history: Sequence[Observed]
     fit_min_km2: float
+    fit_min_blocks: int
 
     def estimate(self, block: str, item: str) -> Estimate:
         """(block, item)'s estimate: the newest wave's measure of it, else the family's most
@@ -362,17 +399,19 @@ class Estimator:
         if seen is None:
             seen = self.family.stored(block, item)
         if seen is None:
-            return self._fitted(block)
+            return self._fitted(block, item)
         return Estimate(peak_gb=seen.peak_gb, minutes=seen.minutes,
                         mem_margin=self.ladder.stored_mem, time_margin=self.ladder.stored_time,
                         source=seen.source)
 
-    def _fitted(self, block: str) -> Estimate:
-        """The fit for `block`, over the family's jobs and the earlier waves': at least
-        fit_min_km2, the worst per-km2 peak and wall of the jobs on such blocks times its area;
-        under it, the largest peak and wall of the jobs on blocks under it. Its memory margin is
-        the ladder's fit_mem, its time's none (the worst rate is its margin). A block with no
-        area, a job on one, or no job to fit is a SystemExit naming it."""
+    def _fitted(self, block: str, item: str) -> Estimate:
+        """The fit for (`block`, `item`), over the family's jobs and the earlier waves' on the
+        block's side of fit_min_km2, `item`'s own when they are on at least fit_min_blocks blocks
+        there, else every item's (`_pool`; the source says which): at least fit_min_km2, the
+        worst per-km2 peak and wall of those jobs times the block's area; under it, their largest
+        peak and wall. Its memory margin is the ladder's fit_mem, its time's none (the worst rate
+        is its margin). A block with no area, a job on one, or no job to fit is a SystemExit
+        naming it."""
         what = f"{self.family.name}'s fit"
         if block not in self.areas:
             raise SystemExit(f"{block}: nothing of {self.family.name} stored, and no area to fit "
@@ -384,23 +423,22 @@ class Estimator:
                              f"{', '.join(unknown[:5])}" + (f" ({len(unknown)} in all)"
                                                             if len(unknown) > 5 else ""))
         area, floor = self.areas[block], self.fit_min_km2
-        if area >= floor:
-            large = [o for o in runs if self.areas[o.block] >= floor]
-            if not large:
-                raise SystemExit(f"{block} ({area:.2f} km2): {what} has no job on a block of at "
-                                 f"least {floor:g} km2")
-            peak = _worst_rate([o.peak_gb / self.areas[o.block] for o in large]) * area
-            minutes = _worst_rate([o.minutes / self.areas[o.block] for o in large]) * area
-            source = f"fit:{len(large)} jobs of at least {floor:g} km2"
+        large = area >= floor
+        side = f"{'of at least' if large else 'under'} {floor:g} km2"
+        pool = _pool([o for o in runs if (self.areas[o.block] >= floor) == large], item=item,
+                     fit_min_blocks=self.fit_min_blocks)
+        if not pool.runs:
+            raise SystemExit(f"{block} ({area:.2f} km2): {what} has no job on a block {side}")
+        if large:
+            peak = _worst_rate([o.peak_gb / self.areas[o.block] for o in pool.runs]) * area
+            minutes = _worst_rate([o.minutes / self.areas[o.block] for o in pool.runs]) * area
         else:
-            small = [o for o in runs if self.areas[o.block] < floor]
-            if not small:
-                raise SystemExit(f"{block} ({area:.2f} km2): {what} has no job on a block under "
-                                 f"{floor:g} km2")
-            peak, minutes = max(o.peak_gb for o in small), max(o.minutes for o in small)
-            source = f"fit:{len(small)} jobs under {floor:g} km2"
+            peak = max(o.peak_gb for o in pool.runs)
+            minutes = max(o.minutes for o in pool.runs)
+        blocks = len({o.block for o in pool.runs})
         return Estimate(peak_gb=peak, minutes=minutes, mem_margin=self.ladder.fit_mem,
-                        time_margin=1.0, source=source)
+                        time_margin=1.0, source=f"fit:{pool.scope}:{len(pool.runs)} jobs on "
+                                                f"{blocks} blocks {side}")
 
 
 class _Wave(NamedTuple):
@@ -417,15 +455,14 @@ def history_of(waves: Path, family: str) -> list[Observed]:
     (ValueError)."""
     found: list[_Wave] = []
     for path in sorted(waves.glob("*/final.db")):
+        h = pq.read_header(path)
+        if h.wave != path.parent.name:
+            raise ValueError(f"{path} is wave {h.wave}'s")
+        if h.family != family:
+            continue
         db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
         db.row_factory = sqlite3.Row
         try:
-            text = db.execute("SELECT header FROM header").fetchone()["header"]
-            h = pq._header(pq._Obj(json.loads(text), f"{path}: header"))
-            if h.wave != path.parent.name:
-                raise ValueError(f"{path} is wave {h.wave}'s")
-            if h.family != family:
-                continue
             rows = db.execute(
                 "SELECT j.block, j.item, a.peak_gb, a.minutes FROM jobs j JOIN attempts a"
                 " ON a.id = (SELECT MAX(id) FROM attempts WHERE job = j.id AND outcome = ?)"
@@ -471,7 +508,10 @@ def plan_wave(*, wave: str, commit: str, family: str, ladder: Ladder, estimator:
     the top rung (then of the top rung's class), needing `fit_mem` times its peak; its group its
     block, every group on one of `nodes`, longest-processing-time first on the group's needed
     minutes (ties by `ids`' order, to the least loaded node, ties by `nodes`' order). The
-    estimator's family and ladder must be `family` and `ladder` (else ValueError)."""
+    estimator's family and ladder must be `family` and `ladder` (else ValueError). A long job
+    estimated past any partition's wall (4287's fitted cycle_desire proposal, about 584 h against
+    7 days) is planned LONG with its estimate as it is: refusing or flagging it is the submit's
+    (Task 7)."""
     if family != estimator.family.name or ladder != estimator.ladder:
         raise ValueError(f"wave {wave}: family {family} and ladder {ladder.name}, the estimator's "
                          f"{estimator.family.name} and {estimator.ladder.name}")

@@ -6,7 +6,8 @@ code as it is and must fail under each of its faults.
     uv run python $S claim [--fault <name>]         # fault: split-tx
     uv run python $S transitions [--fault <name>]   # faults: late-finish, drop-on-top,
                                                     # any-worker, second-claim
-    uv run python $S class [--fault <name>] <rows>  # faults: median-rate, no-fit-margin
+    uv run python $S class [--fault <name>] <rows>  # faults: median-rate, no-fit-margin,
+                                                    # family-rate
     uv run python $S both-ways <guards,> [args ...]   # each guard, then under each of its faults
 
 A guard runs as `<guard> [--fault <name>] [args ...]`: the fault is named by its flag, so a
@@ -66,23 +67,28 @@ DONE marks the job done), `second-claim` (a worker holding a claim may claim aga
 
 `class` (pool_plan's classes and estimates, the spec's 3.4 with the plan's Ruling 15), on the
 stored rows under `<rows>`, every block's area from its consolidated_rows/summary_features.csv:
-- `stored`: the lineup-score family's every stored (block, method), planned under cpu-score (a
-  plan of every stored block and method over orion and quadro2): its class is that of the smallest
-  rung holding 1.2 times its most demanding stored peak (recomputed here from the family's runs),
-  or it is LONG past 88 GB; its needed minutes are 1.25 times that run's wall (rel 1e-9).
-- `leave-one-out`: the propose family's cycle_desire (CLASS_ITEM) jobs on blocks of at least
+- `stored`: the lineup-score family's every stored (block, method) (scoring-only runs: no root of
+  pool_plan.PROPOSED_AND_SCORED), planned under cpu-score (a plan of every stored block and method
+  over orion and quadro2): its class is that of the smallest rung holding 1.2 times its most
+  demanding stored peak (recomputed here from the family's runs), or it is LONG past 88 GB; its
+  needed minutes are 1.25 times that run's wall (rel 1e-9).
+- `leave-one-out`: for each item of the propose family, its jobs on blocks of at least
   FIT_MIN_KM2: each block's estimate with its own rows removed (a family without them) is 1.5
-  times the worst per-km2 peak of the others on such blocks times its area (recomputed here, rel
-  1e-9), and holds its measured peak. The tightest is 62803 (164.7 GB on 11.90 km2, 13.8 GB/km2,
-  the worst rate on record: it finished after desire_fit.out), held by 53556's 10.9 GB/km2.
+  times the worst per-km2 peak of the others on such blocks, the item's own when they are on
+  FIT_MIN_BLOCKS blocks, else the family's, times its area (recomputed here, rel 1e-9), its source
+  naming that fit; cycle_desire's (CLASS_ITEM) holds each block's measured peak (another item's
+  misfit, which costs an OOM's promotion, is counted). cycle_desire's tightest is 62803 (164.7 GB
+  on 11.90 km2, 13.8 GB/km2, the worst rate on record: it finished after desire_fit.out), held by
+  53556's 10.9 GB/km2. The other items tell a family-wide fit from an item's: cycle_desire's own
+  rate is the family's.
 - `plan`: plan_wave of the CLASS_BLOCKS stored lineup blocks with the most stored work (4287 among
   them: its arterial network's 3.0 h, the long lane's) and the seven methods, over CLASS_NODES:
   every job of a block on one node, its group the block; the nodes' summed needed minutes within
   the largest group's of each other (longest-processing-time first); a job whose needed minutes
   pass pool_queue.fresh_minutes (a lease less its margin and a worker's startup, 105) is LONG.
-Faults: `median-rate` (the fit's rate the family's median per-km2 rate, not its worst: the
-recomputation fails) and `no-fit-margin` (the fit without its 1.5: 62803 is classed below its
-measured peak).
+Faults: `median-rate` (the fit's rate the median per-km2 rate, not the worst: the recomputation
+fails), `no-fit-margin` (the fit without its 1.5: 62803 is classed below its measured peak) and
+`family-rate` (every item fitted at the family's rate: the cheap methods' recomputation fails).
 """
 from __future__ import annotations
 
@@ -665,7 +671,7 @@ class _Without:
 def _stored_classes(lineup: pp.Family, lad: Ladder, areas: dict[str, float]) -> list[str]:
     most = _most(lineup.observed())
     est = pp.Estimator(family=lineup, ladder=lad, areas=areas, history=(),
-                       fit_min_km2=pp.FIT_MIN_KM2)
+                       fit_min_km2=pp.FIT_MIN_KM2, fit_min_blocks=pp.FIT_MIN_BLOCKS)
     seed = pp.plan_wave(wave="pool-check", commit=COMMIT, family=lineup.name, ladder=lad,
                         estimator=est, nodes=CLASS_NODES, ids=sorted({b for b, _ in most}),
                         items=sorted({i for _, i in most}), line=lambda b, i: f"echo {b} {i}",
@@ -701,42 +707,66 @@ class Held(NamedTuple):
     measured: float       # GB
     area: float           # km2
     gb: float             # the estimate
-    by: str               # the block whose per-km2 peak is the worst of the others
+    scope: str            # whose jobs the fit was over: the item's or the family's
+    by: str               # the block whose per-km2 peak is the worst of those jobs
     rate: float           # GB/km2
 
 
-def _leave_one_out(propose: pp.Family, lad: Ladder, areas: dict[str, float]) -> list[str]:
-    runs = propose.observed()
-    floor = pp.FIT_MIN_KM2
-    large = [o for o in runs if areas[o.block] >= floor]
-    jobs = [o for o in large if o.item == CLASS_ITEM]
+def _left_out(propose: pp.Family, lad: Ladder, areas: dict[str, float],
+              large: Sequence[pp.Observed], item: str) -> tuple[list[Held], list[str]]:
+    """`item`'s leave-one-out over its jobs in `large` (the family's on blocks of at least
+    FIT_MIN_KM2): each estimate against 1.5 times the worst per-km2 peak of the others (the item's
+    when they are on FIT_MIN_BLOCKS blocks, else the family's: recomputed here) times its area."""
+    jobs = [o for o in large if o.item == item]
     notes: list[str] = []
     held: list[Held] = []
     for blk in sorted({o.block for o in jobs}):
         est = pp.Estimator(family=_Without(family=propose, block=blk), ladder=lad, areas=areas,
-                           history=(), fit_min_km2=floor).estimate(blk, CLASS_ITEM)
-        worst = max((o for o in large if o.block != blk), key=lambda o: o.peak_gb / areas[o.block])
+                           history=(), fit_min_km2=pp.FIT_MIN_KM2,
+                           fit_min_blocks=pp.FIT_MIN_BLOCKS).estimate(blk, item)
+        others = [o for o in large if o.block != blk]
+        own = [o for o in others if o.item == item]
+        scope, pool = (("item", own) if len({o.block for o in own}) >= pp.FIT_MIN_BLOCKS
+                       else ("family", others))
+        worst = max(pool, key=lambda o: o.peak_gb / areas[o.block])
         rate = worst.peak_gb / areas[worst.block]
         want = 1.5 * rate * areas[blk]
         measured = max(o.peak_gb for o in jobs if o.block == blk)
         if not math.isclose(est.gb(), want, rel_tol=1e-9):
-            notes.append(f"{blk}: {est.gb():.2f} GB, want 1.5 x {rate:.3f} GB/km2 x "
-                         f"{areas[blk]:.3f} km2 = {want:.2f}")
-        if est.gb() < measured:
-            notes.append(f"{blk}: {est.gb():.1f} GB, below its measured {measured:.1f}")
+            notes.append(f"{item} {blk}: {est.gb():.2f} GB, want 1.5 x {rate:.3f} GB/km2 ({scope}) "
+                         f"x {areas[blk]:.3f} km2 = {want:.2f}")
+        if not est.source.startswith(f"fit:{scope}:"):
+            notes.append(f"{item} {blk}: source {est.source!r}, want the {scope}'s fit")
         held.append(Held(ratio=est.gb() / measured, block=blk, measured=measured,
-                         area=areas[blk], gb=est.gb(), by=worst.block, rate=rate))
-    if not held:
-        notes.append(f"no {CLASS_ITEM} job on a block of at least {floor:g} km2")
-    t = min(held) if held else None
-    print(f"leave-one-out: {len(jobs)} {CLASS_ITEM} jobs on {len(held)} blocks of at least "
-          f"{floor:g} km2" + ("" if t is None else
-                              f"; the tightest {t.block} ({t.measured:.1f} GB on {t.area:.2f} km2, "
-                              f"{t.measured / t.area:.1f} GB/km2) at {t.gb:.1f} GB, by {t.by}'s "
-                              f"{t.rate:.1f} GB/km2")
-          + (" -> ok" if not notes else " -> FAILS: " + "; ".join(notes[:5])
-             + (f" ({len(notes)} in all)" if len(notes) > 5 else "")), flush=True)
-    return ["leave-one-out"] if notes else []
+                         area=areas[blk], gb=est.gb(), scope=scope, by=worst.block, rate=rate))
+    return held, notes
+
+
+def _leave_one_out(propose: pp.Family, lad: Ladder, areas: dict[str, float]) -> list[str]:
+    large = [o for o in propose.observed() if areas[o.block] >= pp.FIT_MIN_KM2]
+    bad: list[str] = []
+    for item in sorted({o.item for o in large}):
+        held, notes = _left_out(propose, lad, areas, large, item)
+        below = [h for h in held if h.ratio < 1.0]
+        if item == CLASS_ITEM:
+            notes += [f"{item} {h.block}: {h.gb:.1f} GB, below its measured {h.measured:.1f}"
+                      for h in below]
+        t = min(held)
+        scopes = Counter(h.scope for h in held)
+        print(f"leave-one-out {item}: {sum(1 for o in large if o.item == item)} jobs on "
+              f"{len(held)} blocks of at least {pp.FIT_MIN_KM2:g} km2, fit by "
+              + ", ".join(f"{s} {n}" for s, n in sorted(scopes.items()))
+              + f"; {len(below)} below the measured peak; the tightest {t.block} "
+              f"({t.measured:.1f} GB on {t.area:.2f} km2, {t.measured / t.area:.1f} GB/km2) at "
+              f"{t.gb:.1f} GB, by {t.by}'s {t.rate:.1f} GB/km2 ({t.scope})"
+              + (" -> ok" if not notes else " -> FAILS: " + "; ".join(notes[:5])
+                 + (f" ({len(notes)} in all)" if len(notes) > 5 else "")), flush=True)
+        bad += [f"leave-one-out {item}"] if notes else []
+    if not any(o.item == CLASS_ITEM for o in large):
+        print(f"leave-one-out: no {CLASS_ITEM} job on a block of at least "
+              f"{pp.FIT_MIN_KM2:g} km2 -> FAILS", flush=True)
+        bad.append("leave-one-out")
+    return bad
 
 
 def _placed(lineup: pp.Family, lad: Ladder, areas: dict[str, float]) -> list[str]:
@@ -747,7 +777,7 @@ def _placed(lineup: pp.Family, lad: Ladder, areas: dict[str, float]) -> list[str
     blocks = sorted(sorted(work, key=lambda b: -work[b])[:CLASS_BLOCKS])
     items = sorted({i for _, i in most})
     est = pp.Estimator(family=lineup, ladder=lad, areas=areas, history=(),
-                       fit_min_km2=pp.FIT_MIN_KM2)
+                       fit_min_km2=pp.FIT_MIN_KM2, fit_min_blocks=pp.FIT_MIN_BLOCKS)
     seed = pp.plan_wave(wave="pool-check", commit=COMMIT, family=lineup.name, ladder=lad,
                         estimator=est, nodes=CLASS_NODES, ids=blocks, items=items,
                         line=lambda b, i: f"echo {b} {i}", created=_now())
@@ -840,9 +870,14 @@ def _dropped_on_top(ladder: Ladder, *, cls: str, lane: pq.Lane, gb: float, peak_
 _FITTED = pp.Estimator._fitted
 
 
-def _unmargined(self: pp.Estimator, block: str) -> pp.Estimate:
+def _unmargined(self: pp.Estimator, block: str, item: str) -> pp.Estimate:
     """pool_plan.Estimator._fitted without the fit's margin (fit_mem)."""
-    return _FITTED(self, block)._replace(mem_margin=1.0)
+    return _FITTED(self, block, item)._replace(mem_margin=1.0)
+
+
+def _family_pool(runs: Sequence[pp.Observed], *, item: str, fit_min_blocks: int) -> pp.Pool:
+    """pool_plan._pool with every item fitted at the family's rate."""
+    return pp.Pool(scope="family", runs=list(runs))
 
 
 FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
@@ -852,7 +887,8 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
                     "any-worker": lambda: _patched(pq, "_mine", lambda attempt, worker: True),
                     "second-claim": lambda: _patched(pq, "_one_claim", lambda db, worker: None)},
     "class": {"median-rate": lambda: _patched(pp, "_worst_rate", statistics.median),
-              "no-fit-margin": lambda: _patched(pp.Estimator, "_fitted", _unmargined)},
+              "no-fit-margin": lambda: _patched(pp.Estimator, "_fitted", _unmargined),
+              "family-rate": lambda: _patched(pp, "_pool", _family_pool)},
 }
 
 

@@ -315,6 +315,11 @@ def _header(o: _Obj) -> Header:
     return h
 
 
+def _stored_header(text: str, where: str) -> Header:
+    """The header as the queue's `header` table holds it (JSON, read exactly)."""
+    return _header(_Obj(json.loads(text), where))
+
+
 def _job_json(j: JobSeed) -> dict[str, object]:
     return {"id": j.id, "block": j.block, "item": j.item, "group": j.group, "line": j.line,
             "node": j.node, "cls": j.cls, "gb": j.gb, "minutes": j.minutes,
@@ -526,7 +531,7 @@ class SqliteQueue:
                            (json.dumps(_header_json(seed.header), allow_nan=False),))
                 header = seed.header
             else:
-                header = _header(_Obj(json.loads(row["header"]), f"{path}: header"))
+                header = _stored_header(row["header"], f"{path}: header")
                 if (header.wave, header.commit) != (seed.header.wave, seed.header.commit):
                     raise ValueError(f"{path} is wave {header.wave} at {header.commit}, the "
                                      f"seed {seed.header.wave} at {seed.header.commit}")
@@ -857,3 +862,17 @@ class SqliteQueue:
         except BaseException:
             Path(tmp).unlink(missing_ok=True)
             raise
+
+
+def read_header(path: Path) -> Header:
+    """The header of the queue at `path`, or of a snapshot of one (a wave's final.db), read
+    exactly; read-only, one SELECT (so a path with no queue is refused, never made one: sqlite3's
+    OperationalError, and a queue with no header is a ValueError)."""
+    db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        row = db.execute("SELECT header FROM header").fetchone()
+    finally:
+        db.close()
+    if row is None:
+        raise ValueError(f"{path}: no header")
+    return _stored_header(row[0], f"{path}: header")
