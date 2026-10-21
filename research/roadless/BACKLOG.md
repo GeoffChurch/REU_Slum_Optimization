@@ -633,6 +633,27 @@ Open:
     for clearance, clearance_looped, cycle_native and resistance_lp, 4.3 h at most; cycle_desire
     0.5 h on the large blocks and 10 -- 55 h on the oversized) would make the lineup's networks
     what its code proposes.
+- **A uniform rule for walled-in homes** (the owner's call, 2026-10-21: "A uniform rule would be
+  nicer if it works"; NOTES, "A uniform rule for walled-in homes: destinations in their pockets, no
+  free first"; built on research/uniform-leak: metrics.UNIFORM, relax's `.f0`). Measured on the 121
+  blocks with walled-in homes (792) and five controls, SIMP's default at area D 0.05:
+  - For T (free first, today's): U leaves 100 homes walled in on 33 blocks where T leaves 28 on 6
+    (all homes with no open ground); 79 of U's are among the 84 homes with no open ground within
+    ring_m, which its demand cannot reach, 21 (12 blocks) are pocket homes SIMP's optimum or the
+    budget's better use leaves sealed. U's clearing costs the homes T scores a mean -0.012 of Lens
+    A (L_P, L_{P_1/2}, L_J2 alike, the intervals excluding 0; small -0.015, large -0.006), behind
+    on 88 of 121. U's lens is dominated by the walled-in homes (a median 208x the block's median
+    escape time, 44% of P0, 98% of J_2,0), and its optimizer ends below T's clearing by its own
+    measure on 32 blocks.
+  - For U (one rule): no free stage, and so none of its unfair trades (D per unit of population
+    freed over 1 on 27 of 119 blocks, 21.5 at worst); the homes it frees are served (10% over 10x
+    the median against 31% of T's: T's "freed" is often a neighbour cleared within 1 m, the home's
+    own ground still sealed); no connected home moves at baseline (the walls study's A moved 3.9%
+    by over 5%); ahead under its own metric (+0.073 L_P, +0.16 P_{1/2}, +0.17 J_2).
+  - Variants that would answer U's failures, not built: the no-ground homes given demand (on their
+    own footprint, leaking as a pocket), and free first's crossings offered to U's incumbent as a
+    candidate rather than held. If T is kept, the frontier rule asks whether U's code stays as an
+    option (it leads on the freed homes' service and on fairness) or goes to the wiki's dead ends.
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
   owner's answer moves an end of the bracket to that screen's break-even rate. One is live,
