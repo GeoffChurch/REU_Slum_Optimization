@@ -15,7 +15,8 @@ workers of its pools claim, run and record, each claim one attempt.
   asked to step aside) and `closed`.
 - **A claim** takes, of the PENDING jobs of the worker's node and class whose estimate fits the
   minutes it has left, the longest (then the lowest id), so a lease's big jobs come first and
-  small ones fill its tail; a LONG job is the long lane's, claimed by id (`claim_job`).
+  small ones fill its tail; a LONG job is the long lane's, claimed by id (`claim_job`). A worker
+  holds one claim at a time: a second is refused where claims are made.
 - **Done is recorded only by the claim's holder**, only while the claim is still its own: a
   reaped worker's late finish stays an attempt (its exit code, peak and minutes recorded, its
   outcome the reaper's) and the job stays as the reaper left it.
@@ -82,6 +83,12 @@ class Outcome(StrEnum):
 FINISHED = (Outcome.DONE, Outcome.FAILED, Outcome.OOM)
 
 
+def fresh_minutes(ladder: Ladder) -> float:
+    """The minutes a fresh worker of `ladder` can give a job: its lease less the margin. A job
+    estimated past them is the long lane's."""
+    return ladder.lease_minutes - ladder.margin_minutes
+
+
 @dataclass(frozen=True, kw_only=True)
 class Header:
     """A wave's: its name, the commit every run of it is at, the family of its work (the
@@ -120,7 +127,8 @@ class JobSeed:
 class Seed:
     """A wave's jobs.json: its header, its jobs, and whether the queue is closed from the start
     (a fixed wave's is). Its jobs' ids and (block, item)s are each unique, and a pool's job is of
-    a class of the header's ladder."""
+    a class of the header's ladder and fits a fresh lease (`fresh_minutes`): one that did not
+    would wait forever, no worker able to claim it, its count in the demand all the while."""
 
     header: Header
     jobs: tuple[JobSeed, ...]
@@ -137,6 +145,10 @@ class Seed:
         if odd:
             raise ValueError(f"wave {self.header.wave}: pool jobs {odd[:5]} of no class of "
                              f"{lad.name} ({sorted(classes)})")
+        slow = [j.id for j in self.jobs if j.lane == Lane.POOL and j.minutes > fresh_minutes(lad)]
+        if slow:
+            raise ValueError(f"wave {self.header.wave}: pool jobs {slow[:5]} estimated past a "
+                             f"fresh lease's {fresh_minutes(lad):g} minutes (the long lane's)")
 
 
 class Job(NamedTuple):
@@ -351,6 +363,11 @@ def _waiting(lane: Lane) -> JobState:
     return JobState.PENDING if lane == Lane.POOL else JobState.LONG
 
 
+def _mine(attempt: sqlite3.Row, worker: str) -> bool:
+    """Whether `attempt` is `worker`'s: the claim it made (only its claimer finishes it)."""
+    return bool(attempt["worker"] == worker)
+
+
 def _holds(job: sqlite3.Row, attempt: int) -> bool:
     """Whether `attempt` is still `job`'s claim (not reaped, retired or taken over since)."""
     return bool(job["state"] == JobState.CLAIMED and job["attempt"] == attempt)
@@ -383,10 +400,26 @@ def _promoted(ladder: Ladder, *, cls: str, lane: Lane, gb: float, peak_gb: float
     return Placed(state=JobState.LONG, lane=Lane.LONG, cls=cls, gb=need, peak_gb=basis)
 
 
-def _struck(ladder: Ladder, *, lane: Lane, strikes: int) -> tuple[JobState, int]:
+class Struck(NamedTuple):
+    """Where a strike leaves a job (`_struck`)."""
+
+    state: JobState
+    strikes: int
+
+
+def _struck(ladder: Ladder, *, lane: Lane, strikes: int) -> Struck:
     """A strike more: FAILED at the ladder's strikes, else waiting in its lane again."""
     n = strikes + 1
-    return (JobState.FAILED if n >= ladder.strikes else _waiting(lane)), n
+    return Struck(state=JobState.FAILED if n >= ladder.strikes else _waiting(lane), strikes=n)
+
+
+def _one_claim(db: sqlite3.Connection, worker: str) -> None:
+    """Refuse `worker` a claim while it holds one (ValueError naming it): a worker runs one job at
+    a time, so whatever settles its claim (finish, retire, reap) settles one."""
+    held = db.execute("SELECT id FROM jobs WHERE worker = ? AND state = ?",
+                      (worker, JobState.CLAIMED.value)).fetchone()
+    if held is not None:
+        raise ValueError(f"worker {worker!r} holds job {held['id']} already: one claim at a time")
 
 
 def _job(row: sqlite3.Row) -> Job:
@@ -438,7 +471,8 @@ def _transaction(path: Path) -> Iterator[sqlite3.Connection]:
         try:
             yield db
         except BaseException:
-            db.execute("ROLLBACK")
+            if db.in_transaction:      # else a failed ROLLBACK would mask the error
+                db.execute("ROLLBACK")
             raise
         db.execute("COMMIT")
     finally:
@@ -551,25 +585,33 @@ class SqliteQueue:
         return row
 
     @staticmethod
-    def _held(db: sqlite3.Connection, worker: str) -> list[sqlite3.Row]:
-        return list(db.execute("SELECT * FROM jobs WHERE worker = ? AND state = ?",
-                               (worker, JobState.CLAIMED.value)))
+    def _held(db: sqlite3.Connection, worker: str) -> sqlite3.Row | None:
+        """The job `worker`'s claim holds, if any: one at most, as `_one_claim` keeps it where
+        claims are made (more is that invariant broken: RuntimeError)."""
+        rows = db.execute("SELECT * FROM jobs WHERE worker = ? AND state = ?",
+                          (worker, JobState.CLAIMED.value)).fetchall()
+        if len(rows) > 1:
+            raise RuntimeError(f"worker {worker!r} holds jobs {[r['id'] for r in rows]}: one "
+                               "claim at a time is broken")
+        return rows[0] if rows else None
 
     def retire(self, worker: str) -> int:
-        """`worker` has stopped: it claims nothing more, and each job it held goes back to wait
-        in its lane, as if never claimed, its attempt RETIRED (their count). Again: 0."""
+        """`worker` has stopped: it claims nothing more, and the job it held goes back to wait in
+        its lane, as if never claimed, its attempt RETIRED: 1 if it held one, else 0 (and 0
+        again)."""
         with self._tx() as db:
             self._worker_row(db, worker)
             now = time.time()
             db.execute("UPDATE workers SET retired = COALESCE(retired, ?) WHERE id = ?",
                        (now, worker))
-            held = self._held(db, worker)
-            for job in held:
-                db.execute("UPDATE attempts SET end = ?, outcome = ? WHERE id = ?",
-                           (now, Outcome.RETIRED.value, job["attempt"]))
-                db.execute("UPDATE jobs SET state = ?, worker = NULL, attempt = NULL"
-                           " WHERE id = ?", (_waiting(Lane(job["lane"])).value, job["id"]))
-            return len(held)
+            job = self._held(db, worker)
+            if job is None:
+                return 0
+            db.execute("UPDATE attempts SET end = ?, outcome = ? WHERE id = ?",
+                       (now, Outcome.RETIRED.value, job["attempt"]))
+            db.execute("UPDATE jobs SET state = ?, worker = NULL, attempt = NULL WHERE id = ?",
+                       (_waiting(Lane(job["lane"])).value, job["id"]))
+            return 1
 
     def reap(self, worker: str, *, now: float) -> Reaped:
         """`worker` is gone (squeue no longer lists it: the steward's evidence): retired, and
@@ -582,13 +624,9 @@ class SqliteQueue:
             if w["retired"] is not None:
                 return Reaped(worker=worker, run=w["run"], job=None, outcome=None)
             db.execute("UPDATE workers SET retired = ? WHERE id = ?", (time.time(), worker))
-            held = self._held(db, worker)
-            if not held:
+            job = self._held(db, worker)
+            if job is None:
                 return Reaped(worker=worker, run=w["run"], job=None, outcome=None)
-            if len(held) > 1:
-                raise ValueError(f"worker {worker!r} holds jobs {[j['id'] for j in held]}: a "
-                                 "worker holds one claim at a time")
-            job = held[0]
             a = db.execute("SELECT * FROM attempts WHERE id = ?", (job["attempt"],)).fetchone()
             lane, strikes, minutes = Lane(job["lane"]), job["strikes"], job["minutes"]
             ladder = self._header.ladder
@@ -596,14 +634,15 @@ class SqliteQueue:
                 outcome, end = Outcome.WALLTIME, w["ends_at"]
                 ran = (end - a["start"]) / 60
                 minutes = max(minutes, ran)
-                if minutes > ladder.lease_minutes - ladder.margin_minutes:
+                if minutes > fresh_minutes(ladder):
                     lane = Lane.LONG
                 state = _waiting(lane)
             else:
                 outcome, ran, end = Outcome.REAPED, None, time.time()
                 state = _waiting(lane)
                 if not a["rows"]:
-                    state, strikes = _struck(ladder, lane=lane, strikes=strikes)
+                    struck = _struck(ladder, lane=lane, strikes=strikes)
+                    state, strikes = struck.state, struck.strikes
             db.execute("UPDATE attempts SET end = ?, outcome = ?, minutes = ? WHERE id = ?",
                        (end, outcome.value, ran, a["id"]))
             db.execute("UPDATE jobs SET state = ?, lane = ?, minutes = ?, strikes = ?,"
@@ -632,7 +671,9 @@ class SqliteQueue:
 
     @staticmethod
     def _take(db: sqlite3.Connection, w: sqlite3.Row, job: sqlite3.Row) -> Claim:
-        """`job` becomes `w`'s, with a new attempt."""
+        """`job` becomes `w`'s, with a new attempt; a worker holding a claim is refused
+        (`_one_claim`)."""
+        _one_claim(db, w["id"])
         attempt = _inserted(db.execute(
             "INSERT INTO attempts (job, worker, node, cls, start, rows) VALUES (?, ?, ?, ?, ?, 0)",
             (job["id"], w["id"], w["node"], w["cls"], time.time())))
@@ -642,9 +683,9 @@ class SqliteQueue:
                                          (job["id"],)).fetchone()), attempt=attempt)
 
     def claim(self, *, worker: str, minutes_left: float) -> Claim | None:
-        """The next job for `worker` (registered, not retired; else ValueError): of its node and
-        class, PENDING, estimated within `minutes_left` (its walltime left less the margin), the
-        longest first; None if none is."""
+        """The next job for `worker` (registered, not retired and holding no claim; else
+        ValueError): of its node and class, PENDING, estimated within `minutes_left` (its
+        walltime left less the margin), the longest first; None if none is."""
         with self._tx() as db:
             w = self._live(db, worker)
             job = self._pick(db, w, minutes_left)
@@ -652,7 +693,8 @@ class SqliteQueue:
 
     def claim_job(self, *, worker: str, job: int) -> Claim | None:
         """Job `job` for `worker` (the long lane's run of it), if it is waiting (LONG, or a
-        pool's PENDING); None if it is not. A job of another node is refused."""
+        pool's PENDING); None if it is not. A job of another node, or a worker holding a claim,
+        is refused (ValueError)."""
         with self._tx() as db:
             w = self._live(db, worker)
             row = db.execute("SELECT * FROM jobs WHERE id = ?", (job,)).fetchone()
@@ -682,7 +724,7 @@ class SqliteQueue:
             raise ValueError(f"a worker finishes a job {', '.join(FINISHED)}, not {outcome}")
         with self._tx() as db:
             a = db.execute("SELECT * FROM attempts WHERE id = ?", (attempt,)).fetchone()
-            if a is None or a["worker"] != worker:
+            if a is None or not _mine(a, worker):
                 raise ValueError(f"attempt {attempt} is not {worker!r}'s"
                                  + ("" if a is None else f" but {a['worker']!r}'s"))
             if a["rc"] is not None:
@@ -703,7 +745,8 @@ class SqliteQueue:
             elif outcome == Outcome.FAILED:
                 state = _waiting(lane)
                 if not a["rows"]:
-                    state, strikes = _struck(ladder, lane=lane, strikes=strikes)
+                    struck = _struck(ladder, lane=lane, strikes=strikes)
+                    state, strikes = struck.state, struck.strikes
                 placed = placed._replace(state=state)
             db.execute("UPDATE jobs SET state = ?, lane = ?, cls = ?, gb = ?, peak_gb = ?,"
                        " strikes = ?, worker = NULL, attempt = NULL WHERE id = ?",
