@@ -692,8 +692,13 @@ Open:
   residents their walls); symmetric 200 m not worse there (its clearings lose about 0 under the
   diodes'), at a tenth of the cost, but a lower walled-in toll and more people left walled in;
   greedy over single gains crude (joint gain 0.44 of the singles' sum), so SIMP under each would
-  settle it. Next: the controller's and owner's pick. Stage 2 (SIMP's interpolation of a partly
-  cleared building's walls) after a setting is picked; a leaks-in-interiors variant later.
+  settle it. A symmetric price in between: 1,000 m (`Wk1l1000`) frees like the diodes (29 of 102
+  left walled in, B 33, C 31) and is not shown worse on regret (its clearing loses 0.7% under C's
+  metric, 5.6% under B's; theirs 0.7% and -0.5% under its), at a fifth of B's scoring time; it
+  gives up B's walled-in toll (3.9x the block median against 27x) and B's ranking of the others'
+  gains (Spearman 0.76). The default the owner picks. Next: the controller's and owner's pick.
+  Stage 2 (SIMP's interpolation of a partly cleared building's walls) after a setting is picked; a
+  leaks-in-interiors variant later.
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
   owner's answer moves an end of the bracket to that screen's break-even rate. One is live,

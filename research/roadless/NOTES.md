@@ -8912,3 +8912,38 @@ What S1 gives up is the walled-in homes' toll (2.0x the block median, setting 4'
 leaves more people walled in (51 against 29 -- 33).
 
 **Compute** (here, 2 processes): the decompositions and the regret 1.7 process-h.
+
+**A symmetric price in between** (the controller 2026-10-21: the owner wants symmetric walls as
+the default if they are not worse; S1 is not worse on regret but leaves 51 of 102 walled in
+against the diodes' 29 -- 33). Symmetric S5 `Wk1l500`, S10 `Wk1l1000` and S15 `Wk1l1500` through
+the same single gains (leaky_split `decompose`, gains and the self split in one pass), greedy
+clearings to D 0.05 and the regret matrix, every setting against every other (summary_regret.csv,
+the matrix now 8 x 8). Shortfall of row X's clearing under column Y's metric, median over the six
+blocks:
+
+                 A       B       C       S1      S5      S10     S15     T
+       A         0       0.168   0.103   0.232   0.092   0.021   0.000   0.457
+       B         0.050   0       0.008   0.172   0.136   0.007   0.019   0.433
+       C         0.070   0.006   0       0.084   0.058  -0.005   0.034   0.449
+       S1        0.149  -0.009  -0.024   0       0.012   0.010   0.094   0.302
+       S5        0.045  -0.001  -0.038   0.032   0       -0.021  0.005   0.325
+       S10       0.037   0.056   0.007   0.113   0.047   0       0.020   0.421
+       S15       0.000   0.122   0.060   0.185   0.052  -0.009   0       0.329
+
+People left walled in (102 at baseline): A 29, S10 29, S15 29, C 31, B 33, S5 42, S1 51, T 83.
+Self's share of the top-10 gains: S5 12.3%, S10 12.1%, S15 12.6% (B -1%, C 5%). The walled-in
+homes' multiple of their block's median at baseline, on the four blocks B and C were decomposed on
+(18 homes): B 27x, C 12x, A 4.5x, S15 4.1x, S10 3.9x, S5 3.5x, S1 2.9x. Scoring time per single
+clearing, median over the blocks: every symmetric price 0.53 -- 0.63 s (one factorization), C 1.92
+s, B 2.79 s (5.3x S10's), T 0.15 s.
+What it says: S10 (1,000 m) frees like the diodes (29 left) and its clearing loses 0.7% of C's
+gain under C's metric and 5.6% of B's under B's, where theirs lose -0.5% and 0.7% under S10's: on
+a greedy whose joint gains are half its singles' sum, that is not shown worse. S5 (500 m) is the
+cleaner on regret (its clearing loses nothing under B's or C's) but leaves 42 walled in; S15 and A
+lose 12% -- 17% under B's. What a symmetric price gives up against diode B: the walled-in homes'
+toll (S10 3.9x the block median against B's 27x: a symmetric wall taxes every home's exit alike,
+so it cannot price the walled-in homes' way out apart), 12% of its top gains sparing a cleared
+home's residents their own walls (B's -1%), and B's ranking of the others' gains (Spearman 0.76).
+
+**Compute** (here, 2 processes): S5, S10, S15's decompositions 0.9 process-h, the regret re-run
+0.25.

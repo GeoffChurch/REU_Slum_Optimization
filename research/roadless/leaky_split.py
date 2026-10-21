@@ -25,7 +25,8 @@ the sum of its buildings' single gains (the interactions the greedy ignores).
 TOP_SHARE by dP_j / D_j (median over the blocks), and Spearman's correlation of others_j / D_j
 between settings; (2) the regret matrix: for each scoring metric Y and clearing X, Y's shortfall
 (G_Y(c_Y) - G_Y(c_X)) / G_Y(c_Y), median over the blocks (min, max), the people each clearing
-leaves walled in, and each greedy's interaction ratio.
+leaves walled in, each greedy's interaction ratio, and each setting's scoring time per single
+clearing (`decompose`'s wall over its clearings).
 
 Typed as `search.py`'s docstring says:
 
@@ -57,7 +58,11 @@ ROWS = ls.ROWS
 BUDGET = 0.05            # the greedy's area D (the lenses' D)
 TOP_K = ls.TOP_K
 TOP_SHARE = ls.TOP_SHARE
-KEYS = ("T", *ls.SETTINGS)
+# symmetric prices between S1's and A's (the controller 2026-10-21: does one keep S1's regret and
+# free like the diodes?), their gains from `decompose` alone (leaky_single never ran them)
+EXTRA = {"S5": "Wk1l500", "S10": "Wk1l1000", "S15": "Wk1l1500"}
+PARTS = {**ls.SETTINGS, **EXTRA}
+KEYS = ("T", *PARTS)
 POP = common.PopulationDemand()
 
 
@@ -98,7 +103,7 @@ def _scorers(bid: str, keys: tuple[str, ...]) -> tuple[dict[str, _TScorer | _WSc
         if base is None:
             base = metrics.metric_of(metrics.UNIFORM, device="cpu").clearing(b, demand=POP)
         out[k] = _WScorer(gw.WallModel(
-            base, walls=metrics.walls_on_uniform(ls.SETTINGS[k], device="cpu").walls,
+            base, walls=metrics.walls_on_uniform(PARTS[k], device="cpu").walls,
             start=gw.WarmStart()))
     return out, mT
 
@@ -120,8 +125,11 @@ def decompose(bid: str, key: str, *, replace: bool) -> None:
         dP[j] = P0 - P
         self_[j] = pop[j] * (u0[j] - u[j]) if np.isfinite(u0[j]) else 0.0
     share0 = np.where(np.isfinite(u0), pop * np.nan_to_num(u0), 0.0)
-    stored = pd.read_parquet(ROWS / f"{bid}.parquet")[f"dP_{key}"].to_numpy()
-    apart = float(np.abs(dP - stored).max() / max(np.abs(stored).max(), 1e-300))
+    single = pd.read_parquet(ROWS / f"{bid}.parquet")
+    apart = np.nan                  # against leaky_single's gains, where it ran the setting
+    if f"dP_{key}" in single.columns:
+        stored = single[f"dP_{key}"].to_numpy()
+        apart = float(np.abs(dP - stored).max() / max(np.abs(stored).max(), 1e-300))
     clearings.write_once(pd.DataFrame(dict(
         block=bid, setting=key, home=np.arange(n), D=mT.cost, pop=pop, P0=P0, dP=dP, self=self_,
         others=dP - self_, share0=share0, passes=passes, stored_apart=apart,
@@ -144,14 +152,33 @@ def _greedy(gain: NDArray[np.float64], D: NDArray[np.float64]) -> NDArray[np.boo
     return x
 
 
+def _gains(bid: str, key: str, single: pd.DataFrame) -> NDArray[np.float64] | None:
+    """`key`'s single-clearing gains on `bid`: leaky_single's, or `decompose`'s (None: neither
+    ran it)."""
+    if f"dP_{key}" in single.columns:
+        return np.asarray(single[f"dP_{key}"].to_numpy(), dtype=np.float64)
+    path = ROWS / "decomp" / f"{bid}__{key}.parquet"
+    if path.exists():
+        return np.asarray(pd.read_parquet(path).dP.to_numpy(), dtype=np.float64)
+    return None
+
+
+def _known(g: NDArray[np.float64] | None) -> NDArray[np.float64]:
+    if g is None:
+        raise ValueError("a setting with no gains")
+    return g
+
+
 def regret(bid: str, *, replace: bool) -> None:
     out = ROWS / "regret" / f"{bid}.parquet"
     clearings.check_new(out, replace=replace)
     t0 = time.time()
     single = pd.read_parquet(ROWS / f"{bid}.parquet")
     D = single.D.to_numpy()
-    clear = {k: _greedy(single[f"dP_{k}"].to_numpy(), D) for k in KEYS}
-    sc, mT = _scorers(bid, KEYS)
+    gains = {k: _gains(bid, k, single) for k in KEYS}
+    keys = tuple(k for k in KEYS if gains[k] is not None)
+    clear = {k: _greedy(_known(gains[k]), D) for k in keys}
+    sc, mT = _scorers(bid, keys)
     rows = []
     n = mT.n
     for y, s in sc.items():
@@ -160,7 +187,7 @@ def regret(bid: str, *, replace: bool) -> None:
             P, _u2, passes = s.scored(c)
             rows.append(dict(block=bid, clearing=x, scorer=y, P0=P0, P=P, gain=P0 - P,
                              passes=passes, n_cleared=int(c.sum()), D_used=float(D[c].sum()),
-                             single_sum=float(single[f"dP_{y}"].to_numpy()[c].sum())))
+                             single_sum=float(_known(gains[y])[c].sum())))
     for x, c in clear.items():
         left = mT.walled0 & ~mT.live_homes_of(mT.factors(mT.k_of(c)))
         rows.append(dict(block=bid, clearing=x, scorer="B(i)", n_left=int(left.sum()),
@@ -213,8 +240,11 @@ def report() -> None:
                             shortfall=(own - r.gain) / own,
                             interaction=(r.gain / r.single_sum) if r.clearing == ry else np.nan))
     left = reg[reg.scorer == "B(i)"][["block", "clearing", "n_left", "pop_left", "n_walled0"]]
+    cost = dec.groupby(["block", "setting"]).agg(n=("home", "size"), wall=("wall", "first"),
+                                                 passes=("passes", "median")).reset_index()
+    cost["s_per_clearing"] = cost.wall / cost.n
     tables = {"split": pd.DataFrame(split), "split_pairs": pd.DataFrame(pairs),
-              "regret": pd.DataFrame(mat), "left": left}
+              "regret": pd.DataFrame(mat), "left": left, "cost": cost}
     pd.set_option("display.width", 220)
     for name, t in tables.items():
         t.to_csv(ROWS / f"summary_{name}.csv", index=False)
@@ -231,6 +261,8 @@ def report() -> None:
     print(m.dropna(subset=["interaction"]).pivot_table(index="block", columns="scorer",
                                                        values="interaction").round(3).to_string())
     print(left.pivot_table(index="block", columns="clearing", values="n_left").to_string())
+    print(cost.pivot_table(index="block", columns="setting", values="s_per_clearing")
+          .round(2).to_string())
 
 
 def main(argv: list[str]) -> None:
