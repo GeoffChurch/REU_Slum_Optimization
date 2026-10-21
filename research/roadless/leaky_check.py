@@ -49,9 +49,10 @@ conducting CLEARED_SLOW of open ground's.
 as under T (RUNTIME) at the baseline, the ONE_K single clearings, REACH_RANDOM random clearings at
 BUDGET and T's free first, on blocks with walled-in homes. Fault `through-walls`: B (i) read from
 W's own reach (through walls: no home walled in).
-`sources`: every home has demand under W (none walled out of P), its sources on its own footprint's
-cells only (by the cells' triangles' cover), summing to its population, by area within
-CURRENT_TOL, every source cell an unknown at baseline. Fault `doors`: W's sources put at the base's
+`sources`: every home has demand under W (none walled out of P) but one with no footprint triangle
+in the mesh (a footprint under a barrier's cut), its sources on its own footprint's cells only,
+by area, against an oracle (shapely: the triangles whose centroid lies within its polygon) within
+SOURCE_TOL, every source cell an unknown at baseline. Fault `doors`: W's sources put at the base's
 demand points (its doors: a walled-in home's in its pocket, a home with no open ground none).
 `walls-identity`: each walls on UNIFORM, RUNTIME and the per-block metric spells a name that
 gap_walls.walls_of reads back to it and gap_clear.complex_of refuses; a name without walls is
@@ -100,6 +101,9 @@ CURRENT_TOL = 1e-8       # a wall group's current from the definition against co
                          # (relative: the refined solves agree to 1e-12 and better)
 ENERGY_TOL = 1e-9        # P against the dissipation (relative), a cell's imbalance (of the
                          # largest current through a cell: gap_clear_check.FLUX_TOL)
+SOURCE_TOL = 1e-6        # a home's sources against the oracle, of its population: a triangle in a
+                         # sliver within the linework's snap (gap_clear.LINE_SNAP_M) of an outline
+                         # reads either side by its centroid (8e-8 -- 1.8e-7 on 19570, 20269, 23597)
 MONO_ORDERS = 3
 MONO_STEPS = 8
 MONO_TOL = 1e-10         # P rising by less than this (relative) is roundoff
@@ -435,19 +439,20 @@ def sources(ids: list[str]) -> list[str]:
         e1, e2 = xy[:, 1] - xy[:, 0], xy[:, 2] - xy[:, 0]
         area = 0.5 * np.abs(e1[:, 0] * e2[:, 1] - e1[:, 1] * e2[:, 0])
         cen = xy.mean(axis=1)
-        # the oracle: each home's footprint's triangles by their centroids (shapely, not the
-        # mesh's cover), its population over them by area
-        t, h = shapely.STRtree(wm.base.polys).query(shapely.points(cen[:, 0], cen[:, 1]),
-                                                    predicate="within")
+        # the oracle: each home's footprint (the model's geometry, in the mesh's local frame) and
+        # its triangles by their centroids (shapely, not the mesh's cover), its population over
+        # them by area
+        t, h = shapely.STRtree(wm.base.geo.polys).query(shapely.points(cen[:, 0], cen[:, 1]),
+                                                        predicate="within")
         oracle = sp.csr_matrix((area[t], (c.cell[t], h)), shape=(c.n, wm.n))
         tot = np.asarray(oracle.sum(axis=0)).ravel()
         oracle = (oracle @ sp.diags(np.where(tot > 0, 1.0 / np.maximum(tot, 1e-300), 0.0))).tocsr()
         diff = abs(oracle - wm.Pc).max()
         problems = []
-        if diff > CURRENT_TOL:
+        if diff > SOURCE_TOL:
             problems.append(f"placed {diff:.1e} off the footprints' areas")
-        if (tot <= 0).any() or wm.nodem.any():
-            problems.append(f"{int((tot <= 0).sum())} homes with no footprint triangle, "
+        if not np.array_equal(wm.nodem, tot <= 0):
+            problems.append(f"{int((tot <= 0).sum())} homes with no footprint triangle, but "
                             f"{int(wm.nodem.sum())} without demand")
         src = np.asarray(wm.Pc.sum(axis=1)).ravel() > 0
         if not wm.base_.state.unknown[src].all():
