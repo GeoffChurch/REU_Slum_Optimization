@@ -5,6 +5,8 @@ stages), and checks what a task would get.
     PYTHONPATH=. uv run python research/roadless/cluster_check.py cpu <ids,> <items,>
     PYTHONPATH=. uv run python research/roadless/cluster_check.py ids [no-check]
     PYTHONPATH=. uv run python research/roadless/cluster_check.py script [no-script-check]
+    PYTHONPATH=. uv run python research/roadless/cluster_check.py demand \
+        [finished-named|no-throttle|any-reason|no-running]
 
 `cpu`: a `cpu` run on each node of CPU_NODES at its own throttle is one CPU array pinned there
 (`--nodelist`), with no GPU request, the given cores and memory, every (block, item) one task that
@@ -29,6 +31,21 @@ commit) is refused naming the commit; one the commit holds and the working tree 
 the commit before the one that deleted it) plans. Fault `no-script-check`: cluster._script_at a
 no-op: the absent script plans. Exit as for `ids`.
 
+`demand` (cluster_demand: reblock's one campaign in the GPU market): its demand from a made-up
+squeue and seven made-up runs of this registry, and the board script run on a scratch board. Held
+units: every running task of the project's, cp-roads4-desire-g3b's as it stood on 2026-10-21
+among them (throttle 2, one running, three waiting, their memory changed in Slurm), a cancelled
+run's and another checkout's run's too, aggregated by (node, bundle) at the mean of their time
+limits; waiting units: those each run's throttle starts now (one of g3b's), none held by a
+dependency or a begin time, none of a cancelled run; an unpinned run's waiting tasks stated
+nowhere and counted, another checkout's left to it and counted; its runs every run squeue lists
+of the project's and every unfinished one of the registry, not a finished one, another user's,
+another project's, or a task that left squeue between the two reads. Faults: `finished-named`
+(cluster_demand.finished never true: a finished run named), `no-throttle` (cluster_demand.room
+unbounded: units past a run's throttle), `any-reason` (cluster_demand.waits_for always true: a
+task held by its dependency counted), `no-running` (cluster_demand.held's units dropped: what the
+waves hold stated as units 0). Exit as for `ids`.
+
 (`gpu`, the retired raster's sizing checked against its scorer's measured peaks, went with it:
 NOTES, "The complex as the runtime: the raster retired".)
 """
@@ -43,15 +60,20 @@ import sys
 import tarfile
 import tempfile
 from collections.abc import Callable, Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parent.parent)]
 import cluster  # noqa: E402
-from cluster_submit import RunPlan  # noqa: E402
+import cluster_demand  # noqa: E402
+from cluster_submit import Bundle, RunPlan  # noqa: E402
 from cluster_submit.arrays import Array, route, script  # noqa: E402
 from cluster_submit.cli import parser  # noqa: E402
-from cluster_submit.remote import SubprocessRunner  # noqa: E402
+from cluster_submit.gpu import DemandLine, demand_path, read_demand  # noqa: E402
+from cluster_submit.gpuboard import Pending, Running, Seen  # noqa: E402
+from cluster_submit.registry import NO_OVERRIDES, ArrayRecord, RunRecord  # noqa: E402
+from cluster_submit.remote import Local, SubprocessRunner  # noqa: E402
 from cluster_submit.submit import throttle_checked  # noqa: E402
 
 PROJECT = cluster.PROJECT
@@ -213,6 +235,159 @@ def check_script() -> list[str]:
     return bad
 
 
+def _record(name: str, kind: str, job: str, *, gpus: int, finished: bool,
+            cancelled: bool) -> RunRecord:
+    """A made-up run's record, as a submit of `kind` writes it: one array, job `job`, at most
+    `gpus` tasks at once."""
+    opts = (["--gb", "32"] if kind == "blocks"
+            else ["--node", "orion", "--cpus", "1", "--mem", "540", "--items", "x"])
+    argv = ("submit", kind, name, *opts, "--gpus", str(gpus), "a,b", "--",
+            "research/roadless/road_rescore.py", "{id}", "{item}")
+    stamp = "2026-10-21T12:00:00Z"
+    return RunRecord(name=name, kind=kind, commit=SHA, argv=argv, overrides=NO_OVERRIDES,
+                     submitted_at=stamp, attempt=f"guard:{name}",
+                     arrays=(ArrayRecord(job, 32 if kind == "blocks" else 0, ("t",) * 4),),
+                     gpus=gpus, chained_after=(), last_sync=stamp,
+                     gone_at=stamp if finished else None, finished_at=stamp if finished else None,
+                     cancelled_at=stamp if cancelled else None, unpulled=(), unstarted=(),
+                     continues=None, continued_by=None, settled=False)
+
+
+def check_demand() -> list[str]:
+    """`demand` (the module's docstring): the problems found."""
+    def cpu(gb: float, cpus: int = 1) -> Bundle:
+        return Bundle(cards=0, cpus=cpus, mem_gb=gb)
+
+    def name(run: str, label: str = "cpu", project: str = "reblock") -> str:
+        return f"{project}-{run}-{label}"
+
+    def run(job: str, run: str, node: str, b: Bundle, *, user: str = "me",
+            label: str = "cpu", project: str = "reblock") -> Running:
+        return Running(job, user, (node,), b, datetime(2026, 10, 21, tzinfo=UTC),
+                       name(run, label, project))
+
+    def wait(job: str, run: str, b: Bundle, reason: str = "Resources",
+             node: str | None = "orion", label: str = "cpu") -> Pending:
+        return Pending(job, "me", (node,) if node else (), () if node else ("orion", "quadro2"),
+                       reason, name(run, label), b)
+
+    def rec(name: str, job: str, gpus: int, *, kind: str = "cpu", finished: bool = False,
+            cancelled: bool = False) -> RunRecord:
+        return _record(name, kind, job, gpus=gpus, finished=finished, cancelled=cancelled)
+
+    card = Bundle(cards=1, cpus=4, mem_gb=64)
+    recs = [rec("g3a", "100", 1), rec("g3b", "110", 2), rec("held", "300", 4),
+            rec("cancelled", "400", 4, cancelled=True), rec("unpinned", "500", 4, kind="blocks"),
+            rec("done", "600", 4, finished=True), rec("plain", "800", 4)]
+    seen = Seen("me", running=(
+        run("100_0", "g3a", "orion", cpu(850, 2)), run("110_0", "g3b", "orion", cpu(540, 2)),
+        run("400_0", "cancelled", "orion", cpu(540, 2)),
+        run("500_0", "unpinned", "tesla1", card, label="gpu32"),
+        run("900_0", "elsewhere", "orion", cpu(540, 2)),
+        run("910_0", "x", "orion", cpu(8, 2), user="other"),
+        run("920_0", "y", "orion", cpu(8, 2), project="mycooc"),
+        run("950_0", "gone", "orion", cpu(8, 2))), pending=(
+        wait("110_1", "g3b", cpu(375)), wait("110_2", "g3b", cpu(360)),
+        wait("110_3", "g3b", cpu(280)), wait("300_0", "held", cpu(540), "Dependency"),
+        wait("300_1", "held", cpu(540), "BeginTime"), wait("400_1", "cancelled", cpu(540)),
+        wait("500_1", "unpinned", card, node=None, label="gpu32"),
+        wait("500_2", "unpinned", card, node=None, label="gpu32"),
+        wait("800_0", "plain", cpu(540)), wait("900_1", "elsewhere", cpu(375))), nodes=())
+    week, six = 7 * 24 * 60.0, 6 * 24 * 60.0
+    limits = {"100_0": week, "110_0": six, "110_1": six, "110_2": six, "110_3": six,
+              "300_0": 60.0, "300_1": 60.0, "400_0": 60.0, "400_1": 60.0, "500_0": 120.0,
+              "500_1": 120.0, "500_2": 120.0, "800_0": 30.0, "900_0": 600.0, "900_1": 600.0,
+              "910_0": 60.0, "920_0": 60.0}           # 950_0 left squeue between the reads
+    at = "2026-10-21T12:00:00Z"
+    s = cluster_demand.demand_of(recs, seen, limits, project="reblock", campaign="reblock",
+                                 weight=1.0, at=at,
+                                 nodes=tuple(n.name for n in PROJECT.cluster.nodes))
+    want = tuple(DemandLine(node=n, bundle=b, units=u, minutes=m, urgency=None) for n, b, u, m in (
+        ("orion", cpu(850, 2), 1, week), ("orion", cpu(540, 2), 3, (six + 60 + 600) / 3),
+        ("tesla1", card, 1, 120.0), ("orion", cpu(375), 1, six), ("orion", cpu(360), 0, 0.0),
+        ("orion", cpu(280), 0, 0.0), ("orion", cpu(540), 1, 30.0)))
+    runs = ("cancelled", "elsewhere", "g3a", "g3b", "held", "plain", "unpinned")
+
+    def shown(ls: tuple[DemandLine, ...]) -> list[tuple[str, str, int, float]]:
+        return [(x.node, x.bundle.text(), x.units, round(x.minutes, 3)) for x in ls]
+
+    d = s.demand
+    bad = []
+    if d.lines != want:
+        bad.append(f"lines {shown(d.lines)}, wanted {shown(want)}")
+    if (s.unplaced, s.elsewhere) != (2, 1):
+        bad.append(f"{s.unplaced} unplaced and {s.elsewhere} elsewhere, wanted 2 and 1")
+    if d.runs != runs:
+        bad.append(f"runs {d.runs}, wanted {runs}")
+    if (d.project, d.campaign, d.at, d.weight) != ("reblock", "reblock", at, 1.0):
+        bad.append(f"campaign {d.name()}, at {d.at}, weight {d.weight}")
+    with tempfile.TemporaryDirectory() as tmp:
+        board = Path(tmp) / "market"
+        path, beside = demand_path(board, "reblock", "reblock"), demand_path(board, "reblock", "w")
+        beside.parent.mkdir(parents=True)
+        beside.write_text("{}\n")
+        Local("here", SubprocessRunner()).sh(cluster_demand.board_script(str(board), d))
+        if not path.is_file() or read_demand(path.read_text(), str(path)) != d:
+            bad.append(f"the board's {path.name} is not the demand")
+        left = sorted(p.name for p in board.rglob("*") if p.is_file())
+        if left != ["reblock.json", "w.json"]:
+            bad.append(f"the board holds {left}, not the demand beside the other file")
+    print(f"demand: reblock's demand from a squeue and seven runs, on a scratch board -> "
+          f"{'ok' if not bad else 'FAILS'}", flush=True)
+    return bad
+
+
+@contextlib.contextmanager
+def _finished_named() -> Iterator[None]:
+    """cluster_demand.finished never true (fault `finished-named`)."""
+    old = cluster_demand.finished
+    cluster_demand.finished = lambda rec: False
+    try:
+        yield
+    finally:
+        cluster_demand.finished = old
+
+
+@contextlib.contextmanager
+def _no_throttle() -> Iterator[None]:
+    """cluster_demand.room unbounded (fault `no-throttle`)."""
+    old = cluster_demand.room
+    cluster_demand.room = lambda rec, running: 10**6
+    try:
+        yield
+    finally:
+        cluster_demand.room = old
+
+
+@contextlib.contextmanager
+def _any_reason() -> Iterator[None]:
+    """cluster_demand.waits_for always true (fault `any-reason`)."""
+    old = cluster_demand.waits_for
+    cluster_demand.waits_for = lambda p, node: True
+    try:
+        yield
+    finally:
+        cluster_demand.waits_for = old
+
+
+@contextlib.contextmanager
+def _no_running() -> Iterator[None]:
+    """cluster_demand.held's lines kept with no units (fault `no-running`: what a wave holds
+    stated as units 0, the README's way for a wave that wants no more)."""
+    old = cluster_demand.held
+    cluster_demand.held = lambda running, limits: {k: [] for k in old(running, limits)}
+    try:
+        yield
+    finally:
+        cluster_demand.held = old
+
+
+# The command line's fault names, each the fault it injects.
+DEMAND_FAULTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
+    "finished-named": _finished_named, "no-throttle": _no_throttle, "any-reason": _any_reason,
+    "no-running": _no_running}
+
+
 @contextlib.contextmanager
 def _no_script_check() -> Iterator[None]:
     """cluster._script_at a no-op (fault `no-script-check`)."""
@@ -256,5 +431,13 @@ if __name__ == "__main__":
         if bool(bad) != bool(a[1:]):
             raise SystemExit(1 if bad else "the fault no-script-check went unseen: the guard "
                                            "guards nothing")
+    elif a[0] == "demand" and len(a) <= 2 and set(a[1:]) <= set(DEMAND_FAULTS):
+        with DEMAND_FAULTS[a[1]]() if a[1:] else contextlib.nullcontext():
+            bad = check_demand()
+        print(f"demand{f' under the fault {a[1]}' if a[1:] else ''}: "
+              + ("FAILS on " + "; ".join(bad) if bad else "passes"), flush=True)
+        if bool(bad) != bool(a[1:]):
+            raise SystemExit(1 if bad else f"the fault {a[1]} went unseen: the guard guards "
+                                           "nothing")
     else:
         raise SystemExit(f"unknown check {a[0]!r}")

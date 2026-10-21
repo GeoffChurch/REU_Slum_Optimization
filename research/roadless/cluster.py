@@ -40,6 +40,14 @@ a block's tasks unpack one tar at once into the checkout they share.
         # its failed / missing blocks as <run>-r1
     uv run python research/roadless/cluster.py cancel <run>
     uv run python research/roadless/cluster.py watch start|stop
+    uv run python research/roadless/cluster.py gpu      # the GPU market's last allocation
+    uv run python research/roadless/cluster.py demand
+        # state reblock's demand in the GPU market now (after submit, resubmit, sync, wait and
+        # cancel it is stated anyway: cluster_demand)
+
+reblock states its demand in ai's GPU market as one campaign, `reblock` (cluster_submit's README,
+"GPU market"; cluster_demand.py): what its waves' tasks hold and wait for, so the market's keeper
+charges it.
 
 Before a CPU run, the node's load: `ssh ai sinfo -N -p defq -o '%N %c %T %C'` (cores allocated,
 idle, other, total) and `scontrol show node <node>` (AllocMem of RealMemory).
@@ -52,8 +60,12 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 
+import cluster_demand
 import cluster_submit as cs
-from cluster_submit.remote import SubprocessRunner
+from cluster_submit.cli import VERB_NAMES, parser
+from cluster_submit.context import utcnow
+from cluster_submit.registry import Registry
+from cluster_submit.remote import Remote, SubprocessRunner
 from cluster_submit.tree import blob_at
 
 HERE = Path(__file__).resolve().parent
@@ -248,16 +260,65 @@ class Cpu:
 # sacct_grace: how long a run is out of squeue before a task of it with no exit code and no sacct
 # row is taken as cancelled before it started (cluster_submit's "Settling a run": 10 minutes, the
 # cluster's accounting lag many times over; cx-raster, 2026-10-15, had 19 such tasks).
+# attribute_cache: how long ai's login node may answer a stat from cached attributes (its NFSv3
+# home's acregmax and acdirmax, the client's defaults: 60 s), so a run is finished, with its last
+# pull, only once it has been out of squeue that long (cluster_submit's "Settling a run": mycooc's
+# ev2-lib-20k-c, finished a second after it left squeue, lost its last row so, 2026-10-21).
 # market: the disk market of ai's home (its keeper holds reblock's files once a launch publishes
-# them). checkout_setup: nothing to link into a checkout. gpu_market None: reblock's waves are held
-# outside the GPU market's shadow accounts (never `keeper install` from here: it would remove the
-# GPU market's files the keeper reads; the keeper is installed from GeoffChurch/mycooc). campaigns:
-# none of reblock's runs is a campaign's lease.
+# them). checkout_setup: nothing to link into a checkout. gpu_market: ai's GPU market (owner
+# 2026-10-21, at GeoffChurch/mycooc's asking): reblock states its demand there (cluster_demand,
+# after the verbs of STATES_DEMAND), so the keeper attributes what its tasks hold and charges it.
+# Never `keeper install` from here: the keeper is GeoffChurch/mycooc's to install, and the newest
+# install wins (one from here would deploy this pin's cluster_submit, market file and GPU file over
+# mycooc's). campaigns: none of reblock's runs is a campaign's lease, so the market widens and
+# starts none of them, in active mode too.
 PROJECT = cs.Project(name="reblock", repo=REPO, cluster=cs.load_cluster("ai"),
                      kinds=(Blocks(), Cpu()), max_gpus=4,   # owner, 2026-10-03: a shared cluster
                      checkout_setup=(), sacct_grace=timedelta(minutes=10),
-                     market=cs.load_market("ai"), gpu_market=None, campaigns=cs.NoCampaigns())
+                     attribute_cache=timedelta(seconds=60),
+                     market=cs.load_market("ai"), gpu_market=cs.load_gpu_market("ai"),
+                     campaigns=cs.NoCampaigns())
+
+# reblock's one campaign in the GPU market (the controller's ruling, 2026-10-21: one for the
+# project, so its spend accumulates over its waves) is named for the project, and its weight among
+# reblock's campaigns, the only one, is 1 (the project's own weight, against mycooc's and
+# bookgen's, is the market file's).
+CAMPAIGN_WEIGHT = 1.0
+# The verbs after which reblock states its demand: those that submit a run or change what the
+# registry knows of one (a dry submit or resubmit submits nothing, and is left out). The watch
+# timer runs `sync`, so the demand is refreshed every 150 s while a run is unfinished.
+STATES_DEMAND = frozenset({"submit", "resubmit", "sync", "wait", "cancel"})
+if not STATES_DEMAND <= set(VERB_NAMES):
+    raise SystemExit(f"STATES_DEMAND names verbs cluster_submit has not: "
+                     f"{sorted(STATES_DEMAND - set(VERB_NAMES))}")
+
+
+def state_demand(registry: Registry) -> int:
+    """The project's demand (cluster_demand), from squeue and `registry`: 0 once written."""
+    return cluster_demand.state(
+        registry=registry, login=Remote(PROJECT.cluster.host, SubprocessRunner()),
+        board=PROJECT.cluster.board(), project=PROJECT.name, campaign=PROJECT.name,
+        weight=CAMPAIGN_WEIGHT, nodes=tuple(n.name for n in PROJECT.cluster.nodes),
+        now=utcnow())
+
+
+def main(argv: list[str]) -> int:
+    """cluster_submit's verbs, each followed, for those of STATES_DEMAND, by writing reblock's
+    demand, whose failure is said and leaves the verb's exit as it was (a submit that took, a
+    wait's verdict); and `demand`, that write alone, its exit its own."""
+    if argv == ["demand"]:
+        return state_demand(Registry(REPO))
+    code = cs.main(PROJECT, argv)
+    args = parser(PROJECT).parse_args(argv)
+    if args.verb in STATES_DEMAND and not (args.verb in ("submit", "resubmit") and args.dry):
+        try:
+            if state_demand(Registry(REPO)):
+                print("[demand] the next sync states it again", file=sys.stderr)
+        except (SystemExit, ValueError, OSError) as e:      # ssh, squeue's output, the registry
+            print(f"[demand] not stated: {e}; the next sync states it again", file=sys.stderr)
+    return code
+
 
 if __name__ == "__main__":
     sys.path[:0] = [str(HERE), str(REPO)]   # common and the repo's scripts package, for Blocks.plan
-    raise SystemExit(cs.main(PROJECT))
+    raise SystemExit(main(sys.argv[1:]))
