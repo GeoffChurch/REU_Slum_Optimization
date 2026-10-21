@@ -2,7 +2,7 @@
 name = "reblock"
 version = "0.1.0"
 description = ""
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 # Empty on purpose. This wheel is what the DrawRoad widget's Pyodide runtime installs, with
 # `micropip.install(wheelUrl)` (web/src/py/runtime.ts), and micropip resolves every Requires-Dist
 # -- from PyPI, which has no wasm wheels for the science stack. What reblock needs to run is the
@@ -91,6 +91,10 @@ research = [
     # Pins BLAS and OpenMP to one thread in scripts/consensus_matrix.py's processes, forked workers
     # included, where an environment variable set after numpy has loaded would do nothing.
     "threadpoolctl",
+    # GeoffChurch/epistemetry (private), the decision layer research/roadless's screens run
+    # through. Pinned in [tool.uv.sources] at a full SHA, as cluster_submit is; it requires Python
+    # >=3.12, hence this project's requires-python.
+    "epistemetry",
 ]
 # research/roadless's GPU stack, for its solvers here and on the cluster. cupy brings the CUDA 12
 # toolkit as wheels ([ctk]): the cluster's /usr/local/cuda is 11.8 and its nodes' drivers 12.8.
@@ -128,6 +132,7 @@ build-constraint-dependencies = ["hatchling==1.32.0"]
 [tool.uv.sources]
 topology = { path = "ext/topology", editable = true }
 cluster_submit = { git = "https://github.com/GeoffChurch/cluster_submit.git", rev = "30b27367c6baa3e7e5f7ceb28134f7447e4e0dcb" }
+epistemetry = { git = "https://github.com/GeoffChurch/epistemetry.git", rev = "165f98b31c7114ab9fc3b902c9dfc79a67623d99" }
 
 # ---------------------------------------------------------------------------
 # Tooling config
