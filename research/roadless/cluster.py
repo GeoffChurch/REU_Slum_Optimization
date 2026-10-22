@@ -574,9 +574,16 @@ def live_stewards(ctx: cs.Context) -> dict[str, cs.RunRecord]:
         raise SystemExit(f"unreadable records: {', '.join(unreadable)}: a wave's steward among "
                          "them would go unseen")
     got = _live_stewards(recs, lambda r: ctx.parse(r.argv))
-    if got.split:
-        raise SystemExit("; ".join(f"wave {w} has {why}" for w, why in sorted(got.split.items())))
+    _one_commit(got.split)
     return got.stewards
+
+
+def _one_commit(split: Mapping[str, str]) -> None:
+    """Refuse (SystemExit) the waves with live stewards at two commits (`split`, each why):
+    `_live_stewards` leaves them out of the live waves, and a lease's `more` or a template that
+    took one for a wave whose steward is over would end its pools for good."""
+    if split:
+        raise SystemExit("; ".join(f"wave {w} has {why}" for w, why in sorted(split.items())))
 
 
 def wave_summaries(login: Login, waves: Sequence[str]) -> psum.Summaries:
@@ -712,7 +719,7 @@ def _pool_of(a: argparse.Namespace) -> cluster_demand.PoolRun:
 class PoolRuns(NamedTuple):
     """The unfinished pool runs of some records as the demand reads them (`pool_runs`): each by
     name, with what its workers hold, or None when its record does not say; and each wave one of
-    whose pool runs does not, why."""
+    whose pool runs does not, every why."""
 
     pools: dict[str, cluster_demand.PoolRun | None]
     unread: dict[str, str]
@@ -722,17 +729,18 @@ def pool_runs(recs: Sequence[cs.RunRecord]) -> PoolRuns:
     """The unfinished pool runs of `recs` (cluster_demand.finished), each read from its own record
     (`_submitted`, `_pool_of`): a --mem that is no rung of its preset (a preset changed under a
     live wave) leaves it None and its wave unread, not the demand refused."""
-    out = PoolRuns(pools={}, unread={})
+    pools: dict[str, cluster_demand.PoolRun | None] = {}
+    whys: dict[str, list[str]] = {}
     for r in recs:
         if r.kind != Pool.name or cluster_demand.finished(r):
             continue
         a = _submitted(r)
         try:
-            out.pools[r.name] = _pool_of(a)
+            pools[r.name] = _pool_of(a)
         except ValueError as e:
-            out.pools[r.name] = None
-            out.unread[a.wave] = f"its pool run {r.name} does not read: {e}"
-    return out
+            pools[r.name] = None
+            whys.setdefault(a.wave, []).append(f"its pool run {r.name} does not read: {e}")
+    return PoolRuns(pools=pools, unread={w: "; ".join(x) for w, x in whys.items()})
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -863,7 +871,11 @@ def demand_waves(recs: Sequence[cs.RunRecord], login: Login) -> DemandWaves:
     would leave every run of the campaign, a wave's or not, without a demand."""
     live = _live_stewards(recs, _submitted)
     pools = pool_runs(recs)
-    broken = {**live.split, **pools.unread}
+    whys: dict[str, list[str]] = {}
+    for got in (live.split, pools.unread):
+        for w, why in got.items():
+            whys.setdefault(w, []).append(why)
+    broken = {w: "; ".join(x) for w, x in whys.items()}
     read = sorted(w for w in live.stewards if w not in broken)
 
     def summaries() -> psum.Summaries:

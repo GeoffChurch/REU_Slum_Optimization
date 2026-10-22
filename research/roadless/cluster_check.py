@@ -8,11 +8,12 @@ stages), and checks what a task would get.
     uv run python $C script [fault]         # fault: no-script-check
     uv run python $C demand [fault]         # faults: finished-named, no-throttle, any-reason,
                                             # no-running, count-done, every-node, queue-only,
-                                            # waiting-counted, running-twice, pool-refuses,
-                                            # split-refuses
+                                            # waiting-counted, broken-dropped, running-twice,
+                                            # pool-refuses, split-refuses
     uv run python $C kinds [fault]          # fault: lease-bundle
     uv run python $C more [fault]           # faults: continue-idle, finished-dead, task-reaps,
-                                            # hung-waits, reap-first, none-unreaped
+                                            # hung-waits, reap-first, none-unreaped,
+                                            # split-quiet
     uv run python $C template [fault]       # faults: other-mem, other-node, continuation-name,
                                             # reused-name, with-at, first-wave, market-always
     uv run python $C wave [fault]           # faults: no-keep, block-names, no-script-check,
@@ -72,23 +73,26 @@ registry's pool runs its three unfinished ones; (quadro2, m4) states 9 units, ma
 max(2, 0) (Ruling 2), at the units' mean of a's jobs' estimates and b's workers' time limits; the
 waiting lease no unit; (orion, m12) 1; `c` no line; and `b` unread, its two workers stated alone
 (the same line) and the rest stated as ever, when its summary is absent and when its records do not
-read: a lease of `b` at 13 GB (no rung of cpu-score) with a task waiting (no unit), or `b`'s
-stewards live at two commits. Its runs every run squeue lists of the project's and every unfinished
-one of the registry (every pool, steward and long run among them), not a finished one, another
-user's, another project's, or a task that left squeue between the two reads. Faults:
-`finished-named` (cluster_demand.finished never true: a finished run named), `no-throttle`
-(cluster_demand.room unbounded: units past a run's throttle), `any-reason`
-(cluster_demand.waits_for always true: a task held by its dependency counted), `no-running`
-(cluster_demand.held's units dropped: what the waves hold stated as units 0), `count-done`
-(pool_summary.lines_of counting a DONE job as pending: the finished wave `c` states units),
-`every-node` (lines_of counting each job on every node of its wave: a group's jobs counted on each
-of the wave's nodes), `queue-only` (cluster_demand.pool_units the jobs pending or claimed alone:
-`b`'s idle workers dropped, against Ruling 2), `waiting-counted` (cluster_demand.pool_waiting never
-true: the waiting lease counted by its throttle), `running-twice` (cluster_demand.at_tres_alloc
-always true: a pool's running workers stated at their tres-alloc as well as on their wave's line),
-`pool-refuses` (cluster.pool_runs refusing a pool run whose record does not read) and
-`split-refuses` (cluster._live_stewards refusing a wave with live stewards at two commits): each of
-the last two leaves the whole campaign unstated for one wave's records.
+read: two leases of `b` at 13 GB (no rung of cpu-score), the first with a task running (stated at
+what Slurm holds: (quadro2, 13 GB) 1 unit at its limit) and one waiting (no unit),
+cluster.pool_runs naming both in `b`'s why; or `b`'s stewards live at two commits. Its runs every
+run squeue lists of the project's and every unfinished one of the registry (every pool, steward and
+long run among them), not a finished one, another user's, another project's, or a task that left
+squeue between the two reads. Faults: `finished-named` (cluster_demand.finished never true: a
+finished run named), `no-throttle` (cluster_demand.room unbounded: units past a run's throttle),
+`any-reason` (cluster_demand.waits_for always true: a task held by its dependency counted),
+`no-running` (cluster_demand.held's units dropped: what the waves hold stated as units 0),
+`count-done` (pool_summary.lines_of counting a DONE job as pending: the finished wave `c` states
+units), `every-node` (lines_of counting each job on every node of its wave: a group's jobs counted
+on each of the wave's nodes), `queue-only` (cluster_demand.pool_units the jobs pending or claimed
+alone: `b`'s idle workers dropped, against Ruling 2), `waiting-counted`
+(cluster_demand.pool_waiting never true: the waiting lease counted by its throttle),
+`broken-dropped` (cluster_demand.at_tres_alloc false for every pool lease's task: the running task
+of a lease whose record does not say what it holds dropped, held and not demanded), `running-twice`
+(cluster_demand.at_tres_alloc always true: a pool's running workers stated at their tres-alloc as
+well as on their wave's line), `pool-refuses` (cluster.pool_runs refusing a pool run whose record
+does not read) and `split-refuses` (cluster._live_stewards refusing a wave with live stewards at
+two commits): each of the last two leaves the whole campaign unstated for one wave's records.
 
 The lease pool's guards (docs/superpowers/specs/2026-10-21-lease-pool-design.md; the plan's
 Rulings 3, 4, 10 and 11, and the controller's: a summary names its ladder) run cluster.py's kinds
@@ -116,27 +120,29 @@ CPU, so a CPU pool's lease is not what its plan asks for.
 wave `w` two workers wide (tasks 500_0 and 500_1, out of squeue at GONE_AT), its steward live
 unless a case says otherwise and its summary on the cluster (or not), `cs.launches.width` patched
 (the market's arithmetic is cluster_submit's, not this guard's) to call the kind's own rule,
-`today`, except in `market`. Cases: `today`, three m12 jobs pending on quadro2 and 500_1 killed
-at its walltime and reaped there holding a job: Continue(2); `market`, the same with `width`
-answering the market's Continue(10): Continue(3), capped by the jobs pending; `routine`, no task
-killed: Continue(2); `idle`, 500_1 reaped holding no job: Done; `unreaped`, 500_1 registered and
-not reaped yet: raises; `hung`, 500_1 never registered (hung in its startup): Done; `requeued`,
-500_1 requeued (its registering again reaps its earlier self, holding a job, before that one's
-end time) and registered again, not yet reaped: raises; `requeued-late`, the same with the earlier
-self reaped past its end time (the requeue waited that long): raises; `requeued-hung`, its earlier
-self reaped before its end time and the requeued task never registered: Done; `old`, the summary
-written before GONE_AT: raises; `absent`, no summary: raises; `format-2`, a summary of format 2:
-raises; `unsettled`, the wave's steward finished and its continuation undecided: Continue(2);
-`no-steward`, the steward finished and settled: Done; `none-pending`, no m12 job pending on
-quadro2 (some claimed there, some pending elsewhere): Done; and the steward's own `more`:
-Continue(1) while its summary is CLOSED, Done once FINISHED. Faults: `continue-idle`
-(cluster._idle_killed finding none: idle and hung continued), `finished-dead` (a steward live
-only while unfinished: unsettled Done), `task-reaps` (a killed task's reap read by its task alone,
-any run's and any time's: requeued-hung continued on its earlier self's), `hung-waits` (every
-killed task waited for, registered or not: hung raises), `reap-first` (a walltime reap decides
-a killed task still registered: requeued-late continued on its earlier self's) and
+`today`, except in `market`. Cases: `today`, three m12 jobs pending on quadro2 and 500_1 killed at
+its walltime and reaped there holding a job: Continue(2); `market`, the same with `width` answering
+the market's Continue(10): Continue(3), capped by the jobs pending; `routine`, no task killed:
+Continue(2); `idle`, 500_1 reaped holding no job: Done; `unreaped`, 500_1 registered and not reaped
+yet: raises; `hung`, 500_1 never registered (hung in its startup): Done; `requeued`, 500_1 requeued
+(its registering again reaps its earlier self, holding a job, before that one's end time) and
+registered again, not yet reaped: raises; `requeued-late`, the same with the earlier self reaped
+past its end time (the requeue waited that long): raises; `requeued-hung`, its earlier self reaped
+before its end time and the requeued task never registered: Done; `old`, the summary written before
+GONE_AT: raises; `absent`, no summary: raises; `format-2`, a summary of format 2: raises;
+`unsettled`, the wave's steward finished and its continuation undecided: Continue(2); `no-steward`,
+the steward finished and settled: Done; `split`, the wave's steward live and another of it live at
+HEAD^: raises (live_stewards refusing it: a Done would end the wave's pools for good);
+`none-pending`, no m12 job pending on quadro2 (some claimed there, some pending elsewhere): Done;
+and the steward's own `more`: Continue(1) while its summary is CLOSED, Done once FINISHED. Faults:
+`continue-idle` (cluster._idle_killed finding none: idle and hung continued), `finished-dead` (a
+steward live only while unfinished: unsettled Done), `task-reaps` (a killed task's reap read by its
+task alone, any run's and any time's: requeued-hung continued on its earlier self's), `hung-waits`
+(every killed task waited for, registered or not: hung raises), `reap-first` (a walltime reap
+decides a killed task still registered: requeued-late continued on its earlier self's)
 `none-unreaped` (cluster._unreaped finding none, the registered-means-raise rule gone: unreaped,
-requeued and requeued-late decided on reaps that are not theirs).
+requeued and requeued-late decided on reaps that are not theirs) and `split-quiet`
+(cluster._one_commit a no-op: the split wave left out of the live waves, its lease Done).
 
 `template` (Ruling 4, Review Focus 2): live waves `a` (its steward at HEAD) and `b` (at HEAD^),
 with 3 and 7 jobs of m12 (cpu-score) pending on quadro2 and none of m24 pending on orion, a pool
@@ -519,6 +525,15 @@ def _demand_summaries(home: Path) -> None:
             pool_steward._summary(q, round_no=1, at=now, state=state)))
 
 
+class _DemandCase(NamedTuple):
+    """A `demand` case: its records, squeue and time limits, and the lines it states."""
+
+    recs: tuple[RunRecord, ...]
+    seen: Seen
+    limits: dict[str, float]
+    lines: tuple[DemandLine, ...]
+
+
 def check_demand() -> list[str]:
     """`demand` (the module's docstring): the problems found."""
     def cpu(gb: float, cpus: int = 1) -> Bundle:
@@ -607,30 +622,38 @@ def check_demand() -> list[str]:
     def shown(ls: tuple[DemandLine, ...]) -> list[tuple[str, str, int, float]]:
         return [(x.node, x.bundle.text(), x.units, round(x.minutes, 3)) for x in ls]
 
-    def stated(s: cluster_demand.Stated, *, waves: tuple[str, ...],
-               unread: tuple[str, ...]) -> list[str]:
-        """What is wrong with `s`, the demand stated with the summaries of `waves` read and those
-        of `unread` not."""
+    def stated(s: cluster_demand.Stated, *, lines: tuple[DemandLine, ...],
+               waves: tuple[str, ...], unread: tuple[str, ...]) -> list[str]:
+        """What is wrong with `s`, the demand stated with `lines`, the summaries of `waves` read
+        and those of `unread` not."""
         d = s.demand
         bad = []
-        if d.lines != want:
-            bad.append(f"lines {shown(d.lines)}, wanted {shown(want)}")
+        if d.lines != lines:
+            bad.append(f"lines {shown(d.lines)}, wanted {shown(lines)}")
         if (s.waves, s.unread) != (waves, unread):
             bad.append(f"the lines of waves {s.waves} stated and {s.unread} unread, wanted "
                        f"{waves} and {unread}")
         return bad
 
-    # a wave whose records do not read: b's lease of 13 GB (no rung of cpu-score) with a task
-    # waiting, or b's stewards live at two commits
-    mem13 = _demand_pool("b-quadro2-m13-s1", "b", "1250", node="quadro2", mem=13, width=1,
-                         finished=False)
+    # a wave whose records do not read: b's two leases of 13 GB (no rung of cpu-score), the first
+    # with a task running (held at what Slurm holds, a unit) and one waiting (no unit), or b's
+    # stewards live at two commits
+    mem13 = [_demand_pool(f"b-quadro2-m13-s{k}", "b", job, node="quadro2", mem=13, width=2,
+                          finished=False) for k, job in ((1, "1250"), (2, "1270"))]
     split = replace(_demand_run("b-steward2", "steward", ("--wave", "b", "--board", "market"),
                                 "1260", width=1, finished=False), commit=_rev("HEAD^"))
-    waiting13 = wait("1250_0", "b-quadro2-m13-s1", cpu(13, 2), node="quadro2")
-    broken = {   # case: its records, squeue and time limits
-        "b's lease of 13 GB": ([*recs, mem13], seen._replace(pending=(*seen.pending, waiting13)),
-                               {**limits, "1250_0": 120.0}),
-        "b's stewards at two commits": ([*recs, split], seen, limits)}
+    broken = {
+        "b's leases of 13 GB": _DemandCase(
+            recs=(*recs, *mem13),
+            seen=seen._replace(
+                running=(*seen.running, run("1250_0", "b-quadro2-m13-s1", "quadro2", cpu(13, 2))),
+                pending=(*seen.pending, wait("1250_1", "b-quadro2-m13-s1", cpu(13, 2),
+                                             node="quadro2"))),
+            limits={**limits, "1250_0": 120.0, "1250_1": 120.0},
+            lines=(*want[:5], DemandLine(node="quadro2", bundle=cpu(13, 2), units=1,
+                                         minutes=120.0, urgency=None), *want[5:])),
+        "b's stewards at two commits": _DemandCase(recs=(*recs, split), seen=seen,
+                                                   limits=limits, lines=want)}
     bad = []
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp) / "home"
@@ -650,17 +673,24 @@ def check_demand() -> list[str]:
         if got != pools:
             bad.append(f"pool runs {got}, want {pools}")
         s = demanded(recs, seen, limits)
-        bad += stated(s, waves=("a", "b", "c"), unread=())
-        for case, (rs, sq, lim) in broken.items():
+        bad += stated(s, lines=want, waves=("a", "b", "c"), unread=())
+        for case, c in broken.items():
             try:
-                x = demanded(rs, sq, lim)
+                x = demanded(c.recs, c.seen, c.limits)
             except (SystemExit, ValueError) as e:
                 bad.append(f"{case}: refused, no demand stated: {e}")
                 continue
-            bad += [f"{case}: {m}" for m in stated(x, waves=("a", "c"), unread=("b",))]
+            bad += [f"{case}: {m}" for m in stated(x, lines=c.lines, waves=("a", "c"),
+                                                   unread=("b",))]
+        try:
+            why = cluster.pool_runs(broken["b's leases of 13 GB"].recs).unread
+        except ValueError as e:
+            why = {"refused": str(e)}
+        if list(why) != ["b"] or not all(r.name in why["b"] for r in mem13):
+            bad.append(f"b's leases of 13 GB: unread {why}, want b's naming both")
         _put(home, "b", None)
         alone = demanded(recs, seen, limits)
-        bad += [f"b's summary absent: {x}" for x in stated(alone, waves=("a", "c"),
+        bad += [f"b's summary absent: {x}" for x in stated(alone, lines=want, waves=("a", "c"),
                                                            unread=("b",))]
     d = s.demand
     if (s.unplaced, s.elsewhere) != (2, 1):
@@ -780,6 +810,8 @@ DEMAND_FAULTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] 
     "queue-only": lambda: _patched(cluster_demand, "pool_units",
                                    lambda line, running: line.pending + line.claimed),
     "waiting-counted": lambda: _patched(cluster_demand, "pool_waiting", lambda p, pooled: False),
+    "broken-dropped": lambda: _patched(cluster_demand, "at_tres_alloc", lambda j, pooled:
+                                       not cluster_demand.pool_task(j.job, pooled)),
     "running-twice": lambda: _patched(cluster_demand, "at_tres_alloc", lambda j, pooled: True),
     "pool-refuses": lambda: _patched(cluster, "pool_runs", _pools_refused),
     "split-refuses": lambda: _patched(cluster, "_live_stewards", _split_refused)}
@@ -1092,6 +1124,12 @@ def check_more() -> list[str]:
                                              lines=lines, reaped=(), registered=()))
             got[name] = _answer(lambda: cluster.Steward().more(ctx, steward, killed=()))
             cases[name] = MoreCase(None, (), StewardState.UNSETTLED, _width_today, want)
+        # w's steward live (none-pending's) and another at HEAD^: refused, never taken for over
+        ctx.registry.write(_run("w-steward2", "steward", ("--wave", "w", "--board", "market"),
+                                commit=_rev("HEAD^"), width=1, finished=False, settled=False))
+        _put(tmp / "home", "w", summary())
+        got["split"] = _answer(functools.partial(cluster.pool_more, ctx, lease, killed=k))
+        cases["split"] = MoreCase(None, k, alive, t, "raises")
     bad = [f"{name} {got[name]}, want {c.want}" for name, c in cases.items()
            if got[name] != c.want]
     print(f"more: {', '.join(f'{n} {a}' for n, a in got.items())} -> "
@@ -1739,7 +1777,8 @@ FAULTS: dict[str, dict[str, Callable[[], contextlib.AbstractContextManager[None]
                                             lambda killed, registered: list(killed)),
              "reap-first": lambda: _patched(cluster, "_registered", _registered_unreaped),
              "none-unreaped": lambda: _patched(cluster, "_unreaped",
-                                               lambda killed, registered: [])},
+                                               lambda killed, registered: []),
+             "split-quiet": lambda: _patched(cluster, "_one_commit", lambda split: None)},
     "template": {
         "other-mem": lambda: _patched(cluster, "_pool_args", _other_mem),
         "other-node": lambda: _patched(cluster, "_pool_args", _other_node),
