@@ -25,9 +25,9 @@ its command line (the queue, the OOM evidence, the clock, the job's runner) and 
   forks inherits it. It leads a process group of its own (a new session), so a kill on the
   worker's error path takes the group: a compound line (`tar -xf ... && python ...`, where bash
   forks) leaves no grandchild running past its attempt. The session changes no cgroup: the job
-  stays in its worker's, whose OOM count is read, and Slurm's cgroup process tracking
-  (proctrack/cgroup, which ai's cgroup-confined tasks suggest; the smoke wave's to confirm: under
-  proctrack/pgid a new session would outlive its task) kills it with the task.
+  stays in its worker's, whose OOM count is read, and Slurm's cgroup process tracking kills it
+  with the task (ai's `scontrol show config`, 2026-10-21: ProctrackType proctrack/cgroup,
+  TaskPlugin task/cgroup,task/affinity; under proctrack/pgid a new session would outlive it).
 - **Its outcome** (`_outcome`): exit 0 is DONE; otherwise an increase of the cgroup's OOM-kill
   count across the child (`OomEvidence`, read before and after) is OOM, which promotes the job
   (pool_queue); anything else is FAILED, a SIGKILL with no increase or no readable count among

@@ -17,8 +17,10 @@ code as it is and must fail under each of its faults.
                                                     # no-retire, no-kill, pid-only, no-rebirth,
                                                     # no-checks
     uv run python $S dead-claim [--fault <name>]    # faults: by-age, blind
-    uv run python $S aside [--fault <name>]         # fault: whole-yields
-    uv run python $S end [--fault <name>]           # faults: early-end, claimed-runs-on
+    uv run python $S aside [--fault <name>]         # faults: whole-yields, stale-kept,
+                                                    # unread-fatal
+    uv run python $S end [--fault <name>]           # faults: early-end, claimed-runs-on,
+                                                    # open-ended, request-fatal
     uv run python $S both-ways <guards,> [args ...]   # each guard, then under each of its faults
 
 A guard runs as `<guard> [--fault <name>] [args ...]`: the fault is named by its flag, so a
@@ -207,24 +209,33 @@ the steward's own STEWARD_TASK among them, or a failure), no allocation unless a
   summaries), then two rounds each under a hand-made allocation (the keeper's JSON, read back)
   in which the campaign yields ASIDE_YIELDS (3) units of m4's bundle on quadro2: `active`, the
   workers each wave has asked after each round 2, 1, then 2, 1 (none more); `stale`, the
-  allocation older than STALE_AFTER, and `shadow`, its mode shadow: none. Fault `whole-yields`
-  (each steward asks all the yields its own workers can give: 3 and 2).
+  allocation older than STALE_AFTER, and `shadow`, its mode shadow: none; `ghost`, beside them a
+  dead steward's CLOSED summary written STALE_AFTER and a minute before, counting GHOST_WORKERS
+  (6) workers there: it gets no share (2, 1, 2, 1) and the first wave's ledger names it as stale;
+  `unreadable`, beside them a summary of another format: left out (2, 1, 2, 1) and named as
+  refused. Faults: `whole-yields` (each steward asks all the yields its own workers can give: 3
+  and 2), `stale-kept` (no summary too old: the ghost's 6 workers take a share, 1, 1) and
+  `unread-fatal` (a summary that does not read stops the round).
 - `end`: pool_steward.steward with a lease of three END_POLL polls: `finish`, a wave both of whose
   jobs are done: exit 0, final.db holding the queue's jobs and attempts, the bank and the tars
   deleted from its inputs (its seed and --with file kept), the summary FINISHED, the ledger's
-  last line the end; `retry`, a FAILED job and requests to retry it and job 99 (none such): job 1
-  PENDING with no strike, the other refused, both deleted and in the ledger, exit 75 (two rounds
-  no longer fit), no final.db; `cancel`, a cancel request with a job pending, one claimed (its
+  last line the end; `retry`, a FAILED job and requests to retry it, to retry job 99 (none such)
+  and a malformed one (not JSON): job 1 PENDING with no strike, the other two refused, all three
+  deleted and in the ledger, the malformed one's refusal logged, exit 75 (two rounds no longer
+  fit), no final.db; `cancel`, a cancel request with a job pending, one claimed (its
   worker live), one LONG and one done: the three CANCELLED, exit 0, final.db, the bank and tars
   deleted, the summary CANCELLED, and the claimed one's later failure leaving it CANCELLED;
   `long`, a done job and a LONG one waiting: exit 75, no final.db, the bank kept, the summary
-  CLOSED listing the long job; `command`, pool.py `steward` run in this process as a
+  CLOSED listing the long job; `open`, a wave whose one job is done but whose queue is open (a
+  feed that never closes it, as Screened's would between grants): exit 75, no final.db, the
+  summary OPEN; `command`, pool.py `steward` run in this process as a
   cluster_submit task would be (HOME, the Slurm array ids and end time, USER; a relative --board
   with no allocation) on a shipped wave whose one job is done: metrics.RUNTIME named in the
   queue's header, exit 0, the summary FINISHED naming it, final.db, the bank deleted. Faults:
-  `early-end` (a job waiting for the long lane counted as ended: long ends) and
+  `early-end` (a job waiting for the long lane counted as ended: long ends),
   `claimed-runs-on` (transitions': cancel leaves the claimed job running, so the wave never
-  ends).
+  ends), `open-ended` (an open queue's wave ended once its jobs have: open ends) and
+  `request-fatal` (a request that does not read, or that the queue refuses, stops the round).
 """
 from __future__ import annotations
 
@@ -1786,6 +1797,7 @@ WALLTIME_RAN = 50.0               # ... the minutes the walltime-killed worker r
 AGE_LIMIT = 3600.0                # by-age: a claim older than this reaped (s)
 ASIDE_WORKERS = (("wave-a", 4), ("wave-b", 2))   # aside: the waves and their live workers
 ASIDE_YIELDS = 3                  # ... the campaign's yields on (QUADRO, m4)
+GHOST_WORKERS = 6                 # ... the workers a dead steward's summary last counted there
 END_POLL = 0.2                    # end: the steward's poll (s); its lease three polls long
 
 Runner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
@@ -1979,15 +1991,38 @@ def _allocation(*, at: datetime, mode: str, yields: int) -> Allocation:
     return read_allocation(allocation_json(a, indent=1), "the guard's allocation")
 
 
-def _aside_case(tmp: Path, *, name: str, mode: str, age: timedelta,
-                want: tuple[int, ...]) -> list[str]:
-    """ASIDE_WORKERS' waves sharing (QUADRO, m4) under one `waves`, their workers live: each
-    steward's first round with no allocation, then two rounds each under an allocation of `mode`
-    `age` old yielding ASIDE_YIELDS there; the workers each wave has asked after each round
-    against `want` (the first rounds', then the second's)."""
+class Third(NamedTuple):
+    """A third wave under `waves` whose directory holds only a summary.json (`text`): a dead
+    steward's, or one of another format; and the key of the aside's ledger record (`stale` or
+    `refused`) that should name it."""
+    wave: str
+    text: str
+    left_out: str
+
+
+def _ghost(at: datetime) -> Third:
+    """A dead steward's summary written at `at`: wave-ghost CLOSED with GHOST_WORKERS live workers
+    on (QUADRO, m4) as it last counted them."""
+    s = psum.Summary(wave="wave-ghost", commit=COMMIT, at=at.strftime(STAMP), round=7,
+                     state=psum.WaveState.CLOSED, metric=None,
+                     lines=(psum.ClassLine(node=QUADRO, cls="m4", cards=0, cpus=2, mem_gb=4,
+                                           pending=GHOST_WORKERS, claimed=GHOST_WORKERS,
+                                           minutes=30.0, long=0, done=0, failed=0,
+                                           workers=GHOST_WORKERS),),
+                     reaped=(), long=())
+    return Third(wave=s.wave, text=psum.summary_json(s), left_out="stale")
+
+
+def _aside_case(tmp: Path, *, name: str, t0: datetime, mode: str, age: timedelta,
+                third: Third | None, want: tuple[int, ...]) -> list[str]:
+    """ASIDE_WORKERS' waves sharing (QUADRO, m4) under one `waves`, their workers live, and
+    `third` beside them: each steward's first round with no allocation, at `t0`, then two rounds
+    each under an allocation of `mode` `age` old yielding ASIDE_YIELDS there; the workers each wave
+    has asked after each round against `want` (the first rounds', then the second's), and the
+    third named in the first wave's ledger, at its first round under the allocation, as left out
+    (`third.left_out`)."""
     waves = tmp / "waves"
     lad = LADDERS["cpu-score"]
-    t0 = datetime.fromtimestamp(math.floor(time.time()), UTC)
     made: dict[str, tuple[Path, pq.SqliteQueue, list[str]]] = {}
     for w, n in ASIDE_WORKERS:
         jobs = [replace(_small(lad, i, minutes=30.0), node=QUADRO) for i in range(1, 2 * n + 1)]
@@ -1997,30 +2032,52 @@ def _aside_case(tmp: Path, *, name: str, mode: str, age: timedelta,
             q.register(worker=x, run=f"{w}-{QUADRO}-m4-s1", node=QUADRO, cls="m4",
                        ends_at=t0.timestamp() + 7200, restarts=0)
         made[w] = (waves / w, q, ids)
+    if third is not None:
+        (waves / third.wave).mkdir(parents=True)
+        (waves / third.wave / ps.SUMMARY).write_text(third.text)
     everyone = _liveness(_squeue(STEWARD_TASK, *(x for _, _, ids in made.values() for x in ids)))
-    for d, q, _ in made.values():
-        _round(q, d, waves, liveness=everyone, allocation=None, now=t0)
     alloc = _allocation(at=t0 - age, mode=mode, yields=ASIDE_YIELDS)
     got: list[int] = []
-    for _ in (1, 2):
-        for d, q, ids in made.values():
-            _round(q, d, waves, liveness=everyone, allocation=alloc, now=t0)
-            got.append(sum(1 for x in ids if q.asked_aside(x)))
-    notes = [] if tuple(got) == want else [f"asked {got}, want {list(want)}"]
-    print(f"aside {name}: waves {dict(ASIDE_WORKERS)} on {QUADRO} m4, an allocation ({mode}, "
-          f"{age} old) yielding {ASIDE_YIELDS}: asked after each round {got}" + _failing(notes),
-          flush=True)
+    notes: list[str] = []
+    try:
+        for d, q, _ in made.values():
+            _round(q, d, waves, liveness=everyone, allocation=None, now=t0)
+        for _ in (1, 2):
+            for d, q, ids in made.values():
+                _round(q, d, waves, liveness=everyone, allocation=alloc, now=t0)
+                got.append(sum(1 for x in ids if q.asked_aside(x)))
+    except ValueError as e:
+        notes.append(f"a round raised {e}")
+    notes += [] if tuple(got) == want else [f"asked {got}, want {list(want)}"]
+    if third is not None and not notes:
+        first = waves / ASIDE_WORKERS[0][0] / ps.LEDGER
+        record = json.loads(first.read_text().splitlines()[1])["aside"]
+        named = record[third.left_out] if isinstance(record, dict) else None
+        path = str(waves / third.wave / ps.SUMMARY)
+        notes += [] if isinstance(named, dict) and path in named else [
+            f"the ledger's aside {record}, want {path} among its {third.left_out}"]
+    print(f"aside {name}: waves {dict(ASIDE_WORKERS)} on {QUADRO} m4"
+          + ("" if third is None else f" and {third.wave}'s summary ({third.left_out})")
+          + f", an allocation ({mode}, {age} old) yielding {ASIDE_YIELDS}: asked after each "
+          f"round {got}" + _failing(notes), flush=True)
     return [name] if notes else []
 
 
 def aside(_args: list[str]) -> list[str]:
     bad: list[str] = []
+    t0 = datetime.fromtimestamp(math.floor(time.time()), UTC)
     fresh, stale = timedelta(0), STALE_AFTER + timedelta(minutes=1)
-    for name, mode, age, want in (("active", "active", fresh, (2, 1, 2, 1)),
-                                  ("stale", "active", stale, (0, 0, 0, 0)),
-                                  ("shadow", "shadow", fresh, (0, 0, 0, 0))):
+    odd = Third(wave="wave-odd", text=json.dumps({"format": psum.SUMMARY_FORMAT + 1}),
+                left_out="refused")
+    for name, mode, age, third, want in (
+            ("active", "active", fresh, None, (2, 1, 2, 1)),
+            ("stale", "active", stale, None, (0, 0, 0, 0)),
+            ("shadow", "shadow", fresh, None, (0, 0, 0, 0)),
+            ("ghost", "active", fresh, _ghost(t0 - stale), (2, 1, 2, 1)),
+            ("unreadable", "active", fresh, odd, (2, 1, 2, 1))):
         with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
-            bad += _aside_case(Path(tmp), name=name, mode=mode, age=age, want=want)
+            bad += _aside_case(Path(tmp), name=name, t0=t0, mode=mode, age=age, third=third,
+                               want=want)
     return bad
 
 
@@ -2039,6 +2096,7 @@ class Ended(NamedTuple):
     ledger: list[dict[str, object]]
     final: bool                 # final.db written
     inputs: list[str]           # what is left in the wave's inputs
+    log: list[str]
 
 
 def _inputs(d: Path, seed: pq.Seed) -> None:
@@ -2050,19 +2108,30 @@ def _inputs(d: Path, seed: pq.Seed) -> None:
         (inputs / name).write_bytes(b"")
 
 
-def _steward_run(q: pq.Queue, d: Path, waves: Path, *, listed: Sequence[str]) -> Ended:
-    """pool_steward.steward on the wave in `d`, squeue listing `listed` and its own task, its
-    lease three of END_POLL's polls long (so at most three rounds)."""
+@dataclass(frozen=True)
+class _Unclosed:
+    """A feed that grants nothing yet and never closes its queue, as Screened's would between
+    its grants (decision 7)."""
+
+    def round(self, queue: pq.Queue) -> None:
+        return None
+
+
+def _steward_run(q: pq.Queue, d: Path, waves: Path, *, listed: Sequence[str],
+                 feed: ps.Feed) -> Ended:
+    """pool_steward.steward on the wave in `d` fed by `feed`, squeue listing `listed` and its own
+    task, its lease three of END_POLL's polls long (so at most three rounds)."""
+    log: list[str] = []
     ex = ps.steward(queue=q, wave_dir=d, waves=waves,
-                    liveness=_liveness(_squeue(STEWARD_TASK, *listed)), feed=ps.Fixed(),
+                    liveness=_liveness(_squeue(STEWARD_TASK, *listed)), feed=feed,
                     allocation=lambda: None, stale_after=STALE_AFTER,
-                    now=lambda: datetime.now(UTC), log=lambda line: None,
+                    now=lambda: datetime.now(UTC), log=log.append,
                     ends_at=time.time() + 3 * END_POLL, poll_seconds=END_POLL)
     return Ended(exit=int(ex),
                  summary=psum.read_summary((d / ps.SUMMARY).read_text(), "summary.json"),
                  ledger=[json.loads(x) for x in (d / ps.LEDGER).read_text().splitlines()],
                  final=(d / ps.FINAL).exists(),
-                 inputs=sorted(p.name for p in (d / ps.INPUTS).iterdir()))
+                 inputs=sorted(p.name for p in (d / ps.INPUTS).iterdir()), log=log)
 
 
 def _end_finish(tmp: Path) -> list[str]:
@@ -2080,7 +2149,7 @@ def _end_finish(tmp: Path) -> list[str]:
         if got is not None:
             c.q.finish(got.attempt, worker=w, outcome=pq.Outcome.DONE, peak_gb=3.1,
                        minutes=20.0, rc=0)
-    e = _steward_run(c.q, d, waves, listed=[w])
+    e = _steward_run(c.q, d, waves, listed=[w], feed=ps.Fixed())
     same = e.final and all(_rows(d / ps.FINAL, x) == _rows(d / "queue.db", x)
                            for x in ("jobs", "attempts"))
     notes = c.notes + ([] if e.exit == 0 else [f"exit {e.exit}, want 0"]) + (
@@ -2095,7 +2164,8 @@ def _end_finish(tmp: Path) -> list[str]:
 
 
 def _end_retry(tmp: Path) -> list[str]:
-    """A retry request of a FAILED job, and one of a job the wave lacks."""
+    """A retry request of a FAILED job, one of a job the wave lacks, and a malformed one (not
+    JSON)."""
     lad = LADDERS["cpu-score"]
     waves = tmp / "waves"
     d = waves / "pool-check"
@@ -2108,20 +2178,61 @@ def _end_retry(tmp: Path) -> list[str]:
     requests.mkdir()
     (requests / "2026-10-21T00:00:00Z.json").write_text(json.dumps({"retry": [s.id]}))
     (requests / "2026-10-21T00:00:01Z.json").write_text(json.dumps({"retry": [99]}))
-    e = _steward_run(c.q, d, waves, listed=["w1", "w2", "w3"])
+    malformed = "2026-10-21T00:00:02Z.json"
+    (requests / malformed).write_text('{"retry": [1,')
+    try:
+        e: Ended | None = _steward_run(c.q, d, waves, listed=["w1", "w2", "w3"],
+                                       feed=ps.Fixed())
+        raised = None
+    except ValueError as err:
+        e, raised = None, str(err)
+    if e is None:
+        print(f"end retry: the steward raised {raised} -> FAILS", flush=True)
+        return ["retry"]
     first = e.ledger[0]["requests"]
     done = first if isinstance(first, list) else []
     retried = [x for x in done if isinstance(x, dict) and "retried" in x and x["retried"] == 1]
-    refused = [x for x in done if isinstance(x, dict) and "refused" in x]
+    refused = [x["request"] for x in done if isinstance(x, dict) and "refused" in x]
+    logged = [x for x in e.log if x.startswith(f"request {malformed}: ") and "refused" in x]
     notes = c.notes + ([] if e.exit == pw.Exit.RETIRED else [f"exit {e.exit}, want 75"]) + (
         [] if (c.job(s.id).state, c.job(s.id).strikes) == (pq.JobState.PENDING, 0) else
         [f"job 1 {c.job(s.id).state} with {c.job(s.id).strikes} strikes"]) + (
-        [] if (len(retried), len(refused)) == (1, 1) else [f"the ledger's requests {done}"]) + (
+        [] if len(retried) == 1 and refused == ["2026-10-21T00:00:01Z.json", malformed] else
+        [f"the ledger's requests {done}"]) + (
+        [] if len(logged) == 1 else [f"the malformed request logged {len(logged)} times"]) + (
         [] if not list(requests.iterdir()) else ["requests left"]) + (
         [] if not e.final else ["final.db written"])
-    print(f"end retry: job 1 FAILED, a retry of it and of job 99: job 1 {c.job(s.id).state} "
-          f"with {c.job(s.id).strikes} strikes, exit {e.exit}" + _failing(notes), flush=True)
+    print(f"end retry: job 1 FAILED, a retry of it, of job 99 and a malformed one: job 1 "
+          f"{c.job(s.id).state} with {c.job(s.id).strikes} strikes, refused {refused}, exit "
+          f"{e.exit}" + _failing(notes), flush=True)
     return ["retry"] if notes else []
+
+
+def _end_open(tmp: Path) -> list[str]:
+    """A wave whose every job is done but whose queue is open (its feed may grant more, as
+    Screened's would): no end."""
+    lad = LADDERS["cpu-score"]
+    waves = tmp / "waves"
+    d = waves / "pool-check"
+    s = _small(lad)
+    seed = pq.Seed(header=_header(lad), jobs=(s,), closed=False)
+    q = pq.SqliteQueue.open(d / "queue.db", seed)
+    _inputs(d, seed)
+    q.register(worker="w1", run=RUN, node=NODE, cls="m4", ends_at=time.time() + 7200.0,
+               restarts=0)
+    got = q.claim(worker="w1", minutes_left=pq.fresh_minutes(lad))
+    if got is not None:
+        q.finish(got.attempt, worker="w1", outcome=pq.Outcome.DONE, peak_gb=3.1, minutes=20.0,
+                 rc=0)
+    e = _steward_run(q, d, waves, listed=["w1"], feed=_Unclosed())
+    notes = ([] if got is not None and q.jobs()[0].state == pq.JobState.DONE else
+             ["job 1 not done"]) + (
+        [] if e.exit == pw.Exit.RETIRED else [f"exit {e.exit}, want 75"]) + (
+        [] if not e.final else ["final.db written"]) + (
+        [] if e.summary.state == psum.WaveState.OPEN else [f"summary {e.summary.state}"])
+    print(f"end open: its one job done, its queue open: exit {e.exit}, final.db {e.final}, "
+          f"{e.summary.state}" + _failing(notes), flush=True)
+    return ["open"] if notes else []
 
 
 def _end_cancel(tmp: Path) -> list[str]:
@@ -2144,7 +2255,7 @@ def _end_cancel(tmp: Path) -> list[str]:
                    minutes=5.0, rc=0)
     (d / ps.REQUESTS).mkdir()
     (d / ps.REQUESTS / "2026-10-21T00:00:00Z.json").write_text(json.dumps({"cancel": True}))
-    e = _steward_run(c.q, d, waves, listed=[w, other])
+    e = _steward_run(c.q, d, waves, listed=[w, other], feed=ps.Fixed())
     states = {j.id: j.state for j in c.q.jobs()}
     want = {1: pq.JobState.CANCELLED, 2: pq.JobState.CANCELLED, 3: pq.JobState.CANCELLED,
             4: pq.JobState.DONE}
@@ -2178,7 +2289,7 @@ def _end_long(tmp: Path) -> list[str]:
     if got is not None:
         c.q.finish(got.attempt, worker=w, outcome=pq.Outcome.DONE, peak_gb=3.1, minutes=20.0,
                    rc=0)
-    e = _steward_run(c.q, d, waves, listed=[w])
+    e = _steward_run(c.q, d, waves, listed=[w], feed=ps.Fixed())
     want = (psum.LongJob(job=2, block=jobs[1].block, item=jobs[1].item, node=NODE,
                          mem_gb=math.ceil(jobs[1].gb), minutes=30.0),)
     notes = c.notes + ([] if e.exit == pw.Exit.RETIRED else [f"exit {e.exit}, want 75"]) + (
@@ -2230,7 +2341,7 @@ def _end_command(tmp: Path) -> list[str]:
 
 def end(_args: list[str]) -> list[str]:
     bad: list[str] = []
-    for case in (_end_finish, _end_retry, _end_cancel, _end_long, _end_command):
+    for case in (_end_finish, _end_retry, _end_cancel, _end_long, _end_open, _end_command):
         with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
             bad += case(Path(tmp))
     return bad
@@ -2383,9 +2494,37 @@ def _whole_yields(*, yields: int, workers: Mapping[str, int], wave: str) -> int:
     return min(yields, workers[wave])
 
 
-def _ended_with_long(jobs: Sequence[pq.Job]) -> bool:
+def _ended_with_long(jobs: Sequence[pq.Job], *, closed: bool) -> bool:
     """pool_steward._ended counting a job waiting for the long lane as ended."""
-    return all(j.state in (*ps.ENDED, pq.JobState.LONG) for j in jobs)
+    return closed and all(j.state in (*ps.ENDED, pq.JobState.LONG) for j in jobs)
+
+
+def _ended_open(jobs: Sequence[pq.Job], *, closed: bool) -> bool:
+    """pool_steward._ended ignoring whether the queue is closed."""
+    return all(j.state in ps.ENDED for j in jobs)
+
+
+_LIVE_SUMMARIES = ps._live_summaries
+
+
+def _unread_fatal(waves: Path, wave_dir: Path, *, now: datetime,
+                  stale_after: timedelta) -> ps.Others:
+    """pool_steward._live_summaries letting a summary that does not read stop the round."""
+    for path in sorted(waves.glob(f"*/{ps.SUMMARY}")):
+        psum.read_summary(path.read_text(), str(path))
+    return _LIVE_SUMMARIES(waves, wave_dir, now=now, stale_after=stale_after)
+
+
+def _requests_fatal(queue: pq.Queue, requests: Path, *,
+                    log: Callable[[str], None]) -> list[dict[str, object]]:
+    """pool_steward._requests letting a request that does not read, or that the queue refuses,
+    stop the round."""
+    done: list[dict[str, object]] = []
+    for path in sorted(requests.glob("*.json")):
+        what = ps.read_request(path.read_text(), str(path)).apply(queue)
+        path.unlink()
+        done.append({"request": path.name, **what})
+    return done
 
 
 _OUTCOME = pw._outcome
@@ -2441,9 +2580,13 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
                "no-checks": _unchecked},
     "dead-claim": {"by-age": lambda: _patched(ps, "_reap", _reap_by_age),
                    "blind": lambda: _patched(ps.Squeue, "dead", _blind)},
-    "aside": {"whole-yields": lambda: _patched(psum, "aside_share", _whole_yields)},
+    "aside": {"whole-yields": lambda: _patched(psum, "aside_share", _whole_yields),
+              "stale-kept": lambda: _patched(ps, "_stale", lambda s, *, now, stale_after: False),
+              "unread-fatal": lambda: _patched(ps, "_live_summaries", _unread_fatal)},
     "end": {"early-end": lambda: _patched(ps, "_ended", _ended_with_long),
-            "claimed-runs-on": lambda: _patched(pq.SqliteQueue, "cancel", _cancel_waiting)},
+            "claimed-runs-on": lambda: _patched(pq.SqliteQueue, "cancel", _cancel_waiting),
+            "open-ended": lambda: _patched(ps, "_ended", _ended_open),
+            "request-fatal": lambda: _patched(ps, "_requests", _requests_fatal)},
 }
 
 

@@ -15,17 +15,18 @@ gpu_demand's step-aside): one CPU lease per wave that runs a round every poll (`
    older than the market's stale_after; for each (node, bundle) the campaign yields there that is
    a class of this wave's ladder, its share of those units among the live waves' workers there
    (pool_summary.aside_share: the other waves counted by their latest summaries, one that does
-   not read left out and said in the ledger), asked of its own live workers (pool_queue's
-   `ask_aside`: idle ones first, counting its own asks since that allocation).
+   not read, or older than the stale_after, left out and said in the ledger; its own by its
+   queue), asked of its own live workers (pool_queue's `ask_aside`: idle ones first, counting its
+   own asks since that allocation).
 4. **Feed** (`Feed`): `Fixed`, nothing after the seed (decision 7; `Screened` waits for the
    re-run).
 5. **summary.json** written whole (a temporary name, then a rename), then the round's line
    appended to `ledger.jsonl`.
 
 `steward` runs rounds until two no longer fit before its lease's end (75: its continuation is its
-own rule's), or every job is done, failed or cancelled: then the queue's final snapshot
-(`final.db`), the bank and tars deleted from the wave's inputs, a last summary (FINISHED, or
-CANCELLED after a cancel), 0.
+own rule's), or its queue is closed and every job done, failed or cancelled: then the queue's
+final snapshot (`final.db`), the bank and tars deleted from the wave's inputs, a last summary
+(FINISHED, or CANCELLED after a cancel), 0.
 
 It writes no demand (Ruling 1): this machine's demand step states the one campaign's, reading
 each live wave's summary.
@@ -41,7 +42,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
 import pool_summary as psum
 from cluster_submit import Bundle
@@ -219,11 +220,27 @@ def _reap(queue: Queue, liveness: Liveness, *, now: float) -> list[Reaped]:
     return out
 
 
-def _live_summaries(waves: Path, wave_dir: Path) -> tuple[list[psum.Summary], dict[str, str]]:
-    """The other waves' latest summaries under `waves` whose stewards still run (OPEN or CLOSED),
-    and each summary that does not read here, with why."""
-    found: list[psum.Summary] = []
-    refused: dict[str, str] = {}
+class Others(NamedTuple):
+    """The other waves' summaries as a round reads them (`_live_summaries`)."""
+
+    live: list[psum.Summary]    # OPEN or CLOSED, and fresh
+    refused: dict[str, str]     # each that does not read here (by path), and why
+    stale: dict[str, str]       # each OPEN or CLOSED one too old to count (by path), and why
+
+
+def _stale(s: psum.Summary, *, now: datetime, stale_after: timedelta) -> bool:
+    """Whether `s` was written more than `stale_after` before `now`: its steward has run no round
+    for as long as the market counts a demand stale (dead, or between leases that long), so its
+    workers count for no share (the review's ruling, Task 4)."""
+    return now - stamped(s.at) > stale_after
+
+
+def _live_summaries(waves: Path, wave_dir: Path, *, now: datetime,
+                    stale_after: timedelta) -> Others:
+    """The other waves' latest summaries under `waves` whose stewards still run (OPEN or CLOSED)
+    and wrote them within `stale_after` of `now`; and those left out, with why: each that does not
+    read here, and each too old (`_stale`)."""
+    out = Others(live=[], refused={}, stale={})
     own = wave_dir.resolve()
     for path in sorted(waves.glob(f"*/{SUMMARY}")):
         if path.parent.resolve() == own:
@@ -231,11 +248,15 @@ def _live_summaries(waves: Path, wave_dir: Path) -> tuple[list[psum.Summary], di
         try:
             s = psum.read_summary(path.read_text(), str(path))
         except (OSError, ValueError) as e:
-            refused[str(path)] = str(e)
+            out.refused[str(path)] = str(e)
             continue
-        if s.state in psum.LIVE:
-            found.append(s)
-    return found, refused
+        if s.state not in psum.LIVE:
+            continue
+        if _stale(s, now=now, stale_after=stale_after):
+            out.stale[str(path)] = f"wave {s.wave}'s, written {s.at}, older than {stale_after}"
+            continue
+        out.live.append(s)
+    return out
 
 
 def _workers_at(s: psum.Summary, node: str, bundle: Bundle) -> int:
@@ -266,18 +287,19 @@ def _aside(queue: Queue, *, wave_dir: Path, waves: Path,
             for b, units in held.items() if b in classes]
     if not mine:
         return {"mode": a.mode, "at": a.at, "asked": {}}
-    others, refused = _live_summaries(waves, wave_dir)
+    others = _live_summaries(waves, wave_dir, now=now, stale_after=stale_after)
     live = [w for w in queue.workers() if not w.retired]
     asked: dict[str, object] = {}
     for node, b, units in mine:
         cls = classes[b]
-        counts = {s.wave: _workers_at(s, node, b) for s in others}
+        counts = {s.wave: _workers_at(s, node, b) for s in others.live}
         counts[h.wave] = sum(1 for w in live if (w.node, w.cls) == (node, cls))
         share = psum.aside_share(yields=units, workers=counts, wave=h.wave)
         asked[f"{node} {cls}"] = {"yields": units, "workers": counts, "share": share,
                                   "asked": queue.ask_aside(node=node, cls=cls, units=share,
                                                            since=at.timestamp())}
-    return {"mode": a.mode, "at": a.at, "asked": asked, "refused": refused}
+    return {"mode": a.mode, "at": a.at, "asked": asked, "refused": others.refused,
+            "stale": others.stale}
 
 
 def _summary(queue: Queue, *, round_no: int, at: datetime,
@@ -345,9 +367,10 @@ def round_(*, queue: Queue, wave_dir: Path, waves: Path, liveness: Liveness, fee
 
 # ---- the steward ------------------------------------------------------------------------------
 
-def _ended(jobs: Sequence[Job]) -> bool:
-    """Whether every job of the wave has ended (ENDED): a job waiting for the long lane has not."""
-    return all(j.state in ENDED for j in jobs)
+def _ended(jobs: Sequence[Job], *, closed: bool) -> bool:
+    """Whether the wave has ended: its queue `closed` (it grants nothing more: an open one's feed
+    may yet) and every job ended (ENDED: a job waiting for the long lane has not)."""
+    return closed and all(j.state in ENDED for j in jobs)
 
 
 def _end(queue: Queue, *, wave_dir: Path, round_no: int, now: Callable[[], datetime],
@@ -375,9 +398,9 @@ def steward(*, queue: Queue, wave_dir: Path, waves: Path, liveness: Liveness, fe
             allocation: Callable[[], Allocation | None], stale_after: timedelta,
             now: Callable[[], datetime], log: Callable[[str], None], ends_at: float,
             poll_seconds: float) -> Exit:
-    """The wave's steward (the module's doc): a round every `poll_seconds` until every job has
-    ended (its end: 0) or two rounds no longer fit before `ends_at` (epoch seconds on `now`'s
-    clock: 75)."""
+    """The wave's steward (the module's doc): a round every `poll_seconds` until its queue is
+    closed and every job has ended (its end: 0) or two rounds no longer fit before `ends_at`
+    (epoch seconds on `now`'s clock: 75)."""
     h = queue.header()
     log(f"=== steward of wave {h.wave} at {h.commit}: a round every {poll_seconds:g} s, "
         f"{(ends_at - now().timestamp()) / 60:.1f} minutes of its lease left")
@@ -385,7 +408,7 @@ def steward(*, queue: Queue, wave_dir: Path, waves: Path, liveness: Liveness, fe
         started = time.monotonic()
         s = round_(queue=queue, wave_dir=wave_dir, waves=waves, liveness=liveness, feed=feed,
                    allocation=allocation, stale_after=stale_after, now=now, log=log)
-        if _ended(queue.jobs()):
+        if _ended(queue.jobs(), closed=queue.closed()):
             return _end(queue, wave_dir=wave_dir, round_no=s.round, now=now, log=log)
         if ends_at - now().timestamp() < 2 * poll_seconds:
             log("two rounds no longer fit before the lease's end: retired (75)")
