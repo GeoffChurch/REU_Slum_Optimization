@@ -47,23 +47,23 @@ component has a leak) and _boot.parquet (the bootstrap's medians at the constant
 demand), in the region's population units (AreaPopulation normalises each block to mean 1: a
 kblock's potentials times its mean footprint area over the region's); ROWS/members/<kblock>.parquet.
 
-`blocks`: one metric everywhere (owner 2026-10-15), checked per block on TUNING, on a core, no
-re-optimization: each block under the per-block metric (`plain`) and under it with the central
-constants (`leaky`, block_exits: the street ring the edge): P0, P_{1/2},0, J_2,0; under the leak
-the share of the current leaking at baseline, and self-absorption (absorb: a typical home's share
-leaking inside, `anywhere`, and at its own building); the stored SIMP-default and cheap-preset
-clearings (relax_rows, CHEAP_ROWS) scored under each: Lens A on each lens.
-ROWS/blocks/<id>.parquet.
+`blocks`: one metric everywhere (owner 2026-10-15), checked per block on the 13 tuning blocks
+(common.TUNING), on a core, no re-optimization: each block under the per-block metric (`plain`) and
+under it with the central constants (`leaky`, block_exits: the street ring the edge): P0,
+P_{1/2},0, J_2,0; under the leak the share of the current leaking at baseline, and self-absorption
+(absorb: a typical home's share leaking inside, `anywhere`, and at its own building); the stored
+SIMP-default and cheap-preset clearings (relax_rows, CHEAP_ROWS) scored under each: Lens A on each
+lens. ROWS/blocks/<id>.parquet.
 
 `loo-blocks`, `loo`: who each clearing helps (owner 2026-10-16: "Clearing N people's homes to
 provide access to n<N people's homes seems unfair (on average at least)"; a measurement, no
 objective changed). Each cleared building of a final clearing restored alone (leave-one-out from
 it): the population of the other homes standing whose escape time rises by at least LOO_RISES (or
 that the restoring walls in) is what its clearing serves (`helped`), against its own population
-(`displaced`), with the rise in P (`gain`). On TUNING's stored SIMP-default and cheap-preset
-clearings under the per-block metric, on cores; on the region's SIMP clearing under a
-configuration, on a GPU within a wall budget (a seeded random order: a cut leaves a sample).
-ROWS/loo/<where>_<preset>.parquet; summary_loo.csv.
+(`displaced`), with the rise in P (`gain`). On the 13 tuning blocks' (common.TUNING) stored
+SIMP-default and cheap-preset clearings under the per-block metric, on cores; on the region's SIMP
+clearing under a configuration, on a GPU within a wall budget (a seeded random order: a cut leaves
+a sample). ROWS/loo/<where>_<preset>.parquet; summary_loo.csv.
 
 `baseline`: the region's model under a configuration on a core: P0, P_{1/2},0, J_2,0, the homes
 walled in, the leaks' total and the share of the injected current they drain at baseline (the
@@ -555,7 +555,7 @@ def _block_one(bid: str) -> str | None:
 
 
 def blocks(procs: int) -> None:
-    """The per-block check (module docstring) on TUNING."""
+    """The per-block check (module docstring) on the 13 tuning blocks (common.TUNING)."""
     (ROWS / "blocks").mkdir(parents=True, exist_ok=True)
     todo = [i for i in common.TUNING if not (ROWS / "blocks" / f"{i}.parquet").exists()]
     with multiprocessing.get_context("fork").Pool(procs, maxtasksperchild=1) as pool:
@@ -631,7 +631,8 @@ def _loo_block(bid: str) -> str | None:
 
 
 def loo_blocks(procs: int) -> None:
-    """leave_one_out on TUNING's stored presets' clearings, under the per-block metric."""
+    """leave_one_out on the 13 tuning blocks' (common.TUNING) stored presets' clearings, under
+    the per-block metric."""
     (ROWS / "loo").mkdir(parents=True, exist_ok=True)
     todo = [i for i in common.TUNING if not loo_path(i, "cheap").exists()]
     with multiprocessing.get_context("fork").Pool(procs, maxtasksperchild=1) as pool:

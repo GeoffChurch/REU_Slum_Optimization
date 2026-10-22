@@ -919,9 +919,10 @@ Not pursued, with what would change that:
   of 34 sign-flip tests), and phase 5's six screens re-derived to seqscreen's stops and calls. The
   pin is in pyproject.toml (`[tool.uv.sources]`, the full SHA); at every pin move
   `screening_check.py acceptance` (reblock's real-data acceptance test on screen_designs.json, with
-  the other guards: screening.py, "THE PIN"), and when a pin changes the random numbers, `runs` and
-  then `equivalent` against the committed screen_acceptance.csv (its margins half the presets' gap
-  there) before the new runs are committed, the screens re-derived afresh. The epistemetry issues:
+  the other guards: screening.py, "THE PIN"), and when a pin changes the random numbers, the
+  committed screen_acceptance.csv kept outside the repo (`runs` overwrites it in place), `runs`,
+  then `equivalent` of the kept runs against the new (its margins half the presets' gap in the
+  kept) before the new runs are committed, the screens re-derived afresh. The epistemetry issues:
   #1-#9 filed from reblock (#1-#8 closed by 165f98b; #9, why requires-python >=3.12, open); #10 (a
   replay charges a step unit by unit, a live wave pays it whole; from the replay driver's spec)
   open, with the move's measurement commented (an under-charge only where a veto falls inside the

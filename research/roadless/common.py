@@ -61,7 +61,9 @@ def large_blocks() -> list[str]:
     return sorted(pd.read_parquet(LARGE, columns=["block"])["block"])
 
 
-# The 13 large blocks the presets were tuned on (BACKLOG, "Tune on the 13, report on the 44").
+# The 13 large blocks the presets were tuned on (BACKLOG, "Tune on the 13, report on the 44": the
+# held-out 44 then, HELD's 46 since 20023 and 30796 joined them, NOTES "Sightline on the held-out
+# blocks at D 0.05").
 TUNING: tuple[str, ...] = (
     "ZAF.9.3.1_1_1558", "ZAF.9.3.1_1_18895", "ZAF.9.3.1_1_20269", "ZAF.9.3.1_1_20543",
     "ZAF.9.3.1_1_22422", "ZAF.9.3.1_1_23597", "ZAF.9.3.1_1_30848", "ZAF.9.3.1_1_33717",
@@ -71,8 +73,8 @@ TUNING: tuple[str, ...] = (
 # The held-out blocks the screens run on, 46 (the other large blocks that fit the retired raster's
 # greedy at h 0.5): the large blocks large82_simp_vs_greedy.parquet holds, less TUNING, in
 # seqscreen's order (default_rng(0)'s permutation of them sorted), the order phase 5 ran them in;
-# frozen 2026-10-17. The order is data: no seed regenerates it (epistemetry's random_orders draws
-# from stream(seed, PERMUTE, o)).
+# frozen 2026-10-17. The order is data: numpy's default_rng(0) drew it from the sorted set, and no
+# epistemetry seed regenerates it (its random_orders draws from stream(seed, PERMUTE, o)).
 HELD: tuple[str, ...] = (
     "ZAF.9.3.1_1_18739", "ZAF.9.3.1_1_8152", "ZAF.9.3.1_1_18947", "ZAF.9.3.1_1_22673",
     "ZAF.9.3.1_1_22659", "ZAF.9.3.1_1_8480", "ZAF.9.3.1_1_20952", "ZAF.9.3.1_1_17608",

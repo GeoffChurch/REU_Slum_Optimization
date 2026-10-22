@@ -26,10 +26,12 @@ screen stopped is read off its `Stopped` record (`why_of`), never stored as a la
 THE PIN. epistemetry is pinned in pyproject.toml (the `research` group, `[tool.uv.sources]` at a
 full SHA). A pin moves so:
 - edit the `rev`, then `uv lock --upgrade-package epistemetry`;
-- run `screening_check.py both-ways target,records,adapter,why,acceptance,screens`;
-- if `acceptance` fails only because the random numbers changed, regenerate the runs
-  (`screening_check.py runs`) and pass `screening_check.py equivalent` against the committed CSV
-  before committing the new one;
+- run `screening_check.py both-ways target,records,adapter,why,equivalence,acceptance,screens`;
+- if `acceptance` fails only because the random numbers changed, keep the committed runs first,
+  outside the repo (`git show HEAD:research/roadless/screen_acceptance.csv > <old.csv>`: `runs`
+  overwrites screen_acceptance.csv in place), regenerate them (`screening_check.py runs`), and
+  pass `screening_check.py equivalent <old.csv> research/roadless/screen_acceptance.csv` before
+  committing the new ones;
 - if `screens` fails the same way, re-derive the screens afresh (remove screen_decisions.json, then
   `consolidated.py screen-report <preset> 0`), and commit.
 """

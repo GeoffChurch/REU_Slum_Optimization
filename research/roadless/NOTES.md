@@ -8621,13 +8621,15 @@ The pin lives in pyproject.toml, as cluster_submit's does: epistemetry in the `r
 group, `[tool.uv.sources]` at 165f98b's full SHA (cluster_submit mirrors uv.lock's git sources to
 the cluster, so the nodes need no GitHub access). It moves so (screening.py, "THE PIN"): edit the
 rev, `uv lock --upgrade-package epistemetry`, run `screening_check.py both-ways
-target,records,adapter,why,acceptance,screens`; if `acceptance` fails only because the random
-numbers changed, regenerate the runs (`runs`) and pass `equivalent` against the committed
-screen_acceptance.csv before committing the new one; if `screens` fails the same way, re-derive the
-screens afresh (remove screen_decisions.json, `consolidated.py screen-report <preset> 0`) and
-report the moved stops in the pin move's commit. epistemetry requires Python >=3.12
-(GeoffChurch/epistemetry #9 asks why), so the project's requires-python rose to >=3.12 (the venv is
-3.12.13; main is untouched).
+target,records,adapter,why,equivalence,acceptance,screens`; if `acceptance` fails only because the
+random numbers changed, keep the committed screen_acceptance.csv outside the repo first (`git show
+HEAD:research/roadless/screen_acceptance.csv > <old.csv>`: `runs` overwrites it in place),
+regenerate the runs (`runs`) and pass `equivalent <old.csv>
+research/roadless/screen_acceptance.csv` before committing the new ones; if `screens` fails the
+same way, re-derive the screens afresh (remove screen_decisions.json, `consolidated.py
+screen-report <preset> 0`) and report the moved stops in the pin move's commit. epistemetry
+requires Python >=3.12 (GeoffChurch/epistemetry #9 asks why), so the project's requires-python rose
+to >=3.12 (the venv is 3.12.13; main is untouched).
 
 **The comparison** (screening_check.py `runs` and `equivalent`; screen_acceptance.csv). At 165f98b
 every draw is keyed by a seed and its place (`design.screen.stream`), so no replay reproduces the
@@ -8663,21 +8665,24 @@ in its 1,400 runs (67 and 284 in the fourth replay), fewest-wrong 37 and 316 (37
 test's own check (the migration's `self-check`, deleted with it): the old runs against themselves
 pass; one block more on every r2/base run fails on Holm only (p 1e-05); realized-loss's wrong call
 flipped on 20 runs fails on its interval ([+0.0086, +0.0207] outside 0.0107); a draw-free run
-costing 1e-9 more fails the exact check, and a comparison with no draw-free run fails. The margins
-are now a rule, not numbers (`deltas_of`: half the presets' gap on the old runs it is given), since
-a pin move compares against the committed CSV, whose blocks gap gives 0.617, not 0.609.
+costing 1e-9 more fails the exact check, and a comparison with no draw-free run fails (rebuilt on
+the committed runs alone after the move's final review, as the guard `equivalence`, below). The
+margins are now a rule, not numbers (`deltas_of`: half the presets' gap on the old runs it is
+given), since a pin move compares against the committed CSV, whose blocks gap gives 0.617, not
+0.609.
 
 **GeoffChurch/epistemetry #10, measured.** A replay charges a step unit by unit (an arm pays for
 the blocks it observed up to its stop); a live wave run in parallel pays the whole step. Beside
 each run's cost the acceptance runs record `wave_cost` (each arm's steps paid whole), equal to cost
-bit for bit wherever no veto cuts a step short. It is higher on 93 of the 1,400 runs a preset, all
-among C1m4/p64's 100 runs under the veto, where the collapse falls inside the floor's first step
-(its 12 blocks): 1,609.3 GPU-seconds charged (5.9 blocks, mean) against 3,067.0 a wave pays;
-(wave_cost - cost) is a mean 0.475 of the design's cost over those 100 runs and 0.034 over all
-1,400; the same for both presets. It moves neither the comparison (both sides are replays charged
-unit by unit) nor the presets' ranking (both share the floor's step); a replay under-charges
-against what a live wave pays where a veto falls inside a multi-block step, which at step 1 is only
-the floor's first. Commented on #10 (the owner's yes, 2026-10-18):
+bit for bit wherever no veto cuts a step short, and `equivalent` prints the record below for each
+set of runs it compares (`undercharge`). It is higher on 93 of the 1,400 runs a preset, all among
+C1m4/p64's 100 runs under the veto, where the collapse falls inside the floor's first step (its 12
+blocks): 1,609.3 GPU-seconds charged (5.9 blocks, mean) against 3,067.0 a wave pays; (wave_cost -
+cost) is a mean 0.475 of the design's cost over those 100 runs and 0.034 over all 1,400; the same
+for both presets. It moves neither the comparison (both sides are replays charged unit by unit) nor
+the presets' ranking (both share the floor's step); a replay under-charges against what a live wave
+pays where a veto falls inside a multi-block step, which at step 1 is only the floor's first.
+Commented on #10 (the owner's yes, 2026-10-18):
 https://github.com/GeoffChurch/epistemetry/issues/10#issuecomment-6338646207.
 
 **Phase 5's verdicts**, re-derived through `advance` under `realized-loss`
@@ -8697,12 +8702,17 @@ new:
 
 **The guards** (screening_check.py; each passes on the code and fails under each of its faults, a
 patch inside the guard's process; `both-ways` runs both, single-threaded, after the deletion: 51
-and 43 minutes):
+and 43 minutes; after the final review's fixes, which added `equivalence` and the cases and faults
+marked "since the final review", about 60 minutes for the others and 56 for `acceptance`):
 - `target`: each preset's target as its policy builds it, against the loss recomputed outside
-  epistemetry: realized-loss's risk, call and price at 37 of 37 prefixes, fewest-wrong's target and
-  own price at 37 of 37, and each preset's price read off 3 of 3 decisions. Faults `dropped-uses`
-  (the target over 1 use, not FUTURE: 21 of 37 risks off, the other 16 losing exactly 0) and
-  `unstaked` (the own price without its stake: 37 of 37 off): FAIL.
+  epistemetry: realized-loss's risk, call and price at 37 of 37 prefixes, fewest-wrong's target,
+  risk, call and own price at 37 of 37 (its risk and call, since the final review, against the 0-1
+  risk recomputed: a draw adopts where its net value is above 0 at both of the bracket's ends,
+  keeps where below at both, asks otherwise), and each preset's price read off 3 of 3 decisions.
+  Faults `dropped-uses` (the target over 1 use, not FUTURE: 21 of 37 risks off, the other 16 losing
+  exactly 0), `unstaked` (the own price without its stake: 37 of 37 off), and since the final
+  review `always-adopt` (AdoptKeepAsk calling ADOPT: 17 of 37 calls off) and `riskless` (its risk
+  0: 20 of 37 off): FAIL.
 - `records`: each preset's `Screen.record()` round-trips through JSON and names its target. Fault
   `array-rates` (the rates the array np.geomspace returns): the record refuses it, FAIL.
 - `adapter`: a live screen fed through `screening.arrived_of` is epistemetry's replay, decision for
@@ -8720,11 +8730,28 @@ and 43 minutes):
   decisions (Running on 17 blocks), as a wave would store it were the covariates unchanged,
   continues to the screens derived afresh; refused before any decision, each naming its cause: a
   held-out block's default time missing, another metric's or preset's ledger, a state or screen
-  record epistemetry cannot read back, a variant's stored blocks off its order. Faults `shuffled`
-  (common.HELD reshuffled), `altered-record` (one stored price times 1 + 1e-6), `wave-seeded` (each
-  wave its own stream): FAIL.
+  record epistemetry cannot read back, a variant's stored blocks off its order. Since the final
+  review, a screen still running (the branch a new campaign's first screen-report takes, which
+  phase 5's finished screens never reach): r2l2's rows cut to their first 17 blocks and screened
+  afresh are Running, its row used 17 with no stop or call, its next blocks 22591 at wave 0 and
+  22591, 39240, 41806 at wave 3. Faults `shuffled` (common.HELD reshuffled), `altered-record` (one
+  stored price times 1 + 1e-6), `wave-seeded` (each wave its own stream), `wave-ignored` (the next
+  blocks the step's whatever the wave: one at wave 3): FAIL.
+- `equivalence` (since the final review): `equivalent` sees a change, on the committed
+  screen_acceptance.csv alone, by the deleted self-check's cases: the runs against themselves pass;
+  one block more on every r2/base run fails on Holm alone (p 1e-05, Holm 0.00034, both presets);
+  realized-loss's wrong call flipped on 20 runs fails on its interval ([+0.0086, +0.0207] outside
+  0.0111); a draw-free run costing 1e-9 more fails that run's exact check alone; leaving out every
+  draw-free run fails each preset's exact check alone. Beside them, one block more on 7 of
+  realized-loss's r2/base runs passes (p 0.016, Holm 0.54), and `read_runs` refuses runs made under
+  another screen than their preset's. Faults `raw-holm` (holm returning the raw p: the 7-run shift
+  rejected) and `unscreened` (read_runs without its screen check: the runs read): FAIL.
 - `acceptance`: realized-loss replays screen_acceptance.csv's orders 0-9 (140 runs) exactly, 140 of
-  140. Fault `dropped-uses`: both/p64 differs on 4 of 10 runs, FAIL.
+  140. Fault `dropped-uses`: both/p64 differs on 4 of 10 runs, FAIL; since the final review the
+  runs are read by `read_runs`, so the fault's screen, another than the runs', is refused before
+  any replay, and fault `moved-streams` (epistemetry's `stream` keyed under another seed, the
+  record unchanged, as a pin whose streams differ) shows the replays see it: the first four
+  designs' 40 runs equal, r2/base differing on 4 of 10, FAIL.
 
 **What was deleted** (abe75d6d): seqscreen.py, with its loaders, `next`, `question`, ORDERS,
 STOPPED and POWER (no caller outside it; the ask's number is summary_screen.csv's `break_even`),
@@ -8734,11 +8761,14 @@ sets are common.py's (TUNING, 13; HELD, 46, in the order phase 5 ran them, froze
 165f98b's `random_orders` no longer draws that permutation). The replays' data (Ruling 6, the
 owner's "delete"), after the comparison passed: 36 git-ignored paths, 58 MB (ten
 epireplay*.parquet, five *_jobs directories with screen_acceptance_jobs, 21 epireplay4 logs);
-screen_acceptance.csv holds every acceptance run. The fixture stays: epireplay_designs.json is
-screen_designs.json, reblock's real-data acceptance fixture (epistemetry's spec puts each project's
-real-data acceptance test in that project, run through its pin), its five many-arm designs read by
-nothing until a many-arm screen exists (BACKLOG). The four replays' sections above stay as they
-were, records of code that is gone.
+screen_acceptance.csv holds every acceptance run, each with its preset's Screen record (its
+`screen` column, added after the final review, computed for the committed runs rather than re-run),
+which `read_runs`, the CSV's one reader, refuses where it is not the preset's as built now: runs of
+two screens are never compared. The fixture stays: epireplay_designs.json is screen_designs.json,
+reblock's real-data acceptance fixture (epistemetry's spec puts each project's real-data acceptance
+test in that project, run through its pin), its five many-arm designs read by nothing until a
+many-arm screen exists (BACKLOG). The four replays' sections above stay as they were, records of
+code that is gone.
 
 **Compute.** Here, single-threaded: the acceptance runs 13.0 worker-hours over 8.5 h (112 jobs, 63
 on 1 worker, 49 on 4; the fourth replay's same work about 12.7); the guards after the deletion 1.6

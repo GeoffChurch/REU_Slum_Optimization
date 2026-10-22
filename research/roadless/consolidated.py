@@ -376,10 +376,12 @@ SCREEN_BLOCKS = 20      # batch-means blocks of a value's Monte Carlo standard e
 SCREEN_DRAWS = 4000     # draws a stop and a call read (seqscreen's DRAWS)
 SCREEN_SEED = (0,)      # the live screens' draws, keyed by it and each draw's place (epistemetry
                         # `stream`)
+SCREEN_MARGIN = 0.0     # Monte Carlo standard errors a value must clear its price by: none, as
+                        # seqscreen had none
 # The horizons a screen values: one Screen per preset, whatever the population. ValueOfMoreUnits
 # caps each horizon at the blocks left, so a screen of u <= 46 blocks values 1..left exactly as the
-# fourth replay's range(1, u + 1) did; a screen of more blocks than the horizons is refused
-# (screen_data, and the fixture's loader, screening_check.designs).
+# fourth replay's range(1, u + 1) did. A screen's order is common.HELD's blocks it is built for, so
+# none is longer; the fixture's loader refuses a design that is (screening_check.designs).
 SCREEN_HORIZONS = tuple(range(1, len(common.HELD) + 1))
 # The metric the screens' rows, lenses and ledgers are under: a screen campaign's, since a ledger
 # continued on another metric's rows would decide on other numbers. Phase 5's screens ran under the
@@ -396,8 +398,9 @@ SCREEN_RATES = tuple(float(r) for r in np.geomspace(*RATES_PER_GPU_SECOND, RATE_
 
 def screen_presets() -> dict[str, Screen]:
     """The screens' presets, by the name a command line gives: each an epistemetry Screen over the
-    bracket's RATE_POINTS geometric rates (SCREEN_RATES), equally weighted, over FUTURE uses, with
-    no Monte Carlo margin (seqscreen had none), its rule (screening.Rule) the one difference."""
+    bracket's RATE_POINTS geometric rates (SCREEN_RATES), equally weighted, over FUTURE uses, its
+    stop's margin SCREEN_MARGIN Monte Carlo standard errors, its rule (screening.Rule) the one
+    difference."""
     weights = (1.0 / RATE_POINTS,) * RATE_POINTS
 
     def screen_of(rule: screening.Rule) -> Screen:
@@ -419,13 +422,13 @@ def screen_presets() -> dict[str, Screen]:
         # (67 against fewest-wrong's 37 in 1,400 distinct pairwise runs), for fewer asks (284
         # against 318).
         "realized-loss": screen_of(screening.RealizedLoss(rates=SCREEN_RATES, weights=weights,
-                                                          uses=FUTURE, margin=0.0)),
+                                                          uses=FUTURE, margin=SCREEN_MARGIN)),
         # Optimizes the wrong calls: AdoptKeepAsk over the bracket's ends, each arm priced by its
         # own stake; 37 wrong calls against 67 in 1,400 distinct pairwise runs of the fourth replay
         # (each design without the veto, C1m4/p64 with it too). Gives up: more asks (318 against
         # 284), and more realized loss at the bracket's bottom and middle.
         "fewest-wrong": screen_of(screening.ZeroOne(rates=SCREEN_RATES, weights=weights,
-                                                    uses=FUTURE, margin=0.0)),
+                                                    uses=FUTURE, margin=SCREEN_MARGIN)),
     }
 
 
@@ -557,8 +560,8 @@ def screen_data(*, metric: str) -> dict[str, ScreenData]:
     """Every variant's screen but the default's, from the rows under `metric`, whatever the preset.
     Refused before any decision (SystemExit, naming it): a held-out block with no default time in
     the pass's rows (the cost model's covariate on a block not run, which epistemetry's Arrived
-    would refuse without naming the block), a variant's rows off its order or without the
-    default's beside them, and an order longer than the horizons."""
+    would refuse without naming the block), and a variant's rows off its order or without the
+    default's beside them."""
     import relax
     passed = _pass_rows(metric=metric)
     seconds = passed["t"].reindex(list(common.HELD)).to_numpy(dtype=float)
@@ -575,9 +578,6 @@ def screen_data(*, metric: str) -> dict[str, ScreenData]:
             continue
         plan = screen_plan(v)
         eligible = tuple(k for k in common.HELD if relax.built_for_holds(plan) or not holds[k])
-        if len(eligible) > max(SCREEN_HORIZONS):
-            raise SystemExit(f"{v}: {len(eligible)} blocks in its order, more than the screens' "
-                             f"horizons value ({max(SCREEN_HORIZONS)})")
         run = eligible[:len(b)]
         if set(b.index) != set(run):
             raise SystemExit(f"{v}: rows off its order: its {len(b)} blocks are not its order's "
@@ -602,6 +602,7 @@ class Stored(NamedTuple):
 
 
 DECISIONS = ROWS / "screen_decisions.json"
+SUMMARY_SCREEN = ROWS / "summary_screen.csv"     # the screens' table (screen_table's)
 
 
 def _decisions_json() -> Any:
@@ -725,8 +726,8 @@ def screen_table(screen: Screen, *, data: Mapping[str, ScreenData],
 def screen_report(screen: Screen, *, wave: int, metric: str) -> None:
     """Each screen decided by `screen` from its rows under `metric`, each continuing from its
     stored ledger (`screen_table`), and its axes; each running screen's next blocks.
-    ROWS/summary_screen.csv, and DECISIONS: the metric, the screen's record, and each screen's
-    state with the blocks it was decided on."""
+    SUMMARY_SCREEN, and DECISIONS: the metric, the screen's record, and each screen's state with
+    the blocks it was decided on."""
     pd.set_option("display.width", 220)
     st = screen_table(screen, data=screen_data(metric=metric),
                       ledgers=read_decisions(screen, metric=metric), wave=wave, metric=metric)
@@ -737,7 +738,7 @@ def screen_report(screen: Screen, *, wave: int, metric: str) -> None:
         {"metric": metric, "screen": screen.record(),
          "screens": {v: {"blocks": list(s.blocks), "state": s.state.record()}
                      for v, s in st.states.items()}}, allow_nan=False, indent=1) + "\n"
-    st.table.to_csv(ROWS / "summary_screen.csv", index=False)
+    st.table.to_csv(SUMMARY_SCREEN, index=False)
     DECISIONS.write_text(decisions)
     print(st.table.drop(columns="screen").round(5).T.to_string())
     for v, ks in st.upcoming.items():
