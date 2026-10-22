@@ -207,7 +207,11 @@ DEVICES = ("gpu", "cpu")
 @dataclass(frozen=True, kw_only=True)
 class Onecard(_Rows):
     """A block's presets on one `device` (one job per block, item ""), from
-    `consolidated_rows/onecard/*/<device>/<id>.parquet`: the presets' whole wall."""
+    `consolidated_rows/onecard/*/<device>/<id>.parquet`: the presets' whole wall. Each such row is
+    a run of every preset its job named, so it is read as the job's whole measure: a
+    `--keep-standing` run that kept some of its presets (a pool's job run again after a kill)
+    times the rest apart, under `consolidated_rows/onecard_partial/` (consolidated.presets),
+    which is no job's measure and is never read here."""
 
     root: Path
     device: str

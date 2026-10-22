@@ -520,7 +520,7 @@ class Replace:
         return False
 
     def write(self, df: pd.DataFrame, path: Path) -> None:
-        _place(df, path, os.replace)
+        place(df, path, os.replace)
         print(f"{row_marker.ROW_WRITTEN}{path}", flush=True)
 
 
@@ -566,11 +566,12 @@ def _exclusive(tmp: Path, path: Path) -> None:
                      f"({row_marker.REPLACE} names a replacement)") from None
 
 
-def _place(df: pd.DataFrame, path: Path, put: Callable[[Path, Path], None]) -> None:
+def place(df: pd.DataFrame, path: Path, put: Callable[[Path, Path], None]) -> None:
     """`df` to a temporary name beside `path` (no pull matches it, and no other process's: the
     host and the pid, since two nodes' runs of one identity, a double claim's, can share a pid on
     the shared home), then `put` into place; the temporary name removed whether or not `put`
-    succeeds."""
+    succeeds. Every row's writer here (the Standings, write_once) and road_rescore.write_parquet
+    (a working file: a network, its prefixes, a step log) write through it."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{socket.gethostname()}.{os.getpid()}.tmp")
     df.to_parquet(tmp)
@@ -585,5 +586,5 @@ def write_once(df: pd.DataFrame, path: Path) -> None:
     identity raises `Exists` and leaves the first (`Refuse` raises it, `Keep` keeps the first).
     Once the row stands, row_marker.ROW_WRITTEN and its path are printed (flushed), for a pool's
     worker to count. The guard: clearings_check.py `overwrite` (fault `no-check`)."""
-    _place(df, path, _exclusive)
+    place(df, path, _exclusive)
     print(f"{row_marker.ROW_WRITTEN}{path}", flush=True)

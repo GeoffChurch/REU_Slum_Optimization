@@ -21,7 +21,10 @@ code as it is and must fail under each of its faults.
                                                     # unread-fatal
     uv run python $S end [--fault <name>]           # faults: early-end, claimed-runs-on,
                                                     # open-ended, request-fatal, open-fixed
+    uv run python $S keep [--fault <name>]          # fault: refuse
+    uv run python $S double-claim [--fault <name>]  # fault: refuse
     uv run python $S both-ways <guards,> [args ...]   # each guard, then under each of its faults
+    uv run python $S smoke-job <id> <item> [--replace | --keep-standing]   # a smoke wave's job
 
 A guard runs as `<guard> [--fault <name>] [args ...]`: the fault is named by its flag, so a
 mistyped one is never read as an argument, and an unknown one exits naming the guard's faults.
@@ -240,6 +243,47 @@ the steward's own STEWARD_TASK among them, or a failure), no allocation unless a
   ends), `open-ended` (an open queue's wave ended once its jobs have: open ends) and
   `request-fatal` (a request that does not read, or that the queue refuses, stops the round)
   and `open-fixed` (pool_queue._open_fixed answering no: an open fixed seed accepted).
+
+Every pooled command keeps what stands (the spec's 3.3 and its guard 2, decision 4; the plan's
+Rulings 6 and 8):
+- `keep`: each command of the spec's 3.3 list (KEEP_COMMANDS: consolidated baselines, presets,
+  lenses, screen and screen-lenses; road_rescore lineup-score, lineup-one and propose;
+  arterial_study run and propose; uniform block), its function run in this process on KEEP_BLOCK
+  as its main calls it, under the Standing clearings.standing_of resolves `--keep-standing` to
+  (a pool's job line's), each on a rows root of its own in a temporary directory (`_rooted`:
+  relax.OUT, polish_greedy.HERE, consolidated.ROWS and .HERE, uniform.ROWS and .HERE,
+  road_rescore.lineup_rows; arterial_study's rows and road_rescore's scratch passed), its heavy
+  calls patched to return canned rows and counted (`_canned`: relax.one, polish_greedy.run,
+  gap_clear.ComplexMetric.fixed and .model, road_rescore.prefixes_one and .network_rows,
+  reblock.derivations.propose, GreedyArterialReblocker.propose, uniform.score; gap_calib.GpuPeak
+  touching no card; common.build_blocks counted, the real build kept). A first run writes every
+  identity (a row_marker.ROW_WRITTEN line for each) and makes each of the command's patched
+  calls (a patch that missed would guard nothing); every row but one (or two: Pooled.standing)
+  is removed; the next run raises nothing, leaves the standing row's bytes, writes every other
+  identity it is to (Pooled.then) with a ROW_WRITTEN line each and none for the standing one;
+  with every row standing a third run raises nothing, writes nothing and runs nothing (no patched
+  call, no block built). The rows left standing are ones a killed job leaves: the presets' hard
+  preset (the others run, and their one-card row, consolidated.onecard_partial_path's and not the
+  lineup's, names in `presets` only those run), lineup-one's and propose's network without its
+  row (a kill between the two writes: the network kept, `[row] kept`), arterial run's proposal (a
+  kill while scoring), uniform's T arm (read, not run again). Fault `refuse`
+  (clearings.standing_of resolving `--keep-standing` to Refuse()): each command raises Exists.
+- `double-claim` (the spec's guard 2, Review Focus 5): a queue of one job, its line the wave's
+  (cluster_wave._job_line: `python -u research/roadless/pool_check.py smoke-job <id> quick
+  --keep-standing`), two workers (pool_worker.work, two processes, of two leases, the job a real
+  child in the checkout), the second started DOUBLE_LAG after the first claims, its claim patched
+  to take the job the first holds (SqliteQueue._pick, once): one set of rows (both by one
+  process, no temporary name left); both attempts DONE, the first's counting its two rows, the
+  second's none, its log holding `[row] kept` for each; the job DONE with no strike; both workers
+  drained (0). Fault `refuse` (as keep's, reaching the jobs through FAULT_ENV, CHILD_FAULTS): the
+  second attempt fails with Exists, a strike.
+
+`smoke-job <id> <item> [--replace | --keep-standing]` (the smoke waves' job, the plan's Task 10;
+its items pool_plan.SMOKE_JOBS's): its two rows (SMOKE_ROWS/<id>__<item>__<k>.parquet) each
+asked of the resolved Standing first (none to write: it returns at once); then, by SMOKE_WORK,
+3 GB allocated and touched a page at a time (`big`, `oom`), a sleep (`slow` 25 minutes, the
+others 20 s), cupy imported and the card touched (`gpu`); then each row written through the
+Standing (its host and pid in it).
 """
 from __future__ import annotations
 
@@ -252,6 +296,7 @@ import queue
 import random
 import shlex
 import signal
+import socket
 import sqlite3
 import statistics
 import subprocess
@@ -260,15 +305,17 @@ import tempfile
 import time
 from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import AbstractContextManager, contextmanager, redirect_stdout
+from contextlib import AbstractContextManager, contextmanager, nullcontext, redirect_stdout
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from multiprocessing.queues import Queue as MpQueue
 from multiprocessing.synchronize import Barrier
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
+import numpy as np
+import pandas as pd
 from cluster_submit import Bundle
 from cluster_submit.context import STAMP
 from cluster_submit.gpu import (
@@ -282,9 +329,11 @@ from cluster_submit.gpu import (
     read_allocation,
 )
 from cluster_submit.remote_build import MANIFEST
+from numpy.typing import NDArray
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import clearings  # noqa: E402
 import common  # noqa: E402
 import pool as pl  # noqa: E402
 import pool_plan as pp  # noqa: E402
@@ -294,6 +343,9 @@ import pool_summary as psum  # noqa: E402
 import pool_worker as pw  # noqa: E402
 import row_marker  # noqa: E402
 from pool_ladder import LADDERS, Ladder, class_name, rung_of  # noqa: E402
+
+if TYPE_CHECKING:
+    import gap_clear as gcl
 
 NODE = "orion"
 COMMIT = "0123456789abcdef0123456789abcdef01234567"   # a wave's commit (any, the same for all)
@@ -2387,6 +2439,694 @@ def end(_args: list[str]) -> list[str]:
     return bad
 
 
+# ---- keep and double-claim: every pooled command keeps what stands (the spec's 3.3) ---------
+
+KEEP_BLOCK = "ZAF.9.3.1_1_38136"  # keep: a small block (51 buildings: clearings_check overwrite's)
+CANNED_N = 4                      # ... the canned rows' and models' buildings
+DOUBLE_LAG = 10.0                 # double-claim: the second claim this long after the first (s):
+                                  # half the smoke job's 20-s sleep, so the second run's check falls
+                                  # before the first's write and its write after it, whatever their
+                                  # imports take within 10 s of each other
+DOUBLE_WAIT = 300.0               # ... the most the guard waits for a worker (s)
+#: The environment variable through which a fault reaches the pool_check.py processes a guard's
+#: workers start (double-claim's smoke-job lines, which pool_worker.run_job runs as a pool's jobs
+#: are run): its value names one of CHILD_FAULTS, which smoke-job enters before it resolves its
+#: Standing. Set only by a fault, never by a wave.
+FAULT_ENV = "POOL_CHECK_FAULT"
+
+
+class _Mesh(NamedTuple):
+    nt: int
+
+
+class _CannedFixed(NamedTuple):
+    """gap_clear.ComplexMetric.fixed's canned mesh: what its readers here read of one."""
+    fm: _Mesh
+    t_build: float
+
+
+def _canned_lenses(p: float) -> gcl.Lenses:
+    import gap_clear
+    return gap_clear.Lenses(P=p, Pq=p, J2=p, enclosed=0.0, n_enclosed=0,
+                            u=np.ones(CANNED_N), live=np.ones(CANNED_N, dtype=bool),
+                            unknowns=CANNED_N)
+
+
+class _CannedModel:
+    """gap_clear.ComplexMetric.model's canned model (CANNED_N homes, none walled in): what
+    consolidated's baselines and lenses read of one."""
+
+    def __init__(self) -> None:
+        self.n = self.cells0 = CANNED_N
+        self.walled0 = np.zeros(CANNED_N, dtype=bool)
+        self.nodem = np.zeros(CANNED_N, dtype=bool)
+        self.cost = np.full(CANNED_N, 1.0 / CANNED_N)
+        self.base = _canned_lenses(1.0)
+
+    def lenses(self, x: NDArray[np.bool_]) -> gcl.Lenses:
+        return _canned_lenses(0.5)
+
+
+class _Proposed(NamedTuple):
+    """A method's canned proposal: one road, and the arterial's parameters."""
+    roads: Any
+    params: dict[str, object]
+
+
+def _proposed() -> _Proposed:
+    import geopandas as gpd
+    from shapely.geometry import LineString
+    roads = gpd.GeoDataFrame(geometry=[LineString([(0.0, 0.0), (10.0, 0.0)])], crs="EPSG:32734")
+    return _Proposed(roads=roads, params=dict(commits=1, stop="budget", budget=0.2,
+                                              displaced=0.1))
+
+
+class _NoCard:
+    """gap_calib.GpuPeak touching no card: its peak 0."""
+
+    peak = 0.0
+
+    def __enter__(self) -> _NoCard:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+@contextmanager
+def _canned(calls: Counter[str]) -> Iterator[None]:
+    """The heavy calls of every pooled command patched to return canned rows, each counted in
+    `calls` under the name given here: relax.one (SIMP), polish_greedy.run (the greedy and its
+    polish), gap_clear.ComplexMetric.fixed and .model (a mesh and its model: consolidated's
+    baselines and lenses through it), road_rescore.prefixes_one (the cut) and
+    road_rescore.network_rows (the scoring: _cut_and_score's and cx_network's),
+    reblock.derivations.propose (the lineup's proposal method, through the derive cache: never
+    written) and GreedyArterialReblocker.propose (the arterial's), uniform.score (its scorer);
+    gap_calib.GpuPeak touching no card; and common.build_blocks counted, the real build kept
+    (memoized: a block's build is the same each time)."""
+    import gap_calib
+    import gap_clear
+    import polish_greedy
+    import relax
+    import road_rescore as rr
+    import uniform
+
+    from reblock import derivations
+    from reblock.methods.arterial.reblocker import GreedyArterialReblocker
+
+    real_build = common.build_blocks
+    built: dict[tuple[str, ...], list[Any]] = {}
+
+    def build_blocks(ids: list[str]) -> list[Any]:
+        calls["common.build_blocks"] += 1
+        key = tuple(ids)
+        if key not in built:
+            built[key] = real_build(ids)
+        return built[key]
+
+    def one(bid: str, power: float, metric: object, plan: object, budget: float, *,
+            demand: object) -> dict[str, object]:
+        calls["relax.one"] += 1
+        return dict(block=bid, n=CANNED_N, t=1.0, simp_cleared=np.array([0]), simp_perm=0.5,
+                    free_cleared=np.array([], dtype=np.int64), free_D=0.0)
+
+    def run(bid: str, power: float, metric: object, picker: str, tries: int, width: int,
+            budget: float, pairs: bool, *, scoring: object) -> dict[str, object]:
+        calls["polish_greedy.run"] += 1
+        return dict(block=bid, n=CANNED_N, t=1.0, cleared=np.array([1]), perm=0.4)
+
+    def fixed(self: object, block: object, *, cache: Path, carving: object) -> _CannedFixed:
+        calls["ComplexMetric.fixed"] += 1
+        return _CannedFixed(fm=_Mesh(nt=10), t_build=0.1)
+
+    def model(self: object, block: object, fx: object, *, demand: object) -> _CannedModel:
+        calls["ComplexMetric.model"] += 1
+        return _CannedModel()
+
+    def prefixes_one(job: object) -> None:
+        calls["road_rescore.prefixes_one"] += 1
+
+    def network_rows(rows: Path, scratch: Path, metric: object, b: Any,
+                     name: str) -> pd.DataFrame:
+        calls["road_rescore.network_rows"] += 1
+        return pd.DataFrame([dict(block=b.block_id, method=name, budget=0.05, L_P=0.1)])
+
+    def propose(method: object, block: object) -> _Proposed:
+        calls["derivations.propose"] += 1
+        return _proposed()
+
+    def arterial(self: object, block: object, prior: object = None) -> _Proposed:
+        calls["GreedyArterialReblocker.propose"] += 1
+        return _proposed()
+
+    def score(bid: str, label: str, metric: object, xs: tuple[NDArray[np.bool_], ...],
+              held: NDArray[np.bool_]) -> uniform.Scored:
+        calls["uniform.score"] += 1
+        none = np.zeros(CANNED_N, dtype=bool)
+        walled = np.arange(CANNED_N) == 0
+        ones = np.ones(CANNED_N)
+        lens = dict(L_P=0.1, L_Pq=0.1, L_J2=0.1, enclosed=0.0, n_enclosed=0, unknowns=CANNED_N)
+        return uniform.Scored(
+            rows=[dict(block=bid, scorer=label, clearing=c, n_cleared=0, D=0.0, **lens)
+                  for c in uniform.CLEARINGS],
+            left=(walled, none, none), u=(ones, ones, ones), walled0=walled, nodem=none,
+            u0=ones, pop=ones, cost=ones / CANNED_N, pocket=none, shadowed=none,
+            after_free=0.0, P0=1.0, J2_0=1.0)
+
+    with _patched(common, "build_blocks", build_blocks), _patched(relax, "one", one), \
+            _patched(polish_greedy, "run", run), \
+            _patched(gap_clear.ComplexMetric, "fixed", fixed), \
+            _patched(gap_clear.ComplexMetric, "model", model), \
+            _patched(rr, "prefixes_one", prefixes_one), \
+            _patched(rr, "network_rows", network_rows), \
+            _patched(derivations, "propose", propose), \
+            _patched(GreedyArterialReblocker, "propose", arterial), \
+            _patched(uniform, "score", score), _patched(gap_calib, "GpuPeak", _NoCard):
+        yield
+
+
+@contextmanager
+def _rooted(tmp: Path) -> Iterator[None]:
+    """Every pooled script's rows directory moved under `tmp`: relax.OUT, polish_greedy.HERE
+    (its polish_rows/), consolidated.ROWS and consolidated.HERE (its screen_rows/), uniform.ROWS
+    and uniform.HERE (which it names relax's rows relative to), and road_rescore.lineup_rows
+    (arterial_study's rows and road_rescore's scratch are arguments)."""
+    import consolidated
+    import polish_greedy
+    import relax
+    import road_rescore as rr
+    import uniform
+    with _patched(relax, "OUT", tmp / "relax_rows"), _patched(polish_greedy, "HERE", tmp), \
+            _patched(consolidated, "ROWS", tmp / "consolidated_rows"), \
+            _patched(consolidated, "HERE", tmp), \
+            _patched(uniform, "ROWS", tmp / "uniform_rows"), _patched(uniform, "HERE", tmp), \
+            _patched(rr, "lineup_rows", lambda: tmp / "lineup"):
+        yield
+
+
+class Pooled(NamedTuple):
+    """One command of the spec's 3.3 list as `keep` runs it, on KEEP_BLOCK."""
+    run: Callable[[clearings.Standing], None]   # the command (its function, as its main calls it)
+    rows: tuple[Path, ...]          # its identities: every one a first run writes
+    standing: tuple[Path, ...]      # those left standing for the second run (the rest removed)
+    then: tuple[Path, ...]          # the rows the second run writes
+    work: tuple[str, ...]           # the patched calls (_canned's names) its first run makes
+    first: Callable[[], list[str]]  # what else holds after the first run
+    check: Callable[[], list[str]]  # what else holds after the second run
+
+
+def _nothing_else() -> list[str]:
+    return []
+
+
+def _baselines(tmp: Path) -> Pooled:
+    import consolidated as co
+    parts = ["leak", "runtime"]
+    rows = tuple(co.baseline_path(KEEP_BLOCK, p) for p in parts)
+    return Pooled(run=lambda s: co.baselines(KEEP_BLOCK, parts, standing=s), rows=rows,
+                  standing=rows[:1], then=rows[1:],
+                  work=("ComplexMetric.fixed", "ComplexMetric.model"), first=_nothing_else,
+                  check=_nothing_else)
+
+
+def _presets(tmp: Path) -> Pooled:
+    """The lineup's presets on a core, the hard-block preset's row standing: the others run, and
+    the one-card row (onecard_partial_path's, not the lineup's) names them only."""
+    import consolidated as co
+    names, kept = list(co.PRESETS), "hard"
+    items = co.items_of(KEEP_BLOCK, "cpu")
+    partial = co.onecard_partial_path(KEEP_BLOCK, "cpu")
+
+    def read(want: int) -> list[str]:
+        """The pool's presets estimates (pool_plan.Onecard) read `want` one-card rows."""
+        got = len(pp.Onecard(root=tmp, device="cpu").observed())
+        return [] if got == want else [f"pool_plan.Onecard reads {got} one-card rows, not {want}"]
+
+    def named() -> list[str]:
+        if not partial.exists():
+            return [f"no partial one-card row ({partial})"]
+        got = str(pd.read_parquet(partial)["presets"].iloc[0])
+        want = ",".join(k for k in names if k != kept)
+        return read(0) + ([] if got == want else [f"the partial one-card row names {got!r}, the "
+                                                  f"presets run {want!r}"])
+    return Pooled(run=lambda s: co.presets(KEEP_BLOCK, "cpu", names, standing=s),
+                  rows=(*(items[k].path for k in names), co.onecard_path(KEEP_BLOCK, "cpu")),
+                  standing=(items[kept].path,),
+                  then=(*(items[k].path for k in names if k != kept), partial),
+                  work=("relax.one", "polish_greedy.run"), first=lambda: read(1), check=named)
+
+
+def _lenses(tmp: Path) -> Pooled:
+    import consolidated as co
+    rows = (co.lenses_path(KEEP_BLOCK),)
+    return Pooled(run=lambda s: co.lenses(KEEP_BLOCK, standing=s), rows=rows, standing=rows,
+                  then=(), work=("ComplexMetric.fixed", "ComplexMetric.model"),
+                  first=_nothing_else, check=_nothing_else)
+
+
+def _screen(tmp: Path) -> Pooled:
+    """Two screens under RUNTIME (a metric this code builds: SCREENS_METRIC no longer does)."""
+    import consolidated as co
+    import metrics
+    variants = ["default", "seed"]
+    rows = tuple(co.screen_path(v, KEEP_BLOCK, metric=metrics.RUNTIME) for v in variants)
+    return Pooled(run=lambda s: co.screen(KEEP_BLOCK, variants, standing=s,
+                                          metric=metrics.RUNTIME),
+                  rows=rows, standing=rows[:1], then=rows[1:], work=("relax.one",),
+                  first=_nothing_else, check=_nothing_else)
+
+
+def _screen_lenses(tmp: Path) -> Pooled:
+    import consolidated as co
+    import metrics
+    rows = (co.screen_lenses_path(KEEP_BLOCK, metric=metrics.RUNTIME),)
+    return Pooled(run=lambda s: co.screen_lenses(KEEP_BLOCK, standing=s,
+                                                 metric=metrics.RUNTIME),
+                  rows=rows, standing=rows, then=(),
+                  work=("ComplexMetric.fixed", "ComplexMetric.model"), first=_nothing_else,
+                  check=_nothing_else)
+
+
+def _lineup_score(tmp: Path) -> Pooled:
+    import road_rescore as rr
+    nets = ["clearance", "euclidean_grid"]
+    rows = tuple(rr.cx_path(rr.lineup_rows(), rr.lineup_metric(), KEEP_BLOCK, n) for n in nets)
+    return Pooled(run=lambda s: rr.lineup_score(tmp / "scratch", KEEP_BLOCK, nets, standing=s),
+                  rows=rows, standing=rows[:1], then=rows[1:],
+                  work=("road_rescore.prefixes_one", "road_rescore.network_rows"),
+                  first=_nothing_else, check=_nothing_else)
+
+
+#: lineup-one's and propose's network (any of the lineup's: the method is patched)
+KEEP_NETWORK = "euclidean_grid"
+
+
+def _proposal(tmp: Path) -> tuple[Path, Path]:
+    """The lineup's proposal of KEEP_NETWORK on KEEP_BLOCK: its network, its row."""
+    import road_rescore as rr
+    return (rr.net_path(tmp / "scratch", KEEP_BLOCK, KEEP_NETWORK, False),
+            rr.proposal_row(rr.lineup_rows(), KEEP_BLOCK, KEEP_NETWORK, False))
+
+
+def _lineup_one(tmp: Path) -> Pooled:
+    """The network standing without its row: a run killed between the two writes."""
+    import road_rescore as rr
+    rows = (*_proposal(tmp), rr.cx_path(rr.lineup_rows(), rr.lineup_metric(), KEEP_BLOCK,
+                                        KEEP_NETWORK))
+    return Pooled(run=lambda s: rr.lineup_one(tmp / "scratch", KEEP_BLOCK, KEEP_NETWORK,
+                                              standing=s),
+                  rows=rows, standing=rows[:1], then=rows[1:],
+                  work=("derivations.propose", "road_rescore.prefixes_one",
+                        "road_rescore.network_rows"), first=_nothing_else, check=_nothing_else)
+
+
+def _propose(tmp: Path) -> Pooled:
+    """The network standing without its row, as lineup-one's."""
+    import road_rescore as rr
+    rows, method = _proposal(tmp), rr.lineup_arms()[KEEP_NETWORK]
+    return Pooled(run=lambda s: rr.propose(rr.lineup_rows(), tmp / "scratch", KEEP_BLOCK,
+                                           KEEP_NETWORK, method, False, standing=s),
+                  rows=rows, standing=rows[:1], then=rows[1:], work=("derivations.propose",),
+                  first=_nothing_else, check=_nothing_else)
+
+
+#: arterial_study's arm (its runner's check: the method is patched)
+KEEP_ARM = "smoke"
+
+
+def _arterial(tmp: Path) -> tuple[Path, Path]:
+    """arterial_study's rows of KEEP_ARM on KEEP_BLOCK under `tmp`: its proposal row, its scored
+    row."""
+    import arterial_study as art
+    import road_rescore as rr
+    name = art.network_name(KEEP_ARM, art.method_of(art.ARMS[KEEP_ARM]))
+    root = tmp / "arterial"
+    return (rr.proposal_row(root, KEEP_BLOCK, name, False),
+            rr.cx_path(root, rr.lineup_metric(), KEEP_BLOCK, name))
+
+
+def _arterial_run(tmp: Path) -> Pooled:
+    """The proposal standing (its network, a working file, with it): a run killed scoring."""
+    import arterial_study as art
+    rows = _arterial(tmp)
+    return Pooled(run=lambda s: art.run(tmp / "arterial", KEEP_BLOCK, KEEP_ARM, standing=s),
+                  rows=rows, standing=rows[:1], then=rows[1:],
+                  work=("GreedyArterialReblocker.propose", "road_rescore.prefixes_one",
+                        "road_rescore.network_rows"), first=_nothing_else, check=_nothing_else)
+
+
+def _arterial_propose(tmp: Path) -> Pooled:
+    import arterial_study as art
+    rows = _arterial(tmp)[:1]
+    return Pooled(run=lambda s: art.propose(tmp / "arterial", KEEP_BLOCK, KEEP_ARM, standing=s),
+                  rows=rows, standing=rows, then=(),
+                  work=("GreedyArterialReblocker.propose",), first=_nothing_else,
+                  check=_nothing_else)
+
+
+def _uniform(tmp: Path) -> Pooled:
+    """T's row standing (read, not run again), U's and the block's three rows written."""
+    import uniform
+    arms = uniform.arms_on("cpu")
+    rows = (uniform.arm_path(arms.t, KEEP_BLOCK), uniform.arm_path(arms.u, KEEP_BLOCK),
+            *uniform._outs(KEEP_BLOCK))
+    return Pooled(run=lambda s: uniform.block_run(KEEP_BLOCK, "cpu", standing=s), rows=rows,
+                  standing=rows[:1], then=rows[1:], work=("relax.one", "uniform.score"),
+                  first=_nothing_else, check=_nothing_else)
+
+
+#: keep's commands: the spec's 3.3 list (every script a wave runs), in the plan's Task 9 order,
+#: each built on its own rows root (two commands can share an identity: uniform's T is the
+#: presets' default on a core, lineup-one's proposal propose's).
+KEEP_COMMANDS: dict[str, Callable[[Path], Pooled]] = {
+    "consolidated baselines": _baselines, "consolidated presets": _presets,
+    "consolidated lenses": _lenses, "consolidated screen": _screen,
+    "consolidated screen-lenses": _screen_lenses, "road_rescore lineup-score": _lineup_score,
+    "road_rescore lineup-one": _lineup_one, "road_rescore propose": _propose,
+    "arterial_study run": _arterial_run, "arterial_study propose": _arterial_propose,
+    "uniform block": _uniform}
+
+
+class KeepRun(NamedTuple):
+    """One run of a pooled command under the Standing `--keep-standing` resolves to."""
+    raised: BaseException | None
+    wrote: list[Path]               # the rows its row_marker.ROW_WRITTEN lines name
+    calls: Counter[str]             # the patched calls it made (_canned's names)
+
+
+def _keep_run(cmd: Pooled, calls: Counter[str]) -> KeepRun:
+    """`cmd` run once under clearings.standing_of([--keep-standing])'s Standing (as a pool's job
+    line resolves it), its output captured."""
+    rest, standing = clearings.standing_of([row_marker.KEEP_STANDING])
+    if rest:
+        raise ValueError(f"standing_of left {rest}")
+    calls.clear()
+    out = io.StringIO()
+    raised: BaseException | None = None
+    with redirect_stdout(out):
+        try:
+            cmd.run(standing)
+        except (Exception, SystemExit) as e:        # the case reads it
+            raised = e
+    wrote = [Path(x.removeprefix(row_marker.ROW_WRITTEN)) for x in out.getvalue().splitlines()
+             if x.startswith(row_marker.ROW_WRITTEN)]
+    return KeepRun(raised=raised, wrote=wrote, calls=Counter(calls))
+
+
+def _wrote(r: KeepRun, want: Sequence[Path], what: str) -> list[str]:
+    """`r` wrote exactly `want`, each once, and raised nothing."""
+    notes = [] if r.raised is None else [f"{what} raised {r.raised!r}"]
+    if sorted(map(str, r.wrote)) != sorted(map(str, want)):
+        notes.append(f"{what}'s ROW_WRITTEN lines name {sorted(p.name for p in r.wrote)}, not "
+                     f"{sorted(p.name for p in want)}")
+    absent = [p.name for p in want if not p.exists()]
+    return notes + ([f"{what} left {absent} unwritten"] if absent else [])
+
+
+def _kept(name: str, cmd: Pooled, calls: Counter[str]) -> list[str]:
+    """`keep`'s cases for one command (the module's docstring): its failures."""
+    first = _keep_run(cmd, calls)
+    notes = _wrote(first, cmd.rows, "the first run")
+    unmade = [w for w in cmd.work if not first.calls[w]]
+    notes += [f"the first run never called {unmade} (a patch missed: nothing would be guarded)"
+              ] if unmade else []
+    notes += cmd.first()
+    if notes:
+        print(f"keep {name}: " + "; ".join(notes) + " -> FAILS", flush=True)
+        return [name]
+    for p in cmd.rows:
+        if p not in cmd.standing:
+            p.unlink()
+    held = {p: p.read_bytes() for p in cmd.standing}
+    second = _keep_run(cmd, calls)
+    notes = _wrote(second, cmd.then, "with one identity standing, the run")
+    notes += [f"the standing {p.name} changed" for p, b in held.items() if p.read_bytes() != b]
+    notes += [f"the second run wrote {p.name}, not one of its to write" for p in cmd.rows
+              if p not in cmd.standing and p not in cmd.then and p.exists()]
+    notes += cmd.check()
+    every = {p: p.read_bytes() for p in (*cmd.standing, *cmd.then) if p.exists()}
+    third = _keep_run(cmd, calls)
+    notes += [] if third.raised is None else [f"with every row standing it raised "
+                                              f"{third.raised!r}"]
+    ran = {k: n for k, n in third.calls.items() if n}
+    notes += [f"with every row standing it ran {ran}"] if ran else []
+    notes += [f"with every row standing it printed ROW_WRITTEN for "
+              f"{[p.name for p in third.wrote]}"] if third.wrote else []
+    notes += [f"with every row standing {p.name} changed" for p, b in every.items()
+              if p.read_bytes() != b]
+    print(f"keep {name}: the first run wrote {len(first.wrote)} rows; with "
+          f"{', '.join(p.parent.name + '/' + p.name for p in cmd.standing)} standing the next "
+          f"wrote {len(second.wrote)}; with every row standing the next made "
+          f"{sum(third.calls.values())} patched calls or builds" + _failing(notes), flush=True)
+    return [name] if notes else []
+
+
+def keep(_args: list[str]) -> list[str]:
+    """`keep` (the module's docstring): the commands failing."""
+    import road_rescore as rr
+    bad: list[str] = []
+    calls: Counter[str] = Counter()
+    # road_rescore's and arterial_study's runs check a cluster task's single-threaded
+    # environment, which names PYTHONDONTWRITEBYTECODE too (road_rescore.SINGLE)
+    with _canned(calls), _patched_env(rr.SINGLE):
+        for name, build in KEEP_COMMANDS.items():
+            with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp, _rooted(Path(tmp)):
+                bad += _kept(name, build(Path(tmp)), calls)
+    return bad
+
+
+@contextmanager
+def _patched_env(values: Mapping[str, str]) -> Iterator[None]:
+    """os.environ with `values` set, restored after (unset where it was unset)."""
+    old = {k: os.environ[k] for k in values if k in os.environ}
+    os.environ.update(values)
+    try:
+        yield
+    finally:
+        for k in values:
+            if k in old:
+                os.environ[k] = old[k]
+            else:
+                del os.environ[k]
+
+
+# ---- smoke-job (the plan's Task 10's job) and double-claim ------------------------------------
+
+#: smoke-job's rows (pulled home with every other research/roadless row).
+SMOKE_ROWS = HERE / "pool_smoke_rows"
+SMOKE_ROWS_PER_JOB = 2
+PAGE = 4096                       # bytes: an allocation is touched a page at a time
+
+
+class SmokeWork(NamedTuple):
+    """What a smoke job does before it writes its rows."""
+    alloc_gb: float     # GB allocated and touched page by page (0: none)
+    sleep_s: float
+    gpu: bool           # cupy imported and the card touched
+
+
+#: The smoke waves' jobs by item: pool_plan.SMOKE_JOBS's items, each as the plan's Task 10 runs
+#: it (`big` held by its class, `oom` past its: the same 3 GB, estimated otherwise).
+SMOKE_WORK: dict[str, SmokeWork] = {
+    "quick": SmokeWork(alloc_gb=0.0, sleep_s=20.0, gpu=False),
+    "big": SmokeWork(alloc_gb=3.0, sleep_s=20.0, gpu=False),
+    "oom": SmokeWork(alloc_gb=3.0, sleep_s=20.0, gpu=False),
+    "slow": SmokeWork(alloc_gb=0.0, sleep_s=25 * 60.0, gpu=False),
+    "gpu": SmokeWork(alloc_gb=0.0, sleep_s=20.0, gpu=True),
+}
+
+
+def smoke_rows(block: str, item: str) -> dict[int, Path]:
+    """A smoke job's rows, by their number."""
+    return {k: SMOKE_ROWS / f"{block}__{item}__{k}.parquet"
+            for k in range(1, SMOKE_ROWS_PER_JOB + 1)}
+
+
+def smoke_job(argv: list[str]) -> None:
+    """`smoke-job <id> <item> [--replace | --keep-standing]` (the module's docstring), under the
+    fault FAULT_ENV names when a guard's fault set it (CHILD_FAULTS)."""
+    if FAULT_ENV not in os.environ:
+        _smoke_job(argv)
+        return
+    fault = os.environ[FAULT_ENV]
+    if fault not in CHILD_FAULTS:
+        raise SystemExit(f"{FAULT_ENV}={fault!r} names no fault a guard's child takes "
+                         f"({', '.join(CHILD_FAULTS)})")
+    with CHILD_FAULTS[fault]():
+        _smoke_job(argv)
+
+
+def _smoke_job(argv: list[str]) -> None:
+    rest, standing = clearings.standing_of(argv)
+    if set(SMOKE_WORK) != set(pp.SMOKE_JOBS):
+        raise SystemExit(f"smoke-job's items {sorted(SMOKE_WORK)} are not pool_plan.SMOKE_JOBS's "
+                         f"{sorted(pp.SMOKE_JOBS)}")
+    if len(rest) != 2 or rest[1] not in SMOKE_WORK:
+        raise SystemExit(f"smoke-job <id> <item> [{row_marker.REPLACE} | "
+                         f"{row_marker.KEEP_STANDING}], the items {', '.join(SMOKE_WORK)}; "
+                         f"got {rest}")
+    block, item = rest
+    todo = {k: p for k, p in smoke_rows(block, item).items()
+            if standing.todo(p)}            # each asked before any work: Refuse raises
+    if not todo:
+        print(f"smoke-job {block} {item}: its rows stand", flush=True)
+        return
+    work = SMOKE_WORK[item]
+    print(f"smoke-job {block} {item}: {len(todo)} rows to write; {work}", flush=True)
+    held = np.empty(int(work.alloc_gb * 2 ** 30), dtype=np.uint8)
+    held[::PAGE] = 1                # every page touched: resident, as a job's working set is
+    time.sleep(work.sleep_s)
+    if work.gpu:
+        import cupy  # type: ignore[import-untyped]  # no stubs: the card's touch is its one use
+        on = cupy.ones(1 << 20, dtype=cupy.float32)
+        print(f"smoke-job {block} {item}: the card touched ({float(on.sum()):.0f})", flush=True)
+    for k, p in todo.items():
+        standing.write(pd.DataFrame([dict(block=block, item=item, row=k,
+                                          host=socket.gethostname(), pid=os.getpid(),
+                                          held_gb=held.nbytes / 2 ** 30)]), p)
+
+
+class Doubled(NamedTuple):
+    """What one of double-claim's workers did: its exit and log, or the error it died of."""
+    worker: str
+    exit: int
+    log: list[str]
+    error: str | None
+
+
+def _doubled(path: Path, seed: pq.Seed, worker: str, run: str, *, forced: bool,
+             out: MpQueue[Doubled]) -> None:
+    """pool_worker.work as `worker` of `run` (a child process), its jobs real children in the
+    checkout (pool_worker.run_job), on the real clock; `forced`: its first claim takes the job
+    another worker holds (SqliteQueue._pick patched once: a double claim)."""
+    pick = pq.SqliteQueue._pick
+    used: list[bool] = []
+
+    def held_first(db: sqlite3.Connection, w: sqlite3.Row, *,
+                   minutes_left: float) -> sqlite3.Row | None:
+        if used:
+            return pick(db, w, minutes_left=minutes_left)
+        used.append(True)
+        row: sqlite3.Row | None = db.execute("SELECT * FROM jobs WHERE state = ?",
+                                             (pq.JobState.CLAIMED.value,)).fetchone()
+        return row
+
+    log: list[str] = []
+    try:
+        q: pq.Queue = pq.SqliteQueue.open(path, seed)
+
+        def run_line(c: pq.Claim) -> pw.Ran:
+            return pw.run_job(c.job.line, cwd=common.REPO, env=os.environ, log=log.append,
+                              wrote=lambda: q.wrote(c.attempt))
+
+        with (_patched(pq.SqliteQueue, "_pick", staticmethod(held_first)) if forced
+              else nullcontext()):
+            ex = pw.work(queue=q, worker=worker, restarts=0, run=run, node=NODE, cls="m4",
+                         commit=COMMIT, ends_at=time.time() + 7200.0, now=time.time,
+                         wait=lambda: time.sleep(1.0), run_line=run_line,
+                         oom=Counted(count=0), log=log.append)
+    except BaseException as e:
+        out.put(Doubled(worker=worker, exit=-1, log=log, error=f"{type(e).__name__}: {e}"))
+        raise
+    out.put(Doubled(worker=worker, exit=int(ex), log=log, error=None))
+
+
+def _claimed(path: Path) -> bool:
+    """Whether the queue at `path` (made, or not yet) has a job claimed."""
+    if not path.exists():
+        return False
+    db = sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True)
+    try:
+        n: int = db.execute("SELECT COUNT(*) FROM jobs WHERE state = ?",
+                            (pq.JobState.CLAIMED.value,)).fetchone()[0]
+        return n > 0
+    except sqlite3.OperationalError:            # its tables not made yet
+        return False
+    finally:
+        db.close()
+
+
+def double_claim(_args: list[str]) -> list[str]:
+    """`double-claim` (the module's docstring): its failures."""
+    import cluster_wave
+    lad = LADDERS["cpu-score"]
+    block = f"pool-check-{socket.gethostname()}-{os.getpid()}"
+    line = cluster_wave._job_line("research/roadless/pool_check.py smoke-job {id} {item}",
+                                  block=block, item="quick", tar=None)
+    seed = _seed(lad, [replace(_m4(1, minutes=10.0, line=line), block=block, group=block,
+                               item="quick")])
+    rows = list(smoke_rows(block, "quick").values())
+    ctx = mp.get_context("fork")
+    started: list[mp.process.BaseProcess] = []
+    reports: dict[str, Doubled] = {}
+    try:
+        with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
+            path = Path(tmp) / "queue.db"
+            out: MpQueue[Doubled] = ctx.Queue()
+            first = ctx.Process(target=_doubled, args=(path, seed, "w-first", RUN),
+                                kwargs=dict(forced=False, out=out))
+            second = ctx.Process(target=_doubled, args=(path, seed, "w-second", NEXT_RUN),
+                                 kwargs=dict(forced=True, out=out))
+            first.start()
+            started.append(first)
+            t0 = time.time()
+            while not _claimed(path):
+                if time.time() - t0 > DOUBLE_WAIT:
+                    print(f"double-claim: the first worker claimed nothing in {DOUBLE_WAIT:g} s "
+                          "-> FAILS", flush=True)
+                    return ["double-claim"]
+                time.sleep(0.05)
+            time.sleep(DOUBLE_LAG)
+            second.start()
+            started.append(second)
+            try:
+                for _ in range(2):
+                    r = out.get(timeout=DOUBLE_WAIT)
+                    reports[r.worker] = r
+            except queue.Empty:
+                pass
+            for proc in started:
+                proc.join(timeout=DOUBLE_WAIT)
+            if set(reports) != {"w-first", "w-second"} or any(
+                    r.error is not None for r in reports.values()):
+                died = {w: r.error for w, r in reports.items()}
+                print(f"double-claim: the workers reported {died} -> FAILS", flush=True)
+                return ["double-claim"]
+            jobs = pq.SqliteQueue.open(path, seed).jobs()
+            tried = [(a.worker, a.outcome, a.rc, a.rows) for a in _attempts(path)]
+        written = [pd.read_parquet(p) for p in rows if p.exists()]
+        writers = {(str(d["host"].iloc[0]), int(d["pid"].iloc[0])) for d in written}
+        strays = sorted(p.name for p in SMOKE_ROWS.glob(f"{block}__*") if p not in rows)
+    finally:
+        for proc in started:            # every worker ended (killed if hung) before the rows go
+            proc.join(timeout=DOUBLE_WAIT)
+            if proc.is_alive():
+                proc.kill()
+                proc.join()
+        for p in SMOKE_ROWS.glob(f"{block}__*"):
+            p.unlink()
+        if SMOKE_ROWS.is_dir() and not any(SMOKE_ROWS.iterdir()):
+            SMOKE_ROWS.rmdir()          # left empty by the guard: none of a wave's is there
+    log1, log2 = reports["w-first"].log, reports["w-second"].log
+    want = [("w-first", "done", 0, SMOKE_ROWS_PER_JOB), ("w-second", "done", 0, 0)]
+    [job] = jobs
+    notes = ([] if len(written) == len(rows) and len(writers) == 1 else
+             [f"rows {len(written)} of {len(rows)}, by {len(writers)} writers (one set: one)"]) + (
+        [f"stray files {strays}"] if strays else []) + (
+        [] if tried == want else [f"attempts {tried}, want {want}"]) + (
+        [] if (job.state, job.strikes) == (pq.JobState.DONE, 0) else
+        [f"the job {job.state} with {job.strikes} strikes, want done with none"]) + (
+        [] if all(f"{row_marker.ROW_WRITTEN}{p}" in log1 for p in rows) else
+        ["the first run's log lacks its ROW_WRITTEN lines"]) + (
+        [] if all(f"[row] kept {p}" in log2 for p in rows) else
+        ["the second run's log lacks its `[row] kept` lines"]) + (
+        [] if (reports["w-first"].exit, reports["w-second"].exit) == (0, 0) else
+        [f"exits {reports['w-first'].exit}, {reports['w-second'].exit}, want 0, 0"])
+    print(f"double-claim: one job ({line}) claimed by two workers, the second {DOUBLE_LAG:g} s "
+          f"later: attempts {tried}, the job {job.state} with {job.strikes} strikes, rows by "
+          f"{len(writers)} writer" + _failing(notes), flush=True)
+    return ["double-claim"] if notes else []
+
 GUARDS: dict[str, Guard] = {"claim": Guard(run=claim, args=()),
                             "transitions": Guard(run=transitions, args=()),
                             "class": Guard(run=classes, args=("rows",)),
@@ -2396,7 +3136,9 @@ GUARDS: dict[str, Guard] = {"claim": Guard(run=claim, args=()),
                             "worker": Guard(run=worker, args=()),
                             "dead-claim": Guard(run=dead_claim, args=()),
                             "aside": Guard(run=aside, args=()),
-                            "end": Guard(run=end, args=())}
+                            "end": Guard(run=end, args=()),
+                            "keep": Guard(run=keep, args=()),
+                            "double-claim": Guard(run=double_claim, args=())}
 
 
 # ---- faults ---------------------------------------------------------------------------------
@@ -2589,6 +3331,24 @@ def _unified_first(proc_self_cgroup: str, root: Path) -> pw.OomEvidence:
     return found if found.kills() is not None else pw.Unreadable(why=f"{found.about} unread")
 
 
+@contextmanager
+def _refusing() -> Iterator[None]:
+    """clearings.standing_of resolving --keep-standing to Refuse() (a pool's job refusing what
+    stands, as a person's run does), in this process and, through FAULT_ENV, in every smoke-job
+    its workers start (CHILD_FAULTS)."""
+    real = clearings.standing_of
+
+    def standing_of(argv: list[str]) -> tuple[list[str], clearings.Standing]:
+        rest, standing = real(argv)
+        return rest, (clearings.Refuse() if isinstance(standing, clearings.Keep) else standing)
+    with _patched(clearings, "standing_of", standing_of), _patched_env({FAULT_ENV: "refuse"}):
+        yield
+
+
+#: The faults that reach a guard's child processes (smoke-job), by FAULT_ENV's value.
+CHILD_FAULTS: dict[str, Callable[[], AbstractContextManager[None]]] = {"refuse": _refusing}
+
+
 FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "claim": {"split-tx": lambda: _patched(pq.SqliteQueue, "claim", _split_claim)},
     "transitions": {"late-finish": lambda: _patched(pq, "_holds", lambda job, attempt: True),
@@ -2628,6 +3388,8 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
             "open-ended": lambda: _patched(ps, "_ended", _ended_open),
             "request-fatal": lambda: _patched(ps, "_requests", _requests_fatal),
             "open-fixed": lambda: _patched(pq, "_open_fixed", lambda header, *, closed: False)},
+    "keep": {"refuse": _refusing},
+    "double-claim": {"refuse": _refusing},
 }
 
 
@@ -2664,8 +3426,11 @@ def both_ways(guards: list[str], args: list[str]) -> None:
 
 
 def command_line(a: list[str]) -> None:
-    """`<guard> [--fault <name>] [args ...]` or `both-ways <guards,> [args ...]` (the module's
-    doc)."""
+    """`<guard> [--fault <name>] [args ...]`, `both-ways <guards,> [args ...]` or `smoke-job <id>
+    <item> [--replace | --keep-standing]` (the module's doc)."""
+    if a[:1] == ["smoke-job"]:
+        smoke_job(a[1:])
+        return
     if len(a) >= 2 and a[0] == "both-ways":
         names = a[1].split(",")
         unknown = [g for g in names if g not in GUARDS]

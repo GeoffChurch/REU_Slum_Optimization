@@ -442,7 +442,7 @@ def _replace_quiet() -> AbstractContextManager[Any]:
     import os
     from unittest import mock
     return mock.patch.object(clearings.Replace, "write",
-                             lambda self, df, path: clearings._place(df, path, os.replace))
+                             lambda self, df, path: clearings.place(df, path, os.replace))
 
 
 def _both_taken() -> AbstractContextManager[Any]:

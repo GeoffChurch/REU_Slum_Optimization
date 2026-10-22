@@ -10,15 +10,20 @@ polish_greedy.py, search.py, road_rescore.py), keyed by the metric's name.
 
     S=research/roadless/consolidated.py    # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S features <ids,|@file|store> <procs>   # what meets each block: ROWS/features
-    uv run python $S baselines <id> <parts,>     # a block's baselines under the switch's parts
-    uv run python $S presets <id> <cpu|gpu> <default,hard,cheap,cheap005> [--replace]
-    uv run python $S lenses <id> [--replace]      # every preset clearing's lenses, on a core
+    uv run python $S baselines <id> <parts,> [K]  # a block's baselines under the switch's parts
+    uv run python $S presets <id> <cpu|gpu> <default,hard,cheap,cheap005> [K]
+    uv run python $S lenses <id> [K]              # every preset clearing's lenses, on a core
     uv run python $S reuse-networks <scratch>    # the lineup's networks nothing changes
     uv run python $S report                      # ROWS/summary_*.csv
     uv run python $S lineup-report               # ROWS/summary_lineup_*.csv
-    uv run python $S screen <id> <variants,> [--replace]   # phase 5's screens on a block, on a card
-    uv run python $S screen-lenses <id> [--replace]        # their clearings' lenses, on a core
+    uv run python $S screen <id> <variants,> [K]  # phase 5's screens on a block, on a card
+    uv run python $S screen-lenses <id> [K]       # their clearings' lenses, on a core
     uv run python $S screen-report <preset> <wave>         # each screen by epistemetry, its axes
+
+[K] is `--replace` or `--keep-standing` (clearings.standing_of): a row that stands under its
+identity refuses a run (before any work) unless `--replace` names a replacement, and under
+`--keep-standing` (a pool's job) is that identity done, the rest run; a command with nothing left
+returns before building its block.
 
 `features`: per block (the store's 303: clearings.Store's blocks), its OSM features (attrs["osm"])
 as the metric reads them: the barriers' cut (gap_exits.OsmBarriers.parts within the block: its
@@ -31,7 +36,9 @@ block, not a street of its ring). Rows ROWS/features/<id>.parquet.
 (items_of: SIMP's default `.p256w8x2`, the hard-block preset `.p256w8x2.GS0.01cate1`, the cheap
 preset, and the cheap preset at S0.005cat), each free first at area D 0.05 optimizing P, its rows
 in relax_rows/ and polish_rows/ under the metric's name, and the run's one-card timing
-(ROWS/onecard/<metric>/<device>/<id>.parquet).
+(ROWS/onecard/<metric>/<device>/<id>.parquet: the lineup's time, its setup included; a
+`--keep-standing` run that kept some of its presets times the rest apart, in
+ROWS/onecard_partial/, read by nothing that reads the lineup's time).
 
 `screen` (phase 5, pruning): the dominated variants on record that still exist on the complex
 (SCREENS), each in the default's company, run on a block one after another in this process on one
@@ -195,12 +202,14 @@ def baseline_path(bid: str, part: str) -> Path:
 
 def baselines(bid: str, parts: list[str], *, standing: clearings.Standing) -> None:
     """The block's baseline under each part (module docstring), one after another, each written
-    through `standing` (clearings.Standing) under its metric's name."""
+    through `standing` (clearings.Standing) under its metric's name: every part asked before any
+    work, only those it answers for run, and with none the block is never built."""
+    todo = [p for p in parts if standing.todo(baseline_path(bid, p))]
+    if not todo:
+        return
     [b] = common.build_blocks([bid])
-    for part in parts:
+    for part in todo:
         out = baseline_path(bid, part)
-        if not standing.todo(out):
-            continue
         metric = part_metric(part, "cpu")
         t0 = time.time()
         fx = metric.fixed(b, cache=gcl.CACHE, carving=gcl.Carving.none(gc.geometry(b)))
@@ -265,8 +274,23 @@ def items_of(bid: str, device: str) -> dict[str, Item]:
             "cheap005": cheap(CHEAP_005)}
 
 
+def onecard_dir(device: str) -> Path:
+    """The one-card timings on `device` of runs of every preset their commands named (`presets`):
+    each the lineup's time with its setup, read as such by lineup-report's time per block and the
+    pool's estimates (pool_plan.Onecard)."""
+    return ROWS / "onecard" / metrics.RUNTIME / device
+
+
 def onecard_path(bid: str, device: str) -> Path:
-    return ROWS / "onecard" / metrics.RUNTIME / device / f"{bid}.parquet"
+    return onecard_dir(device) / f"{bid}.parquet"
+
+
+def onecard_partial_path(bid: str, device: str) -> Path:
+    """The one-card timing of a run that kept some of the presets it named (`presets` under
+    clearings.Keep: a pool's job run again after a kill): it timed the rest, with a setup of its
+    own, so it is no lineup's time and is kept apart from onecard_path's, where nothing reading
+    the lineup's time reads it."""
+    return ROWS / "onecard_partial" / metrics.RUNTIME / device / f"{bid}.parquet"
 
 
 def presets(bid: str, device: str, names: list[str], *, standing: clearings.Standing) -> None:
@@ -276,15 +300,19 @@ def presets(bid: str, device: str, names: list[str], *, standing: clearings.Stan
     the first mesh) included (`onecard`: the measurement gap, BACKLOG's "one-card timing of the
     whole lineup with setup"). Every identity (each preset and the one-card row) is asked before
     any work, and the presets run are those `standing.todo` answers True for (Refuse: all, or
-    Exists; Keep: those whose rows do not stand); the one-card row names them, and is written if
-    it is to be: it times this run's own work, so with no preset to run there is nothing to time."""
+    Exists; Keep: those whose rows do not stand). The one-card row times this run's own work and
+    names in `presets` the presets it ran: a run of all of `names` writes it at onecard_path (the
+    lineup's time), one that kept some at onecard_partial_path (Keep's re-run of a killed job:
+    the rest's time), each if `standing` answers for it; with no preset to run there is nothing
+    to time."""
     t_task = time.time()
     items = items_of(bid, device)
     unknown = sorted(set(names) - set(items))
     if unknown:
         raise SystemExit(f"unknown presets {unknown}: {sorted(items)}")
     ran = [k for k in names if standing.todo(items[k].path)]
-    timed = standing.todo(onecard_path(bid, device))
+    timing_path = (onecard_path if ran == names else onecard_partial_path)(bid, device)
+    timed = standing.todo(timing_path)
     if not ran:
         return
     timing: dict[str, object] = dict(block=bid, device=device, metric=metrics.RUNTIME,
@@ -308,7 +336,7 @@ def presets(bid: str, device: str, names: list[str], *, standing: clearings.Stan
               f"{gap_calib.peak_gb():.1f} GB, GPU {gpu_gb:.1f} GB", flush=True)
     timing.update(wall=time.time() - t_task, peak_rss_gb=gap_calib.peak_gb())
     if timed:
-        standing.write(pd.DataFrame([timing]), onecard_path(bid, device))
+        standing.write(pd.DataFrame([timing]), timing_path)
 
 
 # ------------------------------------------------------------------ every clearing's lenses
@@ -471,15 +499,18 @@ def screens_metric(metric: str, *, device: str) -> gcl.ComplexMetric:
 
 def screen(bid: str, variants: list[str], *, standing: clearings.Standing, metric: str) -> None:
     """Phase 5's screens on `bid` under `metric`: each of `variants` (SCREENS) that
-    `standing.todo` answers True for (clearings.Standing; every one asked before any work), in
-    turn in this process, on one card, each row written through `standing` with the device, the
-    host, the wall time and the peak memory (as `presets` writes the presets')."""
+    `standing.todo` answers True for (clearings.Standing; every one asked before any work, the
+    metric built only if one is), in turn in this process, on one card, each row written through
+    `standing` with the device, the host, the wall time and the peak memory (as `presets` writes
+    the presets')."""
     import relax
     unknown = sorted(set(variants) - set(SCREENS))
     if unknown:
         raise SystemExit(f"unknown variants {unknown}: {sorted(SCREENS)}")
-    m = screens_metric(metric, device="gpu")
     ran = [v for v in variants if standing.todo(screen_path(v, bid, metric=metric))]
+    if not ran:
+        return
+    m = screens_metric(metric, device="gpu")
     for v in ran:
         plan = screen_plan(v)
         t0 = time.time()
@@ -506,9 +537,9 @@ def screen_lenses(bid: str, *, standing: clearings.Standing, metric: str) -> Non
     (clearings.Standing)."""
     import road_rescore as rr
     out = screen_lenses_path(bid, metric=metric)
-    built = screens_metric(metric, device="cpu")
     if not standing.todo(out):
         return
+    built = screens_metric(metric, device="cpu")
     [b] = common.build_blocks([bid])
     m = built.clearing(b, demand=POP)
     rows = []
@@ -943,8 +974,10 @@ def lineup_report() -> None:
     first = to[to["rank"] == 1].groupby(["lens", "preset"]).size().unstack(fill_value=0)
     print("\nFIRST IN B'S ORDER among default, hard, cheap (blocks; ties count for each)\n"
           + first.to_string())
-    one = _read(ROWS / "onecard" / metrics.RUNTIME / "gpu")
-    cpu = _read(ROWS / "onecard" / metrics.RUNTIME / "cpu")
+    # the lineup's time per block: onecard_dir's rows, each a run of every preset it names (a
+    # run that kept some is timed apart, onecard_partial_path's, and read by nothing here)
+    one = _read(onecard_dir("gpu"))
+    cpu = _read(onecard_dir("cpu"))
     tim = pd.concat([one.assign(device="gpu"), cpu.assign(device="cpu")], ignore_index=True)
     tim["size"] = tim.block.map(feat["size"])
     tim.to_csv(out / "summary_lineup_onecard.csv", index=False)
