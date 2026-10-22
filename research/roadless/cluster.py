@@ -558,9 +558,10 @@ def wave_summary(ctx: cs.Context, wave: str) -> psum.Summary:
 
 
 def _walltime_reaps(s: psum.Summary, run: str) -> dict[str, psum.ReapedWorker]:
-    """The reaps in `s` of `run`'s workers at or past their walltime, by task: a requeued task's
-    earlier self, reaped when it registered again (its node lost, before its walltime), is not
-    its walltime kill's."""
+    """The reaps in `s` of `run`'s workers at or past their walltime, by task, each task's latest
+    (`s.reaped` is in the order they were made). A requeued task's earlier self is reaped when the
+    task registers again, before or past its own end time; it decides nothing while the task is
+    registered again (`_unreaped`), nor, reaped before its walltime, once it is gone."""
     return {r.task: r for r in s.reaped if r.run == run and r.walltime}
 
 
@@ -569,11 +570,11 @@ def _registered(s: psum.Summary, run: str) -> frozenset[str]:
     return frozenset(w.task for w in s.registered if w.run == run)
 
 
-def _unreaped(killed: Sequence[str], reaps: Mapping[str, psum.ReapedWorker],
-              registered: frozenset[str]) -> list[str]:
-    """The tasks of `killed` registered and not yet reaped at their walltime: whether they held a
-    job is not known yet."""
-    return [t for t in killed if t not in reaps and t in registered]
+def _unreaped(killed: Sequence[str], registered: frozenset[str]) -> list[str]:
+    """The tasks of `killed` still registered (not yet reaped, whatever reaps of an earlier self
+    of theirs came before): whether they held a job is not known yet. Reaps decide only the
+    others (`_idle_killed`)."""
+    return [t for t in killed if t in registered]
 
 
 def _idle_killed(killed: Sequence[str], reaps: Mapping[str, psum.ReapedWorker]) -> list[str]:
@@ -590,8 +591,8 @@ def pool_more(ctx: cs.Context, rec: cs.RunRecord, *,
       here);
     - its summary absent, unreadable or of another format: raise (asked again next sync);
     - the summary written before the lease left squeue (`gone_at`: its last reaps may predate the
-      lease's end), or a task of `killed` (at its walltime) registered and not yet reaped at its
-      walltime, by this run (`_walltime_reaps`: a requeued task's earlier reap is not it): raise;
+      lease's end), or a task of `killed` (at its walltime) still registered (`_unreaped`: a
+      requeued task's earlier self's reap is not its own): raise;
     - a task of `killed` reaped holding no job, or never registered (hung in its startup): Done
       (GeoffChurch/mycooc's lesson 5: a lease whose worker sat idle to its walltime has nothing
       to continue for);
@@ -611,7 +612,7 @@ def pool_more(ctx: cs.Context, rec: cs.RunRecord, *,
                          f"({rec.gone_at}): its steward may not have reaped it yet; the next sync "
                          "asks again")
     reaps = _walltime_reaps(s, rec.name)
-    unreaped = _unreaped(killed, reaps, _registered(s, rec.name))
+    unreaped = _unreaped(killed, _registered(s, rec.name))
     if unreaped:
         raise SystemExit(f"{rec.name}'s tasks {', '.join(unreaped)}, killed at their walltime, are "
                          f"not yet reaped (wave {wave}'s summary of {s.at}): whether they held a "
@@ -662,7 +663,7 @@ def _pool_args(*, wave: str, ladder: Ladder, node: str, rung: int) -> tuple[str,
             "--gpus", str(throttle(ladder, node)))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Waves:
     """reblock's campaign as the market's launches see it (cluster_submit's Campaigns, README "GPU
     market"; its docs/migrating/reblock.md, "a campaign names the template of a lease the market
@@ -693,7 +694,7 @@ class Waves:
             return cs.Done(f"reblock's one campaign is {CAMPAIGN}, not {campaign}")
         live = live_stewards(ctx)
         if not live:
-            return cs.Done(f"no wave is live in this registry (no unfinished steward), so none "
+            return cs.Done(f"no wave is live in this registry (no live steward), so none "
                            f"has a job of {bundle.text()} on {node}")
         got = wave_summaries(ctx, sorted(live))
         left_out = {**got.unread, **{

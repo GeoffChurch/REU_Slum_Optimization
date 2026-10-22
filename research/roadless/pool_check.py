@@ -202,9 +202,9 @@ the steward's own STEWARD_TASK among them, or a failure), no allocation unless a
   summary.json reading back as the summary, one ledger line. `fails`, `hangs` and
   `without-own`: the same workers (all registered here), squeue failing (exit 1), outliving its
   timeout, and answering the live worker without the steward's own: nobody reaped, every job
-  still its worker's. Faults: `by-age` (a claim older
-  than an hour reaped, squeue unasked: the live worker's long job reaped) and `blind` (a failed
-  squeue, or one without the steward's own, read as an empty answer: every worker reaped).
+  still its worker's. Faults: `by-age` (a claim older than an hour reaped, squeue unasked: the
+  live worker's long job reaped) and `blind` (a failed squeue, or one without the steward's own,
+  read as an empty answer: every worker reaped).
 - `aside` (Ruling 5, Review Focus 2): two waves (ASIDE_WORKERS: 4 and 2 live workers on quadro2
   in m4 of cpu-score) under one `waves`, each steward's first round with no allocation (their
   summaries), then two rounds each under a hand-made allocation (the keeper's JSON, read back)

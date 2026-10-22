@@ -10,7 +10,7 @@ stages), and checks what a task would get.
                                             # no-running
     uv run python $C kinds [fault]          # fault: lease-bundle
     uv run python $C more [fault]           # faults: continue-idle, finished-dead, task-reaps,
-                                            # hung-waits
+                                            # hung-waits, reap-first
     uv run python $C template [fault]       # faults: other-mem, other-node, continuation-name,
                                             # reused-name, with-at, first-wave, market-always
     uv run python $C both-ways <guards,>    # each guard, then under each of its faults
@@ -89,17 +89,20 @@ at its walltime and reaped there holding a job: Continue(2); `market`, the same 
 answering the market's Continue(10): Continue(3), capped by the jobs pending; `routine`, no task
 killed: Continue(2); `idle`, 500_1 reaped holding no job: Done; `unreaped`, 500_1 registered and
 not reaped yet: raises; `hung`, 500_1 never registered (hung in its startup): Done; `requeued`,
-500_1 requeued (its earlier self reaped holding a job before its walltime, as its registering
-again reaps it) and registered again, not yet reaped: raises; `old`, the summary written before
-GONE_AT: raises; `absent`, no summary: raises; `format-2`, a summary of format 2: raises;
-`unsettled`, the wave's steward finished and its continuation undecided: Continue(2);
+500_1 requeued (its registering again reaps its earlier self, holding a job, before that one's
+end time) and registered again, not yet reaped: raises; `requeued-late`, the same with the earlier
+self reaped past its end time (the requeue waited that long): raises; `requeued-hung`, its earlier
+self reaped before its end time and the requeued task never registered: Done; `old`, the summary
+written before GONE_AT: raises; `absent`, no summary: raises; `format-2`, a summary of format 2:
+raises; `unsettled`, the wave's steward finished and its continuation undecided: Continue(2);
 `no-steward`, the steward finished and settled: Done; `none-pending`, no m12 job pending on
 quadro2 (some claimed there, some pending elsewhere): Done; and the steward's own `more`:
 Continue(1) while its summary is CLOSED, Done once FINISHED. Faults: `continue-idle`
 (cluster._idle_killed finding none: idle and hung continued), `finished-dead` (a steward live
 only while unfinished: unsettled Done), `task-reaps` (a killed task's reap read by its task alone,
-any run's and any time's: requeued continued on its earlier self's) and `hung-waits` (a killed
-task not reaped at its walltime waited for, registered or not: hung raises).
+any run's and any time's: requeued-hung continued on its earlier self's), `hung-waits` (every
+killed task waited for, registered or not: hung raises) and `reap-first` (a walltime reap decides
+a killed task still registered: requeued-late continued on its earlier self's).
 
 `template` (Ruling 4, Review Focus 2): live waves `a` (its steward at HEAD) and `b` (at HEAD^),
 with 3 and 7 jobs of m12 (cpu-score) pending on quadro2 and none of m24 pending on orion, a pool
@@ -140,6 +143,7 @@ import tarfile
 import tempfile
 from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime
+from enum import Enum
 from pathlib import Path
 from typing import NamedTuple
 
@@ -693,16 +697,38 @@ def _one_cpu_lease(self: cluster.Waves, ctx: Context, rec: RunRecord) -> cs.Leas
 
 
 _LEASE = cluster.Waves.lease
+_REGISTERED = cluster._registered
+
+
+def _registered_unreaped(s: psum.Summary, run: str) -> frozenset[str]:
+    """`run`'s tasks registered in `s` less those it has a walltime reap of (fault `reap-first`:
+    a reap decides a killed task, an earlier self's of a requeued one too)."""
+    return _REGISTERED(s, run) - set(cluster._walltime_reaps(s, run))
+
+
+class StewardState(Enum):
+    """A `more` case's wave steward: live, finished with its continuation undecided, or settled."""
+
+    LIVE = "live"
+    UNSETTLED = "unsettled"
+    SETTLED = "settled"
+
+    @property
+    def finished(self) -> bool:
+        return self is not StewardState.LIVE
+
+    @property
+    def settled(self) -> bool:
+        return self is StewardState.SETTLED
 
 
 class MoreCase(NamedTuple):
     """A case of `more`: the summary on the cluster (None: none), the tasks killed at their
-    walltime, the wave's steward (`live`, `unsettled`: finished and its continuation undecided,
-    or `settled`), the width's patch, and the answer."""
+    walltime, the wave's steward, the width's patch, and the answer."""
 
     summary: str | None
     killed: tuple[str, ...]
-    steward: str
+    steward: StewardState
     width: Callable[..., cs.Continue | cs.Done]
     want: str
 
@@ -715,8 +741,9 @@ def check_more() -> list[str]:
              _line("quadro2", 24, pending=5, claimed=0))
     held = psum.ReapedWorker(task=KILLED, run=LEASE, held_job=True, walltime=True)
     idle = held._replace(held_job=False)
-    # its earlier self, reaped when the task registered again requeued (its node lost)
-    earlier = held._replace(walltime=False)
+    # its earlier self, reaped when the task registered again requeued (its node lost): before
+    # its end time, or past it (the requeue waited that long)
+    earlier, earlier_late = held._replace(walltime=False), held
     registered = (psum.RegisteredWorker(task=KILLED, run=LEASE),)
 
     def summary(*, at: str = after, of: Sequence[psum.ClassLine] = lines,
@@ -726,23 +753,26 @@ def check_more() -> list[str]:
                         registered=live)
 
     none_pending = (lines[0], _line("quadro2", 12, pending=0, claimed=2), lines[2])
-    k, t = (KILLED,), _width_today
+    k, t, alive = (KILLED,), _width_today, StewardState.LIVE
     cases = {
-        "today": MoreCase(summary(), k, "live", t, "Continue(2)"),
-        "market": MoreCase(summary(), k, "live", _width_market, "Continue(3)"),
-        "routine": MoreCase(summary(reaped=()), (), "live", t, "Continue(2)"),
-        "idle": MoreCase(summary(reaped=(idle,)), k, "live", t, "Done"),
-        "unreaped": MoreCase(summary(reaped=(), live=registered), k, "live", t, "raises"),
-        "hung": MoreCase(summary(reaped=()), k, "live", t, "Done"),
-        "requeued": MoreCase(summary(reaped=(earlier,), live=registered), k, "live", t,
+        "today": MoreCase(summary(), k, alive, t, "Continue(2)"),
+        "market": MoreCase(summary(), k, alive, _width_market, "Continue(3)"),
+        "routine": MoreCase(summary(reaped=()), (), alive, t, "Continue(2)"),
+        "idle": MoreCase(summary(reaped=(idle,)), k, alive, t, "Done"),
+        "unreaped": MoreCase(summary(reaped=(), live=registered), k, alive, t, "raises"),
+        "hung": MoreCase(summary(reaped=()), k, alive, t, "Done"),
+        "requeued": MoreCase(summary(reaped=(earlier,), live=registered), k, alive, t,
                              "raises"),
-        "old": MoreCase(summary(at=before), k, "live", t, "raises"),
-        "absent": MoreCase(None, k, "live", t, "raises"),
-        "format-2": MoreCase(json.dumps({**json.loads(summary()), "format": 2}), k, "live", t,
+        "requeued-late": MoreCase(summary(reaped=(earlier_late,), live=registered), k, alive, t,
+                                  "raises"),
+        "requeued-hung": MoreCase(summary(reaped=(earlier,)), k, alive, t, "Done"),
+        "old": MoreCase(summary(at=before), k, alive, t, "raises"),
+        "absent": MoreCase(None, k, alive, t, "raises"),
+        "format-2": MoreCase(json.dumps({**json.loads(summary()), "format": 2}), k, alive, t,
                              "raises"),
-        "unsettled": MoreCase(summary(), k, "unsettled", t, "Continue(2)"),
-        "no-steward": MoreCase(summary(), k, "settled", t, "Done"),
-        "none-pending": MoreCase(summary(of=none_pending), k, "live", t, "Done")}
+        "unsettled": MoreCase(summary(), k, StewardState.UNSETTLED, t, "Continue(2)"),
+        "no-steward": MoreCase(summary(), k, StewardState.SETTLED, t, "Done"),
+        "none-pending": MoreCase(summary(of=none_pending), k, alive, t, "Done")}
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
         ctx = _context(tmp / "repo", tmp / "home")
@@ -750,8 +780,8 @@ def check_more() -> list[str]:
         ctx.registry.write(lease)
         got: dict[str, str] = {}
         for name, c in cases.items():
-            ctx.registry.write(_steward_run("w", commit=SHA, finished=c.steward != "live",
-                                            settled=c.steward == "settled"))
+            ctx.registry.write(_steward_run("w", commit=SHA, finished=c.steward.finished,
+                                            settled=c.steward.settled))
             _put(tmp / "home", "w", c.summary)
             with _patched(cs.launches, "width", c.width):
                 got[name] = _answer(functools.partial(cluster.pool_more, ctx, lease,
@@ -762,7 +792,7 @@ def check_more() -> list[str]:
             _put(tmp / "home", "w", _summary("w", at=after, state=state, ladder="cpu-score",
                                              lines=lines, reaped=(), registered=()))
             got[name] = _answer(lambda: cluster.Steward().more(ctx, steward, killed=()))
-            cases[name] = MoreCase(None, (), "unsettled", _width_today, want)
+            cases[name] = MoreCase(None, (), StewardState.UNSETTLED, _width_today, want)
     bad = [f"{name} {got[name]}, want {c.want}" for name, c in cases.items()
            if got[name] != c.want]
     print(f"more: {', '.join(f'{n} {a}' for n, a in got.items())} -> "
@@ -931,8 +961,8 @@ FAULTS: dict[str, dict[str, Callable[[], contextlib.AbstractContextManager[None]
              "task-reaps": lambda: _patched(cluster, "_walltime_reaps",
                                             lambda s, run: {r.task: r for r in s.reaped}),
              "hung-waits": lambda: _patched(cluster, "_unreaped",
-                                            lambda killed, reaps, registered:
-                                            [t for t in killed if t not in reaps])},
+                                            lambda killed, registered: list(killed)),
+             "reap-first": lambda: _patched(cluster, "_registered", _registered_unreaped)},
     "template": {
         "other-mem": lambda: _patched(cluster, "_pool_args", _other_mem),
         "other-node": lambda: _patched(cluster, "_pool_args", _other_node),
