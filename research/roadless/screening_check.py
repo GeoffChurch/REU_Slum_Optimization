@@ -66,16 +66,18 @@ relative) and the stored states, record for record, with their blocks; every sto
 round-trips through JSON; every judged arm's verdict, re-derived from its rule and reading alone,
 is its take; every rule is the preset's stop, and every reading's price the target's (PRICES,
 from the edge recomputed here: realized-loss's the mean rate, fewest-wrong's the mean rate over
-FUTURE over the arm's own stake on its prefix then; to 1e-12 relative). A live wave's ledger
+FUTURE over the arm's own stake on its prefix then; to 1e-12 relative). A ledger part way
 (epistemetry's resume property: continuing from a prefix of a ledger gives what starting afresh
 gives): the longest stored ledger cut to the first half of its decisions (rounded up), as a wave
-stores it, Running for the rest of its last decision's step, on the blocks run when that decision
-was made (`_cut`), read back through the JSON and continued on the whole rows, is the screens
-derived afresh, the table and every state. And refused before any decision: a held-out block's
-default time dropped from the pass's rows (`screen_data`, naming the block), the JSON's metric or
-screen another's, a stored state or screen record epistemetry cannot read back (a field dropped,
-a field added: `read_decisions`, saying that removing the JSON starts afresh), a variant's stored
-blocks starting off its order (`screen_table`, naming the variant).
+would store it were the covariates unchanged (a real wave's are not: a block's cost covariate is
+the pass's default time until the screen runs it, the screen's own re-run after), Running for the
+rest of its last decision's step, on the blocks run when that decision was made (`_cut`), read
+back through the JSON and continued on the whole rows, is the screens derived afresh, the table
+and every state. And refused before any decision: a held-out block's default time dropped from
+the pass's rows (`screen_data`, naming the block), the JSON's metric or screen another's, a
+stored state or screen record epistemetry cannot read back (a field dropped, a field added:
+`read_decisions`'s revive refusal, naming the record as one epistemetry does not read back), a
+variant's stored blocks starting off its order (`screen_table`, naming the variant).
 Faults: `shuffled` (common.HELD reshuffled by np.random.default_rng(1): the rows are off every
 screen's order, which screen_data refuses), `altered-record` (one judged reading's stored price
 times 1 + 1e-6: the screens derived afresh are not the stored ones, and the price is not the
@@ -615,11 +617,11 @@ def _refused(what: str, call: Callable[[], object], *, naming: str) -> list[str]
 
 
 def _cut(stored: consolidated.Stored, *, run: Sequence[str]) -> consolidated.Stored:
-    """`stored` as a live wave would have stored it part way: the first half of its decisions
-    (rounded up), Running for the rest of the last one's step (`advance`'s `want`: each arm it
-    names, from its prefix then to the step's end, the units positions in the screen's order), on
-    the blocks run when that decision was made (the first `at` of `run`). Refused (ValueError)
-    unless the cut keeps a judged decision and leaves one to make."""
+    """`stored` as a wave would have stored it part way were the covariates unchanged: the first
+    half of its decisions (rounded up), Running for the rest of the last one's step (`advance`'s
+    `want`: each arm it names, from its prefix then to the step's end, the units positions in the
+    screen's order), on the blocks run when that decision was made (the first `at` of `run`).
+    Refused (ValueError) unless the cut keeps a judged decision and leaves one to make."""
     ds = stored.state.decisions
     k = (len(ds) + 1) // 2
     last = ds[k - 1]
@@ -637,10 +639,10 @@ def _continued_from_cut(name: str, preset: Screen, j: Any, *,
                         data: Mapping[str, consolidated.ScreenData],
                         stored: Mapping[str, consolidated.Stored],
                         afresh: consolidated.ScreenTable, metric: str) -> list[str]:
-    """The live-wave path: the longest stored ledger cut part way (`_cut`), written into the
-    stored JSON `j` in its place, read back (`read_decisions`) and continued on the whole rows
-    (`screen_table`, wave 0), is `afresh`, the screens derived afresh: the table, and every state
-    with its blocks."""
+    """A wave's path, were the covariates unchanged: the longest stored ledger cut part way
+    (`_cut`), written into the stored JSON `j` in its place, read back (`read_decisions`) and
+    continued on the whole rows (`screen_table`, wave 0), is `afresh`, the screens derived afresh:
+    the table, and every state with its blocks."""
     if not stored:
         return ["cut: no stored ledger to cut"]
     v = max(stored, key=lambda w: len(stored[w].state.decisions))
@@ -781,17 +783,21 @@ def screens() -> list[str]:
         bad += _refused("the stored screen the other preset's",
                         lambda: consolidated.read_decisions(preset, metric=metric),
                         naming="injected preset")
-    starts = f"removing {consolidated.DECISIONS.name} starts the screens afresh"
+    # The revive refusal's own text (read_decisions' `revived`), naming the record, not the
+    # "removing ... starts afresh" its message shares with the metric's and the screen's refusals.
+    unread = "is no record epistemetry reads back"
     state = j["screens"][ahead]["state"]
     dropped = {**j, "screens": {**j["screens"], ahead: {
         **j["screens"][ahead], "state": {k: x for k, x in state.items() if k != "decisions"}}}}
     with _patched(consolidated, "_decisions_json", lambda: dropped):
         bad += _refused(f"{ahead}'s stored state without its decisions, which revive cannot read",
-                        lambda: consolidated.read_decisions(preset, metric=metric), naming=starts)
+                        lambda: consolidated.read_decisions(preset, metric=metric),
+                        naming=f"{ahead}'s state {unread}")
     with _patched(consolidated, "_decisions_json",
                   lambda: {**j, "screen": {**j["screen"], "pin": pinned_rev()}}):
         bad += _refused("the stored screen with a field Screen lacks, which revive cannot read",
-                        lambda: consolidated.read_decisions(preset, metric=metric), naming=starts)
+                        lambda: consolidated.read_decisions(preset, metric=metric),
+                        naming=f"the screen {unread}")
     off = {**stored, ahead: stored[ahead]._replace(blocks=(common.TUNING[0],)
                                                    + stored[ahead].blocks[1:])}
     bad += _refused(f"{ahead}'s stored blocks starting {common.TUNING[0]}, off its order",
