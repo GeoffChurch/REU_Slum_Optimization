@@ -11,8 +11,9 @@ workers of its pools claim, run and record, each claim one attempt.
   `jobs` (the seed's jobs, unique on block and item, each with its state, strikes and the claim
   holding it), `attempts` (one per claim: the job, the worker and its node and class, start, end,
   outcome, peak GB, minutes, exit code and the rows it wrote), `workers` (each registered worker's
-  run, node, class, Slurm end time, and when it registered and retired), `aside` (the workers
-  asked to step aside) and `closed`.
+  run, node, class, Slurm end time, restarts, and when it registered and retired), `reaped` (each
+  reap: the worker, the job it held and its outcome, whether its walltime had ended), `aside` (the
+  workers asked to step aside) and `closed`.
 - **A claim** takes, of the PENDING jobs of the worker's node and class whose estimate fits the
   minutes it has left, the longest (then the lowest id), so a lease's big jobs come first and
   small ones fill its tail; a LONG job is the long lane's, claimed by id (`claim_job`). A worker
@@ -33,9 +34,12 @@ workers of its pools claim, run and record, each claim one attempt.
   times its peak (the peak that killed it is a floor of its need, as uncertain as a fit), its
   estimates never lowered; past the top rung it goes to the long lane.
 - **A dead worker's claim goes back**, as if never claimed (lesson 6), on evidence only: the
-  worker's own exit (`retire`), or the steward's reap on squeue's word (`reap`, which decides a
-  walltime kill by the worker's Slurm end time against `now`). A job waits, between claims, in
-  its lane's state: PENDING in the pool's, LONG in the long lane's.
+  worker's own exit (`retire`), the steward's reap on squeue's word (`reap`, which decides a
+  walltime kill by the worker's Slurm end time against `now`), or its task registering again
+  requeued (Slurm keeps a requeued task's array id and counts its restarts: `register` reaps its
+  earlier self). Every reap is recorded (`reaped`), in the same transaction, for the summary. A
+  job waits, between claims, in its lane's state: PENDING in the pool's, LONG in the long lane's.
+- **A cancel** ends every job not ended, a claimed one too: no later end moves it (`cancel`).
 - Timestamps are for reading (lesson 2): no worker's death or job's fate is decided by elapsed
   time; an attempt's start is read to raise a killed job's estimate to what it ran, and
   `ask_aside` counts the workers asked that retired after an allocation, as mycooc's does.
@@ -192,12 +196,15 @@ class Worker(NamedTuple):
 
 
 class Reaped(NamedTuple):
-    """A reaped worker: the job it held, and what its attempt came to (None: it held none)."""
+    """A reaped worker: the job it held, what its attempt came to (both None: it held none), and
+    whether its walltime had ended (the reaper's `now` at or past its Slurm end time): what a
+    lease's `more` reads (the spec's 3.7, mycooc's lesson 5)."""
 
     worker: str
     run: str
     job: int | None
     outcome: Outcome | None
+    walltime: bool
 
 
 class Queue(Protocol):
@@ -206,14 +213,16 @@ class Queue(Protocol):
     def close(self) -> None: ...
     def metric(self) -> str | None: ...
     def name_metric(self, name: str) -> None: ...
-    def register(self, *, worker: str, run: str, node: str, cls: str, ends_at: float) -> None: ...
+    def register(self, *, worker: str, run: str, node: str, cls: str, ends_at: float,
+                 restarts: int) -> None: ...
     def retire(self, worker: str) -> int: ...
     def claim(self, *, worker: str, minutes_left: float) -> Claim | None: ...
     def claim_job(self, *, worker: str, job: int) -> Claim | None: ...
     def wrote(self, attempt: int) -> None: ...
     def finish(self, attempt: int, *, worker: str, outcome: Outcome, peak_gb: float,
                minutes: float, rc: int) -> JobState: ...
-    def reap(self, worker: str, *, now: float) -> Reaped: ...
+    def reap(self, worker: str, *, now: float) -> Reaped | None: ...
+    def reaped(self) -> list[Reaped]: ...
     def ask_aside(self, *, node: str, cls: str, units: int, since: float) -> list[str]: ...
     def asked_aside(self, worker: str) -> bool: ...
     def retry(self, ids: Sequence[int]) -> int: ...
@@ -225,9 +234,10 @@ class Queue(Protocol):
 
 # ---- the seed's format: every key by name, exactly ------------------------------------------
 
-class _Obj:
+class Obj:
     """A JSON object read exactly: each key by name, its type checked, and none left unread
-    (`done`); every refusal a ValueError naming `where`."""
+    (`done`); every refusal a ValueError naming `where`. The pool's one reader of its JSON files
+    (the seed here, pool_summary's summary.json, pool_steward's requests)."""
 
     def __init__(self, value: object, where: str) -> None:
         if not isinstance(value, dict):
@@ -246,6 +256,13 @@ class _Obj:
         v = self._take(key)
         if not isinstance(v, str):
             raise ValueError(f"{self.where}: {key} {v!r} is not a string")
+        return v
+
+    def text_or_null(self, key: str) -> str | None:
+        """A key whose value is a string or null (the key itself is required)."""
+        v = self._take(key)
+        if v is not None and not isinstance(v, str):
+            raise ValueError(f"{self.where}: {key} {v!r} is neither a string nor null")
         return v
 
     def count(self, key: str) -> int:
@@ -272,8 +289,8 @@ class _Obj:
             raise ValueError(f"{self.where}: {key} {v!r} is not a list")
         return v
 
-    def obj(self, key: str) -> _Obj:
-        return _Obj(self._take(key), f"{self.where}.{key}")
+    def obj(self, key: str) -> Obj:
+        return Obj(self._take(key), f"{self.where}.{key}")
 
     def done(self) -> None:
         if self._unread:
@@ -289,7 +306,7 @@ def _ladder_json(lad: Ladder) -> dict[str, object]:
             "fit_mem": lad.fit_mem, "stored_time": lad.stored_time, "about": lad.about}
 
 
-def _ladder(o: _Obj) -> Ladder:
+def _ladder(o: Obj) -> Ladder:
     rungs: list[int] = []
     for r in o.items("rungs"):
         if isinstance(r, bool) or not isinstance(r, int):
@@ -312,7 +329,7 @@ def _header_json(h: Header) -> dict[str, object]:
             "ladder": _ladder_json(h.ladder), "created": h.created, "feed": h.feed}
 
 
-def _header(o: _Obj) -> Header:
+def _header(o: Obj) -> Header:
     h = Header(wave=o.text("wave"), commit=o.text("commit"), family=o.text("family"),
                ladder=_ladder(o.obj("ladder")), created=o.text("created"), feed=o.text("feed"))
     o.done()
@@ -321,7 +338,7 @@ def _header(o: _Obj) -> Header:
 
 def _stored_header(text: str, where: str) -> Header:
     """The header as the queue's `header` table holds it (JSON, read exactly)."""
-    return _header(_Obj(json.loads(text), where))
+    return _header(Obj(json.loads(text), where))
 
 
 def _job_json(j: JobSeed) -> dict[str, object]:
@@ -330,7 +347,7 @@ def _job_json(j: JobSeed) -> dict[str, object]:
             "peak_gb": j.peak_gb, "source": j.source, "lane": j.lane.value}
 
 
-def _job_seed(o: _Obj) -> JobSeed:
+def _job_seed(o: Obj) -> JobSeed:
     lane = o.text("lane")
     if lane not in {x.value for x in Lane}:
         raise ValueError(f"{o.where}: lane {lane!r} is none of {[x.value for x in Lane]}")
@@ -356,12 +373,12 @@ def read_seed(text: str, where: str) -> Seed:
         value = json.loads(text)
     except json.JSONDecodeError as e:
         raise ValueError(f"{where}: not JSON: {e}") from e
-    o = _Obj(value, where)
+    o = Obj(value, where)
     fmt = o.count("format")
     if fmt != FORMAT:
         raise ValueError(f"{where}: format {fmt}, not {FORMAT}")
     seed = Seed(header=_header(o.obj("header")),
-                jobs=tuple(_job_seed(_Obj(j, f"{where}.jobs[{i}]"))
+                jobs=tuple(_job_seed(Obj(j, f"{where}.jobs[{i}]"))
                            for i, j in enumerate(o.items("jobs"))),
                 closed=o.flag("closed"))
     o.done()
@@ -425,6 +442,12 @@ def _struck(ladder: Ladder, *, lane: Lane, strikes: int) -> Struck:
     return Struck(state=JobState.FAILED if n >= ladder.strikes else _waiting(lane), strikes=n)
 
 
+def _reborn(had: int, restarts: int) -> bool:
+    """Whether a task registered at restart count `had` registers again as itself requeued: Slurm
+    keeps a requeued task's array id and counts its restarts (SLURM_RESTART_COUNT)."""
+    return restarts > had
+
+
 def _attempted_by(db: sqlite3.Connection, run: str) -> list[int]:
     """The jobs any worker registered in `run` (a lease) has attempted, by id."""
     return [r["job"] for r in db.execute(
@@ -468,7 +491,10 @@ _SCHEMA = (
     "CREATE INDEX IF NOT EXISTS jobs_waiting ON jobs (node, cls, state, minutes)",
     "CREATE TABLE IF NOT EXISTS workers (id TEXT PRIMARY KEY, run TEXT NOT NULL,"
     " node TEXT NOT NULL, cls TEXT NOT NULL, ends_at REAL NOT NULL, registered REAL NOT NULL,"
-    " retired REAL)",
+    " retired REAL, restarts INTEGER NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS reaped (id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    " worker TEXT NOT NULL REFERENCES workers (id), run TEXT NOT NULL, job INTEGER,"
+    " outcome TEXT, walltime INTEGER NOT NULL, at REAL NOT NULL)",
     "CREATE TABLE IF NOT EXISTS attempts (id INTEGER PRIMARY KEY AUTOINCREMENT,"
     " job INTEGER NOT NULL REFERENCES jobs (id), worker TEXT NOT NULL REFERENCES workers (id),"
     " node TEXT NOT NULL, cls TEXT NOT NULL, start REAL NOT NULL, end REAL, outcome TEXT,"
@@ -586,14 +612,33 @@ class SqliteQueue:
 
     # -- workers -------------------------------------------------------------------------------
 
-    def register(self, *, worker: str, run: str, node: str, cls: str, ends_at: float) -> None:
+    def register(self, *, worker: str, run: str, node: str, cls: str, ends_at: float,
+                 restarts: int) -> None:
         """`worker` (its Slurm task) of `run` starts on `node` in class `cls`, its walltime
-        ending at `ends_at`; a worker registers once."""
+        ending at `ends_at`, Slurm having restarted it `restarts` times. A worker registers once
+        a restart: registered again at a higher count, it is its task requeued (which keeps its
+        array id), and its earlier self, if it never retired, is reaped first as the steward
+        would reap it (the job it held settled, the reap recorded); then it is registered afresh,
+        its end time the new one, an ask to step aside kept. Registered again at its count or a
+        lower one, or of another run, node or class, it is refused (ValueError)."""
         with self._tx() as db:
-            if db.execute("SELECT 1 FROM workers WHERE id = ?", (worker,)).fetchone():
-                raise ValueError(f"worker {worker!r} has registered already")
-            db.execute("INSERT INTO workers (id, run, node, cls, ends_at, registered)"
-                       " VALUES (?, ?, ?, ?, ?, ?)", (worker, run, node, cls, ends_at, time.time()))
+            now = time.time()
+            w = db.execute("SELECT * FROM workers WHERE id = ?", (worker,)).fetchone()
+            if w is None:
+                db.execute("INSERT INTO workers (id, run, node, cls, ends_at, registered, restarts)"
+                           " VALUES (?, ?, ?, ?, ?, ?, ?)",
+                           (worker, run, node, cls, ends_at, now, restarts))
+                return
+            if not _reborn(w["restarts"], restarts):
+                raise ValueError(f"worker {worker!r} has registered already (restart "
+                                 f"{w['restarts']}, now {restarts})")
+            if (w["run"], w["node"], w["cls"]) != (run, node, cls):
+                raise ValueError(f"worker {worker!r} of {w['run']} on {w['node']} in {w['cls']} "
+                                 f"registers again of {run} on {node} in {cls}")
+            if w["retired"] is None:
+                self._settle(db, w, now=now)
+            db.execute("UPDATE workers SET ends_at = ?, registered = ?, retired = NULL,"
+                       " restarts = ? WHERE id = ?", (ends_at, now, restarts, worker))
 
     @staticmethod
     def _worker_row(db: sqlite3.Connection, worker: str) -> sqlite3.Row:
@@ -632,24 +677,32 @@ class SqliteQueue:
                        (_waiting(Lane(job["lane"])).value, job["id"]))
             return 1
 
-    def reap(self, worker: str, *, now: float) -> Reaped:
-        """`worker` is gone (squeue no longer lists it: the steward's evidence): retired, and
-        the job it held settled. With `now` at or past its Slurm end time it was killed at its
-        walltime: no strike, the job's time estimate raised to what the attempt ran, and past
-        `fresh_minutes` the job goes long. Before it, it died: a strike if the attempt
-        wrote no row. A worker retired already (its own exit came first) is left as it is."""
+    def reap(self, worker: str, *, now: float) -> Reaped | None:
+        """`worker` is gone (squeue no longer lists it: the steward's evidence): retired, the job
+        it held settled, and the reap recorded (`reaped`). With `now` at or past its Slurm end
+        time it was killed at its walltime: no strike, the job's time estimate raised to what the
+        attempt ran, and past `fresh_minutes` the job goes long. Before it, it died: a strike if
+        the attempt wrote no row. A worker retired already (its own exit came first) is left as
+        it is, and nothing is reaped (None)."""
         with self._tx() as db:
             w = self._worker_row(db, worker)
             if w["retired"] is not None:
-                return Reaped(worker=worker, run=w["run"], job=None, outcome=None)
-            db.execute("UPDATE workers SET retired = ? WHERE id = ?", (time.time(), worker))
-            job = self._held(db, worker)
-            if job is None:
-                return Reaped(worker=worker, run=w["run"], job=None, outcome=None)
+                return None
+            return self._settle(db, w, now=now)
+
+    def _settle(self, db: sqlite3.Connection, w: sqlite3.Row, *, now: float) -> Reaped:
+        """Reap `w` (a worker not retired) at `now`, inside the caller's transaction (`reap`'s
+        doc), and record it."""
+        worker = w["id"]
+        db.execute("UPDATE workers SET retired = ? WHERE id = ?", (time.time(), worker))
+        walltime = now >= w["ends_at"]
+        job = self._held(db, worker)
+        reaped = Reaped(worker=worker, run=w["run"], job=None, outcome=None, walltime=walltime)
+        if job is not None:
             a = db.execute("SELECT * FROM attempts WHERE id = ?", (job["attempt"],)).fetchone()
             lane, strikes, minutes = Lane(job["lane"]), job["strikes"], job["minutes"]
             ladder = self._header.ladder
-            if now >= w["ends_at"]:
+            if walltime:
                 outcome, end = Outcome.WALLTIME, w["ends_at"]
                 ran = (end - a["start"]) / 60
                 minutes = max(minutes, ran)
@@ -667,7 +720,22 @@ class SqliteQueue:
             db.execute("UPDATE jobs SET state = ?, lane = ?, minutes = ?, strikes = ?,"
                        " worker = NULL, attempt = NULL WHERE id = ?",
                        (state.value, lane.value, minutes, strikes, job["id"]))
-            return Reaped(worker=worker, run=w["run"], job=job["id"], outcome=outcome)
+            reaped = reaped._replace(job=job["id"], outcome=outcome)
+        db.execute("INSERT INTO reaped (worker, run, job, outcome, walltime, at)"
+                   " VALUES (?, ?, ?, ?, ?, ?)",
+                   (worker, reaped.run, reaped.job,
+                    None if reaped.outcome is None else reaped.outcome.value, int(walltime),
+                    time.time()))
+        return reaped
+
+    def reaped(self) -> list[Reaped]:
+        """Every reap of the wave (the steward's, and a requeued task's earlier self's), in
+        order: what its summary lists."""
+        with self._tx() as db:
+            return [Reaped(worker=r["worker"], run=r["run"], job=r["job"],
+                           outcome=None if r["outcome"] is None else Outcome(r["outcome"]),
+                           walltime=bool(r["walltime"]))
+                    for r in db.execute("SELECT * FROM reaped ORDER BY id")]
 
     # -- claims --------------------------------------------------------------------------------
 
@@ -832,11 +900,21 @@ class SqliteQueue:
             return n
 
     def cancel(self) -> int:
-        """Every waiting job (PENDING or LONG) CANCELLED (their count); a claimed one runs on."""
+        """Every job not ended (PENDING, LONG or CLAIMED) CANCELLED (their count): a claimed one's
+        claim released and its attempt's outcome CANCELLED, ended now. No later end moves it
+        again: its worker's finish moves a job only while the attempt is still its claim (the
+        attempt records the code, peak and minutes under its CANCELLED), and a retire or reap
+        settles only a CLAIMED job. So the wave ends at once, its jobs as the cancel left them
+        (the plan's Ruling 12; a job that kept running writes rows that stand, as any does)."""
         with self._tx() as db:
-            return db.execute("UPDATE jobs SET state = ? WHERE state IN (?, ?)",
+            claimed = JobState.CLAIMED.value
+            db.execute("UPDATE attempts SET end = ?, outcome = ? WHERE id IN"
+                       " (SELECT attempt FROM jobs WHERE state = ?)",
+                       (time.time(), Outcome.CANCELLED.value, claimed))
+            return db.execute("UPDATE jobs SET state = ?, worker = NULL, attempt = NULL"
+                              " WHERE state IN (?, ?, ?)",
                               (JobState.CANCELLED.value, JobState.PENDING.value,
-                               JobState.LONG.value)).rowcount
+                               JobState.LONG.value, claimed)).rowcount
 
     # -- reading -------------------------------------------------------------------------------
 

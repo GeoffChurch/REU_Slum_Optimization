@@ -5,7 +5,8 @@ code as it is and must fail under each of its faults.
     S=research/roadless/pool_check.py      # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S claim [--fault <name>]         # fault: split-tx
     uv run python $S transitions [--fault <name>]   # faults: late-finish, drop-on-top,
-                                                    # any-worker, second-claim, no-exclude
+                                                    # any-worker, second-claim, no-exclude,
+                                                    # claimed-runs-on
     uv run python $S class [--fault <name>] <rows>  # faults: median-rate, no-fit-margin,
                                                     # family-rate, all-long, no-capacity,
                                                     # with-proposed, one-run
@@ -13,7 +14,11 @@ code as it is and must fail under each of its faults.
     uv run python $S oom [--fault <name>]           # faults: fail-on-oom, unified-first
     uv run python $S identity [--fault <name>]      # fault: no-identity
     uv run python $S worker [--fault <name>]        # faults: fail-worker, no-exclude,
-                                                    # no-retire, no-kill, no-checks
+                                                    # no-retire, no-kill, pid-only, no-rebirth,
+                                                    # no-checks
+    uv run python $S dead-claim [--fault <name>]    # faults: by-age, blind
+    uv run python $S aside [--fault <name>]         # fault: whole-yields
+    uv run python $S end [--fault <name>]           # faults: early-end, claimed-runs-on
     uv run python $S both-ways <guards,> [args ...]   # each guard, then under each of its faults
 
 A guard runs as `<guard> [--fault <name>] [args ...]`: the fault is named by its flag, so a
@@ -55,7 +60,9 @@ strikes, gb, peak_gb and minutes among them):
 - `late-finish`: a reaped worker's late finish DONE -> the attempt recorded (its rc and peak), the
   job as the reaper left it (the spec's 3.2, "Done").
 - `retry`: retry of a FAILED job -> PENDING, strikes 0.
-- `cancel`: every PENDING and LONG job CANCELLED, a CLAIMED one untouched.
+- `cancel`: every PENDING, LONG and CLAIMED job CANCELLED (3), the claimed one's attempt
+  CANCELLED; its worker's later finish FAILED with no row -> still CANCELLED, no strike, the
+  attempt's code recorded; its worker's retire -> settles nothing, still CANCELLED.
 - `claim-job`: a pool's claim leaves a LONG job; claim_job takes it (CLAIMED); its finish FAILED
   without rows -> LONG, strikes 1.
 - `aside`: ask_aside(units=2) of class m4 on a node with three live workers of it, one idle, and
@@ -76,7 +83,8 @@ job done), `drop-on-top` (past the top rung the job is FAILED, not LONG: the spe
 it never drops"), `any-worker` (finish takes any worker's word for an attempt: the other worker's
 DONE marks the job done), `second-claim` (a worker holding a claim may claim again), `no-exclude`
 (no lease's attempts excluded, pool_queue._attempted_by answering none: the lease's other worker
-takes back the job it attempted).
+takes back the job it attempted), `claimed-runs-on` (cancel leaves a claimed job CLAIMED: its
+later failure takes it back to PENDING after its wave was cancelled).
 
 `class` (pool_plan's classes and estimates, the spec's 3.4 with the plan's Ruling 15), on the
 stored rows under `<rows>`, every block's area from its consolidated_rows/summary_features.csv:
@@ -130,8 +138,8 @@ says another:
   the next job and draining (0); the child's oom_score_adj, which it prints, 1000, the worker's own
   unchanged (and below 1000, so the child's is the worker's doing); `unchanged`, the count not
   rising, and `unreadable`, no count (pool_worker.Unreadable): the attempt FAILED, a strike, the
-  job PENDING for another worker and this one retired (75: the only job pending is one it
-  attempted), the log saying why (unreadable). `readers`: pool_worker.oom_evidence on
+  job PENDING for the next lease's worker and this one retired (75: the only job pending is one
+  it attempted), the log saying why (unreadable). `readers`: pool_worker.oom_evidence on
   fixtures under a cgroup root of their own: v2 (memory.events's oom_kill, read afresh at each
   call), v1 (memory.oom_control's), hybrid (v1's memory line beside a v2 one: v1), and Unreadable
   for a v2 cgroup with no memory.events, a v1 one with no oom_kill line (before kernel 4.13) and no
@@ -156,9 +164,16 @@ says another:
   the second's is refused at its first row (Exists), writes none and strikes. `raises`: the
   worker's log raising at the child's first line (`echo started; exec sleep 5`): the log's own
   error out of work within 2 s (the child killed), the job PENDING with no strike, its attempt
-  RETIRED, the worker retired. `refusals`: pool.py `work --class m5` (no class of cpu-score) and
-  `--node orion` on quadro2 ($SLURMD_NODENAME): each a SystemExit naming what it is not, no
-  worker registered.
+  RETIRED, the worker retired. `group`: the same of a compound line whose shell forks a
+  grandchild (GRANDCHILD, `true && sh -c '...; exec sleep 5'; echo after`, the grandchild
+  printing its pid): the grandchild gone (or a zombie) within GONE_WAIT of the kill, the job's
+  whole process group killed. `requeued`: task 4242_0 of a lease, registered and holding job 1
+  and never retired (killed with its node), run again by pool.py at SLURM_RESTART_COUNT 1 (Slurm
+  keeps a requeued task's array id): registered again, its earlier self reaped (job 1 PENDING,
+  a strike, the reap recorded with its job), job 2 run, retired (75: job 1 is its lease's
+  attempted); at the same count again, refused. `refusals`: pool.py `work --class m5` (no class
+  of cpu-score), `--node orion` on quadro2 ($SLURMD_NODENAME) and `--job 1` (orion's) on
+  quadro2: each a SystemExit naming what it is not, no worker registered.
   `idle`: an open queue with nothing pending: retired (75) after the ladder's idle minutes, 10
   polls; `idle-at-end`, the same with less than the margin left: at once. `aside`: asked aside
   during job 1: retired (75) after it, job 2 never claimed. `long-lane`: pool.py `work --job` of a
@@ -166,8 +181,50 @@ says another:
   class `long`. Faults: `fail-worker` (one failed job ends the worker, exit 1) and `no-exclude`
   (no lease's attempts excluded: a lease spends a failed job's every strike), each failing
   absent-queue, bad-node, one-job and progress; `no-retire` (SqliteQueue.retire a no-op: raises
-  and the cases reading the workers fail), `no-kill` (Popen.kill a no-op: raises waits out the
-  child) and `no-checks` (pool.py's checks of --node and --class patched out: refusals runs).
+  and the cases reading the workers fail), `no-kill` (pool_worker._kill a no-op: raises and group
+  wait out the child), `pid-only` (pool_worker._kill kills the shell alone, not its group: group's
+  grandchild runs on), `no-rebirth` (a requeued task's registration refused as any second one:
+  requeued's restart exits refused, its claim held) and `no-checks` (pool.py's checks of --node,
+  --job's node and --class patched out: refusals runs).
+
+The steward's guards (pool_steward, pool_summary; the spec's 3.6 and guard 3), each on waves under
+a temporary `waves`, squeue stubbed (pool_steward.Squeue's runner: an answer listing given tasks,
+the steward's own STEWARD_TASK among them, or a failure), no allocation unless a case makes one:
+- `dead-claim` (guard 3, Review Focus 4): `round`, jobs 1 (30 min), 2 (100) and 3 (20) of m4 held
+  by three workers of three leases registered at t0: one live (job 2), one a real child process
+  SIGKILLed holding job 1, one whose walltime ended WALLTIME_RAN minutes after t0 (job 3); a
+  round at t0 + 2 h, squeue listing the live one and the steward's own: job 1 PENDING with one
+  strike (it wrote no row), job 2 still the live worker's, job 3 PENDING with no strike and its
+  minutes raised to the 50 it ran; the summary's reaped the killed worker (held a job, not past
+  its walltime) and the ended one (held a job, past it), summary.json reading back as the
+  summary, one ledger line. `fails`, `hangs` and `without-own`: the same workers (all registered
+  here), squeue failing (exit 1), outliving its timeout, and answering the live worker without
+  the steward's own: nobody reaped, every job still its worker's. Faults: `by-age` (a claim older
+  than an hour reaped, squeue unasked: the live worker's long job reaped) and `blind` (a failed
+  squeue, or one without the steward's own, read as an empty answer: every worker reaped).
+- `aside` (Ruling 5, Review Focus 2): two waves (ASIDE_WORKERS: 4 and 2 live workers on quadro2
+  in m4 of cpu-score) under one `waves`, each steward's first round with no allocation (their
+  summaries), then two rounds each under a hand-made allocation (the keeper's JSON, read back)
+  in which the campaign yields ASIDE_YIELDS (3) units of m4's bundle on quadro2: `active`, the
+  workers each wave has asked after each round 2, 1, then 2, 1 (none more); `stale`, the
+  allocation older than STALE_AFTER, and `shadow`, its mode shadow: none. Fault `whole-yields`
+  (each steward asks all the yields its own workers can give: 3 and 2).
+- `end`: pool_steward.steward with a lease of three END_POLL polls: `finish`, a wave both of whose
+  jobs are done: exit 0, final.db holding the queue's jobs and attempts, the bank and the tars
+  deleted from its inputs (its seed and --with file kept), the summary FINISHED, the ledger's
+  last line the end; `retry`, a FAILED job and requests to retry it and job 99 (none such): job 1
+  PENDING with no strike, the other refused, both deleted and in the ledger, exit 75 (two rounds
+  no longer fit), no final.db; `cancel`, a cancel request with a job pending, one claimed (its
+  worker live), one LONG and one done: the three CANCELLED, exit 0, final.db, the bank and tars
+  deleted, the summary CANCELLED, and the claimed one's later failure leaving it CANCELLED;
+  `long`, a done job and a LONG one waiting: exit 75, no final.db, the bank kept, the summary
+  CLOSED listing the long job; `command`, pool.py `steward` run in this process as a
+  cluster_submit task would be (HOME, the Slurm array ids and end time, USER; a relative --board
+  with no allocation) on a shipped wave whose one job is done: metrics.RUNTIME named in the
+  queue's header, exit 0, the summary FINISHED naming it, final.db, the bank deleted. Faults:
+  `early-end` (a job waiting for the long lane counted as ended: long ends) and
+  `claimed-runs-on` (transitions': cancel leaves the claimed job running, so the wave never
+  ends).
 """
 from __future__ import annotations
 
@@ -179,6 +236,7 @@ import os
 import queue
 import random
 import shlex
+import signal
 import sqlite3
 import statistics
 import subprocess
@@ -186,17 +244,28 @@ import sys
 import tempfile
 import time
 from collections import Counter
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, redirect_stdout
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from itertools import pairwise
 from multiprocessing.queues import Queue as MpQueue
 from multiprocessing.synchronize import Barrier
 from pathlib import Path
 from typing import NamedTuple
 
+from cluster_submit import Bundle
 from cluster_submit.context import STAMP
+from cluster_submit.gpu import (
+    Allocation,
+    Fit,
+    FittedTier,
+    NodeShare,
+    Place,
+    Standing,
+    allocation_json,
+    read_allocation,
+)
 from cluster_submit.remote_build import MANIFEST
 
 HERE = Path(__file__).resolve().parent
@@ -205,6 +274,8 @@ import common  # noqa: E402
 import pool as pl  # noqa: E402
 import pool_plan as pp  # noqa: E402
 import pool_queue as pq  # noqa: E402
+import pool_steward as ps  # noqa: E402
+import pool_summary as psum  # noqa: E402
 import pool_worker as pw  # noqa: E402
 import row_marker  # noqa: E402
 from pool_ladder import LADDERS, Ladder, class_name, rung_of  # noqa: E402
@@ -304,7 +375,7 @@ def _claimer(path: Path, seed: pq.Seed, k: int, start: Barrier, out: MpQueue[Rep
         q: pq.Queue = pq.SqliteQueue.open(path, seed)
         time.sleep(rng.uniform(0.0, CLAIM_SLEEP))
         q.register(worker=worker, run="pool-check", node=NODE, cls=seed.jobs[0].cls,
-                   ends_at=time.time() + 3600.0)
+                   ends_at=time.time() + 3600.0, restarts=0)
         while True:
             time.sleep(rng.uniform(0.0, CLAIM_SLEEP))
             c = q.claim(worker=worker, minutes_left=left)
@@ -412,7 +483,7 @@ class Case:
         (a lease) `pool-check-<NODE>-<cls>-<lease>`."""
         ends = time.time() + 60.0 * minutes
         self.q.register(worker=name, run=f"pool-check-{NODE}-{cls}-{lease}", node=NODE, cls=cls,
-                        ends_at=ends)
+                        ends_at=ends, restarts=0)
         return Registered(name=name, ends=ends)
 
     def claim(self, worker: str, *, left: float, want: pq.Job) -> pq.Claim | None:
@@ -528,7 +599,7 @@ def _reaped(path: Path, lad: Ladder, *, rows: int) -> list[str]:
             c.q.wrote(got.attempt)
         r = c.q.reap(w, now=time.time())
         c.check("reap", r == pq.Reaped(worker=w, run=f"pool-check-{NODE}-m4-s1", job=s.id,
-                                       outcome=pq.Outcome.REAPED), f"{r}")
+                                       outcome=pq.Outcome.REAPED, walltime=False), f"{r}")
         c.after(f"reap before its end, {rows} rows", None, _as_job(
             s, state=pq.JobState.PENDING)._replace(strikes=0 if rows else 1))
     return c.notes
@@ -543,7 +614,8 @@ def _walltime(path: Path, lad: Ladder, *, ran: float, want: pq.JobState) -> list
         s, state=pq.JobState.CLAIMED, worker=w))
     if got is not None:
         r = c.q.reap(w, now=reg.ends + 60.0)
-        c.check("reap", r.job == s.id and r.outcome == pq.Outcome.WALLTIME, f"{r}")
+        c.check("reap", r is not None and (r.job, r.outcome, r.walltime) == (
+            s.id, pq.Outcome.WALLTIME, True), f"{r}")
         c.after(f"reap after its end, {ran:g} minutes run", None, _as_job(s, state=want)._replace(
             minutes=ran, lane=pq.Lane.LONG if want == pq.JobState.LONG else pq.Lane.POOL))
     return c.notes
@@ -586,10 +658,20 @@ def _cancel(path: Path, lad: Ladder) -> list[str]:
     got = c.claim(w, left=c.fresh, want=_as_job(held, state=pq.JobState.CLAIMED, worker=w))
     if got is not None:
         n = c.q.cancel()
-        c.check("cancel", n == 2, f"{n} cancelled, want 2")
-        c.after("cancel", None, _as_job(held, state=pq.JobState.CLAIMED, worker=w))
+        c.check("cancel", n == 3, f"{n} cancelled, want 3")
+        cancelled = _as_job(held, state=pq.JobState.CANCELLED)
+        c.after("cancel", None, cancelled)
         c.after("cancel", None, _as_job(long, state=pq.JobState.CANCELLED))
         c.after("cancel", None, _as_job(waits, state=pq.JobState.CANCELLED))
+        # the claimed job's worker ends it later, failed with no row: no strike, still cancelled
+        st = c.q.finish(got.attempt, worker=w, outcome=pq.Outcome.FAILED, peak_gb=3.1,
+                        minutes=25.0, rc=1)
+        c.after("its worker's later finish FAILED", st, cancelled)
+        a = next((a for a in _attempts(c.path) if a.id == got.attempt), None)
+        c.check("its attempt", a is not None and (a.outcome, a.rc) == (
+            pq.Outcome.CANCELLED.value, 1), f"{a}, want cancelled with rc 1 recorded")
+        c.check("its worker's retire", c.q.retire(w) == 0, "settled a job")
+        c.after("its worker's retire", None, cancelled)
     return c.notes
 
 
@@ -1024,6 +1106,12 @@ NEXT_RUN = f"pool-check-{NODE}-m4-l2"    # ... and the next lease's
 WALLTIME_SPENT = 15.0             # walltime, the clock moving: the minutes each job spends
 RAISE_SLEEP = 5.0                 # raises: the child's sleep after its first line (s)
 RAISE_LIMIT = 2.0                 # ... the most the worker takes to raise (s): the child killed
+#: group: a compound line whose shell forks a grandchild (sh, not the list's last command), which
+#: prints its pid, then `started`, and sleeps RAISE_SLEEP
+GRANDCHILD = ("true && sh -c 'echo \"grandchild $$\"; echo started; "
+              f"exec sleep {RAISE_SLEEP:g}'; echo after")
+GONE_WAIT = 2.0                   # ... the most the grandchild takes to be gone after the kill (s)
+QUADRO = "quadro2"                # a node other than NODE
 
 
 class Clock:
@@ -1100,7 +1188,7 @@ def _work(path: Path, seed: pq.Seed, *, worker: str, run: str, commit: str,
         after(q, c, clock)
         return ran
 
-    ex = pw.work(queue=q, worker=worker, run=run, node=NODE, cls="m4",
+    ex = pw.work(queue=q, worker=worker, restarts=0, run=run, node=NODE, cls="m4",
                  commit=commit, ends_at=clock.now() + 60.0 * minutes_left, now=clock.now,
                  wait=clock.wait, run_line=run_line, oom=oom, log=log.append)
     return Worked(exit=int(ex), log=log, jobs={j.id: j for j in q.jobs()},
@@ -1188,7 +1276,7 @@ def _oom_cases(tmp: Path) -> list[str]:
           f"the worker's own {now}, exit {w.exit}" + _failing(notes), flush=True)
     bad += ["promote"] if notes else []
     # a SIGKILL with the count unchanged, and with no count to read: FAILED, a strike, and the
-    # job another worker's (this one retires: the only job pending is one it attempted)
+    # job the next lease's worker's (this one retires: the only job pending is one it attempted)
     for name, evidence in (("unchanged", Counted(count=OOM_BEFORE)),
                            ("unreadable", pw.Unreadable(why=NO_CGROUP))):
         w = _work(tmp / f"{name}.db", _seed(lad, [_m4(1, minutes=60.0, line=SIGKILLED)]),
@@ -1297,7 +1385,7 @@ def identity(_args: list[str]) -> list[str]:
         path = Path(tmp) / "long.db"
         q: pq.Queue = pq.SqliteQueue.open(path, _seed(lad, [long]))
         log: list[str] = []
-        ex = pw.work_one(queue=q, worker="long", run="pool-check-long-1", job=long.id,
+        ex = pw.work_one(queue=q, worker="long", restarts=0, run="pool-check-long-1", job=long.id,
                          commit=OTHER_COMMIT, ends_at=time.time() + 3600.0, now=time.time,
                          run_line=lambda c: pw.run_job(c.job.line, cwd=Path(tmp), env=os.environ,
                                                        log=log.append, wrote=lambda: None),
@@ -1335,15 +1423,19 @@ def _shipped(tmp: Path, seed: pq.Seed) -> Wave:
     return Wave(home=home, queue=wave / "queue.db", inputs=inputs, checkout=checkout)
 
 
-def _task(w: Wave, argv: list[str], *, task: int, run: str, on: str) -> tuple[int, list[str]]:
-    """pool.py's `argv` as task `task` of run `run` on node `on` (its environment as
-    cluster_submit and Slurm set it, two hours of walltime), in this process: its exit and its
-    log."""
+def _task(w: Wave, argv: list[str], *, task: int, run: str, on: str,
+          restarts: int | None) -> tuple[int, list[str]]:
+    """pool.py's `argv` as task `task` of run `run` on node `on`, requeued `restarts` times (None:
+    never, Slurm's SLURM_RESTART_COUNT unset), its environment as cluster_submit and Slurm set it
+    (two hours of walltime), in this process: its exit and its log."""
     environ = {**os.environ, "HOME": str(w.home), "SLURMD_NODENAME": on,
                "SLURM_ARRAY_JOB_ID": TASK_JOB,
                "SLURM_ARRAY_TASK_ID": str(task), "CLUSTER_SUBMIT_RUN": run,
                "SLURM_JOB_END_TIME": str(int(time.time() + 7200)),
                "CLUSTER_SUBMIT_CHECKOUT": str(w.checkout)}
+    environ.pop("SLURM_RESTART_COUNT", None)
+    if restarts is not None:
+        environ["SLURM_RESTART_COUNT"] = str(restarts)
     out = io.StringIO()
     with redirect_stdout(out):
         ex = pl.main(argv, environ)
@@ -1362,7 +1454,7 @@ def _absent_queue(tmp: Path) -> list[str]:
     there_before = w.queue.exists()
     run = f"pool-check-{NODE}-m4-s1"
     ex, log = _task(w, ["work", "--wave", "pool-check", "--node", NODE, "--class", "m4"],
-                    task=0, run=run, on=NODE)
+                    task=0, run=run, on=NODE, restarts=None)
     q = pq.SqliteQueue.open(w.queue, _seed(lad, []))
     jobs = {j.id: j for j in q.jobs()}
     tried = [(a.job, a.outcome, a.rc) for a in _attempts(w.queue)]
@@ -1490,8 +1582,10 @@ def _long_lane(tmp: Path) -> list[str]:
     long = _line(1, minutes=30.0, line="true", peak_gb=100.0)
     w = _shipped(tmp, _seed(lad, [long]))
     run = "pool-check-long-1"
-    first, _ = _task(w, ["work", "--wave", "pool-check", "--job", "1"], task=0, run=run, on=NODE)
-    again, _ = _task(w, ["work", "--wave", "pool-check", "--job", "1"], task=1, run=run, on=NODE)
+    first, _ = _task(w, ["work", "--wave", "pool-check", "--job", "1"], task=0, run=run, on=NODE,
+                     restarts=None)
+    again, _ = _task(w, ["work", "--wave", "pool-check", "--job", "1"], task=1, run=run, on=NODE,
+                     restarts=None)
     q = pq.SqliteQueue.open(w.queue, _seed(lad, []))
     job = q.jobs()[0]
     workers = [(x.id, x.node, x.cls, x.retired) for x in q.workers()]
@@ -1510,17 +1604,27 @@ class _Interrupted(RuntimeError):
     """The error a case's log raises mid-job."""
 
 
-def _raised(tmp: Path) -> list[str]:
-    """run_line raising mid-job (the worker's log, at the child's first line): the child killed,
+class Interrupted(NamedTuple):
+    """What a worker did whose log raised mid-job (`_interrupt`)."""
+
+    raised: str | None      # None: the log's own error, as wanted; else what happened instead
+    took: float             # seconds, the worker's start to its error
+    printed: list[str]      # the job's lines its log was given
+    notes: list[str]        # the job, its attempt and the worker against the case's want
+
+
+def _interrupt(tmp: Path, line: str) -> Interrupted:
+    """pool_worker.work running one job, `line`, whose log raises at the job's `started` line:
     the error the log's own, the job back to PENDING as if never claimed (its attempt RETIRED,
     no strike), the worker retired."""
     lad = LADDERS["cpu-score"]
-    path = tmp / "raises.db"
-    q: pq.Queue = pq.SqliteQueue.open(path, _seed(lad, [
-        _m4(1, minutes=30.0, line=f"echo started; exec sleep {RAISE_SLEEP:g}")]))
+    path = tmp / "interrupted.db"
+    q: pq.Queue = pq.SqliteQueue.open(path, _seed(lad, [_m4(1, minutes=30.0, line=line)]))
+    printed: list[str] = []
 
-    def interrupting(line: str) -> None:
-        if line == "started":
+    def interrupting(text: str) -> None:
+        printed.append(text)
+        if text == "started":
             raise _Interrupted("the worker's log failed mid-job")
 
     def run_line(c: pq.Claim) -> pw.Ran:
@@ -1529,10 +1633,11 @@ def _raised(tmp: Path) -> list[str]:
 
     t0 = time.monotonic()
     try:
-        ex = pw.work(queue=q, worker=WORKER, run=RUN, node=NODE, cls="m4", commit=COMMIT,
-                     ends_at=time.time() + 7200.0, now=time.time, wait=lambda: None,
-                     run_line=run_line, oom=Counted(count=0), log=lambda line: None)
-        raised = f"nothing, exit {int(ex)}"
+        ex = pw.work(queue=q, worker=WORKER, restarts=0, run=RUN, node=NODE, cls="m4",
+                     commit=COMMIT, ends_at=time.time() + 7200.0, now=time.time,
+                     wait=lambda: None, run_line=run_line, oom=Counted(count=0),
+                     log=lambda text: None)
+        raised: str | None = f"nothing, exit {int(ex)}"
     except _Interrupted:
         raised = None
     except Exception as e:      # another error than the log's: what the guard reports
@@ -1541,30 +1646,112 @@ def _raised(tmp: Path) -> list[str]:
     job = q.jobs()[0]
     tried = [(a.job, a.outcome) for a in _attempts(path)]
     retired = [x.retired for x in q.workers()]
-    notes = ([] if raised is None else [f"raised {raised}, want the log's own error"]) + (
-        [] if took < RAISE_LIMIT else [f"took {took:.1f} s (the child sleeps {RAISE_SLEEP:g}): "
-                                       "not killed"]) + (
-        [] if (job.state, job.strikes) == (pq.JobState.PENDING, 0) else
-        [f"job 1 {job.state} with {job.strikes} strikes, want pending with none"]) + (
+    notes = ([] if (job.state, job.strikes) == (pq.JobState.PENDING, 0) else
+             [f"job 1 {job.state} with {job.strikes} strikes, want pending with none"]) + (
         [] if tried == [(1, pq.Outcome.RETIRED.value)] else [f"attempts {tried}"]) + (
         [] if retired == [True] else [f"workers retired {retired}"])
-    print(f"worker raises: the log raising at the child's first line: {raised or 'its error'}, "
-          f"in {took:.2f} s, job 1 {job.state} with {job.strikes} strikes, attempts {tried}, "
-          f"worker retired {retired}" + _failing(notes), flush=True)
+    return Interrupted(raised=raised, took=took, printed=printed, notes=notes)
+
+
+def _raised(tmp: Path) -> list[str]:
+    """run_line raising mid-job (the worker's log, at the child's first line): the child killed
+    within RAISE_LIMIT (it sleeps RAISE_SLEEP), and `_interrupt`'s wants."""
+    got = _interrupt(tmp, f"echo started; exec sleep {RAISE_SLEEP:g}")
+    notes = ([] if got.raised is None else [f"raised {got.raised}, want the log's own error"]) + (
+        [] if got.took < RAISE_LIMIT else [f"took {got.took:.1f} s (the child sleeps "
+                                           f"{RAISE_SLEEP:g}): not killed"]) + got.notes
+    print(f"worker raises: the log raising at the child's first line: "
+          f"{got.raised or 'its error'}, in {got.took:.2f} s" + _failing(notes), flush=True)
     return ["raises"] if notes else []
 
 
+def _running(pid: int) -> bool:
+    """Whether process `pid` runs: neither gone nor a zombie (dead, its parent yet to reap it)."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except FileNotFoundError:
+        return False
+    return stat.rsplit(")", 1)[1].split()[0] != "Z"
+
+
+def _group(tmp: Path) -> list[str]:
+    """A compound line (GRANDCHILD: its shell forks a grandchild, which prints its pid) whose
+    worker's log raises mid-job: the job's whole group killed, the grandchild gone within
+    GONE_WAIT; and `_interrupt`'s wants. A grandchild left running is killed here after."""
+    got = _interrupt(tmp, GRANDCHILD)
+    pids = [int(x.split()[1]) for x in got.printed if x.startswith("grandchild ")]
+    deadline = time.monotonic() + GONE_WAIT
+    while pids and _running(pids[0]) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    left = [p for p in pids if _running(p)]
+    for p in left:              # the guard's own: no process outlives it
+        os.kill(p, signal.SIGKILL)
+    notes = ([] if got.raised is None else [f"raised {got.raised}, want the log's own error"]) + (
+        [] if got.took < RAISE_LIMIT else [f"took {got.took:.1f} s: not killed"]) + (
+        [] if len(pids) == 1 else [f"the grandchild printed {len(pids)} pids, want one"]) + (
+        [] if not left else [f"the grandchild {left} still ran {GONE_WAIT:g} s after the kill"]
+    ) + got.notes
+    print(f"worker group: a compound line's grandchild ({pids}), the log raising mid-job: "
+          f"{got.raised or 'its error'} in {got.took:.2f} s, the grandchild "
+          + ("still running" if left else "gone") + _failing(notes), flush=True)
+    return ["group"] if notes else []
+
+
+def _requeued(tmp: Path) -> list[str]:
+    """A task requeued by Slurm (its array id kept) while holding job 1, its earlier self never
+    retired, run by pool.py at SLURM_RESTART_COUNT 1: registered again (no refusal), its earlier
+    self reaped (job 1 PENDING with a strike: it wrote no row; the reap recorded), job 2 run, job 1
+    not (its lease attempted it), retired (75); registering again at the same count is refused."""
+    lad = LADDERS["cpu-score"]
+    seed = _seed(lad, [_m4(1, minutes=60.0, line="true"), _m4(2, minutes=30.0, line="true")])
+    w = _shipped(tmp, seed)
+    task = f"{TASK_JOB}_0"
+    q = pq.SqliteQueue.open(w.queue, seed)
+    q.register(worker=task, run=RUN, node=NODE, cls="m4", ends_at=time.time() + 7200.0,
+               restarts=0)
+    held = q.claim(worker=task, minutes_left=pq.fresh_minutes(lad))
+    argv = ["work", "--wave", "pool-check", "--node", NODE, "--class", "m4"]
+    try:
+        ex: int | str = _task(w, argv, task=0, run=RUN, on=NODE, restarts=1)[0]
+    except ValueError as e:
+        ex = f"refused: {e}"
+    try:
+        again: int | str = _task(w, argv, task=0, run=RUN, on=NODE, restarts=1)[0]
+    except ValueError:
+        again = "refused"
+    jobs = {j.id: j for j in q.jobs()}
+    tried = [(a.job, a.outcome) for a in _attempts(w.queue)]
+    want_reaped = [pq.Reaped(worker=task, run=RUN, job=1, outcome=pq.Outcome.REAPED,
+                             walltime=False)]
+    workers = [(x.id, x.retired) for x in q.workers()]
+    notes = ([] if held is not None and held.job.id == 1 else [f"the first claim {held}"]) + (
+        [] if ex == pw.Exit.RETIRED else [f"restart 1: {ex}, want exit 75"]) + (
+        [] if again == "refused" else [f"restart 1 again: exit {again}, want refused"]) + (
+        [] if tried == [(1, "reaped"), (2, "done")] else [f"attempts {tried}"]) + (
+        [] if (jobs[1].state, jobs[1].strikes, jobs[2].state) == (
+            pq.JobState.PENDING, 1, pq.JobState.DONE) else
+        [f"jobs {jobs[1].state} ({jobs[1].strikes} strikes), {jobs[2].state}"]) + (
+        [] if q.reaped() == want_reaped else [f"reaped {q.reaped()}, want {want_reaped}"]) + (
+        [] if workers == [(task, True)] else [f"workers {workers}"])
+    print(f"worker requeued: task {task} holding job 1, requeued (SLURM_RESTART_COUNT 1): exit "
+          f"{ex}, attempts {tried}, reaped {[(r.worker, r.job) for r in q.reaped()]}; the same "
+          f"restart again: {again}" + _failing(notes), flush=True)
+    return ["requeued"] if notes else []
+
+
 def _refusals(tmp: Path) -> list[str]:
-    """pool.py refusing a --class its wave's ladder lacks and a --node it does not run on."""
+    """pool.py refusing a --class its wave's ladder lacks, a --node it does not run on, and a
+    --job of another node's."""
     lad = LADDERS["cpu-score"]
     w = _shipped(tmp, _seed(lad, [_m4(1, minutes=30.0, line="true")]))
+    pooled = ["work", "--wave", "pool-check", "--node", NODE, "--class"]
     notes: list[str] = []
-    for k, (name, cls, on, names) in enumerate((
-            ("class", "m5", NODE, ["m5", *(class_name(0, r) for r in lad.rungs)]),
-            ("node", "m4", "quadro2", [NODE, "quadro2"]))):
+    for k, (name, argv, on, names) in enumerate((
+            ("class", [*pooled, "m5"], NODE, ["m5", *(class_name(0, r) for r in lad.rungs)]),
+            ("node", [*pooled, "m4"], QUADRO, [NODE, QUADRO]),
+            ("job", ["work", "--wave", "pool-check", "--job", "1"], QUADRO, ["1", NODE, QUADRO]))):
         try:
-            ex, _ = _task(w, ["work", "--wave", "pool-check", "--node", NODE, "--class", cls],
-                          task=k, run=RUN, on=on)
+            ex, _ = _task(w, argv, task=k, run=RUN, on=on, restarts=None)
             notes.append(f"--{name}: exit {ex}, want refused")
         except SystemExit as e:
             missing = [n for n in names if n not in str(e.code)]
@@ -1575,15 +1762,475 @@ def _refusals(tmp: Path) -> list[str]:
         notes += [f"registered {[x.id for x in q.workers()]}"] if q.workers() else []
         notes += [f"attempts {_attempts(w.queue)}"] if _attempts(w.queue) else []
     print(f"worker refusals: pool.py work with --class m5 (cpu-score's: "
-          f"{', '.join(class_name(0, r) for r in lad.rungs)}), and --node {NODE} on quadro2"
-          + _failing(notes), flush=True)
+          f"{', '.join(class_name(0, r) for r in lad.rungs)}), --node {NODE} on {QUADRO}, and "
+          f"--job 1 ({NODE}'s) on {QUADRO}" + _failing(notes), flush=True)
     return ["refusals"] if notes else []
 
 
 def worker(_args: list[str]) -> list[str]:
     bad: list[str] = []
-    for case in (_absent_queue, _bad_node, _progress, _idle, _stepped_aside, _raised,
-                 _refusals, _long_lane):
+    for case in (_absent_queue, _bad_node, _progress, _idle, _stepped_aside, _raised, _group,
+                 _requeued, _refusals, _long_lane):
+        with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
+            bad += case(Path(tmp))
+    return bad
+
+
+# ---- the steward: dead-claim, aside, end ------------------------------------------------------
+
+STEWARD_TASK = "4343_0"           # the steward's own Slurm task, which a believed squeue lists
+STALE_AFTER = timedelta(minutes=30)          # the market's stale_after, as the guards pass it
+HOLD_SLEEP = 600.0                # dead-claim: the SIGKILLed worker's wait for its kill (s)
+HOLD_WAIT = 60.0                  # ... the most the guard waits for its claim (s)
+WALLTIME_RAN = 50.0               # ... the minutes the walltime-killed worker ran its job
+AGE_LIMIT = 3600.0                # by-age: a claim older than this reaped (s)
+ASIDE_WORKERS = (("wave-a", 4), ("wave-b", 2))   # aside: the waves and their live workers
+ASIDE_YIELDS = 3                  # ... the campaign's yields on (QUADRO, m4)
+END_POLL = 0.2                    # end: the steward's poll (s); its lease three polls long
+
+Runner = Callable[[Sequence[str]], subprocess.CompletedProcess[str]]
+
+
+def _squeue(*tasks: str) -> Runner:
+    """A squeue answering `tasks`, a line each."""
+    def run(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(list(argv), 0, "".join(f"{x}\n" for x in tasks), "")
+    return run
+
+
+def _squeue_fails(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    """A squeue that cannot reach its controller."""
+    return subprocess.CompletedProcess(list(argv), 1, "",
+                                       "squeue: error: Unable to contact slurm controller\n")
+
+
+def _squeue_hangs(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+    """A squeue that outlives its timeout."""
+    raise subprocess.TimeoutExpired(list(argv), ps.SQUEUE_TIMEOUT)
+
+
+def _liveness(run: Runner) -> ps.Squeue:
+    return ps.Squeue(run=run, user="pool-check", own=STEWARD_TASK)
+
+
+def _wave_seed(name: str, jobs: Sequence[pq.JobSeed]) -> pq.Seed:
+    """A fixed wave `name`'s seed under cpu-score."""
+    return pq.Seed(header=replace(_header(LADDERS["cpu-score"]), wave=name), jobs=tuple(jobs),
+                   closed=True)
+
+
+def _round(q: pq.Queue, wave_dir: Path, waves: Path, *, liveness: ps.Liveness,
+           allocation: Allocation | None, now: datetime) -> psum.Summary:
+    """One steward round of the wave in `wave_dir` at `now`, `allocation` on the board."""
+    return ps.round_(queue=q, wave_dir=wave_dir, waves=waves, liveness=liveness,
+                     feed=ps.Fixed(), allocation=lambda: allocation, stale_after=STALE_AFTER,
+                     now=lambda: now, log=lambda line: None)
+
+
+def _holder(path: Path, seed: pq.Seed, worker: str, run: str, ends_at: float,
+            out: MpQueue[int]) -> None:
+    """A worker (a child process) that registers, claims, says which job, and waits to be
+    SIGKILLed holding its claim."""
+    q = pq.SqliteQueue.open(path, seed)
+    q.register(worker=worker, run=run, node=NODE, cls="m4", ends_at=ends_at, restarts=0)
+    c = q.claim(worker=worker, minutes_left=pq.fresh_minutes(seed.header.ladder))
+    out.put(0 if c is None else c.job.id)
+    time.sleep(HOLD_SLEEP)
+
+
+class Workers(NamedTuple):
+    """dead-claim's workers (Slurm tasks): SIGKILLed holding job 1, live holding job 2 (the
+    longest), past its walltime holding job 3."""
+    killed: str
+    live: str
+    ended: str
+
+
+def _three(waves: Path, *, real: bool) -> tuple[Path, pq.SqliteQueue, Workers, float, list[str]]:
+    """dead-claim's wave: jobs 1 (30 min), 2 (100) and 3 (20) of m4, each held by one of three
+    workers of three leases registered at t0: `live` (job 2, its walltime 3 h off), `killed` (job
+    1, the same; a real child SIGKILLed holding it when `real`, else registered here and left),
+    `ended` (job 3, its walltime WALLTIME_RAN minutes off). The wave's directory and queue, the
+    workers, t0, and what went wrong."""
+    lad = LADDERS["cpu-score"]
+    seed = _wave_seed("pool-check", [_small(lad, 1, minutes=30.0), _small(lad, 2, minutes=100.0),
+                                     _small(lad, 3, minutes=20.0)])
+    d = waves / "pool-check"
+    q = pq.SqliteQueue.open(d / "queue.db", seed)
+    ws = Workers(killed=f"{TASK_JOB}_0", live=f"{TASK_JOB}_1", ended=f"{TASK_JOB}_2")
+    t0 = time.time()
+    notes: list[str] = []
+
+    def lease(w: str) -> str:
+        return f"pool-check-{NODE}-m4-{w}"
+
+    q.register(worker=ws.live, run=lease(ws.live), node=NODE, cls="m4", ends_at=t0 + 3 * 3600,
+               restarts=0)
+    c = q.claim(worker=ws.live, minutes_left=pq.fresh_minutes(lad))
+    notes += [] if c is not None and c.job.id == 2 else [f"live's claim {c}, want job 2"]
+    if real:
+        ctx = mp.get_context("fork")
+        out: MpQueue[int] = ctx.Queue()
+        p = ctx.Process(target=_holder, args=(d / "queue.db", seed, ws.killed, lease(ws.killed),
+                                               t0 + 3 * 3600, out))
+        p.start()
+        try:
+            held: int | None = out.get(timeout=HOLD_WAIT)
+        except queue.Empty:
+            held = None
+        p.kill()                # SIGKILL: no `finally`, no retire
+        p.join()
+        notes += [] if p.exitcode == -signal.SIGKILL else [f"the holder exited {p.exitcode}"]
+    else:
+        q.register(worker=ws.killed, run=lease(ws.killed), node=NODE, cls="m4",
+                   ends_at=t0 + 3 * 3600, restarts=0)
+        k = q.claim(worker=ws.killed, minutes_left=pq.fresh_minutes(lad))
+        held = None if k is None else k.job.id
+    notes += [] if held == 1 else [f"the killed worker held {held}, want job 1"]
+    q.register(worker=ws.ended, run=lease(ws.ended), node=NODE, cls="m4",
+               ends_at=t0 + 60 * WALLTIME_RAN, restarts=0)
+    e = q.claim(worker=ws.ended, minutes_left=WALLTIME_RAN - lad.margin_minutes)
+    notes += [] if e is not None and e.job.id == 3 else [f"ended's claim {e}, want job 3"]
+    return d, q, ws, t0, notes
+
+
+def _dead_round(tmp: Path) -> list[str]:
+    """The round after a worker's SIGKILL (the spec's guard 3, the plan's Review Focus 4)."""
+    waves = tmp / "waves"
+    d, q, ws, t0, notes = _three(waves, real=True)
+    now = datetime.fromtimestamp(t0 + 2 * 3600, UTC)
+    s = _round(q, d, waves, liveness=_liveness(_squeue(STEWARD_TASK, ws.live)), allocation=None,
+               now=now)
+    jobs = {j.id: j for j in q.jobs()}
+
+    def lease(w: str) -> str:
+        return f"pool-check-{NODE}-m4-{w}"
+
+    want = (psum.ReapedWorker(task=ws.killed, run=lease(ws.killed), held_job=True,
+                              walltime=False),
+            psum.ReapedWorker(task=ws.ended, run=lease(ws.ended), held_job=True, walltime=True))
+    on_disk = psum.read_summary((d / ps.SUMMARY).read_text(), "summary.json")
+    ledger = (d / ps.LEDGER).read_text().splitlines()
+    got = {i: (j.state, j.strikes, j.worker) for i, j in jobs.items()}
+    want_jobs = {1: (pq.JobState.PENDING, 1, None), 2: (pq.JobState.CLAIMED, 0, ws.live),
+                 3: (pq.JobState.PENDING, 0, None)}
+    notes += ([] if got == want_jobs else [f"jobs {got}, want {want_jobs}"]) + (
+        [] if math.isclose(jobs[3].minutes, WALLTIME_RAN, abs_tol=0.1) else
+        [f"job 3's minutes {jobs[3].minutes:.2f}, want {WALLTIME_RAN:g} (what it ran)"]) + (
+        [] if s.reaped == want else [f"reaped {s.reaped}, want {want}"]) + (
+        [] if on_disk == s else ["summary.json reads back otherwise"]) + (
+        [] if len(ledger) == 1 else [f"{len(ledger)} ledger lines, want 1"])
+    print(f"dead-claim round: a worker SIGKILLed holding job 1, one live holding job 2, one past "
+          f"its walltime holding job 3; squeue lists the live one and the steward's own: jobs "
+          f"{({i: (x[0].value, *x[1:]) for i, x in got.items()})}, job 3's minutes "
+          f"{jobs[3].minutes:.1f}, reaped "
+          f"{[(r.task, r.held_job, r.walltime) for r in s.reaped]}" + _failing(notes),
+          flush=True)
+    return ["round"] if notes else []
+
+
+def _abstains(tmp: Path) -> list[str]:
+    """A squeue that fails, one that outlives its timeout, and one answering without the
+    steward's own task: nobody reaped."""
+    bad: list[str] = []
+    for name, run in (("fails", _squeue_fails), ("hangs", _squeue_hangs),
+                      ("without-own", None)):
+        waves = tmp / name / "waves"
+        d, q, ws, t0, notes = _three(waves, real=False)
+        answer = _squeue(ws.live) if run is None else run
+        s = _round(q, d, waves, liveness=_liveness(answer), allocation=None,
+                   now=datetime.fromtimestamp(t0 + 2 * 3600, UTC))
+        held = {j.id: j.worker for j in q.jobs()}
+        want = {1: ws.killed, 2: ws.live, 3: ws.ended}
+        notes += ([] if held == want else [f"held {held}, want {want}"]) + (
+            [] if s.reaped == () else [f"reaped {s.reaped}"])
+        print(f"dead-claim {name}: nobody reaped" + _failing(notes), flush=True)
+        bad += [name] if notes else []
+    return bad
+
+
+def dead_claim(_args: list[str]) -> list[str]:
+    bad: list[str] = []
+    for case in (_dead_round, _abstains):
+        with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
+            bad += case(Path(tmp))
+    return bad
+
+
+def _allocation(*, at: datetime, mode: str, yields: int) -> Allocation:
+    """An allocation of `mode` at `at` in which the campaign holds 6 units of cpu-score's m4 on
+    QUADRO and yields `yields` of them, made as the keeper would (read back from its JSON)."""
+    m4 = LADDERS["cpu-score"].bundle(4)
+    none = Bundle(cards=0, cpus=0, mem_gb=0)
+    stamp = at.strftime(STAMP)
+    tier = FittedTier(coverage=0.9, lease_hours=2.0, hours=0.0, reserve=none, covered=1.0,
+                      started=1.0)
+    node = NodeShare(state="mixed", tier="active", lease_hours=2.0,
+                     total=Bundle(cards=0, cpus=64, mem_gb=256), others=none, outside=none,
+                     reserve=none, capacity=Bundle(cards=0, cpus=64, mem_gb=248),
+                     owed=m4.times(yields), owed_to=("another-user's-job",), why="the guard's",
+                     campaigns={ps.CAMPAIGN: (Place(bundle=m4, demand=6, urgency=None,
+                                                    allocated=6, held=6, yields=yields),)})
+    a = Allocation(at=stamp, mode=mode, pool=Bundle(cards=0, cpus=64, mem_gb=256),
+                   fit=Fit(at=stamp, window_days=14, jobs=0, quiet=tier, active=tier),
+                   campaigns={ps.CAMPAIGN: Standing(weight=1.0, share=1.0, spend=0.0,
+                                                    demand_at=stamp, stale=False, runs=())},
+                   nodes={QUADRO: node}, outside=(), refused={})
+    return read_allocation(allocation_json(a, indent=1), "the guard's allocation")
+
+
+def _aside_case(tmp: Path, *, name: str, mode: str, age: timedelta,
+                want: tuple[int, ...]) -> list[str]:
+    """ASIDE_WORKERS' waves sharing (QUADRO, m4) under one `waves`, their workers live: each
+    steward's first round with no allocation, then two rounds each under an allocation of `mode`
+    `age` old yielding ASIDE_YIELDS there; the workers each wave has asked after each round
+    against `want` (the first rounds', then the second's)."""
+    waves = tmp / "waves"
+    lad = LADDERS["cpu-score"]
+    t0 = datetime.fromtimestamp(math.floor(time.time()), UTC)
+    made: dict[str, tuple[Path, pq.SqliteQueue, list[str]]] = {}
+    for w, n in ASIDE_WORKERS:
+        jobs = [replace(_small(lad, i, minutes=30.0), node=QUADRO) for i in range(1, 2 * n + 1)]
+        q = pq.SqliteQueue.open(waves / w / "queue.db", _wave_seed(w, jobs))
+        ids = [f"{w}-{k}" for k in range(n)]
+        for x in ids:
+            q.register(worker=x, run=f"{w}-{QUADRO}-m4-s1", node=QUADRO, cls="m4",
+                       ends_at=t0.timestamp() + 7200, restarts=0)
+        made[w] = (waves / w, q, ids)
+    everyone = _liveness(_squeue(STEWARD_TASK, *(x for _, _, ids in made.values() for x in ids)))
+    for d, q, _ in made.values():
+        _round(q, d, waves, liveness=everyone, allocation=None, now=t0)
+    alloc = _allocation(at=t0 - age, mode=mode, yields=ASIDE_YIELDS)
+    got: list[int] = []
+    for _ in (1, 2):
+        for d, q, ids in made.values():
+            _round(q, d, waves, liveness=everyone, allocation=alloc, now=t0)
+            got.append(sum(1 for x in ids if q.asked_aside(x)))
+    notes = [] if tuple(got) == want else [f"asked {got}, want {list(want)}"]
+    print(f"aside {name}: waves {dict(ASIDE_WORKERS)} on {QUADRO} m4, an allocation ({mode}, "
+          f"{age} old) yielding {ASIDE_YIELDS}: asked after each round {got}" + _failing(notes),
+          flush=True)
+    return [name] if notes else []
+
+
+def aside(_args: list[str]) -> list[str]:
+    bad: list[str] = []
+    fresh, stale = timedelta(0), STALE_AFTER + timedelta(minutes=1)
+    for name, mode, age, want in (("active", "active", fresh, (2, 1, 2, 1)),
+                                  ("stale", "active", stale, (0, 0, 0, 0)),
+                                  ("shadow", "shadow", fresh, (0, 0, 0, 0))):
+        with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
+            bad += _aside_case(Path(tmp), name=name, mode=mode, age=age, want=want)
+    return bad
+
+
+def _rows(path: Path, table: str) -> list[tuple[object, ...]]:
+    db = sqlite3.connect(path.absolute().as_uri() + "?mode=ro", uri=True)
+    try:
+        return [tuple(r) for r in db.execute(f"SELECT * FROM {table} ORDER BY id")]
+    finally:
+        db.close()
+
+
+class Ended(NamedTuple):
+    """What a steward did (`_steward_run`)."""
+    exit: int
+    summary: psum.Summary
+    ledger: list[dict[str, object]]
+    final: bool                 # final.db written
+    inputs: list[str]           # what is left in the wave's inputs
+
+
+def _inputs(d: Path, seed: pq.Seed) -> None:
+    """A wave's shipped inputs: its seed, its bank, a tar per block and a --with file."""
+    inputs = d / ps.INPUTS
+    inputs.mkdir(parents=True, exist_ok=True)
+    (inputs / "jobs.json").write_text(pq.seed_json(seed))
+    for name in (ps.BANK, *(f"{j.block}.tar" for j in seed.jobs), "with.txt"):
+        (inputs / name).write_bytes(b"")
+
+
+def _steward_run(q: pq.Queue, d: Path, waves: Path, *, listed: Sequence[str]) -> Ended:
+    """pool_steward.steward on the wave in `d`, squeue listing `listed` and its own task, its
+    lease three of END_POLL's polls long (so at most three rounds)."""
+    ex = ps.steward(queue=q, wave_dir=d, waves=waves,
+                    liveness=_liveness(_squeue(STEWARD_TASK, *listed)), feed=ps.Fixed(),
+                    allocation=lambda: None, stale_after=STALE_AFTER,
+                    now=lambda: datetime.now(UTC), log=lambda line: None,
+                    ends_at=time.time() + 3 * END_POLL, poll_seconds=END_POLL)
+    return Ended(exit=int(ex),
+                 summary=psum.read_summary((d / ps.SUMMARY).read_text(), "summary.json"),
+                 ledger=[json.loads(x) for x in (d / ps.LEDGER).read_text().splitlines()],
+                 final=(d / ps.FINAL).exists(),
+                 inputs=sorted(p.name for p in (d / ps.INPUTS).iterdir()))
+
+
+def _end_finish(tmp: Path) -> list[str]:
+    """A wave whose last job finishes: its end."""
+    lad = LADDERS["cpu-score"]
+    waves = tmp / "waves"
+    d = waves / "pool-check"
+    jobs = [_small(lad, 1, minutes=30.0), _small(lad, 2, minutes=20.0)]
+    d.mkdir(parents=True)
+    c = Case(d / "queue.db", lad, jobs)
+    _inputs(d, _seed(lad, jobs))
+    w = c.worker("w1", cls="m4", minutes=120, lease="s1").name
+    for _ in jobs:
+        got = c.q.claim(worker=w, minutes_left=c.fresh)
+        if got is not None:
+            c.q.finish(got.attempt, worker=w, outcome=pq.Outcome.DONE, peak_gb=3.1,
+                       minutes=20.0, rc=0)
+    e = _steward_run(c.q, d, waves, listed=[w])
+    same = e.final and all(_rows(d / ps.FINAL, x) == _rows(d / "queue.db", x)
+                           for x in ("jobs", "attempts"))
+    notes = c.notes + ([] if e.exit == 0 else [f"exit {e.exit}, want 0"]) + (
+        [] if same else ["final.db is not the queue's jobs and attempts"]) + (
+        [] if e.inputs == ["jobs.json", "with.txt"] else [f"inputs left {e.inputs}"]) + (
+        [] if e.summary.state == psum.WaveState.FINISHED else [f"summary {e.summary.state}"]) + (
+        [] if "end" in e.ledger[-1] and e.ledger[-1]["end"] == "finished" else
+        [f"the ledger's last {e.ledger[-1]}"])
+    print(f"end finish: both jobs done: exit {e.exit}, final.db {e.final}, inputs left "
+          f"{e.inputs}, {e.summary.state}" + _failing(notes), flush=True)
+    return ["finish"] if notes else []
+
+
+def _end_retry(tmp: Path) -> list[str]:
+    """A retry request of a FAILED job, and one of a job the wave lacks."""
+    lad = LADDERS["cpu-score"]
+    waves = tmp / "waves"
+    d = waves / "pool-check"
+    s = _small(lad)
+    d.mkdir(parents=True)
+    c = Case(d / "queue.db", lad, [s])
+    _inputs(d, _seed(lad, [s]))
+    _strike_thrice(c, s)
+    requests = d / ps.REQUESTS
+    requests.mkdir()
+    (requests / "2026-10-21T00:00:00Z.json").write_text(json.dumps({"retry": [s.id]}))
+    (requests / "2026-10-21T00:00:01Z.json").write_text(json.dumps({"retry": [99]}))
+    e = _steward_run(c.q, d, waves, listed=["w1", "w2", "w3"])
+    first = e.ledger[0]["requests"]
+    done = first if isinstance(first, list) else []
+    retried = [x for x in done if isinstance(x, dict) and "retried" in x and x["retried"] == 1]
+    refused = [x for x in done if isinstance(x, dict) and "refused" in x]
+    notes = c.notes + ([] if e.exit == pw.Exit.RETIRED else [f"exit {e.exit}, want 75"]) + (
+        [] if (c.job(s.id).state, c.job(s.id).strikes) == (pq.JobState.PENDING, 0) else
+        [f"job 1 {c.job(s.id).state} with {c.job(s.id).strikes} strikes"]) + (
+        [] if (len(retried), len(refused)) == (1, 1) else [f"the ledger's requests {done}"]) + (
+        [] if not list(requests.iterdir()) else ["requests left"]) + (
+        [] if not e.final else ["final.db written"])
+    print(f"end retry: job 1 FAILED, a retry of it and of job 99: job 1 {c.job(s.id).state} "
+          f"with {c.job(s.id).strikes} strikes, exit {e.exit}" + _failing(notes), flush=True)
+    return ["retry"] if notes else []
+
+
+def _end_cancel(tmp: Path) -> list[str]:
+    """A cancel request with a job pending, one claimed (its worker live), one LONG and one
+    done; then the claimed one's worker finishing it, failed."""
+    lad = LADDERS["cpu-score"]
+    waves = tmp / "waves"
+    d = waves / "pool-check"
+    jobs = [_small(lad, 1, minutes=30.0), _small(lad, 2, minutes=60.0),
+            _seed_job(3, minutes=30.0, peak_gb=100.0, ladder=lad), _small(lad, 4, minutes=10.0)]
+    d.mkdir(parents=True)
+    c = Case(d / "queue.db", lad, jobs)
+    _inputs(d, _seed(lad, jobs))
+    w = c.worker("w1", cls="m4", minutes=120, lease="s1").name
+    held = c.q.claim(worker=w, minutes_left=c.fresh)          # job 2, the longest
+    other = c.worker("w2", cls="m4", minutes=120, lease="s2").name
+    four = c.q.claim_job(worker=other, job=4)
+    if four is not None:
+        c.q.finish(four.attempt, worker=other, outcome=pq.Outcome.DONE, peak_gb=3.1,
+                   minutes=5.0, rc=0)
+    (d / ps.REQUESTS).mkdir()
+    (d / ps.REQUESTS / "2026-10-21T00:00:00Z.json").write_text(json.dumps({"cancel": True}))
+    e = _steward_run(c.q, d, waves, listed=[w, other])
+    states = {j.id: j.state for j in c.q.jobs()}
+    want = {1: pq.JobState.CANCELLED, 2: pq.JobState.CANCELLED, 3: pq.JobState.CANCELLED,
+            4: pq.JobState.DONE}
+    late = None if held is None else c.q.finish(held.attempt, worker=w,
+                                                outcome=pq.Outcome.FAILED, peak_gb=3.1,
+                                                minutes=25.0, rc=1)
+    notes = c.notes + ([] if held is not None and held.job.id == 2 else [f"claim {held}"]) + (
+        [] if e.exit == 0 else [f"exit {e.exit}, want 0"]) + (
+        [] if states == want else [f"jobs {states}, want {want}"]) + (
+        [] if e.final else ["no final.db"]) + (
+        [] if e.inputs == ["jobs.json", "with.txt"] else [f"inputs left {e.inputs}"]) + (
+        [] if e.summary.state == psum.WaveState.CANCELLED else [f"summary {e.summary.state}"]) + (
+        [] if late == pq.JobState.CANCELLED else [f"the claimed job's later failure: {late}"])
+    print(f"end cancel: jobs {({i: s.value for i, s in states.items()})}, exit {e.exit}, "
+          f"final.db {e.final}, {e.summary.state}; "
+          f"the claimed job's later failure leaves it {late}" + _failing(notes), flush=True)
+    return ["cancel"] if notes else []
+
+
+def _end_long(tmp: Path) -> list[str]:
+    """A wave whose one job not done waits for the long lane: no end."""
+    lad = LADDERS["cpu-score"]
+    waves = tmp / "waves"
+    d = waves / "pool-check"
+    jobs = [_small(lad, 1, minutes=30.0), _seed_job(2, minutes=30.0, peak_gb=100.0, ladder=lad)]
+    d.mkdir(parents=True)
+    c = Case(d / "queue.db", lad, jobs)
+    _inputs(d, _seed(lad, jobs))
+    w = c.worker("w1", cls="m4", minutes=120, lease="s1").name
+    got = c.q.claim(worker=w, minutes_left=c.fresh)
+    if got is not None:
+        c.q.finish(got.attempt, worker=w, outcome=pq.Outcome.DONE, peak_gb=3.1, minutes=20.0,
+                   rc=0)
+    e = _steward_run(c.q, d, waves, listed=[w])
+    want = (psum.LongJob(job=2, block=jobs[1].block, item=jobs[1].item, node=NODE,
+                         mem_gb=math.ceil(jobs[1].gb), minutes=30.0),)
+    notes = c.notes + ([] if e.exit == pw.Exit.RETIRED else [f"exit {e.exit}, want 75"]) + (
+        [] if not e.final else ["final.db written"]) + (
+        [] if ps.BANK in e.inputs else ["the bank deleted"]) + (
+        [] if e.summary.state == psum.WaveState.CLOSED else [f"summary {e.summary.state}"]) + (
+        [] if e.summary.long == want else [f"long {e.summary.long}, want {want}"])
+    print(f"end long: job 1 done, job 2 waiting for the long lane: exit {e.exit}, final.db "
+          f"{e.final}, {e.summary.state}, long {[x.job for x in e.summary.long]}"
+          + _failing(notes), flush=True)
+    return ["long"] if notes else []
+
+
+def _end_command(tmp: Path) -> list[str]:
+    """pool.py `steward` as a cluster_submit task runs it (its environment set: HOME, the Slurm
+    array ids and end time, USER), a relative --board with no allocation on it, on a shipped wave
+    whose one job is done and whose worker has retired (so squeue is never asked): the metric
+    named (metrics.RUNTIME), the wave ended (0), its summary FINISHED and naming the metric."""
+    import metrics  # here: its numpy and scipy are this case's alone
+    lad = LADDERS["cpu-score"]
+    s = _small(lad)
+    w = _shipped(tmp, _seed(lad, [s]))
+    (w.inputs / ps.BANK).write_bytes(b"")
+    c = Case(w.queue, lad, [s])
+    x = c.worker("w1", cls="m4", minutes=120, lease="s1").name
+    got = c.q.claim(worker=x, minutes_left=c.fresh)
+    if got is not None:
+        c.q.finish(got.attempt, worker=x, outcome=pq.Outcome.DONE, peak_gb=3.1, minutes=20.0,
+                   rc=0)
+    c.q.retire(x)
+    environ = {**os.environ, "HOME": str(w.home), "SLURM_ARRAY_JOB_ID": STEWARD_TASK.split("_")[0],
+               "SLURM_ARRAY_TASK_ID": "0", "SLURM_JOB_END_TIME": str(int(time.time() + 3600)),
+               "USER": "pool-check"}
+    with redirect_stdout(io.StringIO()):
+        ex = int(pl.main(["steward", "--wave", "pool-check", "--board", "market",
+                          "--stale-after-minutes", "30"], environ))
+    d = w.queue.parent
+    summary = psum.read_summary((d / ps.SUMMARY).read_text(), "summary.json")
+    notes = c.notes + ([] if ex == 0 else [f"exit {ex}, want 0"]) + (
+        [] if c.q.metric() == metrics.RUNTIME else [f"the queue's metric {c.q.metric()}"]) + (
+        [] if (summary.state, summary.metric) == (psum.WaveState.FINISHED, metrics.RUNTIME) else
+        [f"summary {summary.state} naming {summary.metric}"]) + (
+        [] if (d / ps.FINAL).exists() and not (w.inputs / ps.BANK).exists() else
+        ["no final.db, or the bank kept"])
+    print(f"end command: pool.py steward on a wave whose job is done: exit {ex}, "
+          f"{summary.state}, the metric named" + _failing(notes), flush=True)
+    return ["command"] if notes else []
+
+
+def end(_args: list[str]) -> list[str]:
+    bad: list[str] = []
+    for case in (_end_finish, _end_retry, _end_cancel, _end_long, _end_command):
         with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
             bad += case(Path(tmp))
     return bad
@@ -1595,7 +2242,10 @@ GUARDS: dict[str, Guard] = {"claim": Guard(run=claim, args=()),
                             "walltime": Guard(run=walltime, args=()),
                             "oom": Guard(run=oom, args=()),
                             "identity": Guard(run=identity, args=()),
-                            "worker": Guard(run=worker, args=())}
+                            "worker": Guard(run=worker, args=()),
+                            "dead-claim": Guard(run=dead_claim, args=()),
+                            "aside": Guard(run=aside, args=()),
+                            "end": Guard(run=end, args=())}
 
 
 # ---- faults ---------------------------------------------------------------------------------
@@ -1687,10 +2337,55 @@ def _left_once() -> AbstractContextManager[None]:
 
 @contextmanager
 def _unchecked() -> Iterator[None]:
-    """pool.py's checks of --node and --class patched out."""
+    """pool.py's checks of --node, --job's node and --class patched out."""
     with _patched(pl, "check_node", lambda node, environ: None), _patched(
+            pl, "check_job_node", lambda job, queue, environ: None), _patched(
             pl, "check_class", lambda cls, header: None):
         yield
+
+
+def _cancel_waiting(self: pq.SqliteQueue) -> int:
+    """SqliteQueue.cancel leaving a claimed job to run on (CLAIMED), only the waiting ones
+    CANCELLED: its later failure takes it back to PENDING."""
+    with self._tx() as db:
+        return db.execute("UPDATE jobs SET state = ? WHERE state IN (?, ?)",
+                          (pq.JobState.CANCELLED.value, pq.JobState.PENDING.value,
+                           pq.JobState.LONG.value)).rowcount
+
+
+def _reap_by_age(queue: pq.Queue, liveness: ps.Liveness, *, now: float) -> list[pq.Reaped]:
+    """pool_steward._reap deciding by a claim's age, not squeue's word (mycooc's measured and
+    rejected threshold): every worker whose open attempt started AGE_LIMIT before `now`."""
+    if not isinstance(queue, pq.SqliteQueue):
+        raise TypeError(f"by-age reads a SqliteQueue's attempts, not a {type(queue).__name__}")
+    db = sqlite3.connect(queue.path.absolute().as_uri() + "?mode=ro", uri=True)
+    try:
+        old = [r[0] for r in db.execute("SELECT worker FROM attempts WHERE end IS NULL AND"
+                                        " start < ? ORDER BY id", (now - AGE_LIMIT,))]
+    finally:
+        db.close()
+    return [r for w in old for r in [queue.reap(w, now=now)] if r is not None]
+
+
+def _blind(self: ps.Squeue, workers: Sequence[str]) -> frozenset[str]:
+    """pool_steward.Squeue.dead reading a squeue that fails (or answers without the steward's own
+    task) as an empty answer: every worker it does not list has ended."""
+    try:
+        out = self.run(["squeue", "-h", "-r", "-u", self.user, "-o", "%i"])
+        listed = set(out.stdout.split()) if out.returncode == 0 else set()
+    except (OSError, subprocess.SubprocessError):
+        listed = set()
+    return frozenset(w for w in workers if w not in listed)
+
+
+def _whole_yields(*, yields: int, workers: Mapping[str, int], wave: str) -> int:
+    """pool_summary.aside_share asking all the yields of a wave's own workers there."""
+    return min(yields, workers[wave])
+
+
+def _ended_with_long(jobs: Sequence[pq.Job]) -> bool:
+    """pool_steward._ended counting a job waiting for the long lane as ended."""
+    return all(j.state in (*ps.ENDED, pq.JobState.LONG) for j in jobs)
 
 
 _OUTCOME = pw._outcome
@@ -1721,7 +2416,9 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
                     "drop-on-top": lambda: _patched(pq, "_promoted", _dropped_on_top),
                     "any-worker": lambda: _patched(pq, "_mine", lambda attempt, worker: True),
                     "second-claim": lambda: _patched(pq, "_one_claim", lambda db, worker: None),
-                    "no-exclude": _no_exclusion},
+                    "no-exclude": _no_exclusion,
+                    "claimed-runs-on": lambda: _patched(pq.SqliteQueue, "cancel",
+                                                        _cancel_waiting)},
     "class": {"median-rate": lambda: _patched(pp, "_worst_rate", statistics.median),
               "no-fit-margin": lambda: _patched(pp.Estimator, "_fitted", _unmargined),
               "family-rate": lambda: _patched(pp, "_pool", _family_pool),
@@ -1738,8 +2435,15 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "worker": {"fail-worker": lambda: _patched(pw, "FAILED_IN_A_ROW", 1),
                "no-exclude": _no_exclusion,
                "no-retire": lambda: _patched(pq.SqliteQueue, "retire", lambda self, worker: 0),
-               "no-kill": lambda: _patched(subprocess.Popen, "kill", lambda self: None),
+               "no-kill": lambda: _patched(pw, "_kill", lambda proc: None),
+               "pid-only": lambda: _patched(pw, "_kill", lambda proc: proc.kill()),
+               "no-rebirth": lambda: _patched(pq, "_reborn", lambda had, restarts: False),
                "no-checks": _unchecked},
+    "dead-claim": {"by-age": lambda: _patched(ps, "_reap", _reap_by_age),
+                   "blind": lambda: _patched(ps.Squeue, "dead", _blind)},
+    "aside": {"whole-yields": lambda: _patched(psum, "aside_share", _whole_yields)},
+    "end": {"early-end": lambda: _patched(ps, "_ended", _ended_with_long),
+            "claimed-runs-on": lambda: _patched(pq.SqliteQueue, "cancel", _cancel_waiting)},
 }
 
 

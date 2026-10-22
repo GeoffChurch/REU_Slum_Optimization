@@ -21,7 +21,13 @@ its command line (the queue, the OOM evidence, the clock, the job's runner) and 
   the attempt as it comes (so a reaper sees what a killed job had written); its code, and its
   peak (`ru_maxrss`, the child's and its descendants' maximum) from `os.wait4`. The child runs at
   oom_score_adj 1000, set by itself before it execs (raising its own needs no privilege), so a
-  cgroup's OOM killer takes the job, not the worker (the plan's Review Focus 4).
+  cgroup's OOM killer takes the job, not the worker (the plan's Review Focus 4); every process it
+  forks inherits it. It leads a process group of its own (a new session), so a kill on the
+  worker's error path takes the group: a compound line (`tar -xf ... && python ...`, where bash
+  forks) leaves no grandchild running past its attempt. The session changes no cgroup: the job
+  stays in its worker's, whose OOM count is read, and Slurm's cgroup process tracking
+  (proctrack/cgroup, which ai's cgroup-confined tasks suggest; the smoke wave's to confirm: under
+  proctrack/pgid a new session would outlive its task) kills it with the task.
 - **Its outcome** (`_outcome`): exit 0 is DONE; otherwise an increase of the cgroup's OOM-kill
   count across the child (`OomEvidence`, read before and after) is OOM, which promotes the job
   (pool_queue); anything else is FAILED, a SIGKILL with no increase or no readable count among
@@ -47,6 +53,7 @@ smoke waves (the plan's Task 10).
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import time
 from collections.abc import Callable, Mapping
@@ -67,9 +74,11 @@ OOM_SCORE_ADJ = 1000
 
 
 class Exit(IntEnum):
-    DRAINED = 0         # the queue closed, nothing of its node and class pending (work_one: done)
+    DRAINED = 0         # the queue closed, nothing of its node and class pending (work_one: done;
+                        # the steward: its wave ended)
     OWN_FAULT = 1       # another commit's queue, jobs failed in a row (work_one: not done)
-    RETIRED = 75        # routine: asked aside, nothing pending fits its walltime, idle
+    RETIRED = 75        # routine: asked aside, nothing pending fits its walltime, idle (the
+                        # steward: two rounds no longer fit its lease)
 
 
 # ---- the OOM evidence -----------------------------------------------------------------------
@@ -198,18 +207,27 @@ def _last_for_the_oom_killer() -> None:
         f.write(str(OOM_SCORE_ADJ))
 
 
+def _kill(proc: subprocess.Popen[str]) -> None:
+    """SIGKILL the job's process group: its shell and every process the shell forked. The group
+    is there while its leader is unreaped, which it is until `run_job` waits for it."""
+    os.killpg(proc.pid, signal.SIGKILL)
+
+
 def run_job(line: str, *, cwd: Path, env: Mapping[str, str], log: Callable[[str], None],
             wrote: Callable[[], None]) -> Ran:
-    """`bash -c <line>` in `cwd` with `env`, at oom_score_adj OOM_SCORE_ADJ, its output (stdout
-    and stderr merged, undecodable bytes replaced) given to `log` line by line as it comes,
-    `wrote()` called for each line starting with row_marker.ROW_WRITTEN; its code and peak from
-    `os.wait4` once its output ends. If reading it raises, the child is killed and reaped before
-    the error goes on, so no job outlives its worker's attempt."""
+    """`bash -c <line>` in `cwd` with `env`, at oom_score_adj OOM_SCORE_ADJ, leading a process
+    group of its own, its output (stdout and stderr merged, undecodable bytes replaced) given to
+    `log` line by line as it comes, `wrote()` called for each line starting with
+    row_marker.ROW_WRITTEN; its code and peak from `os.wait4` once its output ends. If reading it
+    raises, its group is killed and the child reaped before the error goes on, so no process of
+    the job outlives its worker's attempt."""
     start = time.monotonic()
-    # preexec_fn runs between fork and exec, unsafe only beside other threads: the worker has none
+    # preexec_fn runs between fork and exec, unsafe only beside other threads: the worker has
+    # none; start_new_session's setsid runs before it, so the job leads its group from its exec
     proc = subprocess.Popen(["bash", "-c", line], cwd=cwd, env=dict(env), stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                            errors="replace", bufsize=1, preexec_fn=_last_for_the_oom_killer)
+                            errors="replace", bufsize=1, start_new_session=True,
+                            preexec_fn=_last_for_the_oom_killer)
     if proc.stdout is None:
         raise RuntimeError("Popen gave no stdout pipe")
     rows = 0
@@ -221,7 +239,7 @@ def run_job(line: str, *, cwd: Path, env: Mapping[str, str], log: Callable[[str]
                 rows += 1
                 wrote()
     except BaseException:
-        proc.kill()
+        _kill(proc)
         proc.wait()         # Popen's: an already reaped child is no new error over this one
         raise
     finally:
@@ -278,11 +296,12 @@ def _refused(header: Header, commit: str) -> str | None:
 
 # ---- the worker -------------------------------------------------------------------------------
 
-def work(*, queue: Queue, worker: str, run: str, node: str, cls: str, commit: str,
-         ends_at: float, now: Callable[[], float], wait: Callable[[], None],
+def work(*, queue: Queue, worker: str, restarts: int, run: str, node: str, cls: str,
+         commit: str, ends_at: float, now: Callable[[], float], wait: Callable[[], None],
          run_line: Callable[[Claim], Ran], oom: OomEvidence, log: Callable[[str], None]) -> Exit:
-    """`worker` (a Slurm task of `run`, on `node` in class `cls`, its checkout at `commit`, its
-    walltime ending at `ends_at`, epoch seconds on `now`'s clock) claims and runs its jobs until
+    """`worker` (a Slurm task of `run`, restarted `restarts` times, on `node` in class `cls`, its
+    checkout at `commit`, its walltime ending at `ends_at`, epoch seconds on `now`'s clock;
+    registered again when requeued: pool_queue's `register`) claims and runs its jobs until
     it exits (the module's doc), each by `run_line`, never one its lease has attempted, `wait`ing
     a poll on an open queue with nothing pending; the queue's ladder gives its margin and idle
     minutes."""
@@ -292,9 +311,11 @@ def work(*, queue: Queue, worker: str, run: str, node: str, cls: str, commit: st
         log(refused)
         return Exit.OWN_FAULT
     lad = header.ladder
-    log(f"=== worker {worker} of {run}: wave {header.wave} at {commit}, {node} {cls}, "
+    log(f"=== worker {worker} of {run}" + (f" (restart {restarts})" if restarts else "")
+        + f": wave {header.wave} at {commit}, {node} {cls}, "
         f"{(ends_at - now()) / 60:.1f} minutes of walltime left; {oom.about}")
-    queue.register(worker=worker, run=run, node=node, cls=cls, ends_at=ends_at)
+    queue.register(worker=worker, run=run, node=node, cls=cls, ends_at=ends_at,
+                   restarts=restarts)
     try:
         failed: list[int] = []              # the jobs of the attempts failed in a row
         idle_since: float | None = None
@@ -336,13 +357,14 @@ def work(*, queue: Queue, worker: str, run: str, node: str, cls: str, commit: st
         queue.retire(worker)
 
 
-def work_one(*, queue: Queue, worker: str, run: str, job: int, commit: str, ends_at: float,
-             now: Callable[[], float], run_line: Callable[[Claim], Ran], oom: OomEvidence,
-             log: Callable[[str], None]) -> Exit:
+def work_one(*, queue: Queue, worker: str, restarts: int, run: str, job: int, commit: str,
+             ends_at: float, now: Callable[[], float], run_line: Callable[[Claim], Ran],
+             oom: OomEvidence, log: Callable[[str], None]) -> Exit:
     """The long lane's run of job `job` (the spec's 3.8): `worker` claims that job, runs it by
     `run_line` and records it; 0 when it is done, 1 otherwise (a queue of another commit, no such
     job, a job not waiting, a job that failed or was killed for memory). It registers on the
-    job's node in the class `long`, no pool's, so no pool's step-aside or demand counts it."""
+    job's node in the class `long`, no pool's, so no pool's step-aside or demand counts it, at
+    its restart count `restarts` (as `work`'s worker)."""
     header = queue.header()
     refused = _refused(header, commit)
     if refused is not None:
@@ -356,7 +378,8 @@ def work_one(*, queue: Queue, worker: str, run: str, job: int, commit: str, ends
     log(f"=== worker {worker} of {run}: the long lane's job {job} of wave {header.wave} at "
         f"{commit}, on {j.node}, estimated {j.minutes:.0f} minutes, "
         f"{(ends_at - now()) / 60:.1f} minutes of walltime left; {oom.about}")
-    queue.register(worker=worker, run=run, node=j.node, cls=Lane.LONG.value, ends_at=ends_at)
+    queue.register(worker=worker, run=run, node=j.node, cls=Lane.LONG.value, ends_at=ends_at,
+                   restarts=restarts)
     try:
         c = queue.claim_job(worker=worker, job=job)
         if c is None:
