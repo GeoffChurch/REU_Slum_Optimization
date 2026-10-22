@@ -50,6 +50,12 @@ a block's tasks unpack one tar at once into the checkout they share.
     uv run python research/roadless/cluster.py demand
         # state reblock's demand in the GPU market now (after submit, resubmit, sync, wait and
         # cancel it is stated anyway: cluster_demand)
+    uv run python research/roadless/cluster.py wave submit <w> --preset <p> --family <f> \
+        --nodes <n,...> [--items <items,|@file>] [--unpack TAR] [--with FILE ...] \
+        [--board PATH] [--dry] <ids,|@file> -- <script> <args with {id} [and {item}]>
+    uv run python research/roadless/cluster.py wave <w> status|pools|long|cancel
+    uv run python research/roadless/cluster.py wave <w> retry <id,...>|failed
+        # a wave (cluster_wave.py); after each but status and a dry submit, the demand
 
 A wave (docs/superpowers/specs/2026-10-21-lease-pool-design.md) is reblock's work as leases of
 ai's GPU/CPU market. Its jobs, one command per (block, item), are rows of a queue on the cluster's
@@ -147,7 +153,8 @@ def _command(args: argparse.Namespace, *placeholders: str) -> str:
     # REMAINDER (which drops the `--`) swallows an option placed after the ids
     command: list[str] = args.command
     if not command or command[0].startswith("-"):
-        raise SystemExit(f"usage: submit {args.kind} <run> [options] <ids> -- <command>")
+        raise SystemExit("usage: ... [options] <ids> -- <command>: every option before the ids, "
+                         f"the command after them and `--` (got {command[:2]})")
     line = " ".join(command)
     for p in placeholders:
         if p not in line:
@@ -782,20 +789,33 @@ def state_demand(registry: Registry) -> int:
         now=utcnow())
 
 
+def _demand_after() -> None:
+    """reblock's demand written after a verb that submitted or changed runs; its failure is said
+    and leaves the verb's exit as it was (a submit that took, a wait's verdict)."""
+    try:
+        if state_demand(Registry(REPO)):
+            print("[demand] the next sync states it again", file=sys.stderr)
+    except (SystemExit, ValueError, OSError) as e:      # ssh, squeue's output, the registry
+        print(f"[demand] not stated: {e}; the next sync states it again", file=sys.stderr)
+
+
 def main(argv: list[str]) -> int:
     """cluster_submit's verbs, each followed, for those of STATES_DEMAND, by writing reblock's
-    demand, whose failure is said and leaves the verb's exit as it was (a submit that took, a
-    wait's verdict); and `demand`, that write alone, its exit its own."""
+    demand (`_demand_after`); `wave` (cluster_wave.py), followed by it as its verb says
+    (`Ran.states_demand`: every one but status and a dry submit); and `demand`, that write
+    alone, its exit its own."""
     if argv == ["demand"]:
         return state_demand(Registry(REPO))
+    if argv[:1] == ["wave"]:
+        import cluster_wave  # pandas, the estimators and the bank's sources: only a wave needs them
+        ran = cluster_wave.main(argv[1:], edge=cluster_wave.here(argv[1:]))
+        if ran.states_demand:
+            _demand_after()
+        return ran.code
     code = cs.main(PROJECT, argv)
     args = parser(PROJECT).parse_args(argv)
     if args.verb in STATES_DEMAND and not (args.verb in ("submit", "resubmit") and args.dry):
-        try:
-            if state_demand(Registry(REPO)):
-                print("[demand] the next sync states it again", file=sys.stderr)
-        except (SystemExit, ValueError, OSError) as e:      # ssh, squeue's output, the registry
-            print(f"[demand] not stated: {e}; the next sync states it again", file=sys.stderr)
+        _demand_after()
     return code
 
 

@@ -10,9 +10,12 @@ stages), and checks what a task would get.
                                             # no-running
     uv run python $C kinds [fault]          # fault: lease-bundle
     uv run python $C more [fault]           # faults: continue-idle, finished-dead, task-reaps,
-                                            # hung-waits, reap-first
+                                            # hung-waits, reap-first, none-unreaped
     uv run python $C template [fault]       # faults: other-mem, other-node, continuation-name,
                                             # reused-name, with-at, first-wave, market-always
+    uv run python $C wave [fault]           # faults: no-keep, block-names, no-script-check,
+                                            # no-check, fit-capped, uncapped, any-node,
+                                            # pools-only
     uv run python $C both-ways <guards,>    # each guard, then under each of its faults
 
 Each guard but `cpu` has its faults (FAULTS: a patch in this process, no file edited, as
@@ -101,8 +104,10 @@ Continue(1) while its summary is CLOSED, Done once FINISHED. Faults: `continue-i
 (cluster._idle_killed finding none: idle and hung continued), `finished-dead` (a steward live
 only while unfinished: unsettled Done), `task-reaps` (a killed task's reap read by its task alone,
 any run's and any time's: requeued-hung continued on its earlier self's), `hung-waits` (every
-killed task waited for, registered or not: hung raises) and `reap-first` (a walltime reap decides
-a killed task still registered: requeued-late continued on its earlier self's).
+killed task waited for, registered or not: hung raises), `reap-first` (a walltime reap decides
+a killed task still registered: requeued-late continued on its earlier self's) and
+`none-unreaped` (cluster._unreaped finding none, the registered-means-raise rule gone: unreaped,
+requeued and requeued-late decided on reaps that are not theirs).
 
 `template` (Ruling 4, Review Focus 2): live waves `a` (its steward at HEAD) and `b` (at HEAD^),
 with 3 and 7 jobs of m12 (cpu-score) pending on quadro2 and none of m24 pending on orion, a pool
@@ -126,6 +131,36 @@ its starts: `other-mem` (its `--mem` the next rung: line_checked refuses the bun
 reads another commit than the template's), `first-wave` (the first live wave by name, whatever
 its pending jobs) and `market-always` (Waves.starts asking the market with no wave live).
 
+`wave` (the spec's 3.8 and 3.9, cluster_wave.py): `cluster.py wave submit ... --dry` command
+lines at HEAD through cluster.main, cluster_wave's edge a registry in a temporary directory, a
+runner that records any call to the cluster (none is made), each run's dry submit planned as
+`kinds` plans one, and a rows root of stored lineup-score rows made here (WAVE_ROWS: no stored row
+of this checkout's is read): `wave submit g-1 --preset cpu-score --family lineup-score --nodes
+orion,quadro2 --items clearance,resistance_lp --unpack <tars>/{id}.tar <WAVE_BLOCKS> --
+road_rescore.py lineup-score <scratch> {id} {item}` writes a seed of one job per (block, item) in
+order, each block's on one node, each line unpacking its block's tar through cluster_unpack.py and
+ending `--keep-standing`; prints each node's classes; plans no pool, its steward `--at` HEAD on
+the default board, and one long run, of the job whose stored wall (100 minutes, 125 with its
+margin) passes a fresh lease's 105: `--mem` 45, 1.5 times its stored peak of 30 GB, and
+`--minutes` 188 (1.5 times 125, rounded up), every planned run's name a run name's. Refused: the
+misspelt id of `ids` (MISTYPED), by the bank's writer, before anything is planned; a script the
+commit lacks (GONE), naming the commit; `{item}` without --items, and --items without `{item}`; a
+tar whose name does not end in `.tar`; gpu-presets on orion (its cards unusable); and the Ruling's
+fitted long jobs (cycle_desire on both blocks, no stored row: the family's longest wall under 1
+km2, 7000 minutes, times 1.5 past 7 days), naming them. A stored long job past 7 days
+(slow_stored: 7500 minutes with its margin) plans a long run capped at `--minutes` 10080. Then the
+requests, on a registry with wave `w` live (its steward, a pool lease running, one finished and
+settled, a long run running, another wave's pool) and its seed of three jobs on the cluster:
+`wave w retry 2`, `wave w retry failed` and `wave w cancel` leave in `reblock-waves/w/requests/`
+exactly three files, reading as Retry((2,)), Retry((1, 2, 3)) and Cancel(); `retry 9` is refused
+naming 9; `cancel` cancels the running pool lease and the long run, and neither the settled
+lease, the steward nor the other wave's pool. Faults: `no-keep` (the job lines without
+`--keep-standing`), `block-names` (long runs named `<w>-long-<block>`: no run name),
+`no-script-check` and `no-check` (as `script`'s and `ids`'), `fit-capped` (the Ruling's refusal
+gone: fitted jobs capped at 7 days), `uncapped` (long runs at 1.5 times their estimate, uncapped:
+the long kind refuses slow_stored's), `any-node` (cluster_wave._servable a no-op: gpu-presets
+planned on orion) and `pools-only` (cancel leaving the long runs).
+
 (`gpu`, the retired raster's sizing checked against its scorer's measured peaks, went with it:
 NOTES, "The complex as the runtime: the raster retired".)
 """
@@ -136,11 +171,13 @@ import contextlib
 import functools
 import io
 import json
+import math
 import os
 import subprocess
 import sys
 import tarfile
 import tempfile
+from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime
 from enum import Enum
@@ -152,6 +189,9 @@ sys.path[:0] = [str(HERE), str(HERE.parent.parent)]
 import cluster  # noqa: E402
 import cluster_demand  # noqa: E402
 import cluster_submit as cs  # noqa: E402
+import cluster_wave  # noqa: E402
+import pool_queue as pq  # noqa: E402
+import pool_steward  # noqa: E402
 import pool_summary as psum  # noqa: E402
 from cluster_submit import Bundle, RunPlan  # noqa: E402
 from cluster_submit.arrays import Array, route, script  # noqa: E402
@@ -159,10 +199,11 @@ from cluster_submit.cli import parser  # noqa: E402
 from cluster_submit.context import Context, Shell, kind_of, utcnow  # noqa: E402
 from cluster_submit.gpu import DemandLine, chain_base, demand_path, read_demand  # noqa: E402
 from cluster_submit.gpuboard import Pending, Running, Seen  # noqa: E402
+from cluster_submit.project import NAME  # noqa: E402
 from cluster_submit.registry import NO_OVERRIDES, ArrayRecord, Registry, RunRecord  # noqa: E402
 from cluster_submit.remote import Completed, Local, SubprocessRunner  # noqa: E402
 from cluster_submit.submit import throttle_checked  # noqa: E402
-from pool_ladder import Ladder  # noqa: E402
+from pool_ladder import LADDERS, Ladder  # noqa: E402
 
 PROJECT = cluster.PROJECT
 COMMAND = ["--", "research/roadless/gap_calib.py", "preset", "{id}", "{item}", "cpu"]
@@ -946,9 +987,325 @@ def _with_at(*, wave: str, ladder: Ladder, node: str, rung: int) -> tuple[str, .
     return (*_POOL_ARGS(wave=wave, ladder=ladder, node=node, rung=rung), "--at", SHA)
 
 
+# ---- the wave verb ----------------------------------------------------------------------------
+
+WAVE_BLOCKS = ("ZAF.9.5.4_1_9712", "ZAF.9.5.4_1_9717")  # wave: two of TUNING's large blocks
+FIT_BLOCK = "guard.fit"         # wave: a stored run's block beside them, under 1 km2, in the fit
+SCORE = "research/roadless/road_rescore.py"
+
+
+class _Stored(NamedTuple):
+    """A stored lineup-score row of the `wave` guard's rows root: a network scored."""
+
+    block: str
+    item: str
+    peak_gb: float
+    minutes: float
+
+
+WAVE_ROWS = (
+    _Stored(WAVE_BLOCKS[0], "clearance", 3.0, 20.0),
+    _Stored(WAVE_BLOCKS[0], "resistance_lp", 9.0, 30.0),
+    _Stored(WAVE_BLOCKS[1], "clearance", 3.0, 25.0),
+    _Stored(WAVE_BLOCKS[1], "resistance_lp", 30.0, 100.0),  # 125 min with its margin: long
+    _Stored(WAVE_BLOCKS[1], "slow_stored", 5.0, 6000.0),    # 7500: 1.5 times it past 7 days
+    _Stored(FIT_BLOCK, "slow", 2.0, 7000.0))                # the fit's longest wall under 1 km2
+
+
+def _wave_rows(root: Path) -> None:
+    """The `wave` guard's rows root: each of WAVE_ROWS a row file as road_rescore writes one (the
+    lineup-score family reads them), and a features CSV giving FIT_BLOCK's area (WAVE_BLOCKS',
+    from the bank)."""
+    import pandas as pd
+    d = root / "road_rows" / "guard" / "area_guard"
+    d.mkdir(parents=True)
+    for r in WAVE_ROWS:
+        pd.DataFrame({"block": [r.block], "method": [r.item], "peak_rss_gb": [r.peak_gb],
+                      "t_total": [r.minutes * 60]}).to_parquet(d / f"{r.block}__{r.item}.parquet")
+    features = root / "consolidated_rows" / "summary_features.csv"
+    features.parent.mkdir(parents=True)
+    features.write_text(f"block,area_m2\n{FIT_BLOCK},500000\n")
+
+
+class _Planned(NamedTuple):
+    """A run's dry submit as the `wave` guard's verb planned it."""
+
+    argv: tuple[str, ...]
+    args: argparse.Namespace
+    plan: RunPlan
+
+
+def _planner(work: Path, planned: list[_Planned]) -> cluster_wave.Verb:
+    """The `wave` guard's verb: each call a dry submit, planned as `kinds` plans one (the kind's
+    plan, routed and throttle-checked), and recorded; anything else is a failure of the guard."""
+    def verb(argv: Sequence[str]) -> int:
+        args = _parsed(list(argv))
+        if args.verb != "submit" or not args.dry:
+            raise AssertionError(f"a dry wave ran {list(argv)}")
+        _args, plan, _arrays = _plan(list(argv), work / args.run, sha=args.at)
+        planned.append(_Planned(argv=tuple(argv), args=args, plan=plan))
+        return 0
+    return verb
+
+
+def _offline(repo: Path, calls: list[list[str]]) -> Context:
+    """A Context over a registry in `repo` whose runner records every call (a dry wave makes
+    none) and answers it as ssh does when the cluster cannot be reached."""
+    def run(argv: Sequence[str], *, input: str | None = None) -> Completed:
+        calls.append(list(argv))
+        return Completed(255, "", "the guard's cluster is unreachable")
+
+    return Context(project=PROJECT, run=run, registry=Registry(repo), units_dir=repo / "units",
+                   now=utcnow, entry=HERE / "cluster.py", argv=(), machine="cluster-check",
+                   caller=Shell(), sleep=lambda s: None, parse=parser(PROJECT).parse_args)
+
+
+class _Waved(NamedTuple):
+    """What a `wave` command line came to through cluster.main: its refusal (None: it ran, exit
+    0), what it printed, and the dry submits it planned."""
+
+    refused: str | None
+    out: str
+    planned: list[_Planned]
+
+
+def _waved(edge: cluster_wave.Edge, planned: list[_Planned], argv: Sequence[str]) -> _Waved:
+    """`cluster.py wave <argv>` through cluster.main, on `edge`."""
+    planned.clear()
+    out, err = io.StringIO(), io.StringIO()
+    refused: str | None = None
+    try:
+        with (contextlib.redirect_stdout(out), contextlib.redirect_stderr(err),
+              _patched(cluster_wave, "here", lambda a: edge)):
+            code = cluster.main(["wave", *argv])
+        if code:
+            refused = f"exit {code}: {err.getvalue().strip()[-500:]}"
+    except SystemExit as e:
+        refused = f"{e.code}: {err.getvalue().strip()[-500:]}"
+    return _Waved(refused=refused, out=out.getvalue(), planned=list(planned))
+
+
+def _submit_line(wave: str, *opts: str, preset: str, ids: Sequence[str],
+                 command: Sequence[str]) -> list[str]:
+    """`wave submit <wave> --preset <preset> --family lineup-score --dry <opts> <ids> --
+    <command>`."""
+    return ["submit", wave, "--preset", preset, "--family", "lineup-score", "--dry", *opts,
+            ",".join(ids), "--", *command]
+
+
+def _main_wave(got: _Waved, *, work: Path, scratch: str) -> list[str]:
+    """The `wave` guard's main case, g-1 (the module's docstring): its problems."""
+    if got.refused is not None:
+        return [f"g-1 refused: {got.refused}"]
+    bad: list[str] = []
+    seed = pq.read_seed((work / "g-1" / cluster_wave.SEED).read_text(), "g-1's seed")
+    items = ("clearance", "resistance_lp")
+    want = [(b, i) for b in WAVE_BLOCKS for i in items]
+    if [(j.id, j.block, j.item) for j in seed.jobs] != [(k, *w) for k, w in enumerate(want, 1)]:
+        bad.append(f"jobs {[(j.id, j.block, j.item) for j in seed.jobs]}, want one per (block, "
+                   f"item): {want}")
+    node = {b: {j.node for j in seed.jobs if j.block == b} for b in WAVE_BLOCKS}
+    if any(len(n) != 1 for n in node.values()):
+        bad.append(f"a block's jobs on several nodes: {node}")
+    lines = {j.line for j in seed.jobs
+             if j.line != f'python -u research/roadless/cluster_unpack.py "$CLUSTER_SUBMIT_INPUTS/'
+                          f'{j.block}.tar" && python -u {SCORE} lineup-score {scratch} {j.block} '
+                          f"{j.item} --keep-standing"}
+    if lines:
+        bad.append(f"job lines {sorted(lines)[:2]}")
+    printed = got.out.splitlines()
+    for n in sorted({j.node for j in seed.jobs if j.lane == pq.Lane.POOL}):
+        counts = Counter(j.cls for j in seed.jobs if j.node == n and j.lane == pq.Lane.POOL)
+        shown = [ln for ln in printed if ln.startswith(f"  {n}: ")]
+        if len(shown) != 1 or not all(f"{c} {k}" in shown[0] for c, k in counts.items()):
+            bad.append(f"{n}'s classes {dict(counts)} not printed: {shown}")
+    longs = [j for j in seed.jobs if j.lane == pq.Lane.LONG]
+    stored = WAVE_ROWS[3]
+    if [(j.block, j.item) for j in longs] != [(stored.block, stored.item)]:
+        bad.append(f"long jobs {longs}, want ({stored.block}, {stored.item})'s alone")
+        return bad
+    [long] = longs
+    kinds = [p.args.kind for p in got.planned]
+    if kinds != ["steward", "long"]:
+        bad.append(f"planned {kinds}, want a steward and one long run, no pool")
+    names = [p.args.run for p in got.planned if not NAME.fullmatch(p.args.run)]
+    if names:
+        bad.append(f"planned runs whose names are no run names: {names}")
+    steward = ("submit", "steward", "g-1-steward", "--at", SHA, "--wave", "g-1", "--board",
+               PROJECT.cluster.board(), "--dry")
+    mem, minutes = 1.5 * stored.peak_gb, math.ceil(1.5 * 1.25 * stored.minutes)
+    run = ("submit", "long", f"g-1-long-{long.id}", "--at", SHA, "--wave", "g-1", "--preset",
+           "cpu-score", "--job", str(long.id), "--node", long.node, "--mem", f"{mem:g}",
+           "--minutes", str(minutes), "--dry")
+    if [p.argv for p in got.planned] != [steward, run]:
+        bad.append(f"planned {[p.argv for p in got.planned]}, want {[steward, run]}")
+    elif got.planned[1].plan.resources != cs.Resources(cpus=2, mem_gb=int(mem),
+                                                       time=cluster.slurm_time(minutes),
+                                                       node=long.node):
+        bad.append(f"the long run's resources {got.planned[1].plan.resources}")
+    return bad
+
+
+def _wave_seed(wave: str) -> str:
+    """A seed of three cpu-score jobs of `wave`, as a submit ships it (the requests' case)."""
+    header = pq.Header(wave=wave, commit=SHA, family="lineup-score", ladder=LADDERS["cpu-score"],
+                       created="2026-10-21T10:00:00Z", feed=pq.FIXED)
+    jobs = tuple(pq.JobSeed(id=k, block=f"b{k}", item="", group=f"b{k}", line="true",
+                            node="orion", cls="m4", gb=1.0, minutes=10.0, peak_gb=1.0,
+                            source="smoke", lane=pq.Lane.POOL) for k in (1, 2, 3))
+    return pq.seed_json(pq.Seed(header=header, jobs=jobs, closed=True))
+
+
+def _wave_requests(tmp: Path) -> tuple[list[str], str]:
+    """The `wave` guard's requests (the module's docstring): its problems, and what it saw."""
+    home = tmp / "home"
+    ctx = _context(tmp / "repo", home)
+    for r in (_steward_run("w", commit=SHA, finished=False, settled=False),
+              _pool_run("w-quadro2-m12-s1", "w", node="quadro2", mem=12, finished=False),
+              _run("w-orion-m4-s1", "pool", ("--wave", "w", "--preset", "cpu-score", "--node",
+                                            "orion", "--mem", "4", "--gpus", "64"),
+                   commit=SHA, width=1, finished=True, settled=True),
+              _run("w-long-3", "long", ("--wave", "w", "--preset", "cpu-score", "--job", "3",
+                                        "--node", "orion", "--mem", "90", "--minutes", "300"),
+                   commit=SHA, width=1, finished=False, settled=False),
+              _pool_run("v-quadro2-m12-s1", "v", node="quadro2", mem=12, finished=False)):
+        ctx.registry.write(r)
+    inputs = home / cluster.WAVES / "w" / pool_steward.INPUTS
+    inputs.mkdir(parents=True)
+    (inputs / cluster_wave.SEED).write_text(_wave_seed("w"))
+    verbs: list[tuple[str, ...]] = []
+
+    def verb(argv: Sequence[str]) -> int:
+        verbs.append(tuple(argv))
+        return 0
+
+    edge = cluster_wave.Edge(ctx=ctx, verb=verb, rows=tmp, features=tmp / "features.csv",
+                             records=tmp / "waves")
+    bad: list[str] = []
+    with contextlib.redirect_stdout(io.StringIO()):
+        for argv in (["w", "retry", "2"], ["w", "retry", "failed"], ["w", "cancel"]):
+            cluster_wave.main(argv, edge=edge)
+        try:
+            cluster_wave.main(["w", "retry", "9"], edge=edge)
+            bad.append("retry 9 (no job of w's) requested")
+        except SystemExit as e:
+            if "9" not in str(e.code):
+                bad.append(f"retry 9 refused without naming 9: {e.code}")
+    folder = home / cluster.WAVES / "w" / pool_steward.REQUESTS
+    files = sorted(p.name for p in folder.iterdir())
+    read = [pool_steward.read_request((folder / f).read_text(), f) for f in files]
+    want = [pool_steward.Retry(ids=(2,)), pool_steward.Retry(ids=(1, 2, 3)),
+            pool_steward.Cancel()]
+    if read != want or [f.rpartition("-")[2] for f in files] != ["retry.json", "retry.json",
+                                                                  "cancel.json"]:
+        bad.append(f"requests {files}: {read}, want {want}")
+    cancels = sorted(verbs)
+    if cancels != [("cancel", "w-long-3"), ("cancel", "w-quadro2-m12-s1")]:
+        bad.append(f"cancel ran {cancels}, want the running pool lease's and the long run's")
+    return bad, f"requests {len(files)}, cancels {[c[1] for c in cancels]}"
+
+
+def check_wave() -> list[str]:
+    """`wave` (the module's docstring): the problems found."""
+    bad: list[str] = []
+    got: list[str] = []
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        rows, tars, scratch = tmp / "rows", tmp / "tars", str(tmp / "scratch")
+        _wave_rows(rows)
+        tars.mkdir()
+        for b in WAVE_BLOCKS:
+            with tarfile.open(tars / f"{b}.tar", "w"):
+                pass
+        calls: list[list[str]] = []
+        planned: list[_Planned] = []
+        ctx = _offline(tmp / "repo", calls)
+        edge = cluster_wave.Edge(ctx=ctx, verb=_planner(tmp / "plans", planned), rows=rows,
+                                 features=rows / "consolidated_rows" / "summary_features.csv",
+                                 records=rows / "waves")
+        work = ctx.registry.root.parent / cluster_wave.WORK
+        score = [SCORE, "lineup-score", scratch, "{id}", "{item}"]
+        a, b = WAVE_BLOCKS
+        cpu = "cpu-score"
+        main = _waved(edge, planned, _submit_line(
+            "g-1", "--nodes", "orion,quadro2", "--items", "clearance,resistance_lp", "--unpack",
+            str(tars / "{id}.tar"), preset=cpu, ids=WAVE_BLOCKS, command=score))
+        bad += _main_wave(main, work=work, scratch=scratch)
+        got.append("g-1 " + ("planned" if main.refused is None else "refused"))
+        refusals = {   # case: (its command line, the words its refusal says)
+            "misspelt": (_submit_line("g-2", "--nodes", "orion", "--items", "clearance",
+                                      preset=cpu, ids=(b, MISTYPED), command=score),
+                         (MISTYPED, "does not yield")),
+            "no-script": (_submit_line("g-3", "--nodes", "orion", "--items", "clearance",
+                                       preset=cpu, ids=(b,), command=(GONE, "{id}", "{item}")),
+                          (SHA[:12],)),
+            "item-unfilled": (_submit_line("g-4", "--nodes", "orion", preset=cpu, ids=(b,),
+                                           command=score), ("{item}",)),
+            "item-unused": (_submit_line("g-5", "--nodes", "orion", "--items", "clearance",
+                                         preset=cpu, ids=(b,), command=score[:-1]), ("{item}",)),
+            "tgz": (_submit_line("g-6", "--nodes", "orion", "--items", "clearance", "--unpack",
+                                 str(tars / "{id}.tgz"), preset=cpu, ids=(b,), command=score),
+                    (".tar",)),
+            "gpu-on-orion": (_submit_line("g-7", "--nodes", "orion", "--items", "clearance",
+                                          preset="gpu-presets", ids=(b,), command=score),
+                             ("unusable",)),
+            "fitted-past-7-days": (_submit_line("g-8", "--nodes", "orion,quadro2", "--items",
+                                                "cycle_desire", preset=cpu, ids=WAVE_BLOCKS,
+                                                command=score),
+                                   (a, b, "cycle_desire", "7 days"))}
+        for case, (argv, words) in refusals.items():
+            x = _waved(edge, planned, argv)
+            if x.refused is None or x.planned:
+                bad.append(f"{case}: planned {[p.args.run for p in x.planned]}, not refused")
+            elif not all(w in x.refused for w in words):
+                bad.append(f"{case}: refused without saying {words}: {x.refused}")
+            got.append(f"{case} {'refused' if x.refused is not None else 'planned'}")
+        capped = _waved(edge, planned, _submit_line(
+            "g-9", "--nodes", "orion", "--items", "slow_stored", preset=cpu, ids=(b,),
+            command=score))
+        longs = [p for p in capped.planned if p.args.kind == "long"]
+        if (capped.refused is not None or len(longs) != 1 or longs[0].args.minutes != 10080
+                or longs[0].plan.resources.time != "7-00:00:00"):
+            bad.append(f"slow_stored: {capped.refused or [p.argv for p in longs]}, want one long "
+                       "run of --minutes 10080 (7 days)")
+        got.append("slow_stored " + ("refused" if capped.refused is not None
+                                     else f"--minutes {[p.args.minutes for p in longs]}"))
+        if calls:
+            bad.append(f"a dry wave called the cluster: {calls[:2]}")
+        more, saw = _wave_requests(tmp / "requests")
+        bad += more
+        got.append(saw)
+    print(f"wave: {'; '.join(got)} -> {'ok' if not bad else 'FAILS'}", flush=True)
+    return bad
+
+
+_JOB_LINE = cluster_wave._job_line
+
+
+def _no_keep(line: str, *, block: str, item: str, tar: Path | None) -> str:
+    """A job's line without --keep-standing (fault `no-keep`)."""
+    return _JOB_LINE(line, block=block, item=item, tar=tar).removesuffix(
+        f" {cluster_wave.KEEP}")
+
+
+def _block_names(ctx: Context, wave: str, job: psum.LongJob) -> str:
+    """A long run named for its job's block (fault `block-names`)."""
+    return f"{wave}-long-{job.block}"
+
+
+def _uncapped(minutes: float) -> int:
+    """A long run's walltime uncapped (fault `uncapped`)."""
+    return math.ceil(cluster_wave.LONG_TIME * minutes)
+
+
+def _any_node(*, wave: str, ladder: Ladder, nodes: Sequence[str], commit: str,
+              work: Path) -> None:
+    """Every node taken as serving every ladder (fault `any-node`)."""
+
+
 GUARDS: dict[str, Callable[[], list[str]]] = {
     "ids": check_ids, "script": check_script, "demand": check_demand, "kinds": check_kinds,
-    "more": check_more, "template": check_template}
+    "more": check_more, "template": check_template, "wave": check_wave}
 FAULTS: dict[str, dict[str, Callable[[], contextlib.AbstractContextManager[None]]]] = {
     "ids": {"no-check": _no_check},
     "script": {"no-script-check": _no_script_check},
@@ -962,7 +1319,9 @@ FAULTS: dict[str, dict[str, Callable[[], contextlib.AbstractContextManager[None]
                                             lambda s, run: {r.task: r for r in s.reaped}),
              "hung-waits": lambda: _patched(cluster, "_unreaped",
                                             lambda killed, registered: list(killed)),
-             "reap-first": lambda: _patched(cluster, "_registered", _registered_unreaped)},
+             "reap-first": lambda: _patched(cluster, "_registered", _registered_unreaped),
+             "none-unreaped": lambda: _patched(cluster, "_unreaped",
+                                               lambda killed, registered: [])},
     "template": {
         "other-mem": lambda: _patched(cluster, "_pool_args", _other_mem),
         "other-node": lambda: _patched(cluster, "_pool_args", _other_node),
@@ -974,7 +1333,16 @@ FAULTS: dict[str, dict[str, Callable[[], contextlib.AbstractContextManager[None]
         "first-wave": lambda: _patched(cluster, "_chosen",
                                        lambda choices: min(choices, key=lambda c: c.wave)),
         "market-always": lambda: _patched(cluster.Waves, "starts",
-                                          lambda self, market: tuple(market()))}}
+                                          lambda self, market: tuple(market()))},
+    "wave": {
+        "no-keep": lambda: _patched(cluster_wave, "_job_line", _no_keep),
+        "block-names": lambda: _patched(cluster_wave, "_long_name", _block_names),
+        "no-script-check": _no_script_check,
+        "no-check": _no_check,
+        "fit-capped": lambda: _patched(cluster_wave, "_unbounded", lambda jobs: []),
+        "uncapped": lambda: _patched(cluster_wave, "_long_minutes", _uncapped),
+        "any-node": lambda: _patched(cluster_wave, "_servable", _any_node),
+        "pools-only": lambda: _patched(cluster_wave, "CANCELLED_KINDS", (cluster.Pool.name,))}}
 
 
 # ---- the command line -----------------------------------------------------------------------
