@@ -324,8 +324,8 @@ Rulings 6 and 8):
 `smoke-job <id> <item> [--replace | --keep-standing]` (the smoke waves' job, the plan's Task 10;
 its items pool_plan.SMOKE_JOBS's): its two rows (SMOKE_ROWS/<id>__<item>__<k>.parquet) each
 asked of the resolved Standing first (none to write: it returns at once); then, by SMOKE_JOBS,
-3 GB allocated and touched a page at a time (`big`, `oom`), a sleep (`slow` 25 minutes, the
-others 20 s), cupy imported and the card touched (`gpu`); then each row written through the
+3 GB allocated and touched a page at a time (`big`, `oom`), a sleep (`slow` 25 minutes,
+`steady` 2, the others 20 s), cupy imported and the card touched (`gpu`); then each row written through the
 Standing (its host and pid in it).
 """
 from __future__ import annotations

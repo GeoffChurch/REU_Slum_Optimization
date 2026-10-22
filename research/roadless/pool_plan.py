@@ -334,7 +334,8 @@ class Proposals(_Rows):
 class SmokeJob(NamedTuple):
     """A smoke wave's job: its estimate, taken as stored (`Smoke`), and what pool_check.py
     smoke-job does, which the estimate misjudges where a smoke wave wants it to (`oom` estimated
-    at 1 GB allocating 3, `slow` at 3 minutes sleeping 25)."""
+    at 1 GB allocating 3, `slow` at 3 minutes sleeping 25); `steady` sleeps 2 minutes, so an m2
+    lease has job boundaries for a step-aside."""
     peak_gb: float      # the estimate's peak (GB)
     minutes: float      # ... and wall
     alloc_gb: float     # GB the job allocates and touches page by page (0: none)
@@ -349,6 +350,7 @@ SMOKE_JOBS: dict[str, SmokeJob] = {
     "big": SmokeJob(peak_gb=3.0, minutes=1.0, alloc_gb=3.0, sleep_s=20.0, gpu=False),
     "oom": SmokeJob(peak_gb=1.0, minutes=1.0, alloc_gb=3.0, sleep_s=20.0, gpu=False),
     "slow": SmokeJob(peak_gb=0.5, minutes=3.0, alloc_gb=0.0, sleep_s=25 * 60.0, gpu=False),
+    "steady": SmokeJob(peak_gb=0.5, minutes=2.5, alloc_gb=0.0, sleep_s=120.0, gpu=False),
     "gpu": SmokeJob(peak_gb=2.0, minutes=2.0, alloc_gb=0.0, sleep_s=20.0, gpu=True)}
 
 
