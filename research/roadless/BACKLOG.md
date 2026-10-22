@@ -62,6 +62,19 @@ research/roadless the public package takes (the branch carries the private clust
 revamp go with it: the public package's and the road methods' own displacement (Open, below), the
 two families' account and the dangling citations (Owner's decisions, below).
 
+The explore page (owner 2026-10-22): four stages on 5810, Screening (the f_alpha family's
+switch, the shells polynomial's why) -> Growth (one builder) -> Optimization (two tabs: the
+clearing with its flow, current and power, and one road method, cycle_native, built out by a
+slider; mockups: the "Block 5810 Pipeline" and "5810 Road Build-out" artifacts) -> Evaluation
+(the metrics, the ramped destroyed area's road drawing, every method on one chart of L against
+D with P, P_{1/2} or J_2); no walled-in counts, no Lens B. Growth (owner): the region's blocks
+grown by the share of its smallest enclosing axis-aligned square they fill ("if you show a
+circle on a rectangular screen ... you might as well fill in the lost corners"), any enclosed
+block absorbed in the step that encloses it (no holes by construction); dense_cluster and
+squareness deleted. src/reblock/region.py is in the Block producers' closure: change it with
+the revamp's regen, not before (a cold cache otherwise). The headline waits on Open, "Paving has
+no price".
+
 Closed (measured, NOTES): multi-rounding `.r<n>` (held out +0.001 at 2x; late `.r2l2` the same at
 1.58x); coarse-to-fine `.c0.75` (keeps gates at 0.85x, but with the polish dominated); coarse
 multi-start `.C<h>.m<k>` and fine `.m<k>` (neither faster nor better); the two-phase polish `.pP`
@@ -679,6 +692,17 @@ Open:
   - (3) Take S0.005cat into the cheap preset (`cheap005`)? +0.0018 L_P on the 60 large blocks
     (ahead on 38, behind on 22) at 73 s against 69 s a block on one card; +0.0007 on the 220 small
     (41 / 38) at 17 s against 14 s. Both are on the frontier.
+- **Paving has no price** (found 2026-10-22, **owner's call**): under the paved-only boost a new
+  road gets 10x the open ground's conductance and 5810's own lanes (all but 2% unpaved) none, so a
+  road along a lane counts as paving it: at area D 0.05 cycle_native's L_P is 0.392 under RUNTIME
+  (0.050 in the lineup's rows, under the older boost; 0.080 with the new corridors unboosted) and
+  clearance_looped's 0.239, above SIMP's clearing (0.235 under RUNTIME), which paves nothing.
+  Paving 5810's existing lanes alone, at D 0, would be worth about 1 - 1.85/3.19 = 0.42 (the
+  older metric's baseline is RUNTIME's with those lanes boosted; inferred, not run). Options: a
+  second cost axis for paving (paved length or area) beside D, every intervention on one frontier
+  (recommended); new roads unboosted, as the lineup was; or paving existing lanes as an
+  intervention, with clearing allowed to pave what it clears. The held re-run and the site's
+  headline wait on it.
 - **A screen continued over real waves** (the owner's call; NOTES, "Pruning by epistemetry: the
   move"). consolidated.screen_data's cost covariate for a block is the pass's default time until
   the screen runs it and the screen's own re-run of the default after, so a ledger made in waves
