@@ -86,8 +86,11 @@ starts its pools) and reads and steers it. A wave's state lives on the cluster, 
 requests), never in a run's directory, which the keeper or `gc` releases once its run settles.
 
 reblock states its demand in ai's GPU market as one campaign, CAMPAIGN (cluster_submit's README,
-"GPU market"; cluster_demand.py): what its waves' tasks hold and wait for, so the market's keeper
-charges it.
+"GPU market"; cluster_demand.py), so the market's keeper charges what its tasks hold: what they
+hold and wait for, and each live wave's pool lines from its summary.json (`state_demand`: the
+larger of its workers running and its jobs pending or claimed, per node and class). This
+machine's step, after every verb of STATES_DEMAND, writes it; a steward never does (the plan's
+Ruling 1).
 
 Before a CPU run, the node's load: `ssh ai sinfo -N -p defq -o '%N %c %T %C'` (cores allocated,
 idle, other, total) and `scontrol show node <node>` (AllocMem of RealMemory).
@@ -112,7 +115,7 @@ from cluster_submit.cli import VERB_NAMES, parser
 from cluster_submit.context import stamped, utcnow
 from cluster_submit.project import Source
 from cluster_submit.registry import Registry
-from cluster_submit.remote import Remote, SubprocessRunner
+from cluster_submit.remote import Login, Remote, SubprocessRunner
 from cluster_submit.tree import blob_at
 from pool_ladder import LADDERS, STEWARD, Ladder, class_name
 from pool_steward import FINAL, LEDGER, SUMMARY
@@ -527,19 +530,26 @@ def _live(rec: cs.RunRecord) -> bool:
     return rec.finished_at is None or not rec.settled
 
 
-def live_stewards(ctx: cs.Context) -> dict[str, cs.RunRecord]:
-    """The live waves of this registry, by name: each wave's live steward run (`_live`). An
-    unreadable record is refused (SystemExit): a steward among them would go unseen, and a Done
-    on its wave's leases is final. Two live stewards of a wave at two commits are refused."""
-    recs, unreadable = ctx.registry.all()
-    if unreadable:
-        raise SystemExit(f"unreadable records: {', '.join(unreadable)}: a wave's steward among "
-                         "them would go unseen")
+#: How a step reads a record's submit arguments: a verb's ctx.parse of its argv, or, with no
+#: Context, `_submitted`.
+Args = Callable[[cs.RunRecord], argparse.Namespace]
+
+
+def _submitted(rec: cs.RunRecord) -> argparse.Namespace:
+    """`rec`'s submit arguments, read from its record alone (cs.submitted: the project's parser),
+    for a step that has no Context (the demand's, `state_demand`)."""
+    return cs.submitted(PROJECT, rec)
+
+
+def _live_stewards(recs: Sequence[cs.RunRecord], args: Args) -> dict[str, cs.RunRecord]:
+    """The live waves among `recs`, by name: each wave's live steward run (`_live`), its wave its
+    --wave (read by `args`). Two live stewards of a wave at two commits are refused
+    (SystemExit)."""
     live: dict[str, cs.RunRecord] = {}
     for r in recs:
         if r.kind != Steward.name or not _live(r):
             continue
-        wave: str = ctx.parse(r.argv).wave
+        wave: str = args(r).wave
         if wave in live and live[wave].commit != r.commit:
             raise SystemExit(f"wave {wave} has live stewards at two commits: "
                              f"{live[wave].name} at {live[wave].commit[:12]}, {r.name} at "
@@ -548,16 +558,27 @@ def live_stewards(ctx: cs.Context) -> dict[str, cs.RunRecord]:
     return live
 
 
-def wave_summaries(ctx: cs.Context, waves: Sequence[str]) -> psum.Summaries:
-    """The summaries of `waves` on the cluster, read with one ssh call (pool_summary's
-    `read_summaries`)."""
-    return psum.read_summaries(ctx.remote(), {w: f"{WAVES}/{w}/{SUMMARY}" for w in waves})
+def live_stewards(ctx: cs.Context) -> dict[str, cs.RunRecord]:
+    """The live waves of this registry, by name (`_live_stewards`). An unreadable record is
+    refused (SystemExit): a steward among them would go unseen, and a Done on its wave's leases is
+    final."""
+    recs, unreadable = ctx.registry.all()
+    if unreadable:
+        raise SystemExit(f"unreadable records: {', '.join(unreadable)}: a wave's steward among "
+                         "them would go unseen")
+    return _live_stewards(recs, lambda r: ctx.parse(r.argv))
+
+
+def wave_summaries(login: Login, waves: Sequence[str]) -> psum.Summaries:
+    """The summaries of `waves` on the cluster, read through `login` with one command
+    (pool_summary's `read_summaries`)."""
+    return psum.read_summaries(login, {w: f"{WAVES}/{w}/{SUMMARY}" for w in waves})
 
 
 def wave_summary(ctx: cs.Context, wave: str) -> psum.Summary:
     """`wave`'s summary on the cluster; raises (SystemExit) when it is absent or does not read
     (asked again next sync)."""
-    got = wave_summaries(ctx, [wave])
+    got = wave_summaries(ctx.remote(), [wave])
     if wave not in got.read:
         raise SystemExit(f"wave {wave}'s summary does not read ({got.unread[wave]}); the next sync "
                          "asks again")
@@ -670,6 +691,24 @@ def _pool_args(*, wave: str, ladder: Ladder, node: str, rung: int) -> tuple[str,
             "--gpus", str(throttle(ladder, node)))
 
 
+def _pool_run(rec: cs.RunRecord, args: Args) -> cluster_demand.PoolRun | None:
+    """A pool run's wave, its node and what each of its workers holds there (its class's bundle),
+    read from its submit arguments (`args`); None for a run of another kind. What Waves.lease says
+    of a run, and the demand's pool runs (`pool_runs`)."""
+    if rec.kind != Pool.name:
+        return None
+    a = args(rec)
+    return cluster_demand.PoolRun(wave=a.wave, node=a.node,
+                                  bundle=LADDERS[a.preset].bundle(a.mem))
+
+
+def pool_runs(recs: Sequence[cs.RunRecord]) -> dict[str, cluster_demand.PoolRun]:
+    """The unfinished pool runs of `recs`, by name (`_pool_run`, each read from its own record:
+    `_submitted`)."""
+    return {r.name: p for r in recs
+            if r.finished_at is None and (p := _pool_run(r, _submitted)) is not None}
+
+
 @dataclass(frozen=True, kw_only=True)
 class Waves:
     """reblock's campaign as the market's launches see it (cluster_submit's Campaigns, README "GPU
@@ -681,11 +720,10 @@ class Waves:
     registry: Registry
 
     def lease(self, ctx: cs.Context, rec: cs.RunRecord) -> cs.Lease | None:
-        """A pool run: CAMPAIGN's lease on its --node, each worker its class's bundle."""
-        if rec.kind != Pool.name:
-            return None
-        a = ctx.parse(rec.argv)
-        return cs.Lease(CAMPAIGN, a.node, LADDERS[a.preset].bundle(a.mem))
+        """A pool run (`_pool_run`): CAMPAIGN's lease on its --node, each worker its class's
+        bundle."""
+        p = _pool_run(rec, lambda r: ctx.parse(r.argv))
+        return None if p is None else cs.Lease(CAMPAIGN, p.node, p.bundle)
 
     def template(self, ctx: cs.Context, campaign: str, node: str,
                  bundle: cs.Bundle) -> cs.Template | cs.Done:
@@ -703,7 +741,7 @@ class Waves:
         if not live:
             return cs.Done(f"no wave is live in this registry (no live steward), so none "
                            f"has a job of {bundle.text()} on {node}")
-        got = wave_summaries(ctx, sorted(live))
+        got = wave_summaries(ctx.remote(), sorted(live))
         left_out = {**got.unread, **{
             w: (f"it names the ladder {s.ladder!r}, none of this machine's "
                 f"({', '.join(sorted(LADDERS))}): its pools cannot be planned here")
@@ -781,9 +819,16 @@ if not STATES_DEMAND <= set(VERB_NAMES):
 
 
 def state_demand(registry: Registry) -> int:
-    """The project's demand (cluster_demand), from squeue and `registry`: 0 once written."""
+    """The project's demand (cluster_demand.state; Ruling 1: this step is its file's one writer),
+    from squeue, `registry` read once (its records, its unfinished pool runs, `pool_runs`, and its
+    live waves, `_live_stewards`, each record's arguments its own: this step has no Context) and
+    the live waves' summaries, read with one ssh call (`wave_summaries`): 0 once written."""
+    login = Remote(PROJECT.cluster.host, SubprocessRunner())
+    recs, unreadable = registry.all()
+    live = sorted(_live_stewards(recs, _submitted))
     return cluster_demand.state(
-        registry=registry, login=Remote(PROJECT.cluster.host, SubprocessRunner()),
+        recs=recs, unreadable=unreadable, pools=pool_runs(recs),
+        summaries=lambda: wave_summaries(login, live), login=login,
         board=PROJECT.cluster.board(), project=PROJECT.name, campaign=CAMPAIGN,
         weight=CAMPAIGN_WEIGHT, nodes=tuple(n.name for n in PROJECT.cluster.nodes),
         now=utcnow())

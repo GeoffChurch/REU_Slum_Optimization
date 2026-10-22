@@ -7,7 +7,7 @@ stages), and checks what a task would get.
     uv run python $C ids [fault]            # fault: no-check
     uv run python $C script [fault]         # fault: no-script-check
     uv run python $C demand [fault]         # faults: finished-named, no-throttle, any-reason,
-                                            # no-running
+                                            # no-running, count-done, every-node, queue-only
     uv run python $C kinds [fault]          # fault: lease-bundle
     uv run python $C more [fault]           # faults: continue-idle, finished-dead, task-reaps,
                                             # hung-waits, reap-first, none-unreaped
@@ -17,7 +17,8 @@ stages), and checks what a task would get.
                                             # no-check, fit-capped, uncapped, any-node,
                                             # pools-only, fit-margin, unfinished-only,
                                             # first-cancel-stops, record-reused, no-bank-code,
-                                            # common-only, drop-regions, clean-always
+                                            # common-only, drop-regions, clean-always,
+                                            # outside-import, producers-unseen
     uv run python $C both-ways <guards,>    # each guard, then under each of its faults
 
 Each guard but `cpu` has its faults (FAULTS: a patch in this process, no file edited, as
@@ -48,20 +49,36 @@ commit) is refused naming the commit; one the commit holds and the working tree 
 the commit before the one that deleted it) plans. Fault `no-script-check`: cluster._script_at a
 no-op: the absent script plans.
 
-`demand` (cluster_demand: reblock's one campaign in the GPU market): its demand from a made-up
-squeue and seven made-up runs of this registry, and the board script run on a scratch board. Held
-units: every running task of the project's, cp-roads4-desire-g3b's as it stood on 2026-10-21
-among them (throttle 2, one running, three waiting, their memory changed in Slurm), a cancelled
-run's and another checkout's run's too, aggregated by (node, bundle) at the mean of their time
-limits; waiting units: those each run's throttle starts now (one of g3b's), none held by a
-dependency or a begin time, none of a cancelled run; an unpinned run's waiting tasks stated
-nowhere and counted, another checkout's left to it and counted; its runs every run squeue lists
-of the project's and every unfinished one of the registry, not a finished one, another user's,
-another project's, or a task that left squeue between the two reads. Faults: `finished-named`
-(cluster_demand.finished never true: a finished run named), `no-throttle` (cluster_demand.room
-unbounded: units past a run's throttle), `any-reason` (cluster_demand.waits_for always true: a
-task held by its dependency counted), `no-running` (cluster_demand.held's units dropped: what the
-waves hold stated as units 0).
+`demand` (cluster_demand: reblock's one campaign in the GPU market, with the lease-pool plan's
+Rulings 1 and 2): its demand from a made-up squeue, seven made-up runs of this registry and three
+waves' runs, their summaries read from a cluster home made here, and the board script run on a
+scratch board. Held units: every running task of the project's but a pool lease's,
+cp-roads4-desire-g3b's as it stood on 2026-10-21 among them (throttle 2, one running, three
+waiting, their memory changed in Slurm), a cancelled run's and another checkout's run's too, the
+waves' two running stewards (one unit each at the steward's bundle on orion) and a long run,
+aggregated by (node, bundle) at the mean of their time limits; waiting units: those each run's
+throttle starts now (one of g3b's), none held by a dependency or a begin time, none of a cancelled
+run; an unpinned run's waiting tasks stated nowhere and counted, another checkout's left to it and
+counted. The waves' pool lines, each wave's queue made in that home and its summary.json its
+steward's (pool_steward._summary, its lines pool_summary.lines_of's): waves `a` and `b` share
+(quadro2, cpu-score's m4), `a` with 5 jobs pending, 2 claimed and 3 workers running there and one
+job pending on orion (m12), `b` with nothing pending or claimed and 2 workers running there (idle,
+about to retire), and `c` finished, its m12 jobs on quadro2 done and its worker exited; a lease of
+`a` waits in Slurm on (quadro2, m4). The live waves (cluster._live_stewards: `c`'s steward finished
+and unsettled) are a, b and c; the registry's pool runs (cluster.pool_runs) its three unfinished
+ones; (quadro2, m4) states 9 units, max(3, 5 + 2) and max(2, 0) (Ruling 2), at the units' mean of
+a's jobs' estimates and b's workers' time limits; the waiting lease no unit; (orion, m12) 1; `c` no
+line; and with `b`'s summary absent, `b` unread and its two workers stated alone (the same line).
+Its runs every run squeue lists of the project's and every unfinished one of the registry (every
+pool, steward and long run among them), not a finished one, another user's, another project's, or a
+task that left squeue between the two reads. Faults: `finished-named` (cluster_demand.finished
+never true: a finished run named), `no-throttle` (cluster_demand.room unbounded: units past a run's
+throttle), `any-reason` (cluster_demand.waits_for always true: a task held by its dependency
+counted), `no-running` (cluster_demand.held's units dropped: what the waves hold stated as units
+0), `count-done` (pool_summary.lines_of counting a DONE job as pending: the finished wave `c`
+states units), `every-node` (lines_of counting each job on every node of its wave: a group's jobs
+counted on each of the wave's nodes) and `queue-only` (cluster_demand.pool_units the jobs pending
+or claimed alone: `b`'s idle workers dropped, against Ruling 2).
 
 The lease pool's guards (docs/superpowers/specs/2026-10-21-lease-pool-design.md; the plan's
 Rulings 3, 4, 10 and 11, and the controller's: a summary names its ladder) run cluster.py's kinds
@@ -159,25 +176,29 @@ blocks, 7000 minutes). cluster_wave._uncommitted on a git repo made here lists c
 below src/reblock and one below conf once they are changed (and no other file), and nothing while
 they are committed. A bank of one block written by common.write_bank in a subprocess (BANK_PROBE)
 loads its modules of this repo (not of its .venv) from below BANK_CODE's paths alone, common.py
-among them (conf is read, not imported: BANK_CODE lists it whole). Then the requests, on a registry
-with wave `w` live (its steward, a pool lease running, one finished with its continuation
-undecided, one finished and settled, a long run running, another wave's pool) and its seed of three
-jobs on the cluster: `wave w retry 2`, `wave w retry failed` and `wave w cancel` leave in
-`reblock-waves/w/requests/` exactly three files, reading as Retry((2,)), Retry((1, 2, 3)) and
-Cancel(); `retry 9` is refused naming 9; `cancel` cancels the running pool lease, the undecided one
-and the long run, every one though the first cancel fails (exit 1), and neither the settled lease,
-the steward nor the other wave's pool. Faults: `no-keep` (the job lines without `--keep-standing`),
-`block-names` (long runs named `<w>-long-<block>`: no run name), `no-script-check` and `no-check`
-(as `script`'s and `ids`'), `fit-capped` (the Ruling's refusal gone: fitted jobs past 7 days
-capped), `fit-margin` (the Ruling as first written, 1.5 times the estimate past 7 days: fitted_slow
-refused), `uncapped` (long runs at 1.5 times their estimate, uncapped: the long kind refuses
-slow_stored's), `any-node` (cluster_wave._servable a no-op: gpu-presets planned on orion),
-`pools-only` (cancel leaving the long runs), `unfinished-only` (cluster_wave._undone as unfinished
-alone: the undecided lease left), `first-cancel-stops` (cancel stopping at its first failure),
-`record-reused` (cluster_wave._recorded a no-op), `no-bank-code` (BANK_CODE empty), `common-only`
-(BANK_CODE common.py alone: the Block producers' change unseen), `drop-regions` (BANK_CODE without
-regions.py: the probe's imports name it) and `clean-always` (cluster_wave._uncommitted answering
-none).
+among them, and a file below src/reblock (conf is read, not imported: BANK_CODE lists it whole).
+Then the requests, on a registry with wave `w` live (its steward, a pool lease running, one
+finished with its continuation undecided, one finished and settled, a long run running, another
+wave's pool) and its seed of three jobs on the cluster: `wave w retry 2`, `wave w retry failed` and
+`wave w cancel` leave in `reblock-waves/w/requests/` exactly three files, reading as Retry((2,)),
+Retry((1, 2, 3)) and Cancel(); `retry 9` is refused naming 9; `cancel` cancels the running pool
+lease, the undecided one and the long run, every one though the first cancel fails (exit 1), and
+neither the settled lease, the steward nor the other wave's pool. Faults: `no-keep` (the job lines
+without `--keep-standing`), `block-names` (long runs named `<w>-long-<block>`: no run name),
+`no-script-check` and `no-check` (as `script`'s and `ids`'), `fit-capped` (the Ruling's refusal
+gone: fitted jobs past 7 days capped), `fit-margin` (the Ruling as first written, 1.5 times the
+estimate past 7 days: fitted_slow refused), `uncapped` (long runs at 1.5 times their estimate,
+uncapped: the long kind refuses slow_stored's), `any-node` (cluster_wave._servable a no-op:
+gpu-presets planned on orion), `pools-only` (cancel leaving the long runs), `unfinished-only`
+(cluster_wave._undone as unfinished alone: the undecided lease left), `first-cancel-stops` (cancel
+stopping at its first failure), `record-reused` (cluster_wave._recorded a no-op), `no-bank-code`
+(BANK_CODE empty), `common-only` (BANK_CODE common.py alone: the Block producers' change unseen),
+`drop-regions` (BANK_CODE without regions.py: the probe's imports name it), `clean-always`
+(cluster_wave._uncommitted answering none), and two faults of the probe alone (BANK_PROBE changed,
+BANK_CODE as it is, so no other case sees them): `outside-import` (the probe imports pool_ladder
+beside common, as a common.py importing a module of this repo outside BANK_CODE would: the probe
+names pool_ladder.py) and `producers-unseen` (the probe blind to src/, as with reblock loaded from
+outside the repo: it sees no file below src/reblock).
 
 (`gpu`, the retired raster's sizing checked against its scorer's measured peaks, went with it:
 NOTES, "The complex as the runtime: the raster retired".)
@@ -197,6 +218,7 @@ import tarfile
 import tempfile
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -208,13 +230,14 @@ import cluster  # noqa: E402
 import cluster_demand  # noqa: E402
 import cluster_submit as cs  # noqa: E402
 import cluster_wave  # noqa: E402
+import pool_plan as pp  # noqa: E402
 import pool_queue as pq  # noqa: E402
 import pool_steward  # noqa: E402
 import pool_summary as psum  # noqa: E402
 from cluster_submit import Bundle, RunPlan  # noqa: E402
 from cluster_submit.arrays import Array, route, script  # noqa: E402
 from cluster_submit.cli import parser  # noqa: E402
-from cluster_submit.context import Context, Shell, kind_of, utcnow  # noqa: E402
+from cluster_submit.context import STAMP, Context, Shell, kind_of, utcnow  # noqa: E402
 from cluster_submit.gpu import DemandLine, chain_base, demand_path, read_demand  # noqa: E402
 from cluster_submit.gpuboard import Pending, Running, Seen  # noqa: E402
 from cluster_submit.project import NAME  # noqa: E402
@@ -400,6 +423,92 @@ def _record(name: str, kind: str, job: str, *, gpus: int, finished: bool,
                      continues=None, continued_by=None, settled=False)
 
 
+@contextlib.contextmanager
+def _patched(owner: object, name: str, value: object) -> Iterator[None]:
+    old = getattr(owner, name)
+    setattr(owner, name, value)
+    try:
+        yield
+    finally:
+        setattr(owner, name, old)
+
+
+def _demand_run(name: str, kind: str, args: Sequence[str], job: str, *, width: int,
+                finished: bool) -> RunRecord:
+    """A run of a `demand` wave: `_run`'s record of it at HEAD, `width` tasks of array job `job`;
+    finished, its continuation undecided, or live."""
+    r = _run(name, kind, args, commit=SHA, width=width, finished=finished, settled=False)
+    return replace(r, arrays=(ArrayRecord(job, 0, ("t",) * width),))
+
+
+def _demand_pool(name: str, wave: str, job: str, *, node: str, mem: int, width: int,
+                 finished: bool) -> RunRecord:
+    """A lease of `demand` wave `wave`'s cpu-score pool of `mem` GB on `node` (`_demand_run`)."""
+    return _demand_run(name, "pool", ("--wave", wave, "--preset", "cpu-score", "--node", node,
+                                      "--mem", str(mem), "--gpus", str(cluster.CPU_NODES[node])),
+                       job, width=width, finished=finished)
+
+
+def _demand_job(i: int, *, node: str, mem: int, minutes: float) -> pq.JobSeed:
+    """Job `i` of a `demand` wave: of cpu-score's class `mem` on `node`, estimated at `minutes`."""
+    block = f"guard.demand{i}"
+    return pq.JobSeed(id=i, block=block, item="clearance", group=block, line=f"echo {block}",
+                      node=node, cls=f"m{mem}", gb=mem - 1.0, minutes=minutes,
+                      peak_gb=(mem - 1.0) / 1.2, source="rows:guard", lane=pq.Lane.POOL)
+
+
+def _demand_summaries(home: Path) -> None:
+    """The `demand` waves' queues in `home`'s WAVES (each wave's directory, as on the cluster), as
+    their workers leave them, and each one's summary.json as its steward writes it
+    (pool_steward._summary: its lines pool_summary.lines_of's): `a`, CLOSED, 7 jobs of m4 on
+    quadro2 estimated at 10 to 70 minutes, 2 of them claimed by workers of a-quadro2-m4-s1 and 5
+    pending, its third worker idle, and one m12 job on orion pending (25 minutes); `b`, CLOSED, its
+    one m4 job on quadro2 done and its two workers there idle (about to retire); `c`, FINISHED,
+    its two m12 jobs on quadro2 done and its one worker retired (its lease has exited)."""
+    lad = LADDERS["cpu-score"]
+    now = datetime.now(UTC)
+
+    def made(wave: str, jobs: Sequence[pq.JobSeed]) -> pq.SqliteQueue:
+        h = pq.Header(wave=wave, commit=SHA, family="guard", ladder=lad,
+                      created=now.strftime(STAMP), feed=pq.FIXED)
+        return pq.SqliteQueue.open(home / cluster.WAVES / wave / "queue.db",
+                                   pq.Seed(header=h, jobs=tuple(jobs), closed=True))
+
+    def workers(q: pq.SqliteQueue, run: str, tasks: Sequence[str], *, node: str,
+                cls: str) -> None:
+        for t in tasks:
+            q.register(worker=t, run=run, node=node, cls=cls, ends_at=now.timestamp() + 7200,
+                       restarts=0)
+
+    def claimed(q: pq.SqliteQueue, worker: str) -> pq.Claim:
+        c = q.claim(worker=worker, minutes_left=1000.0)
+        if c is None:
+            raise AssertionError(f"wave {q.header().wave}'s {worker} claimed nothing")
+        return c
+
+    def done(q: pq.SqliteQueue, worker: str) -> None:
+        q.finish(claimed(q, worker).attempt, worker=worker, outcome=pq.Outcome.DONE,
+                 peak_gb=1.0, minutes=1.0, rc=0)
+
+    a = made("a", [*(_demand_job(i, node="quadro2", mem=4, minutes=10.0 * i)
+                     for i in range(1, 8)), _demand_job(8, node="orion", mem=12, minutes=25.0)])
+    workers(a, "a-quadro2-m4-s1", ("1100_0", "1100_1", "1100_2"), node="quadro2", cls="m4")
+    claimed(a, "1100_0")
+    claimed(a, "1100_1")
+    b = made("b", [_demand_job(1, node="quadro2", mem=4, minutes=30.0)])
+    workers(b, "b-quadro2-m4-s1", ("1200_0", "1200_1"), node="quadro2", cls="m4")
+    done(b, "1200_0")
+    c = made("c", [_demand_job(i, node="quadro2", mem=12, minutes=20.0) for i in (1, 2)])
+    workers(c, "c-quadro2-m12-s1", ("1400_0",), node="quadro2", cls="m12")
+    done(c, "1400_0")
+    done(c, "1400_0")
+    c.retire("1400_0")
+    for q, state in ((a, psum.WaveState.CLOSED), (b, psum.WaveState.CLOSED),
+                     (c, psum.WaveState.FINISHED)):
+        _put(home, q.header().wave, psum.summary_json(
+            pool_steward._summary(q, round_no=1, at=now, state=state)))
+
+
 def check_demand() -> list[str]:
     """`demand` (the module's docstring): the problems found."""
     def cpu(gb: float, cpus: int = 1) -> Bundle:
@@ -423,9 +532,25 @@ def check_demand() -> list[str]:
         return _record(name, kind, job, gpus=gpus, finished=finished, cancelled=cancelled)
 
     card = Bundle(cards=1, cpus=4, mem_gb=64)
+    m4, steward = cpu(4, 2), cpu(3, 2)
     recs = [rec("g3a", "100", 1), rec("g3b", "110", 2), rec("held", "300", 4),
             rec("cancelled", "400", 4, cancelled=True), rec("unpinned", "500", 4, kind="blocks"),
-            rec("done", "600", 4, finished=True), rec("plain", "800", 4)]
+            rec("done", "600", 4, finished=True), rec("plain", "800", 4),
+            *(_demand_run(f"{w}-steward", "steward", ("--wave", w, "--board", "market"), job,
+                          width=1, finished=w == "c")
+              for w, job in (("a", "1000"), ("b", "1010"), ("c", "1020"))),
+            _demand_pool("a-quadro2-m4-s1", "a", "1100", node="quadro2", mem=4, width=3,
+                         finished=False),
+            _demand_pool("a-quadro2-m4-s2", "a", "1110", node="quadro2", mem=4, width=1,
+                         finished=False),
+            _demand_pool("b-quadro2-m4-s1", "b", "1200", node="quadro2", mem=4, width=2,
+                         finished=False),
+            _demand_pool("c-quadro2-m12-s1", "c", "1400", node="quadro2", mem=12, width=1,
+                         finished=True),
+            _demand_run("a-long-7", "long", ("--wave", "a", "--preset", "cpu-score", "--job",
+                                             "7", "--node", "orion", "--mem", "90",
+                                             "--minutes", "3000"), "1300", width=1,
+                        finished=False)]
     seen = Seen("me", running=(
         run("100_0", "g3a", "orion", cpu(850, 2)), run("110_0", "g3b", "orion", cpu(540, 2)),
         run("400_0", "cancelled", "orion", cpu(540, 2)),
@@ -433,35 +558,81 @@ def check_demand() -> list[str]:
         run("900_0", "elsewhere", "orion", cpu(540, 2)),
         run("910_0", "x", "orion", cpu(8, 2), user="other"),
         run("920_0", "y", "orion", cpu(8, 2), project="mycooc"),
-        run("950_0", "gone", "orion", cpu(8, 2))), pending=(
+        run("950_0", "gone", "orion", cpu(8, 2)),
+        run("1000_0", "a-steward", "orion", steward), run("1010_0", "b-steward", "orion", steward),
+        run("1300_0", "a-long-7", "orion", cpu(90, 2)),
+        *(run(f"1100_{k}", "a-quadro2-m4-s1", "quadro2", m4) for k in range(3)),
+        *(run(f"1200_{k}", "b-quadro2-m4-s1", "quadro2", m4) for k in range(2))), pending=(
         wait("110_1", "g3b", cpu(375)), wait("110_2", "g3b", cpu(360)),
         wait("110_3", "g3b", cpu(280)), wait("300_0", "held", cpu(540), "Dependency"),
         wait("300_1", "held", cpu(540), "BeginTime"), wait("400_1", "cancelled", cpu(540)),
         wait("500_1", "unpinned", card, node=None, label="gpu32"),
         wait("500_2", "unpinned", card, node=None, label="gpu32"),
-        wait("800_0", "plain", cpu(540)), wait("900_1", "elsewhere", cpu(375))), nodes=())
+        wait("800_0", "plain", cpu(540)), wait("900_1", "elsewhere", cpu(375)),
+        wait("1110_0", "a-quadro2-m4-s2", m4, node="quadro2")), nodes=())
     week, six = 7 * 24 * 60.0, 6 * 24 * 60.0
     limits = {"100_0": week, "110_0": six, "110_1": six, "110_2": six, "110_3": six,
               "300_0": 60.0, "300_1": 60.0, "400_0": 60.0, "400_1": 60.0, "500_0": 120.0,
               "500_1": 120.0, "500_2": 120.0, "800_0": 30.0, "900_0": 600.0, "900_1": 600.0,
-              "910_0": 60.0, "920_0": 60.0}           # 950_0 left squeue between the reads
+              "910_0": 60.0, "920_0": 60.0,           # 950_0 left squeue between the reads
+              "1000_0": 120.0, "1010_0": 120.0, "1300_0": 3000.0, "1110_0": 120.0,
+              **{f"1100_{k}": 120.0 for k in range(3)},
+              **{f"1200_{k}": 100.0 for k in range(2)}}   # b's lease capped by the market
     at = "2026-10-21T12:00:00Z"
-    s = cluster_demand.demand_of(recs, seen, limits, project="reblock", campaign="reblock",
-                                 weight=1.0, at=at,
-                                 nodes=tuple(n.name for n in PROJECT.cluster.nodes))
+    pools = {"a-quadro2-m4-s1": cluster_demand.PoolRun(wave="a", node="quadro2", bundle=m4),
+             "a-quadro2-m4-s2": cluster_demand.PoolRun(wave="a", node="quadro2", bundle=m4),
+             "b-quadro2-m4-s1": cluster_demand.PoolRun(wave="b", node="quadro2", bundle=m4)}
+    # (quadro2, m4): a's max(3 running, 5 pending + 2 claimed) at its jobs' mean (40 minutes),
+    # and b's max(2 running, none) at its workers' time limits; c's m12 line there none
     want = tuple(DemandLine(node=n, bundle=b, units=u, minutes=m, urgency=None) for n, b, u, m in (
         ("orion", cpu(850, 2), 1, week), ("orion", cpu(540, 2), 3, (six + 60 + 600) / 3),
-        ("tesla1", card, 1, 120.0), ("orion", cpu(375), 1, six), ("orion", cpu(360), 0, 0.0),
-        ("orion", cpu(280), 0, 0.0), ("orion", cpu(540), 1, 30.0)))
-    runs = ("cancelled", "elsewhere", "g3a", "g3b", "held", "plain", "unpinned")
+        ("tesla1", card, 1, 120.0), ("orion", steward, 2, 120.0),
+        ("orion", cpu(90, 2), 1, 3000.0), ("orion", cpu(375), 1, six),
+        ("orion", cpu(360), 0, 0.0), ("orion", cpu(280), 0, 0.0), ("orion", cpu(540), 1, 30.0),
+        ("orion", cpu(12, 2), 1, 25.0), ("quadro2", m4, 9, (7 * 40.0 + 2 * 100.0) / 9)))
+    runs = ("a-long-7", "a-quadro2-m4-s1", "a-quadro2-m4-s2", "a-steward", "b-quadro2-m4-s1",
+            "b-steward", "cancelled", "elsewhere", "g3a", "g3b", "held", "plain", "unpinned")
 
     def shown(ls: tuple[DemandLine, ...]) -> list[tuple[str, str, int, float]]:
         return [(x.node, x.bundle.text(), x.units, round(x.minutes, 3)) for x in ls]
 
-    d = s.demand
+    def stated(s: cluster_demand.Stated, *, waves: tuple[str, ...],
+               unread: tuple[str, ...]) -> list[str]:
+        """What is wrong with `s`, the demand stated with the summaries of `waves` read and those
+        of `unread` not."""
+        d = s.demand
+        bad = []
+        if d.lines != want:
+            bad.append(f"lines {shown(d.lines)}, wanted {shown(want)}")
+        if (s.waves, s.unread) != (waves, unread):
+            bad.append(f"the lines of waves {s.waves} stated and {s.unread} unread, wanted "
+                       f"{waves} and {unread}")
+        return bad
+
     bad = []
-    if d.lines != want:
-        bad.append(f"lines {shown(d.lines)}, wanted {shown(want)}")
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp) / "home"
+        login = _context(Path(tmp) / "repo", home).remote()
+        _demand_summaries(home)
+        live = sorted(cluster._live_stewards(recs, cluster._submitted))
+        if live != ["a", "b", "c"]:
+            bad.append(f"live waves {live}, want a, b and c (c's steward finished, unsettled)")
+        got = cluster.pool_runs(recs)
+        if got != pools:
+            bad.append(f"pool runs {got}, want {pools}")
+        s = cluster_demand.demand_of(
+            recs, seen, limits, pools=got, waves=cluster.wave_summaries(login, live),
+            project="reblock", campaign="reblock", weight=1.0, at=at,
+            nodes=tuple(n.name for n in PROJECT.cluster.nodes))
+        bad += stated(s, waves=("a", "b", "c"), unread=())
+        _put(home, "b", None)
+        alone = cluster_demand.demand_of(
+            recs, seen, limits, pools=got, waves=cluster.wave_summaries(login, live),
+            project="reblock", campaign="reblock", weight=1.0, at=at,
+            nodes=tuple(n.name for n in PROJECT.cluster.nodes))
+        bad += [f"b's summary absent: {x}" for x in stated(alone, waves=("a", "c"),
+                                                           unread=("b",))]
+    d = s.demand
     if (s.unplaced, s.elsewhere) != (2, 1):
         bad.append(f"{s.unplaced} unplaced and {s.elsewhere} elsewhere, wanted 2 and 1")
     if d.runs != runs:
@@ -479,8 +650,8 @@ def check_demand() -> list[str]:
         left = sorted(p.name for p in board.rglob("*") if p.is_file())
         if left != ["reblock.json", "w.json"]:
             bad.append(f"the board holds {left}, not the demand beside the other file")
-    print(f"demand: reblock's demand from a squeue and seven runs, on a scratch board -> "
-          f"{'ok' if not bad else 'FAILS'}", flush=True)
+    print(f"demand: reblock's demand from a squeue, seven runs and waves a, b and c (b's summary "
+          f"read, then absent), on a scratch board -> {'ok' if not bad else 'FAILS'}", flush=True)
     return bad
 
 
@@ -529,10 +700,33 @@ def _no_running() -> Iterator[None]:
         cluster_demand.held = old
 
 
+_LINES_OF = psum.lines_of
+
+
+def _count_done(jobs: Sequence[pq.Job], workers: Sequence[pq.Worker],
+                ladder: Ladder) -> tuple[psum.ClassLine, ...]:
+    """pool_summary.lines_of counting a DONE job as pending (fault `count-done`: a finished wave
+    states units)."""
+    return _LINES_OF([j._replace(state=pq.JobState.PENDING) if j.state == pq.JobState.DONE
+                      else j for j in jobs], workers, ladder)
+
+
+def _every_node(jobs: Sequence[pq.Job], workers: Sequence[pq.Worker],
+                ladder: Ladder) -> tuple[psum.ClassLine, ...]:
+    """pool_summary.lines_of counting each job on every node its wave has a job on (fault
+    `every-node`: a group's jobs counted on each of the wave's nodes)."""
+    nodes = sorted({j.node for j in jobs})
+    return _LINES_OF([j._replace(node=n) for j in jobs for n in nodes], workers, ladder)
+
+
 # The command line's fault names, each the fault it injects.
 DEMAND_FAULTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "finished-named": _finished_named, "no-throttle": _no_throttle, "any-reason": _any_reason,
-    "no-running": _no_running}
+    "no-running": _no_running,
+    "count-done": lambda: _patched(psum, "lines_of", _count_done),
+    "every-node": lambda: _patched(psum, "lines_of", _every_node),
+    "queue-only": lambda: _patched(cluster_demand, "pool_units",
+                                   lambda line, running: line.pending + line.claimed)}
 
 
 @contextlib.contextmanager
@@ -638,16 +832,6 @@ def _answer(fn: Callable[[], cs.Continue | cs.Done]) -> str:
     except SystemExit:
         return "raises"
     return f"Continue({got.workers})" if isinstance(got, cs.Continue) else "Done"
-
-
-@contextlib.contextmanager
-def _patched(owner: object, name: str, value: object) -> Iterator[None]:
-    old = getattr(owner, name)
-    setattr(owner, name, value)
-    try:
-        yield
-    finally:
-        setattr(owner, name, old)
 
 
 def _width_today(ctx: Context, rec: RunRecord, *,
@@ -1014,10 +1198,11 @@ FIT_BLOCK = "guard.fit"         # wave: a stored run's block beside them, under 
 FITTED = tuple(f"guard.fitted{k}" for k in range(1, 6))
 SCORE = "research/roadless/road_rescore.py"
 COMMON = "research/roadless/common.py"
+PRODUCERS = "src/reblock"       # wave: the Block producers' package, which a bank's write imports
 #: wave: the bank's code as cluster_wave.BANK_CODE lists it, in its order
 BANK_FILES = (COMMON, "research/roadless/regions.py", "research/roadless/gap_exits.py",
               "research/roadless/digests.py", "scripts/__init__.py",
-              "scripts/fetch_kblock_fixtures.py", "src/reblock", "conf")
+              "scripts/fetch_kblock_fixtures.py", PRODUCERS, "conf")
 PRODUCER = "src/reblock/derive/guard.py"   # wave: a Block producer's file, below src/reblock
 CONFIG = "conf/guard.yaml"                 # wave: a config file, below conf
 
@@ -1301,7 +1486,9 @@ def _covered(path: str, code: Sequence[str]) -> bool:
 def _bank_imports_check(tmp: Path) -> tuple[list[str], str]:
     """The `wave` guard's import case: a bank of WAVE_BLOCKS[1] written by common.write_bank in a
     subprocess; every file of this repo its modules were loaded from lies below a path of
-    cluster_wave.BANK_CODE. Its problems, and what it saw."""
+    cluster_wave.BANK_CODE, common.py and a file below PRODUCERS among them (a probe that saw
+    none of src/reblock, loaded from elsewhere, would pass whatever BANK_CODE says of it). Its
+    problems, and what it saw."""
     tmp.mkdir()
     r = subprocess.run([sys.executable, "-I", "-c", BANK_PROBE, str(PROJECT.repo),
                         str(tmp / "bank.pkl"), WAVE_BLOCKS[1]], cwd=tmp, capture_output=True,
@@ -1314,8 +1501,18 @@ def _bank_imports_check(tmp: Path) -> tuple[list[str], str]:
            if outside else [])
     if not any(f == COMMON for f in files):
         bad.append(f"the bank's probe imported no {COMMON}: {files}")
+    if not any(_covered(f, (PRODUCERS,)) for f in files):
+        bad.append(f"the bank's probe imported no file below {PRODUCERS}: {files}")
     return bad, (f"bank imports {len(files)} files of this repo, "
                  + (f"{len(outside)} outside BANK_CODE" if outside else "every one in BANK_CODE"))
+
+
+def _probe_fault(old: str, new: str) -> contextlib.AbstractContextManager[None]:
+    """BANK_PROBE with `old` replaced by `new` (the probe's faults: the bank is written in a
+    subprocess, which no patch in this process reaches)."""
+    if BANK_PROBE.count(old) != 1:
+        raise AssertionError(f"BANK_PROBE has {old!r} {BANK_PROBE.count(old)} times, not once")
+    return _patched(sys.modules[__name__], "BANK_PROBE", BANK_PROBE.replace(old, new))
 
 
 def _clean(repo: Path, paths: Sequence[str]) -> list[str]:
@@ -1464,7 +1661,7 @@ def _any_node(*, wave: str, ladder: Ladder, nodes: Sequence[str], commit: str,
 def _fit_margin(jobs: Sequence[pq.JobSeed]) -> list[pq.JobSeed]:
     """The Ruling as first written: a fitted job refused when 1.5 times its estimate passes 7
     days (fault `fit-margin`: fitted_slow refused)."""
-    return [j for j in jobs if j.lane == pq.Lane.LONG and j.source.startswith("fit:")
+    return [j for j in jobs if j.lane == pq.Lane.LONG and j.source.startswith(pp.FIT_SOURCE)
             and cluster_wave.LONG_TIME * j.minutes > cluster_wave.LONG_MAX_MINUTES]
 
 
@@ -1518,7 +1715,12 @@ FAULTS: dict[str, dict[str, Callable[[], contextlib.AbstractContextManager[None]
         "drop-regions": lambda: _patched(
             cluster_wave, "BANK_CODE",
             tuple(c for c in cluster_wave.BANK_CODE if c != "research/roadless/regions.py")),
-        "clean-always": lambda: _patched(cluster_wave, "_uncommitted", _clean)}}
+        "clean-always": lambda: _patched(cluster_wave, "_uncommitted", _clean),
+        "outside-import": lambda: _probe_fault("import common\n",
+                                               "import common\nimport pool_ladder\n"),
+        "producers-unseen": lambda: _probe_fault(
+            'not f.is_relative_to(repo / ".venv")',
+            'not f.is_relative_to(repo / ".venv") and not f.is_relative_to(repo / "src")')}}
 
 
 # ---- the command line -----------------------------------------------------------------------

@@ -75,6 +75,11 @@ class Observed(NamedTuple):
     source: str
 
 
+#: How an Estimate's source names a fit (`fit:<scope>:...`, Estimator._fitted): a stored or
+#: measured basis's is `rows:...`, `wave:...` or `smoke`.
+FIT_SOURCE = "fit:"
+
+
 class Estimate(NamedTuple):
     """A job's estimate: the bases (a peak in GB, a wall in minutes), the margins they are taken
     with, and where the bases came from."""
@@ -454,8 +459,9 @@ class Estimator:
             minutes = max(o.minutes for o in pool.runs)
         blocks = len({o.block for o in pool.runs})
         return Estimate(peak_gb=peak, minutes=minutes, mem_margin=self.ladder.fit_mem,
-                        time_margin=1.0, source=f"fit:{pool.scope}:{len(pool.runs)} jobs on "
-                                                f"{blocks} blocks {side}")
+                        time_margin=1.0,
+                        source=f"{FIT_SOURCE}{pool.scope}:{len(pool.runs)} jobs on {blocks} "
+                               f"blocks {side}")
 
 
 class _Wave(NamedTuple):

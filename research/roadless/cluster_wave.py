@@ -17,15 +17,14 @@ with the plan's Rulings 4, 7 and 12): a wave submitted whole, then read and stee
    neither `reblock` (the campaign) nor `submit` (`wave submit ...` is always a submit), no record
    of the registry is a run of it, no record of it is here (`research/roadless/waves/<w>/`, whose
    final.db a reused name would overwrite), and (without --dry) the cluster has no
-   `reblock-waves/<w>`. Nothing of the bank's code (BANK_CODE: common.py and all
-   common.write_bank builds through, its imports from this repo and the Hydra config it composes)
-   has an uncommitted change: the bank is built here by the working tree's code while every run
-   is `--at` HEAD. The command's script
-   is a file at the commit (cluster._script_at); it has `{id}`, and `{item}` exactly when
-   --items is given; --unpack's tars end in `.tar` (the steward deletes the wave's inputs/*.tar
-   at its end). Each of --nodes has its usable memory known (pool_plan.USABLE_GB) and
-   serves the preset: the pool the market would start there (Waves.template's arguments) plans
-   and routes, so a CPU ladder is refused off CPU_NODES and a GPU one on a node of unusable cards.
+   `reblock-waves/<w>`. Nothing of the bank's code (BANK_CODE: common.py and all common.write_bank
+   builds through, its imports from this repo and the Hydra config it composes) has an uncommitted
+   change: the bank is built here by the working tree's code while every run is `--at` HEAD. The
+   command's script is a file at the commit (cluster._script_at); it has `{id}`, and `{item}`
+   exactly when --items is given; --unpack's tars end in `.tar` (the steward deletes the wave's
+   inputs/*.tar at its end). Each of --nodes has its usable memory known (pool_plan.USABLE_GB) and
+   serves the preset: the pool the market would start there (Waves.template's arguments) plans and
+   routes, so a CPU ladder is refused off CPU_NODES and a GPU one on a node of unusable cards.
 2. The bank (common.write_bank, every id checked: a misspelt one is refused before anything is
    planned), the areas (pool_plan.areas_of), the estimator (the family's rows, the earlier waves'
    records, FIT_MIN_KM2 and FIT_MIN_BLOCKS) and the seed (pool_plan.plan_wave: one job per (block,
@@ -137,9 +136,6 @@ KEEP = "--keep-standing"
 #: LONG_MAX_MINUTES. Cost only, never a row.
 LONG_TIME = 1.5
 LONG_MAX_MINUTES = cluster.LONG_MAX_MINUTES
-#: How pool_plan's Estimator names a fit's source (`fit:<scope>:...`, Estimator._fitted): a stored
-#: or measured basis's is `rows:...`, `wave:...` or `smoke`.
-FIT_SOURCE = "fit:"
 #: The kinds of a wave's runs, and those `cancel` cancels (the steward ends the wave itself).
 WAVE_KINDS = (cluster.Pool.name, cluster.Steward.name, cluster.Long.name)
 CANCELLED_KINDS = (cluster.Pool.name, cluster.Long.name)
@@ -331,7 +327,7 @@ def _long_of(j: pq.JobSeed) -> psum.LongJob:
 def _unbounded(jobs: Sequence[pq.JobSeed]) -> list[pq.JobSeed]:
     """The LONG jobs whose estimate is a fit and itself passes LONG_MAX_MINUTES: the Ruling's,
     refused."""
-    return [j for j in jobs if j.lane == pq.Lane.LONG and j.source.startswith(FIT_SOURCE)
+    return [j for j in jobs if j.lane == pq.Lane.LONG and j.source.startswith(pp.FIT_SOURCE)
             and j.minutes > LONG_MAX_MINUTES]
 
 
@@ -449,7 +445,7 @@ def _inputs(files: Sequence[Path]) -> tuple[Path, ...]:
 def _source_kind(source: str) -> str:
     """An estimate's source as the plan counts it: `rows`, `wave`, `smoke`, or `fit:<scope>`."""
     head, _, rest = source.partition(":")
-    return f"{head}:{rest.partition(':')[0]}" if source.startswith(FIT_SOURCE) else head
+    return f"{head}:{rest.partition(':')[0]}" if source.startswith(pp.FIT_SOURCE) else head
 
 
 def _print_plan(seed: pq.Seed, *, nodes: Sequence[str], longs: Sequence[tuple[Call, pq.JobSeed]],
@@ -609,7 +605,7 @@ def _run_state(r: RunRecord) -> str:
 def _status(edge: Edge, wave: str) -> Ran:
     ctx = edge.ctx
     runs = _wave_runs(ctx, wave)
-    got = cluster.wave_summaries(ctx, [wave])
+    got = cluster.wave_summaries(ctx.remote(), [wave])
     code = 0
     if wave in got.read:
         s = got.read[wave]
