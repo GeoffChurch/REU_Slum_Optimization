@@ -2009,7 +2009,8 @@ class Third(NamedTuple):
 def _ghost(at: datetime) -> Third:
     """A dead steward's summary written at `at`: wave-ghost CLOSED with GHOST_WORKERS live workers
     on (QUADRO, m4) as it last counted them."""
-    s = psum.Summary(wave="wave-ghost", commit=COMMIT, at=at.strftime(STAMP), round=7,
+    s = psum.Summary(wave="wave-ghost", commit=COMMIT, ladder="cpu-score",
+                     at=at.strftime(STAMP), round=7,
                      state=psum.WaveState.CLOSED, metric=None,
                      lines=(psum.ClassLine(node=QUADRO, cls="m4", cards=0, cpus=2, mem_gb=4,
                                            pending=GHOST_WORKERS, claimed=GHOST_WORKERS,

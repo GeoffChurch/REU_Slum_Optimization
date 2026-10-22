@@ -11,16 +11,23 @@ the other waves' stewards stepping aside).
 - **Reaped**: every worker the wave's reaps took (pool_queue's `reaped`), each with whether it
   held a job and whether its walltime had ended (what `more` reads: mycooc's lesson 5).
 - **Long**: the jobs waiting for a long run (LONG), each with what a run of it needs.
+- **Its ladder's name** (the queue header's, a name of pool_ladder.LADDERS): what this machine's
+  `Waves.template` starts a class's pool lease with (`--preset`), so the queue's header stays
+  the one record of a wave's ladder and no run's arguments repeat it (the controller's ruling,
+  2026-10-21).
 - **Read exactly** (`read_summary`): format SUMMARY_FORMAT, every key by name, of its type, none
   unknown; anything else a ValueError naming where it was read (Ruling 13: the format changes
-  only while no wave is live).
+  only while no wave is live). Several waves' summaries on the cluster are read with one command
+  (`read_summaries`), each read so.
 - **Stepping aside across waves** (`aside_share`, Ruling 5): the campaign's yields on a (node,
   bundle) shared among the live waves there in proportion to their workers, largest remainder.
 """
 from __future__ import annotations
 
+import base64
 import json
 import math
+import shlex
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -29,6 +36,7 @@ from enum import StrEnum
 from typing import NamedTuple
 
 from cluster_submit.context import STAMP
+from cluster_submit.remote import Login
 from pool_ladder import Ladder, class_name
 from pool_queue import Job, JobState, Lane, Obj, Worker
 
@@ -83,12 +91,13 @@ class LongJob(NamedTuple):
 
 @dataclass(frozen=True, kw_only=True)
 class Summary:
-    """A wave's summary.json: the wave, its commit, when (STAMP) and at which of its steward's
-    rounds, its state and metric, its lines, every worker reaped, and the jobs waiting for a long
-    run."""
+    """A wave's summary.json: the wave, its commit, its ladder's name, when (STAMP) and at which
+    of its steward's rounds, its state and metric, its lines, every worker reaped, and the jobs
+    waiting for a long run."""
 
     wave: str
     commit: str
+    ladder: str
     at: str
     round: int
     state: WaveState
@@ -154,8 +163,8 @@ def aside_share(*, yields: int, workers: Mapping[str, int], wave: str) -> int:
 def summary_json(s: Summary) -> str:
     """summary.json's text: one line of JSON (and its newline)."""
     return json.dumps({
-        "format": SUMMARY_FORMAT, "wave": s.wave, "commit": s.commit, "at": s.at,
-        "round": s.round, "state": s.state.value, "metric": s.metric,
+        "format": SUMMARY_FORMAT, "wave": s.wave, "commit": s.commit, "ladder": s.ladder,
+        "at": s.at, "round": s.round, "state": s.state.value, "metric": s.metric,
         "lines": [line._asdict() for line in s.lines],
         "reaped": [r._asdict() for r in s.reaped],
         "long": [j._asdict() for j in s.long]}, allow_nan=False) + "\n"
@@ -204,8 +213,8 @@ def read_summary(text: str, where: str) -> Summary:
     state = o.text("state")
     if state not in {s.value for s in WaveState}:
         raise ValueError(f"{where}: state {state!r} is none of {[s.value for s in WaveState]}")
-    s = Summary(wave=o.text("wave"), commit=o.text("commit"), at=at, round=o.count("round"),
-                state=WaveState(state), metric=o.text_or_null("metric"),
+    s = Summary(wave=o.text("wave"), commit=o.text("commit"), ladder=o.text("ladder"), at=at,
+                round=o.count("round"), state=WaveState(state), metric=o.text_or_null("metric"),
                 lines=tuple(_line(Obj(v, f"{where}.lines[{i}]"))
                             for i, v in enumerate(o.items("lines"))),
                 reaped=tuple(_reaped(Obj(v, f"{where}.reaped[{i}]"))
@@ -214,3 +223,58 @@ def read_summary(text: str, where: str) -> Summary:
                            for i, v in enumerate(o.items("long"))))
     o.done()
     return s
+
+
+class Summaries(NamedTuple):
+    """Waves' summaries as `read_summaries` found them: those that read, and why each other did
+    not, both by wave."""
+
+    read: dict[str, Summary]
+    unread: dict[str, str]
+
+
+#: How `read_summaries`'s command marks a summary it could not read (base64 never prints it).
+_UNREAD = "!"
+
+
+def read_summaries(login: Login, paths: Mapping[str, str]) -> Summaries:
+    """The summaries at `paths` (by wave, each as `login`'s commands name it), read with one
+    command, each exactly (read_summary) and its `wave` the one asked: those that read, and why
+    each other did not (absent or unreadable there, not a summary, of another format, another
+    wave's). A command that fails, or that answers otherwise than one line a wave, in order, is
+    refused (SystemExit): nothing is read, and whoever asked asks again. No paths: none, and no
+    command."""
+    waves = list(paths)
+    if not waves:
+        return Summaries(read={}, unread={})
+    command = "".join(f"printf '%s ' {shlex.quote(w)}; base64 -w0 {shlex.quote(paths[w])} "
+                      f"2>/dev/null || printf %s {shlex.quote(_UNREAD)}; echo\n" for w in waves)
+    r = login.probe(command)
+    lines = r.stdout.splitlines()
+    named = [line.partition(" ")[0] for line in lines]
+    if r.returncode or named != waves:
+        raise SystemExit(f"the summaries of {', '.join(waves)} on {login.host} could not be read "
+                         f"(exit {r.returncode}, waves answered {named}): "
+                         f"{r.stderr.strip()[-300:]}")
+    out = Summaries(read={}, unread={})
+    for w, line in zip(waves, lines, strict=True):
+        body = line.partition(" ")[2]
+        where = f"{login.host}:{paths[w]}"
+        if body == _UNREAD:
+            out.unread[w] = f"{where}: absent, or not readable there"
+            continue
+        try:
+            text = base64.b64decode(body, validate=True).decode()
+        except ValueError as e:                 # binascii.Error, UnicodeDecodeError
+            out.unread[w] = f"{where}: not base64 of UTF-8 text: {e}"
+            continue
+        try:
+            s = read_summary(text, where)
+        except ValueError as e:
+            out.unread[w] = str(e)
+            continue
+        if s.wave != w:
+            out.unread[w] = f"{where}: wave {s.wave}'s summary, not {w}'s"
+            continue
+        out.read[w] = s
+    return out

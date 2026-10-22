@@ -2,11 +2,23 @@
 scripts it as cluster_submit's submit does (the plan a dry submit prints and the sbatch it
 stages), and checks what a task would get.
 
-    PYTHONPATH=. uv run python research/roadless/cluster_check.py cpu <ids,> <items,>
-    PYTHONPATH=. uv run python research/roadless/cluster_check.py ids [no-check]
-    PYTHONPATH=. uv run python research/roadless/cluster_check.py script [no-script-check]
-    PYTHONPATH=. uv run python research/roadless/cluster_check.py demand \
-        [finished-named|no-throttle|any-reason|no-running]
+    C=research/roadless/cluster_check.py   # from the repo root, PYTHONPATH=., single-threaded
+    uv run python $C cpu <ids,> <items,>    # a print, checked by eye
+    uv run python $C ids [fault]            # fault: no-check
+    uv run python $C script [fault]         # fault: no-script-check
+    uv run python $C demand [fault]         # faults: finished-named, no-throttle, any-reason,
+                                            # no-running
+    uv run python $C kinds [fault]          # fault: lease-bundle
+    uv run python $C more [fault]           # fault: continue-idle
+    uv run python $C template [fault]       # faults: other-mem, other-node, continuation-name,
+                                            # reused-name, with-at, first-wave
+    uv run python $C both-ways <guards,>    # each guard, then under each of its faults
+
+Each guard but `cpu` has its faults (FAULTS: a patch in this process, no file edited, as
+gap_clear_check.py's): it passes on the code as it is, and must fail under each fault; run alone
+it exits 1 when it fails as it is, and under a fault exits 0 when it fails (the fault seen) and
+names the fault when it does not. `both-ways` runs each guard as it is and under each of its
+faults, in one process, and exits 1 naming every run not as expected.
 
 `cpu`: a `cpu` run on each node of CPU_NODES at its own throttle is one CPU array pinned there
 (`--nodelist`), with no GPU request, the given cores and memory, every (block, item) one task that
@@ -21,15 +33,14 @@ the parser every entry point reads its ids with (common.ids_of), by the bank's w
 (common.write_bank), by a `blocks` submit's plan before any task is staged, and by build_blocks
 reading a bank that lacks it; the id spelt right parses and plans. Fault `no-check`: the check
 removed (common._known a no-op): the parser and the bank's writer let the mistyped id through,
-the bank written without it, as in phase 2b. It follows gap_clear_check.py's convention: exit 0
-when the guard passes, or fails under its fault.
+the bank written without it, as in phase 2b.
 
 `script` (a plan reads the repo at its commit, cluster_submit's README): a plan of either kind
 reads its command's script at the run's commit (Kind.plan's sha), from git, never the working
 tree. A script the working tree holds and the commit lacks (gap_calib.py at the repo's first
 commit) is refused naming the commit; one the commit holds and the working tree lacks (GONE, at
 the commit before the one that deleted it) plans. Fault `no-script-check`: cluster._script_at a
-no-op: the absent script plans. Exit as for `ids`.
+no-op: the absent script plans.
 
 `demand` (cluster_demand: reblock's one campaign in the GPU market): its demand from a made-up
 squeue and seven made-up runs of this registry, and the board script run on a scratch board. Held
@@ -44,7 +55,62 @@ another project's, or a task that left squeue between the two reads. Faults: `fi
 (cluster_demand.finished never true: a finished run named), `no-throttle` (cluster_demand.room
 unbounded: units past a run's throttle), `any-reason` (cluster_demand.waits_for always true: a
 task held by its dependency counted), `no-running` (cluster_demand.held's units dropped: what the
-waves hold stated as units 0). Exit as for `ids`.
+waves hold stated as units 0).
+
+The lease pool's guards (docs/superpowers/specs/2026-10-21-lease-pool-design.md; the plan's
+Rulings 3, 4, 10 and 11, and the controller's: a summary names its ladder) run cluster.py's kinds
+and Waves against a real cluster_submit Context over a registry in a temporary directory, its
+runner answering every ssh command with bash in a temporary cluster home, so the summaries are
+read as the login node reads them:
+
+`kinds`: each kind planned from a command line at HEAD (as a dry submit plans it, routed and
+throttle-checked): a `pool` of cpu-score at 12 GB on quadro2 is one CPU array pinned there, 2
+CPUs, 12 GB, 2:00:00 (its sbatch header too), no inputs, its one line `pool.py work --wave w
+--node quadro2 --class m12`; one of gpu-presets at 32 GB on tesla1 one array of tesla1's card,
+its task asking 8 GB of it, 4 CPUs and 32 GB, `--class g32`; refused: a gpu-presets pool on orion
+(its cards unusable), a `--mem` that is no rung of the preset, a cpu-score pool on tesla1 (no
+node of CPU_NODES, whose throttle it would run at: Ruling 10) and one past quadro2's throttle; a
+`steward` lands on orion with 2 CPUs and 3 GB for 2:00:00, its line `pool.py steward --wave w
+--board cluster_submit/market --stale-after-minutes 30` (the market's stale_after); a `long` of
+90 GB and 3000 minutes asks 90 GB and 2-02:00:00, its line `pool.py work --wave w --job 7`, and
+one of 7 days and a minute is refused. `Waves.lease` of each one's record: a pool's
+`Lease("reblock", node, its class's bundle)`, which is what its plan asks Slurm for (a card per
+task or none, the plan's CPUs and memory, on its node: Ruling 3), and None for the steward, the
+long run, a `cpu` run and a `blocks` run. Fault `lease-bundle`: Waves.lease gives a CPU class 1
+CPU, so a CPU pool's lease is not what its plan asks for.
+
+`more` (the spec's guard 8, the plan's Review Focus 1 and 3): `pool_more` of a finished lease of
+wave `w` two workers wide (tasks 500_0 and 500_1, out of squeue at GONE_AT), its steward live and
+its summary on the cluster (or not), `cs.launches.width` patched (the market's arithmetic is
+cluster_submit's, not this guard's) to call the kind's own rule, `today`, except in `market`.
+Cases: `today`, three m12 jobs pending on quadro2 and 500_1 killed at its walltime and reaped
+holding a job: Continue(2); `market`, the same with `width` answering the market's Continue(10):
+Continue(3), capped by the jobs pending; `routine`, no task killed: Continue(2); `idle`, 500_1
+reaped holding no job: Done; `unreaped`, 500_1 not reaped yet: raises; `old`, the summary written
+before GONE_AT: raises; `absent`, no summary: raises; `format-2`, a summary of format 2: raises;
+`no-steward`, the wave's steward finished: Done; `none-pending`, no m12 job pending on quadro2
+(some claimed there, some pending elsewhere): Done; and the steward's own `more`: Continue(1)
+while its summary is CLOSED, Done once FINISHED. Fault `continue-idle` (cluster._idle_killed
+finding none: a lease whose worker was killed idle is continued).
+
+`template` (Ruling 4, Review Focus 2): live waves `a` (its steward at HEAD) and `b` (at HEAD^),
+with 3 and 7 jobs of m12 (cpu-score) pending on quadro2 and none of m24 pending on orion, a pool
+lease of `b` there already named b-quadro2-m12-s1, and a live wave `c` whose summary is absent.
+The template for (quadro2, 0/2/12) is `b`'s: kind `pool`, run b-quadro2-m12-s2, commit `b`'s
+steward's, args `--wave b --preset cpu-score --node quadro2 --mem 12 --gpus 40`; and it passes
+every refusal of cluster_submit's `launches.start`, by launches' own code: its arguments parsed
+with `--at` its commit read that commit and no --dry, `chain_base` of its run is the run, the
+registry lacks it, the pool kind's plan of it passes `launches.line_checked` for that node and
+bundle, and `Waves.lease` of its record is the campaign's lease of that bundle there. Done, naming
+the bundle and node: a bundle no live wave has a line of (quadro2, 0/2/24), a node no wave serves
+(tesla1), lines with nothing pending (orion, 0/2/24; its why naming `c`'s unread summary too), and
+another campaign's. A registry whose only live wave is `c`: raises; whose live wave's summary
+names a ladder LADDERS lacks: raises, naming it; with no live wave: Done. `Waves.starts(lambda:
+(s,))` is `(s,)`. Faults, one per refusal the template must not trip and one for its choice:
+`other-mem` (its `--mem` the next rung: line_checked refuses the bundle), `other-node` (its
+`--node` another node), `continuation-name` (`<w>-<node>-<class>-l1`), `reused-name` (`-s1`, which
+the registry has), `with-at` (its args carrying `--at` HEAD: the parse reads another commit than
+the template's) and `first-wave` (the first live wave by name, whatever its pending jobs).
 
 (`gpu`, the retired raster's sizing checked against its scorer's measured peaks, went with it:
 NOTES, "The complex as the runtime: the raster retired".)
@@ -53,28 +119,35 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import functools
 import io
+import json
 import os
 import subprocess
 import sys
 import tarfile
 import tempfile
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parent.parent)]
 import cluster  # noqa: E402
 import cluster_demand  # noqa: E402
+import cluster_submit as cs  # noqa: E402
+import pool_summary as psum  # noqa: E402
 from cluster_submit import Bundle, RunPlan  # noqa: E402
 from cluster_submit.arrays import Array, route, script  # noqa: E402
 from cluster_submit.cli import parser  # noqa: E402
-from cluster_submit.gpu import DemandLine, demand_path, read_demand  # noqa: E402
+from cluster_submit.context import Context, Shell, kind_of, utcnow  # noqa: E402
+from cluster_submit.gpu import DemandLine, chain_base, demand_path, read_demand  # noqa: E402
 from cluster_submit.gpuboard import Pending, Running, Seen  # noqa: E402
-from cluster_submit.registry import NO_OVERRIDES, ArrayRecord, RunRecord  # noqa: E402
-from cluster_submit.remote import Local, SubprocessRunner  # noqa: E402
+from cluster_submit.registry import NO_OVERRIDES, ArrayRecord, Registry, RunRecord  # noqa: E402
+from cluster_submit.remote import Completed, Local, SubprocessRunner  # noqa: E402
 from cluster_submit.submit import throttle_checked  # noqa: E402
+from pool_ladder import Ladder  # noqa: E402
 
 PROJECT = cluster.PROJECT
 COMMAND = ["--", "research/roadless/gap_calib.py", "preset", "{id}", "{item}", "cpu"]
@@ -411,33 +484,452 @@ def _no_check() -> Iterator[None]:
         common._known = old
 
 
+# ---- the lease pool's guards ------------------------------------------------------------------
+
+GONE_AT = "2026-10-21T12:00:00Z"        # more: when the lease left squeue
+LEASE = "w-quadro2-m12-s1"              # more: the lease, two workers wide
+KILLED = "500_1"                        # more: its task killed at its walltime
+
+
+def _context(repo: Path, home: Path) -> Context:
+    """A cluster_submit Context over a registry in `repo`, its runner answering every ssh command
+    with bash in `home` (the cluster home, as the login node runs a command)."""
+    def run(argv: Sequence[str], *, input: str | None = None) -> Completed:
+        if argv[0] != "ssh":
+            raise AssertionError(f"a call that is no ssh command: {list(argv)}")
+        r = subprocess.run(["bash", "-c", argv[-1]], cwd=home, input=input, text=True,
+                           capture_output=True)
+        return Completed(r.returncode, r.stdout, r.stderr)
+
+    home.mkdir(parents=True, exist_ok=True)
+    return Context(project=PROJECT, run=run, registry=Registry(repo), units_dir=repo / "units",
+                   now=utcnow, entry=HERE / "cluster.py", argv=(), machine="cluster-check",
+                   caller=Shell(), sleep=lambda s: None, parse=parser(PROJECT).parse_args)
+
+
+def _run(name: str, kind: str, args: Sequence[str], *, commit: str, width: int,
+         finished: bool) -> RunRecord:
+    """A run's record as a submit of `kind` named `name` with `args` writes it: one array (job
+    500, `width` tasks), out of squeue at GONE_AT and finished, or live."""
+    stamp = "2026-10-21T10:00:00Z"
+    return RunRecord(name=name, kind=kind, commit=commit, argv=("submit", kind, name, *args),
+                     overrides=NO_OVERRIDES, submitted_at=stamp, attempt=f"guard:{name}",
+                     arrays=(ArrayRecord("500", 0, ("t",) * width),), gpus=4, chained_after=(),
+                     last_sync=stamp, gone_at=GONE_AT if finished else None,
+                     finished_at=GONE_AT if finished else None, cancelled_at=None, unpulled=(),
+                     unstarted=(), continues=None, continued_by=None, settled=False)
+
+
+def _steward_run(wave: str, *, commit: str, finished: bool) -> RunRecord:
+    return _run(f"{wave}-steward", "steward", ("--wave", wave, "--board", "market"),
+                commit=commit, width=1, finished=finished)
+
+
+def _pool_run(name: str, wave: str, *, node: str, mem: int, finished: bool) -> RunRecord:
+    return _run(name, "pool", ("--wave", wave, "--preset", "cpu-score", "--node", node, "--mem",
+                               str(mem), "--gpus", str(cluster.CPU_NODES[node])),
+                commit=SHA, width=2, finished=finished)
+
+
+def _line(node: str, mem: int, *, pending: int, claimed: int) -> psum.ClassLine:
+    """A line of cpu-score's class `mem` on `node`."""
+    return psum.ClassLine(node=node, cls=f"m{mem}", cards=0, cpus=2, mem_gb=mem, pending=pending,
+                          claimed=claimed, minutes=30.0, long=0, done=0, failed=0,
+                          workers=claimed)
+
+
+def _summary(wave: str, *, at: str, state: psum.WaveState, ladder: str,
+             lines: Sequence[psum.ClassLine], reaped: Sequence[psum.ReapedWorker]) -> str:
+    return psum.summary_json(psum.Summary(
+        wave=wave, commit=SHA, ladder=ladder, at=at, round=3, state=state, metric=None,
+        lines=tuple(lines), reaped=tuple(reaped), long=()))
+
+
+def _put(home: Path, wave: str, text: str | None) -> None:
+    """`wave`'s summary.json on the cluster `text`, or none."""
+    path = home / cluster.WAVES / wave / "summary.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if text is None:
+        path.unlink(missing_ok=True)
+    else:
+        path.write_text(text)
+
+
+def _answer(fn: Callable[[], cs.Continue | cs.Done]) -> str:
+    """What a `more` answered: `Continue(<workers>)`, `Done`, or `raises` (SystemExit)."""
+    try:
+        got = fn()
+    except SystemExit:
+        return "raises"
+    return f"Continue({got.workers})" if isinstance(got, cs.Continue) else "Done"
+
+
+@contextlib.contextmanager
+def _patched(owner: object, name: str, value: object) -> Iterator[None]:
+    old = getattr(owner, name)
+    setattr(owner, name, value)
+    try:
+        yield
+    finally:
+        setattr(owner, name, old)
+
+
+def _width_today(ctx: Context, rec: RunRecord, *,
+                 today: Callable[[], cs.Continue | cs.Done]) -> cs.Continue | cs.Done:
+    return today()
+
+
+def _width_market(ctx: Context, rec: RunRecord, *,
+                  today: Callable[[], cs.Continue | cs.Done]) -> cs.Continue | cs.Done:
+    return cs.Continue(workers=10)
+
+
+def check_kinds() -> list[str]:
+    """`kinds` (the module's docstring): the problems found."""
+    bad: list[str] = []
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        ctx = _context(tmp / "repo", tmp / "home")
+        cpu_pool = ("--wave", "w", "--preset", "cpu-score", "--node", "quadro2", "--mem", "12",
+                    "--gpus", "40")
+        gpu_pool = ("--wave", "w", "--preset", "gpu-presets", "--node", "tesla1", "--mem", "32",
+                    "--gpus", "4")
+        steward = ("--wave", "w", "--board", "cluster_submit/market")
+        long = ("--wave", "w", "--preset", "cpu-score", "--job", "7", "--node", "orion", "--mem",
+                "90", "--minutes", "3000")
+        work = "python -u research/roadless/pool.py"
+        want = {   # kind, run, args: card GB of its array, its node, resources, task GB, line
+            ("pool", "w-quadro2-m12-s1", cpu_pool): (0, cs.Resources(
+                cpus=2, mem_gb=12, time="2:00:00", node="quadro2"), 0.0,
+                f"{work} work --wave w --node quadro2 --class m12"),
+            ("pool", "w-tesla1-g32-s1", gpu_pool): (32, cs.Resources(
+                cpus=4, mem_gb=32, time="2:00:00", node="tesla1"), cluster.CARD_GB,
+                f"{work} work --wave w --node tesla1 --class g32"),
+            ("steward", "w-steward", steward): (0, cs.Resources(
+                cpus=2, mem_gb=3, time="2:00:00", node="orion"), 0.0,
+                f"{work} steward --wave w --board cluster_submit/market "
+                "--stale-after-minutes 30"),
+            ("long", "w-long-7", long): (0, cs.Resources(
+                cpus=2, mem_gb=90, time="2-02:00:00", node="orion"), 0.0,
+                f"{work} work --wave w --job 7")}
+        leases = {"w-quadro2-m12-s1": cs.Lease("reblock", "quadro2", Bundle(0, 2, 12)),
+                  "w-tesla1-g32-s1": cs.Lease("reblock", "tesla1", Bundle(1, 4, 32))}
+        for (kind, run, args), (card, res, gb, line) in want.items():
+            argv = ["submit", kind, run, "--dry", *args]
+            sub, plan, arrays = _plan(argv, tmp / run, sha=SHA)
+            got = ([(a.card_gb, a.node, list(a.tasks)) for a in arrays], plan.resources,
+                   [t.gpu_gb for t in plan.tasks], plan.inputs, plan.prelude)
+            if got != ([(card, res.node, [line])], res, [gb], (), (cluster.TASK_ENV,)):
+                bad.append(f"{kind} {run}: planned {got}")
+            env = cluster.ENV.at(SubprocessRunner(), PROJECT.repo, SHA, root=PROJECT.root())
+            head = {ln for ln in script(PROJECT, run, SHA, arrays[0], plan.resources,
+                                        plan.prelude, sub.gpus, env).splitlines()
+                    if ln.startswith("#SBATCH")}
+            sbatch = {f"#SBATCH --nodelist={res.node}", f"#SBATCH --cpus-per-task={res.cpus}",
+                      f"#SBATCH --mem={res.mem_gb}G", f"#SBATCH --time={res.time}"}
+            if not sbatch <= head:
+                bad.append(f"{kind} {run}: its sbatch header lacks {sorted(sbatch - head)}")
+            rec = _run(run, kind, args, commit=SHA, width=1, finished=False)
+            lease = cluster.Waves().lease(ctx, rec)
+            if lease != leases.get(run):
+                bad.append(f"{kind} {run}: Waves.lease {lease}, want {leases.get(run)}")
+            asks = {Bundle(cards=0 if t.cpu else 1, cpus=plan.resources.cpus,
+                           mem_gb=plan.resources.mem_gb) for t in plan.tasks}
+            if lease is not None and (lease.node, {lease.bundle}) != (plan.resources.node, asks):
+                bad.append(f"{kind} {run}: its lease is {lease.bundle.text()} on {lease.node}, "
+                           f"its plan asks {[b.text() for b in asks]} on {plan.resources.node}")
+        others = [_run("c", "cpu", ("--node", "orion", "--cpus", "1", "--mem", "8", "--items",
+                                    "x", "a", "--", "research/roadless/gap_calib.py", "{id}",
+                                    "{item}"), commit=SHA, width=1, finished=False),
+                  _run("b", "blocks", ("--gb", "8", "a", "--", "research/roadless/gap_calib.py",
+                                       "{id}"), commit=SHA, width=1, finished=False)]
+        bad += [f"{r.kind}: Waves.lease {x}" for r in others
+                if (x := cluster.Waves().lease(ctx, r)) is not None]
+        refusals = {   # what is refused, and a word its why says
+            "a gpu-presets pool on orion": ("pool", ("--wave", "w", "--preset", "gpu-presets",
+                                                     "--node", "orion", "--mem", "32", "--gpus",
+                                                     "4"), "unusable"),
+            "a --mem of 13 GB": ("pool", (*cpu_pool[:7], "13", *cpu_pool[8:]), "rung"),
+            "a cpu-score pool on tesla1": ("pool", ("--wave", "w", "--preset", "cpu-score",
+                                                    "--node", "tesla1", "--mem", "12"),
+                                           "CPU_NODES"),
+            "a cpu-score pool on quadro2 at --gpus 41": ("pool", (*cpu_pool[:9], "41"),
+                                                         "at most 40"),
+            "a long run of 7 days and a minute": ("long", (*long[:11], "10081"), "7 days")}
+        for what, (kind, args, word) in refusals.items():
+            try:
+                why = _refused(["submit", kind, "guard", "--dry", *args], tmp / "refused",
+                               sha=SHA)
+                if word not in why:
+                    bad.append(f"{what}: refused without saying {word!r}: {why}")
+            except AssertionError:
+                bad.append(f"{what}: planned")
+    print(f"kinds: pool, steward and long planned, refused and leased -> "
+          f"{'ok' if not bad else 'FAILS'}", flush=True)
+    return bad
+
+
+def _one_cpu_lease(self: cluster.Waves, ctx: Context, rec: RunRecord) -> cs.Lease | None:
+    """Waves.lease giving a CPU class 1 CPU (fault `lease-bundle`)."""
+    x = _LEASE(self, ctx, rec)
+    if x is None or x.bundle.cards:
+        return x
+    return x._replace(bundle=Bundle(cards=0, cpus=1, mem_gb=x.bundle.mem_gb))
+
+
+_LEASE = cluster.Waves.lease
+
+
+class MoreCase(NamedTuple):
+    """A case of `more`: the summary on the cluster (None: none), the tasks killed at their
+    walltime, whether the wave's steward is finished, the width's patch, and the answer."""
+
+    summary: str | None
+    killed: tuple[str, ...]
+    steward_finished: bool
+    width: Callable[..., cs.Continue | cs.Done]
+    want: str
+
+
+def check_more() -> list[str]:
+    """`more` (the module's docstring): the problems found."""
+    closed = psum.WaveState.CLOSED
+    after, before = "2026-10-21T12:01:00Z", "2026-10-21T11:59:00Z"
+    lines = (_line("orion", 12, pending=4, claimed=0), _line("quadro2", 12, pending=3, claimed=2),
+             _line("quadro2", 24, pending=5, claimed=0))
+    held = psum.ReapedWorker(task=KILLED, run=LEASE, held_job=True, walltime=True)
+    idle = held._replace(held_job=False)
+
+    def summary(*, at: str = after, of: Sequence[psum.ClassLine] = lines,
+                reaped: Sequence[psum.ReapedWorker] = (held,)) -> str:
+        return _summary("w", at=at, state=closed, ladder="cpu-score", lines=of, reaped=reaped)
+
+    none_pending = (lines[0], _line("quadro2", 12, pending=0, claimed=2), lines[2])
+    cases = {
+        "today": MoreCase(summary(), (KILLED,), False, _width_today, "Continue(2)"),
+        "market": MoreCase(summary(), (KILLED,), False, _width_market, "Continue(3)"),
+        "routine": MoreCase(summary(reaped=()), (), False, _width_today, "Continue(2)"),
+        "idle": MoreCase(summary(reaped=(idle,)), (KILLED,), False, _width_today, "Done"),
+        "unreaped": MoreCase(summary(reaped=()), (KILLED,), False, _width_today, "raises"),
+        "old": MoreCase(summary(at=before), (KILLED,), False, _width_today, "raises"),
+        "absent": MoreCase(None, (KILLED,), False, _width_today, "raises"),
+        "format-2": MoreCase(json.dumps({**json.loads(summary()), "format": 2}), (KILLED,),
+                             False, _width_today, "raises"),
+        "no-steward": MoreCase(summary(), (KILLED,), True, _width_today, "Done"),
+        "none-pending": MoreCase(summary(of=none_pending), (KILLED,), False, _width_today,
+                                 "Done")}
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        ctx = _context(tmp / "repo", tmp / "home")
+        lease = _pool_run(LEASE, "w", node="quadro2", mem=12, finished=True)
+        ctx.registry.write(lease)
+        got: dict[str, str] = {}
+        for name, c in cases.items():
+            ctx.registry.write(_steward_run("w", commit=SHA, finished=c.steward_finished))
+            _put(tmp / "home", "w", c.summary)
+            with _patched(cs.launches, "width", c.width):
+                got[name] = _answer(functools.partial(cluster.pool_more, ctx, lease,
+                                                      killed=c.killed))
+        steward = _steward_run("w", commit=SHA, finished=True)
+        for name, state, want in (("steward-closed", closed, "Continue(1)"),
+                                  ("steward-finished", psum.WaveState.FINISHED, "Done")):
+            _put(tmp / "home", "w", _summary("w", at=after, state=state, ladder="cpu-score",
+                                             lines=lines, reaped=()))
+            got[name] = _answer(lambda: cluster.Steward().more(ctx, steward, killed=()))
+            cases[name] = MoreCase(None, (), True, _width_today, want)
+    bad = [f"{name} {got[name]}, want {c.want}" for name, c in cases.items()
+           if got[name] != c.want]
+    print(f"more: {', '.join(f'{n} {a}' for n, a in got.items())} -> "
+          f"{'ok' if not bad else 'FAILS'}", flush=True)
+    return bad
+
+
+class _Want(NamedTuple):
+    """A `template` case answered Done: the campaign, node and bundle asked, and the words its
+    why says."""
+
+    campaign: str
+    node: str
+    bundle: Bundle
+    says: tuple[str, ...]
+
+
+def _start_refusals(ctx: Context, t: cs.Template, node: str, bundle: Bundle,
+                    work: Path) -> list[str]:
+    """Each refusal of cluster_submit's launches.start `t` trips there, by launches' own code;
+    and whether Waves.lease of its record is the campaign's lease of `bundle` on `node`."""
+    bad: list[str] = []
+    argv = ("submit", t.kind, t.run, "--at", t.commit, *t.args)
+    sub = ctx.parse(argv)
+    if sub.at != t.commit or sub.dry:
+        bad.append(f"its arguments parse to --at {sub.at} (dry {sub.dry}), its commit {t.commit}")
+    if chain_base(t.run) != t.run:
+        bad.append(f"its run {t.run} reads as a continuation of {chain_base(t.run)}")
+    if ctx.registry.exists(t.run):
+        bad.append(f"its run {t.run} is in the registry")
+    plan = kind_of(PROJECT, t.kind).plan(sub, work, sha=t.commit)
+    try:
+        cs.launches.line_checked(plan, t.run, cs.Start(campaign=cluster.CAMPAIGN, node=node,
+                                                       bundle=bundle, workers=3,
+                                                       lease_hours=2.0))
+    except SystemExit as e:
+        bad.append(f"line_checked: {e}")
+    rec = _run(t.run, t.kind, t.args, commit=t.commit, width=1, finished=False)
+    lease = cluster.Waves().lease(ctx, rec)
+    if lease != cs.Lease(cluster.CAMPAIGN, node, bundle):
+        bad.append(f"its lease {lease}")
+    return bad
+
+
+def check_template() -> list[str]:
+    """`template` (the module's docstring): the problems found."""
+    closed, after = psum.WaveState.CLOSED, "2026-10-21T12:01:00Z"
+    older = _rev("HEAD^")
+    m12, m24 = Bundle(0, 2, 12), Bundle(0, 2, 24)
+    bad: list[str] = []
+    got: list[str] = []
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        home = tmp / "home"
+        ctx = _context(tmp / "repo", home)
+        for wave, commit, pending in (("a", SHA, 3), ("b", older, 7)):
+            ctx.registry.write(_steward_run(wave, commit=commit, finished=False))
+            _put(home, wave, _summary(wave, at=after, state=closed, ladder="cpu-score", lines=(
+                _line("orion", 24, pending=0, claimed=pending),
+                _line("quadro2", 12, pending=pending, claimed=0)), reaped=()))
+        ctx.registry.write(_steward_run("c", commit=SHA, finished=False))
+        ctx.registry.write(_pool_run("b-quadro2-m12-s1", "b", node="quadro2", mem=12,
+                                     finished=False))
+        t = cluster.Waves().template(ctx, "reblock", "quadro2", m12)
+        want = cs.Template(kind="pool", run="b-quadro2-m12-s2", commit=older,
+                           args=("--wave", "b", "--preset", "cpu-score", "--node", "quadro2",
+                                 "--mem", "12", "--gpus", "40"))
+        if t != want:
+            bad.append(f"the template for quadro2's m12 {t}, want {want}")
+        if isinstance(t, cs.Template):
+            got.append(f"{t.run} at {t.commit[:7]}")
+            bad += [f"its start: {p}" for p in _start_refusals(ctx, t, "quadro2", m12,
+                                                                tmp / "plan")]
+        for w in (_Want("reblock", "quadro2", m24, ("quadro2", m24.text())),
+                  _Want("reblock", "tesla1", m12, ("tesla1", m12.text())),
+                  _Want("reblock", "orion", m24, ("orion", m24.text(), "wave c")),
+                  _Want("mycooc", "quadro2", m12, ("mycooc",))):
+            x = cluster.Waves().template(ctx, w.campaign, w.node, w.bundle)
+            if not isinstance(x, cs.Done) or not all(s in x.why for s in w.says):
+                bad.append(f"{w.campaign} on {w.node} of {w.bundle.text()}: {x}, want Done "
+                           f"saying {w.says}")
+            got.append(f"{w.campaign} on {w.node}, {w.bundle.text()}: {type(x).__name__}")
+        s = cs.Start(campaign="reblock", node="quadro2", bundle=m12, workers=3, lease_hours=2.0)
+        if cluster.Waves().starts(lambda: (s,)) != (s,):
+            bad.append("Waves.starts does not pass the market's starts on")
+    for case, (waves, says) in {"unread": (("c",), "wave c"),
+                                "no-such-ladder": (("d",), "no-such"),
+                                "none-live": ((), None)}.items():
+        with tempfile.TemporaryDirectory() as d:
+            tmp = Path(d)
+            ctx = _context(tmp / "repo", tmp / "home")
+            for wave in waves:
+                ctx.registry.write(_steward_run(wave, commit=SHA, finished=False))
+            _put(tmp / "home", "d", _summary("d", at=after, state=closed, ladder="no-such",
+                                             lines=(), reaped=()))
+            try:
+                x = cluster.Waves().template(ctx, "reblock", "quadro2", m12)
+                ok = says is None and isinstance(x, cs.Done)
+                got.append(f"{case}: {type(x).__name__}")
+            except SystemExit as e:
+                ok = says is not None and says in str(e)
+                got.append(f"{case}: raises")
+            if not ok:
+                bad.append(f"{case}: {got[-1]}, want {'Done' if says is None else 'raises'}"
+                           f"{'' if says is None else f' naming {says}'}")
+    print(f"template: {'; '.join(got)} -> {'ok' if not bad else 'FAILS'}", flush=True)
+    return bad
+
+
+_POOL_ARGS, _START_NAME = cluster._pool_args, cluster._start_name
+
+
+def _other_mem(*, wave: str, ladder: Ladder, node: str, rung: int) -> tuple[str, ...]:
+    """The template's --mem the rung above its class's (fault `other-mem`)."""
+    args = list(_POOL_ARGS(wave=wave, ladder=ladder, node=node, rung=rung))
+    args[args.index("--mem") + 1] = str(ladder.rungs[ladder.rungs.index(rung) + 1])
+    return tuple(args)
+
+
+def _other_node(*, wave: str, ladder: Ladder, node: str, rung: int) -> tuple[str, ...]:
+    """The template's --node another node of CPU_NODES (fault `other-node`)."""
+    args = list(_POOL_ARGS(wave=wave, ladder=ladder, node=node, rung=rung))
+    args[args.index("--node") + 1] = next(n for n in sorted(cluster.CPU_NODES) if n != node)
+    return tuple(args)
+
+
+def _with_at(*, wave: str, ladder: Ladder, node: str, rung: int) -> tuple[str, ...]:
+    """The template's args carrying --at HEAD (fault `with-at`)."""
+    return (*_POOL_ARGS(wave=wave, ladder=ladder, node=node, rung=rung), "--at", SHA)
+
+
+GUARDS: dict[str, Callable[[], list[str]]] = {
+    "ids": check_ids, "script": check_script, "demand": check_demand, "kinds": check_kinds,
+    "more": check_more, "template": check_template}
+FAULTS: dict[str, dict[str, Callable[[], contextlib.AbstractContextManager[None]]]] = {
+    "ids": {"no-check": _no_check},
+    "script": {"no-script-check": _no_script_check},
+    "demand": DEMAND_FAULTS,
+    "kinds": {"lease-bundle": lambda: _patched(cluster.Waves, "lease", _one_cpu_lease)},
+    "more": {"continue-idle": lambda: _patched(cluster, "_idle_killed",
+                                               lambda killed, reaped: [])},
+    "template": {
+        "other-mem": lambda: _patched(cluster, "_pool_args", _other_mem),
+        "other-node": lambda: _patched(cluster, "_pool_args", _other_node),
+        "continuation-name": lambda: _patched(
+            cluster, "_start_name", lambda ctx, wave, node, cls: f"{wave}-{node}-{cls}-l1"),
+        "reused-name": lambda: _patched(
+            cluster, "_start_name", lambda ctx, wave, node, cls: f"{wave}-{node}-{cls}-s1"),
+        "with-at": lambda: _patched(cluster, "_pool_args", _with_at),
+        "first-wave": lambda: _patched(cluster, "_chosen",
+                                       lambda choices: min(choices, key=lambda c: c.wave))}}
+
+
+# ---- the command line -----------------------------------------------------------------------
+
+def main(guard: str, fault: str | None) -> None:
+    if fault is None:
+        bad = GUARDS[guard]()
+    else:
+        with FAULTS[guard][fault]():
+            bad = GUARDS[guard]()
+    verdict = "FAILS on " + "; ".join(bad) if bad else "passes"
+    print(f"{guard}{'' if fault is None else f' under the fault {fault}'}: {verdict}", flush=True)
+    if bad and fault is None:
+        raise SystemExit(1)
+    if not bad and fault is not None:
+        raise SystemExit(f"the fault {fault} went unseen: the guard guards nothing")
+
+
+def both_ways(guards: list[str]) -> None:
+    """Each guard as it is, then under each of its faults (FAULTS), one after another in this
+    process. Raises naming every run not as `main` expects."""
+    wrong = []
+    for guard in guards:
+        for fault in (None, *FAULTS[guard]):
+            try:
+                main(guard, fault)
+            except SystemExit as e:
+                wrong.append(f"{guard}{'' if fault is None else f' under {fault}'}: {e.code}")
+    print(f"both ways, {', '.join(guards)}: "
+          + ("as expected" if not wrong else "NOT as expected: " + "; ".join(wrong)), flush=True)
+    if wrong:
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if a[0] == "cpu":
+    if len(a) == 3 and a[0] == "cpu":
         check_cpu(a[1].split(","), a[2].split(","))
-    elif a[0] == "ids" and len(a) in (1, 2) and a[1:] in ([], ["no-check"]):
-        with _no_check() if a[1:] else contextlib.nullcontext():
-            bad = check_ids()
-        print(f"ids{' under the fault no-check' if a[1:] else ''}: "
-              + ("FAILS on " + "; ".join(bad) if bad else "passes"), flush=True)
-        if bool(bad) != bool(a[1:]):
-            raise SystemExit(1 if bad else "the fault no-check went unseen: the guard guards "
-                                           "nothing")
-    elif a[0] == "script" and a[1:] in ([], ["no-script-check"]):
-        with _no_script_check() if a[1:] else contextlib.nullcontext():
-            bad = check_script()
-        print(f"script{' under the fault no-script-check' if a[1:] else ''}: "
-              + ("FAILS on " + "; ".join(bad) if bad else "passes"), flush=True)
-        if bool(bad) != bool(a[1:]):
-            raise SystemExit(1 if bad else "the fault no-script-check went unseen: the guard "
-                                           "guards nothing")
-    elif a[0] == "demand" and len(a) <= 2 and set(a[1:]) <= set(DEMAND_FAULTS):
-        with DEMAND_FAULTS[a[1]]() if a[1:] else contextlib.nullcontext():
-            bad = check_demand()
-        print(f"demand{f' under the fault {a[1]}' if a[1:] else ''}: "
-              + ("FAILS on " + "; ".join(bad) if bad else "passes"), flush=True)
-        if bool(bad) != bool(a[1:]):
-            raise SystemExit(1 if bad else f"the fault {a[1]} went unseen: the guard guards "
-                                           "nothing")
-    else:
-        raise SystemExit(f"unknown check {a[0]!r}")
+        raise SystemExit(0)
+    if len(a) == 2 and a[0] == "both-ways" and set(a[1].split(",")) <= set(GUARDS):
+        both_ways(a[1].split(","))
+        raise SystemExit(0)
+    if len(a) not in (1, 2) or a[0] not in GUARDS or (len(a) == 2 and a[1] not in FAULTS[a[0]]):
+        raise SystemExit(__doc__)
+    main(a[0], a[1] if len(a) == 2 else None)
