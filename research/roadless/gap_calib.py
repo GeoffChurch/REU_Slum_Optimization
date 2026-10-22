@@ -199,9 +199,10 @@ def warm(bid: str) -> None:
           f"{fx.t_build:.0f}s); peak {peak_gb():.1f} GB", flush=True)
 
 
-def preset(bid: str, item: str, device: str, *, replace: bool) -> None:
-    """A preset item on `bid` (module docstring), its row written once (clearings.write_once: a
-    row standing under its identity refuses the run before any work, unless `replace`)."""
+def preset(bid: str, item: str, device: str, *, standing: clearings.Standing) -> None:
+    """A preset item on `bid` (module docstring), its row written through `standing`
+    (clearings.Standing: a row standing under its identity refuses the run before any work under
+    Refuse, is replaced under Replace, is the identity done under Keep)."""
     m = ITEM.fullmatch(item)
     if m is None:
         raise SystemExit(f"unknown preset item {item!r}: simp[E] or "
@@ -214,7 +215,8 @@ def preset(bid: str, item: str, device: str, *, replace: bool) -> None:
                          f"{metric.name.removeprefix(base.name)}")
     scoring = search.polish_scoring_of(exact)
     out = ROWS / "preset" / device / item / f"{bid}.parquet"
-    clearings.check_new(out, replace=replace)
+    if not standing.todo(out):
+        return
     t0 = time.time()
 
     def run() -> dict[str, object]:
@@ -231,7 +233,7 @@ def preset(bid: str, item: str, device: str, *, replace: bool) -> None:
         row, gpu_gb = run(), np.nan
     row.update(item=item, metric=metric.name, host=socket.gethostname(), peak_rss_gb=peak_gb(),
                gpu_gb=gpu_gb, wall=time.time() - t0)
-    clearings.write_once(pd.DataFrame([row]), out, replace=replace)
+    standing.write(pd.DataFrame([row]), out)
     print(f"{bid} {item} on {device}: peak {peak_gb():.1f} GB, {row['wall']:.0f}s", flush=True)
 
 
@@ -591,16 +593,16 @@ def main(argv: list[str]) -> None:
               "NUMBA_NUM_THREADS"):
         if os.environ.get(v) != "1":
             raise SystemExit(f"{v}=1 is required (single-threaded workers)")
-    argv, again = clearings.replace_flag(argv)
+    argv, standing = clearings.standing_of(argv)
     cmd = argv[0]
     failed: list[str] = []
     if cmd == "warm":
         warm(argv[1])
     elif cmd == "preset":
-        preset(argv[1], argv[2], argv[3], replace=again)
+        preset(argv[1], argv[2], argv[3], standing=standing)
     elif cmd == "presets":
         for item in argv[2].split(","):
-            preset(argv[1], item, argv[3], replace=again)
+            preset(argv[1], item, argv[3], standing=standing)
     elif cmd == "speed":
         _SPEED_DEVICE.append(argv[3])
         failed = _pool(speed_one, common.ids_of(argv[1]), int(argv[2]))

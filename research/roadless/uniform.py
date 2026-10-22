@@ -101,10 +101,11 @@ def _outs(bid: str) -> tuple[Path, Path, Path]:
             ROWS / "homes" / f"{bid}.parquet")
 
 
-def run_arm(arm: Arm, bid: str, device: str, *, replace: bool) -> None:
-    """The arm's SIMP run on `bid`, its row with the device, host, wall time and peak memory."""
+def run_arm(arm: Arm, bid: str, device: str, *, standing: clearings.Standing) -> None:
+    """The arm's SIMP run on `bid`, its row with the device, host, wall time and peak memory; a
+    row that stands is read, not run again, unless `standing` replaces it (clearings.Replace)."""
     path = arm_path(arm, bid)
-    if path.exists() and not replace:
+    if standing.reuse(path):
         print(f"{bid} {arm.label}: its row stands ({path.relative_to(HERE)})", flush=True)
         return
     pygc.collect()                      # the last model's plans freed before this one's
@@ -117,7 +118,7 @@ def run_arm(arm: Arm, bid: str, device: str, *, replace: bool) -> None:
         row, gpu_gb = relax.one(bid, POWER, arm.metric, arm.plan, BUDGET, demand=POP), np.nan
     row.update(arm=arm.label, device=device, host=socket.gethostname(),
                peak_rss_gb=gap_calib.peak_gb(), gpu_gb=gpu_gb, wall=time.time() - t0)
-    clearings.write_once(pd.DataFrame([row]), path, replace=replace)
+    standing.write(pd.DataFrame([row]), path)
 
 
 def _cleared(path: Path, n: int) -> np.ndarray:
@@ -170,12 +171,13 @@ def score(bid: str, label: str, metric: gcl.ComplexMetric, xs: tuple[np.ndarray,
                   J2_0=m.base.J2)
 
 
-def lenses(bid: str, device: str, *, replace: bool) -> None:
+def lenses(bid: str, device: str, *, standing: clearings.Standing) -> None:
     """Every clearing of `bid` (none, T's, U's) under both metrics; the block's facts; its
-    walled-in homes (module docstring)."""
+    walled-in homes (module docstring); each row written through `standing`
+    (clearings.Standing), which answers for all three before any work."""
     outs = _outs(bid)
-    for o in outs:
-        clearings.check_new(o, replace=replace)
+    if not any([standing.todo(o) for o in outs]):       # every one asked: Refuse raises on any
+        return
     t0 = time.time()
     arms = arms_on(device)
     rT = pd.read_parquet(arm_path(arms.t, bid)).iloc[0]
@@ -228,18 +230,19 @@ def lenses(bid: str, device: str, *, replace: bool) -> None:
         shadowed_U=sU.shadowed[w], left_T=leftT[w], left_U=leftU[w]))
     for o, df in zip(outs, (pd.DataFrame(sT.rows + sU.rows), pd.DataFrame([block]), homes),
                      strict=True):
-        clearings.write_once(df, o, replace=replace)
+        standing.write(df, o)
     print(f"{bid}: {int(w.sum())} walled in; T leaves {block['left_T']}, U {block['left_U']}; "
           f"Jaccard {block['jaccard']:.3f}; lenses {time.time() - t0:.0f}s", flush=True)
 
 
-def block_run(bid: str, device: str, *, replace: bool) -> None:
-    for o in _outs(bid):                # a finished block refuses before any work
-        clearings.check_new(o, replace=replace)
+def block_run(bid: str, device: str, *, standing: clearings.Standing) -> None:
+    # a finished block refuses before any work (Refuse), or is done (Keep); every out asked
+    if not any([standing.todo(o) for o in _outs(bid)]):
+        return
     arms = arms_on(device)
     for arm in arms:
-        run_arm(arm, bid, device, replace=replace)
-    lenses(bid, device, replace=replace)
+        run_arm(arm, bid, device, standing=standing)
+    lenses(bid, device, standing=standing)
 
 
 # ------------------------------------------------------------------ the report
@@ -340,9 +343,9 @@ def report() -> None:
 
 
 def main(argv: list[str]) -> None:
-    argv, replace = clearings.replace_flag(argv)
+    argv, standing = clearings.standing_of(argv)
     if len(argv) == 3 and argv[0] == "block" and argv[2] in ("cpu", "gpu"):
-        block_run(argv[1], argv[2], replace=replace)
+        block_run(argv[1], argv[2], standing=standing)
     elif argv == ["report"]:
         report()
     else:

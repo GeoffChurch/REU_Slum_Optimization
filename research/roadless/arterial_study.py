@@ -20,7 +20,8 @@ match, and to <rows>/steps/<id>__<net>.parquet when the run ends); the network t
 <rows>/scratch/networks, a proposal row (wall, CPU, peak RSS, commits, stop, roads, host) to
 <rows>/proposals; then the lineup's canonical prefixes (road_rescore.prefixes_one) and their
 scores on the complex under RUNTIME on a core (road_rescore.cx_network). A proposal row that
-stands refuses the run unless --replace (clearings.check_new). The study's <rows> is
+stands refuses the run unless --replace (clearings.Refuse, .Replace), or under --keep-standing
+is that proposal done, the run going on to its scoring (clearings.Keep). The study's <rows> is
 research/roadless/arterial_rows/study (untracked). `propose` is `run` without the scoring (a
 region-scale timing, whose scoring would cost more than the proposal).
 
@@ -117,26 +118,32 @@ def steps_path(rows: Path, bid: str, name: str) -> Path:
     return rows / "steps" / f"{bid}__{name}.parquet"
 
 
-def run(rows: Path, bid: str, arm_name: str, *, replace: bool) -> None:
+def run(rows: Path, bid: str, arm_name: str, *, standing: clearings.Standing) -> None:
     """One (block, arm) end to end (the module's docstring)."""
-    b, name = propose(rows, bid, arm_name, replace=replace)
+    b, name = propose(rows, bid, arm_name, standing=standing)
     scratch = rows / "scratch"
     rr._BLOCKS[bid] = b
     if rr.prefixes_one(rr.PrefixJob(rows, scratch, bid, name)) is not None:
         raise SystemExit(f"{bid} {name}: its prefixes failed")
-    rr.cx_network(rows, scratch, _metric(), b, name, replace=replace)
+    rr.cx_network(rows, scratch, _metric(), b, name, standing=standing)
 
 
-def propose(rows: Path, bid: str, arm_name: str, *, replace: bool) -> tuple[Block, str]:
+def propose(rows: Path, bid: str, arm_name: str, *,
+            standing: clearings.Standing) -> tuple[Block, str]:
     """`run`'s proposal half alone (the network, its steps and its proposal row; no scoring):
-    the block and the network's name."""
+    the block and the network's name. A proposal `standing` answers is done (Keep: its row
+    stands, and its network, written before the row) is not made again; the block and the name
+    are returned for the scoring all the same."""
     rr._check_single_threaded()
     method = method_of(ARMS[arm_name])
     name = network_name(arm_name, method)
     scratch = rows / "scratch"
     row_path = rr.proposal_row(rows, bid, name, False)
-    clearings.check_new(row_path, replace=replace)
+    todo = standing.todo(row_path)
     [b] = common.build_blocks([bid])
+    if not todo:
+        print(f"{bid} {name}: its proposal row stands ({row_path})", flush=True)
+        return b, name
     print(f"{bid} n={len(b.buildings)} {arm_name} as {name}: {method}", flush=True)
     sp = steps_path(rows, bid, name)
     sp.parent.mkdir(parents=True, exist_ok=True)
@@ -355,12 +362,13 @@ def report(rows: Path, base: Path, ids: list[str]) -> None:
 
 
 if __name__ == "__main__":
-    a, again = clearings.replace_flag(sys.argv[1:])
+    argv = sys.argv[1:]
+    a, standing = clearings.standing_of(argv)
     if len(a) == 4 and a[0] == "run":
-        run(Path(a[1]), common.ids_of(a[2])[0], a[3], replace=again)
+        run(Path(a[1]), common.ids_of(a[2])[0], a[3], standing=standing)
     elif len(a) == 4 and a[0] == "propose":
-        propose(Path(a[1]), common.ids_of(a[2])[0], a[3], replace=again)
-    elif len(a) == 4 and a[0] == "report" and not again:
-        report(Path(a[1]), Path(a[2]), common.ids_of(a[3]))
+        propose(Path(a[1]), common.ids_of(a[2])[0], a[3], standing=standing)
+    elif len(argv) == 4 and argv[0] == "report":        # writes no row: takes no Standing's flag
+        report(Path(argv[1]), Path(argv[2]), common.ids_of(argv[3]))
     else:
         raise SystemExit(__doc__)

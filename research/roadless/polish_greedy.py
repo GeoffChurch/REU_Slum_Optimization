@@ -12,7 +12,7 @@ budget) and the polish never moves them. Where no home is walled in nothing is h
 as before.
 
     PYTHONPATH=. uv run python research/roadless/polish_greedy.py <id> <p> <cpu|gpu> <picker> \\
-        <tries> <width> <metric> <budget> [x2] [E] [--replace]
+        <tries> <width> <metric> <budget> [x2] [E] [--replace | --keep-standing]
 
 metric: the gap complex's name (metrics.metric_of; cpu or gpu, its factorization's device). `x2`:
 two-for-one moves too (search.Swaps' pairs); `E`: the candidates scored exactly. Rows in
@@ -80,15 +80,16 @@ def rows_of(picker: str, tries: int, width: int, pairs: bool, scoring: search.Po
 
 def main(bid: str, power: float, metric: gap_clear.ComplexMetric, picker_spec: str, tries: int,
          width: int, budget: float, pairs: bool, *, scoring: search.PolishScoring,
-         replace: bool) -> None:
-    """`metric` the run's (metrics.metric_of); its row (`run`'s) in rows_of, written once
-    (clearings.write_once: a row standing under its identity refuses the run before any work,
-    unless `replace`)."""
+         standing: clearings.Standing) -> None:
+    """`metric` the run's (metrics.metric_of); its row (`run`'s) in rows_of, written through
+    `standing` (clearings.Standing: a row standing under its identity refuses the run before any
+    work under Refuse, is replaced under Replace, is the identity done under Keep)."""
     out = (rows_of(picker_spec, tries, width, pairs, scoring, metric.name, budget)
            / f"{bid}_p{power:g}.parquet")
-    clearings.check_new(out, replace=replace)
+    if not standing.todo(out):
+        return
     row = run(bid, power, metric, picker_spec, tries, width, budget, pairs, scoring=scoring)
-    clearings.write_once(pd.DataFrame([row]), out, replace=replace)
+    standing.write(pd.DataFrame([row]), out)
 
 
 def run(bid: str, power: float, metric: gap_clear.ComplexMetric, picker_spec: str, tries: int,
@@ -137,11 +138,11 @@ def run(bid: str, power: float, metric: gap_clear.ComplexMetric, picker_spec: st
 
 if __name__ == "__main__":
     import metrics
-    a, again = clearings.replace_flag(sys.argv[1:])
+    a, standing = clearings.standing_of(sys.argv[1:])
     flags = a[8:]
     if len(a) < 8 or flags not in ([], ["x2"], ["E"], ["x2", "E"]):
         raise SystemExit("usage: <id> <p> <cpu|gpu> <picker> <tries> <width> <metric> <budget> "
-                         "[x2] [E] [--replace]")
+                         "[x2] [E] [--replace | --keep-standing]")
     main(a[0], float(a[1]), metrics.metric_of(a[6], device=a[2]), a[3], int(a[4]), int(a[5]),
          float(a[7]), "x2" in flags, scoring=search.polish_scoring_of("E" if "E" in flags else ""),
-         replace=again)
+         standing=standing)

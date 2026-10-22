@@ -1530,7 +1530,7 @@ def _progress(tmp: Path) -> list[str]:
     rows = [str(tmp / "rows" / f"r{k}.parquet") for k in (1, 2)]
     code = (f"import sys; sys.path.insert(0, {str(HERE)!r}); import clearings, pandas as pd; "
             "from pathlib import Path; "
-            f"[clearings.write_once(pd.DataFrame({{'a': [1]}}), Path(p), replace=False) "
+            f"[clearings.Refuse().write(pd.DataFrame({{'a': [1]}}), Path(p)) "
             f"for p in {rows!r}]; sys.exit(1)")
     line = f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
     seed = _seed(lad, [_m4(1, minutes=30.0, line=line)])

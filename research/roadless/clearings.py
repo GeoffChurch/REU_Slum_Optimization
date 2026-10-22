@@ -461,48 +461,129 @@ def cleared_positions(run: str, block: BlockLike, *, step: int) -> NDArray[np.in
 
 # ------------------------------------------------------------------ the runs' rows, written once
 
-def check_new(path: Path, *, replace: bool) -> None:
-    """Refuses (`Exists`) to start a run whose row `path` already stands, unless `replace` (the
-    caller naming a deliberate replacement): the optimizers' no-overwrite guard (BACKLOG, "The
-    stored clearings made durable"; NOTES, "The consolidated pass"). A row's path is its identity:
-    the block, the preset or method, the metric's name, the budget and the seed (each optimizer's
-    rows directory spells them: relax.rows_of, polish_greedy.rows_of, clear.rows_dir, ...), so a
-    finished identity re-run is an error, before any work."""
-    if path.exists() and not replace:
-        raise Exists(f"{path}: a row stands under this identity (block, preset or method, metric, "
-                     "budget, seed); a replacement is named, never taken (--replace)")
+REPLACE = "--replace"                # a person naming a deliberate replacement: `Replace`
+KEEP_STANDING = "--keep-standing"    # a pool's job: a row that stands is that identity done: `Keep`
+
+
+class Standing(Protocol):
+    """What a run does with a row that stands under its identity: the optimizers' no-overwrite
+    guard (BACKLOG, "The stored clearings made durable"; NOTES, "The consolidated pass") and the
+    pool's keeping of what stands (the lease pool's spec, 3.3: a job run again after a partial
+    write keeps what stands and writes the rest). A row's path is its identity: the block, the
+    preset or method, the metric's name, the budget and the seed (each optimizer's rows directory
+    spells them: relax.rows_of, polish_greedy.rows_of, clear.rows_dir, ...). Resolved once per
+    script by `standing_of`, from its command line, and passed down: `Refuse` (a person's run),
+    `Replace` (`--replace`), `Keep` (`--keep-standing`). The guard: clearings_check.py
+    `overwrite`."""
+
+    def todo(self, path: Path) -> bool:
+        """Whether the identity at `path` is to be run (checked before any work)."""
+        ...
+
+    def reuse(self, path: Path) -> bool:
+        """Whether a standing row at `path` is read rather than made again, where a caller may
+        reuse one (road_rescore.cx_plain's presets)."""
+        ...
+
+    def write(self, df: pd.DataFrame, path: Path) -> None:
+        """`df`, the run's rows, to `path` whole (a temporary name no pull matches, then into
+        place)."""
+        ...
+
+
+@dataclass(frozen=True, kw_only=True)
+class Refuse:
+    """A person's run: a finished identity run again is an error, before any work (`todo` raises
+    `Exists`) and at the write (`write_once`: two runs racing for one identity cannot both
+    write)."""
+
+    def todo(self, path: Path) -> bool:
+        if path.exists():
+            raise Exists(f"{path}: a row stands under this identity (block, preset or method, "
+                         f"metric, budget, seed); a replacement is named, never taken ({REPLACE})")
+        return True
+
+    def reuse(self, path: Path) -> bool:
+        return path.exists()
+
+    def write(self, df: pd.DataFrame, path: Path) -> None:
+        write_once(df, path)
+
+
+@dataclass(frozen=True, kw_only=True)
+class Replace:
+    """A replacement named (`--replace`): every identity is run, and its row put in place of any
+    that stands (os.replace); row_marker.ROW_WRITTEN is printed once it does."""
+
+    def todo(self, path: Path) -> bool:
+        return True
+
+    def reuse(self, path: Path) -> bool:
+        return False
+
+    def write(self, df: pd.DataFrame, path: Path) -> None:
+        _place(df, path, os.replace)
+        print(f"{row_marker.ROW_WRITTEN}{path}", flush=True)
+
+
+@dataclass(frozen=True, kw_only=True)
+class Keep:
+    """A pool's job (`--keep-standing`): a row that stands is that identity done, at the check
+    (not run) and at the write, where the `Exists` of a row written meanwhile (a double claim's
+    other run) means the same: the first row stays, `[row] kept <path>` is printed and nothing
+    is raised. A kept row is not written, so prints no row_marker.ROW_WRITTEN: a job that keeps
+    rows and then fails is a strike, never progress (the lease pool's plan, Ruling 6)."""
+
+    def todo(self, path: Path) -> bool:
+        return not path.exists()
+
+    def reuse(self, path: Path) -> bool:
+        return path.exists()
+
+    def write(self, df: pd.DataFrame, path: Path) -> None:
+        try:
+            write_once(df, path)
+        except Exists:
+            print(f"[row] kept {path}", flush=True)
+
+
+def standing_of(argv: list[str]) -> tuple[list[str], Standing]:
+    """A command line less its `--replace` and `--keep-standing`, and the `Standing` they name:
+    neither, `Refuse`; `--replace`, `Replace`; `--keep-standing`, `Keep`; both, a SystemExit."""
+    replace, keep = REPLACE in argv, KEEP_STANDING in argv
+    if replace and keep:
+        raise SystemExit(f"{REPLACE} and {KEEP_STANDING} answer a row that stands oppositely: "
+                         "give one")
+    standing: Standing = Replace() if replace else Keep() if keep else Refuse()
+    return [a for a in argv if a not in (REPLACE, KEEP_STANDING)], standing
 
 
 def _exclusive(tmp: Path, path: Path) -> None:
     """`tmp` to `path` if nothing stands there (a hard link: atomic, and it fails if `path`
-    exists, so two runs racing for one identity cannot both write)."""
-    os.link(tmp, path)
+    exists, so two runs racing for one identity cannot both write), else `Exists`."""
+    try:
+        os.link(tmp, path)
+    except FileExistsError:
+        raise Exists(f"{path}: a row stands under this identity; not replaced ({REPLACE} names "
+                     "a replacement)") from None
 
 
-def write_once(df: pd.DataFrame, path: Path, *, replace: bool) -> None:
-    """A run's rows to `path` whole (a temp name no pull matches, then into place) and only if no
-    row stands there, unless `replace` (check_new): a second write of one identity raises
-    `Exists` and leaves the first. Once the row stands, row_marker.ROW_WRITTEN and its path are
-    printed (flushed), for a pool's worker to count. The guard: clearings_check.py `overwrite`
-    (fault `no-check`)."""
+def _place(df: pd.DataFrame, path: Path, put: Callable[[Path, Path], None]) -> None:
+    """`df` to a temporary name beside `path` (no pull matches it), then `put` into place; the
+    temporary name removed whether or not `put` succeeds."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     df.to_parquet(tmp)
     try:
-        if replace:
-            os.replace(tmp, path)
-        else:
-            try:
-                _exclusive(tmp, path)
-            except FileExistsError:
-                raise Exists(f"{path}: a row stands under this identity; not replaced (--replace "
-                             "names a replacement)") from None
+        put(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def write_once(df: pd.DataFrame, path: Path) -> None:
+    """A run's rows to `path` whole and only if no row stands there: a second write of one
+    identity raises `Exists` and leaves the first (`Refuse` raises it, `Keep` keeps the first).
+    Once the row stands, row_marker.ROW_WRITTEN and its path are printed (flushed), for a pool's
+    worker to count. The guard: clearings_check.py `overwrite` (fault `no-check`)."""
+    _place(df, path, _exclusive)
     print(f"{row_marker.ROW_WRITTEN}{path}", flush=True)
-
-
-def replace_flag(argv: list[str]) -> tuple[list[str], bool]:
-    """A command line less its `--replace` (the caller naming a deliberate replacement of the
-    rows its run would write), and whether it was given."""
-    return [a for a in argv if a != "--replace"], "--replace" in argv
