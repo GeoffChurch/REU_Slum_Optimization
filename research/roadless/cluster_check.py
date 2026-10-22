@@ -115,12 +115,13 @@ its task asking 8 GB of it, 4 CPUs and 32 GB, `--class g32`; refused: a gpu-pres
 node of CPU_NODES, whose throttle it would run at: Ruling 10) and one past quadro2's throttle; a
 `steward` lands on orion with 2 CPUs and 3 GB for 2:00:00, its line `pool.py steward --wave w
 --board cluster_submit/market --stale-after-minutes 30` (the market's stale_after); a `long` of
-90 GB and 3000 minutes asks 90 GB and 2-02:00:00, its line `pool.py work --wave w --job 7`, and
-one of 7 days and a minute is refused. `Waves.lease` of each one's record: a pool's
-`Lease("reblock", node, its class's bundle)`, which is what its plan asks Slurm for (a card per
-task or none, the plan's CPUs and memory, on its node: Ruling 3), and None for the steward, the
-long run, a `cpu` run and a `blocks` run. Fault `lease-bundle`: Waves.lease gives a CPU class 1
-CPU, so a CPU pool's lease is not what its plan asks for.
+90 GB and 3000 minutes asks 90 GB and 2-02:00:00, its line `pool.py work --wave w --job 7 --mem
+90` (its worker's memory limit the run's own), and one of 7 days and a minute is refused.
+`Waves.lease` of each one's record: a pool's `Lease("reblock", node, its class's bundle)`, which
+is what its plan asks Slurm for (a card per task or none, the plan's CPUs and memory, on its node:
+Ruling 3), and None for the steward, the long run, a `cpu` run and a `blocks` run. Fault
+`lease-bundle`: Waves.lease gives a CPU class 1 CPU, so a CPU pool's lease is not what its plan
+asks for.
 
 `more` (the spec's guard 8, the plan's Review Focus 1 and 3): `pool_more` of a finished lease of
 wave `w` two workers wide (tasks 500_0 and 500_1, out of squeue at GONE_AT), its steward live
@@ -1012,7 +1013,7 @@ def check_kinds() -> list[str]:
                 "--stale-after-minutes 30"),
             ("long", "w-long-7", long): (0, cs.Resources(
                 cpus=2, mem_gb=90, time="2-02:00:00", node="orion"), 0.0,
-                f"{work} work --wave w --job 7")}
+                f"{work} work --wave w --job 7 --mem 90")}
         leases = {"w-quadro2-m12-s1": cs.Lease("reblock", "quadro2", Bundle(0, 2, 12)),
                   "w-tesla1-g32-s1": cs.Lease("reblock", "tesla1", Bundle(1, 4, 32))}
         for (kind, run, args), (card, res, gb, line) in want.items():

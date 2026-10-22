@@ -123,12 +123,19 @@ The shape is GeoffChurch/mycooc's: its executor is the steward (without the adap
   - its own stored peak, from the last finished run of the same work on the same block (`peak_rss_gb` in the onecard, baselines, lineup lens and proposal rows, or an earlier wave's final queue), times 1.2;
   - with none, an area fit over the family's finished jobs at its worst per-km^2 rate, times 1.5 (desire_fit.out: the worst block 24% above the fit; the memory note "Cluster memory from measured peak");
   - each estimate records its source, and the submit prints the counts by source;
-  - a peak is a finished job's maximum RSS, never a reading while it runs (lesson 9).
+  - a peak is a finished job's maximum RSS, never a reading while it runs alone (lesson 9); the worker raises it to the largest unique memory of the job's processes it saw (3.4), since wait4's maximum is over single processes.
   - Time estimates come the same way: a stored wall times 1.25, else the family's fit at its worst rate.
 - **OOM promotes; it never drops.**
-  - The worker runs each job as a child and reads its own Slurm job's cgroup OOM-kill count before and after (`memory.events` on cgroup v2, `memory.oom_control` on v1): an increase means the job was killed for memory.
+  - The worker enforces its class (decision 13): a thread sums the unique memory of every process of the job's session about once a second, and once the sum passes the class's memory less the worker's own unique memory, it SIGKILLs the session and records the job killed for memory ("worker: unique X GB > limit Y GB" in its log).
+    A process's unique memory is its smaps_rollup's Pss_Anon + Pss_Shmem: each anonymous or shmem page divided among the processes mapping it, so a fork pool's copy-on-write pages count once, and file-backed pages (mmapped inputs) not at all.
+    Summed RSS is not the measure: a 0.5 GB parent with 3 idle forks read 2.03 GB, and reblock's jobs fork pools of up to 72.
+    Nor is the cgroup's memory.current: it counts page cache, which a job's NFS reads would fill.
+    A kernel without those fields (before 5.7) is refused at the worker's start: no other measure stands in.
+    The scan walks the members' page tables (261 ms for 72 forks of a 0.5 GB parent), so it spends at most a tenth of a thread, pausing longer than a second after a long scan.
+  - The worker also reads its own Slurm job's cgroup OOM-kill count before and after each job (`memory.events` on cgroup v2, `memory.oom_control` on v1): an increase means a kernel killed the job for memory, should Slurm ever enforce the limit.
   - The job then moves up a rung, pending, its attempt kept with its peak; past the top rung it goes to the long lane (3.8) at 1.5 times its last peak.
-  - A child killed by SIGKILL with no OOM count is a strike (3.5), not a promotion: no guess (open question 9: ai's cgroup version).
+  - A child killed by SIGKILL with neither the worker's kill nor an OOM count is a strike (3.5), not a promotion: no guess (decision 9).
+  - A spike shorter than the worker's period can pass unkilled: the job is done, its attempt records the peak, and the next wave's history classes it higher.
 - **A promoted job's class may have no pool on its node.**
   The steward's demand states it, but the market starts a lease only from a lease of that bundle on that node in the registry (`launches.newest`).
   Until cluster_submit can start a campaign's lease from a template the campaign names (open question 2), `wave <w> pools` submits the missing pool, and `status` names it.
@@ -290,6 +297,8 @@ research/roadless/pool_check.py, cluster_check's convention: each passes, and fa
    Fault `median-rate`: 53556's cycle_desire (24% above the fit) classed below its measured peak.
 6. **OOM promotion.** A child that allocates past its class in a Slurm cgroup (live, on ai) is promoted, never dropped, and past the top rung it waits for the long lane.
    Fault `fail-on-oom`: the job ends failed.
+   The worker's own kill (guard `memory`): a job past its limit, alone or summed over the processes it forks, is killed within a few periods and promoted; one under it is untouched, and so is a fork pool whose copy-on-write pages are under it; a scan that fails raises out of the job, the job killed.
+   Faults `no-watchdog`, `leader-only`, `rss-sum` and `error-lost`.
 7. **Demand from the queue.** Units per (node, class) are the jobs pending or claimed there; a finished wave states 0 everywhere; long jobs are runs, not units.
    Faults `count-done` (a finished wave's units not 0) and `every-node` (a group's jobs counted on each of the wave's nodes).
 8. **`more`.** Continue only while its class has jobs on its node and every walltime kill held a job; Done for an idle kill, no steward or an empty class; raise while a kill is unreaped.
@@ -351,3 +360,5 @@ The owner approved the spec with the controller's recommendations on the open qu
 10. The held re-run waits for the pool.
 11. Groups stay fixed to a node at submit in the first build.
 12. The ladders and margins as written.
+13. (2026-10-22, "Worker enforces it".) ai's Slurm writes no memory limit: under cgroup v2 the memory controller is delegated at every level, yet memory.max, memory.swap.max and memory.high read `max` at every level of a job's tree (jobs 81808 and 81809), and a job asking 1 GB touched 1.5 GB to rc 0 with no OOM counted.
+    So the worker enforces each job's class itself (3.4), by the session's unique memory (Pss_Anon + Pss_Shmem), and the cgroup's count stays a second source.

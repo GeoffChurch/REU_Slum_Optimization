@@ -3,7 +3,7 @@
 long run and a wave's steward run, each a task of a cluster_submit run.
 
     python -u research/roadless/pool.py work --wave <w> --node <n> --class <c>   # a pool's task
-    python -u research/roadless/pool.py work --wave <w> --job <id>                # a long run's
+    python -u research/roadless/pool.py work --wave <w> --job <id> --mem <GB>     # a long run's
     python -u research/roadless/pool.py steward --wave <w> --board <path> \
         --stale-after-minutes <m>                                                # the steward's
 
@@ -19,6 +19,11 @@ passed to pool_worker (`work`, `work_one`) and pool_steward (`steward`):
   node (`$SLURMD_NODENAME`: a block's jobs run on its node), a pool's `--node`, a long run's
   `--job`'s, and a pool's `--class` is one of the wave's ladder's (each a SystemExit naming what
   it is not);
+- a job's memory (pool_worker.run_job's `memory_gb`, against which its worker watches it): the
+  GB its task asked, a pool's its class's rung in the wave's ladder (`class_gb`), a long run's
+  its `--mem` (the run's sbatch --mem, cluster.py's Long); a kernel whose smaps_rollup cannot
+  measure a job's unique memory (pool_worker.Unmeasurable) is refused before the worker
+  registers, a SystemExit;
 - the OOM evidence: resolved from /proc/self/cgroup (pool_worker.oom_evidence);
 - a job: `bash -c <its line>` in the checkout, its environment the worker's with the wave's
   inputs (`CLUSTER_SUBMIT_INPUTS=<wave>/inputs`, where cluster_submit's would name the run's own)
@@ -107,13 +112,15 @@ def restarts_of(environ: Mapping[str, str]) -> int:
     return int(environ["SLURM_RESTART_COUNT"]) if "SLURM_RESTART_COUNT" in environ else 0
 
 
-def check_class(cls: str, header: pq.Header) -> None:
-    """A pool's worker's class is one of its wave's ladder's, else a SystemExit listing them."""
+def class_gb(cls: str, header: pq.Header) -> int:
+    """The memory (GB) of a pool's worker's class, one of its wave's ladder's (its rung), else a
+    SystemExit listing them."""
     lad = header.ladder
-    classes = [class_name(lad.cards, r) for r in lad.rungs]
-    if cls not in classes:
+    rungs = {class_name(lad.cards, r): r for r in lad.rungs}
+    if cls not in rungs:
         raise SystemExit(f"pool.py work: --class {cls} is no class of wave {header.wave}'s ladder "
-                         f"{lad.name} ({', '.join(classes)})")
+                         f"{lad.name} ({', '.join(rungs)})")
+    return rungs[cls]
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -125,6 +132,7 @@ def _parser() -> argparse.ArgumentParser:
     w.add_argument("--node", help="the node whose jobs a pool's worker claims")
     w.add_argument("--class", dest="cls", help="the class whose jobs a pool's worker claims")
     w.add_argument("--job", type=int, help="the one job a long run runs")
+    w.add_argument("--mem", type=int, help="a long run's memory, GB (its sbatch --mem)")
     w.set_defaults(verb_run=_work)
     s = verbs.add_parser("steward", help="a wave's steward")
     s.add_argument("--wave", required=True)
@@ -148,10 +156,11 @@ def _queue(wave: Path) -> pq.SqliteQueue:
 
 def _work(ap: argparse.ArgumentParser, a: argparse.Namespace,
           environ: Mapping[str, str]) -> pw.Exit:
-    long_run = a.job is not None and a.node is None and a.cls is None
-    pooled = a.job is None and a.node is not None and a.cls is not None
+    long_run = a.job is not None and a.mem is not None and a.node is None and a.cls is None
+    pooled = a.job is None and a.mem is None and a.node is not None and a.cls is not None
     if not (long_run or pooled):
-        ap.error("work takes --node and --class (a pool's worker), or --job alone (a long run)")
+        ap.error("work takes --node and --class (a pool's worker), or --job and --mem (a long "
+                 "run)")
     if pooled:
         check_node(a.node, environ)
     worker = f"{_env(environ, 'SLURM_ARRAY_JOB_ID')}_{_env(environ, 'SLURM_ARRAY_TASK_ID')}"
@@ -160,6 +169,10 @@ def _work(ap: argparse.ArgumentParser, a: argparse.Namespace,
     ends_at = float(_env(environ, "SLURM_JOB_END_TIME"))
     checkout = Path(_env(environ, "CLUSTER_SUBMIT_CHECKOUT"))
     commit = checkout_commit(checkout)
+    try:
+        pw.own_unique_gb()      # the measure a job's class is enforced by, or no worker
+    except pw.Unmeasurable as e:
+        raise SystemExit(f"pool.py work: {e}") from e
     oom = pw.oom_evidence(PROC_SELF_CGROUP.read_text(), CGROUP_ROOT)
     wave = Path(_env(environ, "HOME")) / WAVES / a.wave
     inputs = wave / ps.INPUTS
@@ -167,17 +180,19 @@ def _work(ap: argparse.ArgumentParser, a: argparse.Namespace,
     child_env = {**environ, "CLUSTER_SUBMIT_INPUTS": str(inputs),
                  "REBLOCK_BLOCK_BANK": str(inputs / ps.BANK)}
 
+    if long_run:
+        check_job_node(a.job, queue, environ)
+    memory_gb: int = a.mem if long_run else class_gb(a.cls, queue.header())
+
     def run_line(c: pq.Claim) -> pw.Ran:
-        return pw.run_job(c.job.line, cwd=checkout, env=child_env, log=_log,
-                          wrote=lambda: queue.wrote(c.attempt),
+        return pw.run_job(c.job.line, cwd=checkout, env=child_env, memory_gb=memory_gb,
+                          log=_log, wrote=lambda: queue.wrote(c.attempt),
                           kept=lambda: queue.kept(c.attempt))
 
-    if a.job is not None:
-        check_job_node(a.job, queue, environ)
+    if long_run:
         return pw.work_one(queue=queue, worker=worker, restarts=restarts, run=run, job=a.job,
                            commit=commit, ends_at=ends_at, now=time.time, run_line=run_line,
                            oom=oom, log=_log)
-    check_class(a.cls, queue.header())
     poll = queue.header().ladder.poll_seconds
     return pw.work(queue=queue, worker=worker, restarts=restarts, run=run, node=a.node,
                    cls=a.cls, commit=commit, ends_at=ends_at, now=time.time,
