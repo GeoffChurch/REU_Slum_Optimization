@@ -14,11 +14,11 @@ Wk1l1000 and B diode B (Wk1o10i3000n64, on B_N of the walled-in blocks: `pick`),
 - `Simp`: relax.one under a plan. Under W the plan names no eps world (W_PLAN, SIMP's default
   without `.e` and `s`, which name T's worlds of a standing building at eps; gap_walls'
   relaxation is W itself at every 0/1 clearing), its polish scored exactly (`E`) on a core as T's
-  was, `.f0`; PROJ_PLAN the same with relax's Heaviside projection (stage 3's ruling).
+  was, `.f0`; PENALTY_PLAN the same with a steeper penalty (q to 5: stage 3's ruling).
 - `Greedy`: walls_greedy's greedy over W's exact gains (`Gx` every candidate re-scored each step,
   `GxL` lazily).
 The arms by label (ARMS): stage 2's S10 and B (SIMP's default); stage 3's pilot S10p (the
-projection), S10g (GxL), S10G (Gx, on the pilot's blocks of at most PILOT_FULL_N buildings: lazy
+steeper penalty), S10g (GxL), S10G (Gx, on the pilot's blocks of at most PILOT_FULL_N buildings: lazy
 against full), and its fit arms S10x and Bx (FIT, the pilot's pick). A study (STUDIES: stage2,
 pilot, fit) is the arms it scores and the pairs it reports, its rows in its own directory.
 
@@ -35,7 +35,7 @@ pilot, fit) is the arms it scores and the pairs it reports, its rows in its own 
 (uniform_rows/summary_blocks.csv's n_walled) and then by id, split into B_STRATA strata of
 consecutive blocks (numpy.array_split), B_N / B_STRATA drawn from each without replacement by
 numpy.random.default_rng(PICK_SEED). `pilot-pick`: stage 3's pilot by the same rule, PILOT_N blocks
-from PILOT_STRATA strata by default_rng(PILOT_SEED), the projection's tuning blocks (TUNING) left
+from PILOT_STRATA strata by default_rng(PILOT_SEED), the penalty's tuning blocks (TUNING) left
 out.
 
 `arm`: the arm's run (its optimizer under its metric), its row with the host, the wall time and the
@@ -106,7 +106,7 @@ PILOT_STRATA = 5
 PILOT_SEED = 20261023
 PILOT_FULL_N = 250                   # the full greedy (Gx) on the pilot's blocks of at most this
                                      # many buildings (its scores ~ 0.05 n^2: lazy against full)
-TUNING = ("ZAF.9.1.2_1_3786", "ZAF.9.3.1_1_19570", "ZAF.9.3.1_1_18286")   # the projection's
+TUNING = ("ZAF.9.1.2_1_3786", "ZAF.9.3.1_1_19570", "ZAF.9.3.1_1_18286")   # the penalty's
 LENSES = ("L_P", "L_Pq", "L_J2")
 BB_DRAWS = 4000                      # the Bayesian bootstrap's draws (consolidated._bb_interval's)
 BB_SEED = 20261022
@@ -115,12 +115,12 @@ WALLS = {"S10": "Wk1l1000",          # the owner's default walls (2026-10-21)
 # SIMP's default under W: relax.SIMP_DEFAULT without its eps worlds (`.e0.0001`, `s1e-06`: T's), the
 # polish scored exactly (W's discrete scorer), no free first
 W_PLAN = "fw0.q3.i10.k1.p256w8x2E.f0"
-# ... with relax's Heaviside projection, its sharpness doubling from 1 to 64 over the continuation
-# (stage 3's ruling, on TUNING: NOTES)
-PROJ_PLAN = "fw0.q3.i10.b1-64.k1.p256w8x2E.f0"
+# ... with a steeper penalty, SIMP's continuation to q 5 (stage 3's ruling on TUNING: as default's
+# W L_P, half its grey; relax's Heaviside projection .b1-64 near-binary but 0.007 below: NOTES)
+PENALTY_PLAN = "fw0.q5.i10.k1.p256w8x2E.f0"
 FIT = "GxL"                          # stage 3's pick on the pilot (NOTES)
 # the walls arms by label: (walls, optimizer's name)
-ARMS = {"S10": ("S10", W_PLAN), "B": ("B", W_PLAN), "S10p": ("S10", PROJ_PLAN),
+ARMS = {"S10": ("S10", W_PLAN), "B": ("B", W_PLAN), "S10p": ("S10", PENALTY_PLAN),
         "S10g": ("S10", "GxL"), "S10G": ("S10", "Gx"), "S10x": ("S10", FIT), "Bx": ("B", FIT)}
 
 

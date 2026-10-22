@@ -150,31 +150,29 @@ class Lazy:
     def run(self, sc: Scorer, *, budget: float) -> Result:
         cost = sc.wm.cost
         J0, left, steps = sc.J, budget + 1e-12, []
-        # (-gain per unit cost, building, the step it was scored at); per building scored at the
-        # current step its gain and its state's sides (none kept from the first pass)
-        heap: list[tuple[float, int, int]] = []
-        fresh: dict[int, tuple[float, NDArray[np.int8] | None]] = {}
+        # (-gain per unit cost, building, the step it was scored at, the gain); per building scored
+        # at the current step its state's sides (none kept from the first pass)
+        heap: list[tuple[float, int, int, float]] = []
+        sides_at: dict[int, NDArray[np.int8]] = {}
         for j in range(sc.wm.n):
             if _fits(sc, j, left):
                 g, _sides = sc.gain(j)
-                heap.append((-g / float(cost[j]), j, 0))
-                fresh[j] = (g, None)
+                heap.append((-g / float(cost[j]), j, 0, g))
         heapq.heapify(heap)
         step = 0
         while heap:
-            key, j, at = heapq.heappop(heap)
+            key, j, at, g = heapq.heappop(heap)
             if not _fits(sc, j, left):
                 continue
             if self.stale(at, step):
                 g, sides = sc.gain(j)
-                fresh[j] = (g, sides)
-                heapq.heappush(heap, (-g / float(cost[j]), j, step))
+                sides_at[j] = sides
+                heapq.heappush(heap, (-g / float(cost[j]), j, step, g))
                 continue
-            g, kept = fresh[j]
-            sc.take(j, g, kept)
+            sc.take(j, g, sides_at[j] if j in sides_at else None)
             left -= float(cost[j])
             step += 1
-            fresh = {}
+            sides_at = {}
             steps.append(Step(building=j, gain=g, ratio=-key, J=sc.J, D=sc.D, scores=sc.scores))
         return Result(J0=J0, steps=steps, scores=sc.scores)
 

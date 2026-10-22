@@ -12,6 +12,12 @@ convention). Every guard meshes afresh (a cache of its own, in a temporary direc
     uv run python $S walled-count <ids,> [fault]  # fault: through-walls
     uv run python $S sources <ids,> [fault]       # fault: doors
     uv run python $S walls-identity - [fault]     # fault: part-dropped
+    uv run python $S relax-gradient <ids,> [fault]  # faults: no-faces, forward-only, ground-zero
+    uv run python $S relax-ends <ids,> [fault]    # fault: owners-reversed
+    uv run python $S relax-monotone <ids,> [fault]  # fault: cleared-slow
+    uv run python $S relax-warm <ids,> [fault]    # fault: one-pass
+    uv run python $S relax-identity - [fault]     # faults: eps-accepted, part-dropped
+    uv run python $S greedy-exact <ids,> [fault]  # faults: stale-gain, over-budget
     uv run python $S both-ways <guards,> <ids,|->
 
 Each runs under the guards' walls, SYM (symmetric, ell 200 m) and DIODE (out 50 m, in 300 m), k_in
@@ -62,6 +68,17 @@ refused by walls_of; a diode whose lengths are equal, a k_in over 1 and a zero w
 gap_walls's public constants are SIDE_REL alone (it moves scores at the floating-point level only,
 so it is in no digest). Fault `part-dropped`: WallMetric's name without the walls' part.
 
+The relaxation's guards (stage 2; NOTES, "Walls that leak", stage 2): `relax-gradient` (the
+gradient against central differences at SIMP's start and a random design, q 1 and 3; at a grounded
+exit's owner the limit against the gradient just below it), `relax-ends` (the relaxation at 0/1
+clearings W's state bit for bit), `relax-monotone` (no table value falls as an owner clears, P along
+designs never rises), `relax-warm` (the diode warm from the last design settles where the cold
+start does), `relax-identity` (W's plan and arms read back, T's eps worlds refused).
+`greedy-exact` (stage 3, walls_greedy): under each walls, the lazy greedy's every step's gain is W's
+exact gain, J before less J after each scored afresh (WallModel.exact), within GAIN_TOL of J0; it
+stops at the budget (D within it, no building left that fits what remains). Faults `stale-gain`
+(a popped gain taken without re-scoring) and `over-budget` (a candidate's fit ignoring its cost).
+
 Typed as `search.py`'s docstring says:
 
     MYPYPATH=research/roadless uv run mypy --strict --follow-imports=silent \\
@@ -93,6 +110,7 @@ import leaky_simp  # noqa: E402
 import metrics  # noqa: E402
 import region_leaks  # noqa: E402
 import relax  # noqa: E402
+import walls_greedy as wg  # noqa: E402
 
 if TYPE_CHECKING:
     from reblock.contracts import Block
@@ -133,6 +151,8 @@ ENDS_TOL = 1e-12         # the relaxation's J at a 0/1 clearing against W's scor
                          # network is W's bit for bit; a diode's loop from another start ties)
 WARM_ITERS = 6           # relax-warm: SIMP's first updates replayed warm and cold
 WARM_TOL = 1e-10         # ... their potentials apart (of the largest)
+GAIN_TOL = 1e-10         # greedy-exact: a step's gain against W's exact one, of J0 (a diode's
+                         # loops from other starts settle to roundoff)
 
 
 @contextmanager
@@ -810,13 +830,14 @@ def relax_identity(_ids: list[str]) -> list[str]:
     if plan.name != leaky_simp.W_PLAN or not isinstance(plan.free, relax.NoFree) or \
             plan.polish_scoring.suffix != "E" or plan.kscore != 0.0 or plan.eps != clear.EPS:
         bad.append(f"W's plan {leaky_simp.W_PLAN!r} reads back as {plan.name!r}")
-    a = leaky_simp.arms()
-    for arm, part in ((a.s10, leaky_simp.S10), (a.b, leaky_simp.DIODE_B)):
+    for label in leaky_simp.ARMS:
+        arm = leaky_simp.w_arm(label)
         back = gw.walls_of(arm.metric.name, factorization=gap_factor.SuperLU())
         path = leaky_simp.arm_path(arm, "x")
         if back.walls != arm.metric.walls or back.name != arm.metric.name or \
-                f"+{part}+" not in arm.metric.name or \
-                path.parts[-4:-1] != (arm.metric.name, arm.plan.name, "D0.05"):
+                f"+{leaky_simp.WALLS[arm.walls]}+" not in arm.metric.name or \
+                leaky_simp.optimizer_of(arm.opt.name) != arm.opt or \
+                path.parts[-4:-1] != (arm.metric.name, arm.opt.name, "D0.05"):
             bad.append(f"{arm.label}: {arm.metric.name} / {path} does not round-trip")
     wm = _walls_model(_direction_block(), PER_BLOCK, SYM, start=WARM)
     refused: list[Callable[[], object]] = [
@@ -833,16 +854,55 @@ def relax_identity(_ids: list[str]) -> list[str]:
     if sc.q != 1.0 or sc.beta != 0.0:
         bad.append("W's scorer not at q 1, unprojected")
     verdict = "ok" if not bad else "FAILS: " + "; ".join(bad[:3])
-    print(f"relax-identity: W's plan {plan.name}; {a.s10.metric.name[:60]}...; T's eps worlds "
-          f"refused -> {verdict}", flush=True)
+    print(f"relax-identity: W's plan {plan.name}; {len(leaky_simp.ARMS)} arms' names and rows "
+          f"read back; T's eps worlds refused -> {verdict}", flush=True)
     return bad
+
+
+# ------------------------------------------------------------------ stage 3: the greedy
+
+def greedy_exact(ids: list[str]) -> list[str]:
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        for walls in WALLS:
+            wm = _walls_model(b, _uniform(), walls, start=WARM)
+            res = wg.run(wm, wg.Lazy(), budget=BUDGET, power=1.0)
+            x = np.zeros(wm.n, dtype=bool)
+            J = wm.exact(x, 1.0)[0]
+            worst = 0.0
+            for st in res.steps:
+                x[st.building] = True
+                J1 = wm.exact(x, 1.0)[0]
+                worst = max(worst, abs(st.gain - (J - J1)) / res.J0)
+                J = J1
+            D = float(wm.cost[x].sum())
+            fits = int(((~x) & (wm.cost <= BUDGET - D)).sum())
+            ok = len(res.steps) > 0 and worst <= GAIN_TOL and D <= BUDGET + 1e-12 and fits == 0
+            print(f"greedy-exact {bid} {walls.name}: {len(res.steps)} steps, {res.scores} scores; "
+                  f"gains against W's exact {worst:.1e} of J0; D {D:.5f}, {fits} buildings "
+                  f"left that fit -> {'ok' if ok else 'FAILS'}", flush=True)
+            if not ok:
+                bad.append(f"{bid} {walls.name}: gains {worst:.1e}, D {D:.5f}, {fits} fit")
+    return bad
+
+
+def _never_stale(self: wg.Lazy, scored_at: int, step: int) -> bool:
+    """walls_greedy.Lazy.stale never: a popped gain taken as scored (fault `stale-gain`)."""
+    return False
+
+
+def _fits_any(sc: wg.Scorer, j: int, left: float) -> bool:
+    """walls_greedy._fits ignoring the cost (fault `over-budget`)."""
+    return not bool(sc.removed[j])
 
 
 GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "direction": direction, "party": party, "settles": settles, "energy": energy,
     "monotone": monotone, "walled-count": walled_count, "sources": sources,
     "walls-identity": walls_identity, "relax-gradient": relax_gradient, "relax-ends": relax_ends,
-    "relax-monotone": relax_monotone, "relax-warm": relax_warm, "relax-identity": relax_identity}
+    "relax-monotone": relax_monotone, "relax-warm": relax_warm, "relax-identity": relax_identity,
+    "greedy-exact": greedy_exact}
 
 
 def _diode_costs_swapped(self: gw.DiodeWalls, leave: np.ndarray, enter: np.ndarray
@@ -884,6 +944,8 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
                                                         _eps_accepted),
                        "part-dropped": lambda: _patched(gw.WallMetric, "name",
                                                         property(_name_without_part))},
+    "greedy-exact": {"stale-gain": lambda: _patched(wg.Lazy, "stale", _never_stale),
+                     "over-budget": lambda: _patched(wg, "_fits", _fits_any)},
 }
 
 
