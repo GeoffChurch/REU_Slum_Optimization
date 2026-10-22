@@ -8561,3 +8561,183 @@ pass's default wall on one card (two arms, two meshes, two models for the lenses
 (63612; its process's peak RSS 55.8 GB of the task's 64, GPU 6.9 GB). The U arm took 0.93x T's
 wall (0.84x SIMP's own time). Here, single-threaded, at most 2 processes: the 80 small blocks 2.1
 process-h (0.96x the default's wall), the guards and diagnostics about 8 process-h.
+
+### Pruning by epistemetry: the move (owner 2026-10-17)
+
+**Why.** The owner's decision of 2026-10-17: the consolidated pass prunes with seqscreen (its
+screens are done, phase 5 above), then reblock's screens decide through GeoffChurch/epistemetry and
+seqscreen is deleted, so that epistemetry is dogfooded by several projects rather than shadowed by
+a second decision layer inside reblock. seqscreen goes by that decision, not by dominance: the
+fourth replay ("Pruning by epistemetry: the realized loss as the target", above) tied it within
+noise, the realized loss below seqscreen's at every rate with 67 wrong calls and 284 asks against
+its 66 and 280 in each setting's 1,300 pairwise runs, counts that moved more under the nine-rate
+sensitivity than they differ by. The plan: docs/superpowers/plans/2026-10-17-epistemetry-move.md.
+
+**What a screen is now.** epistemetry 165f98b's `Screen` (a policy, a drop rule and a seed:
+`design.screen`), carried on by its live loop `advance` as each block's rows arrive. The policy is
+`ValueOfMoreUnits`: past a 15-block floor, at step 1, it values the next blocks at every horizon (1
+to 46, capped at the blocks left) on the finite-population Bayesian bootstrap of the variant's own
+blocks, the extra GPU-seconds uncertain jointly with the gain and the next blocks' cost forecast in
+proportion to the default's GPU-seconds on them (`ProportionalTo`, the cost model's covariate), and
+goes on while some horizon is worth its GPU time; the collapse veto (`VetoBelow`, a block more than
+0.1 Lens A below the default) stops it at once, keeping the default. What it values, prices and
+calls each arm by is the rule, a Strategy in screening.py (`Rule`), and the two presets are built
+once at consolidated's edge (`screen_presets()`, every number that can change a call a constant
+there) and injected into `screen-report <preset> <wave>`, which never asks which rule it holds:
+- `realized-loss`, the default: `AdoptKeepAskByStake` over the bracket's five geometric rates
+  (`RATES_PER_GPU_SECOND`, 2e-6 -- 1.9e-5 Lens A per GPU-second), equally weighted, over FUTURE
+  (820) uses, a wrong call losing |gain - rate x extra GPU-seconds|; the lowest realized loss at
+  every rate in the fourth replay. It gives up wrong calls: 67 against 37 in the fourth replay's
+  1,400 distinct pairwise runs (each design without the veto, C1m4/p64 with it too), for fewer asks
+  (284 against 318).
+- `fewest-wrong`: `AdoptKeepAsk` over the bracket's ends, each arm priced by its own stake
+  (`screening.OwnStake`, the third replay's 0-1 target). It gives up asks (318 against 284) and
+  realized loss at the bracket's bottom and middle.
+
+The nine-point sensitivity is no preset (asks are free, owner 2026-10-16, so no operating point
+wants fewest asks), and `SharedStake` was not ported (on one arm it is the own price, and reblock
+screens pairwise). `Screen.record()` is a screen's identity (the rule's target and stop, the
+horizons, the floor, the step, the cost model, the Monte Carlo sizes, the veto and the seed), and
+it revives as the screen itself. Each wave continues from the screens' stored ledger
+(consolidated_rows/screen_decisions.json: the metric, the Screen's record, and each screen's
+Running or Stopped state with the blocks it was decided on), so a wave never re-values the
+decisions that chose the earlier ones; a ledger of another metric or preset, on blocks the rows no
+longer start with, or one epistemetry cannot read back is refused before anything is decided, and
+removing the file starts afresh. The screens' metric is the campaign's
+(`consolidated.SCREENS_METRIC`): phase 5's ran under the previous boost (every drivable way,
+va03a092b), which this code no longer builds, so `screen` and `screen-lenses` refuse to extend that
+campaign, and a campaign under RUNTIME moves the constant and starts afresh. Continuing equals
+deriving afresh only while the cost covariates stay as they were: in a campaign run in real waves a
+block's covariate is the pass's default time until the screen runs it and the screen's own re-run
+of the default after (on the 30 held-out blocks with both they differ by up to 137 s, 65% of the
+pass's), so r2l2 decided as a 17-block wave (the covariates of the seven blocks it runs next moving
+by up to 10.8% once run) and continued onto its 24 rows reaches the same stop (20) and call (ask)
+with readings about 1% off and a ledger unequal to the one derived afresh (BACKLOG, "A screen
+continued over real waves", the owner's call).
+
+The pin lives in pyproject.toml, as cluster_submit's does: epistemetry in the `research` dependency
+group, `[tool.uv.sources]` at 165f98b's full SHA (cluster_submit mirrors uv.lock's git sources to
+the cluster, so the nodes need no GitHub access). It moves so (screening.py, "THE PIN"): edit the
+rev, `uv lock --upgrade-package epistemetry`, run `screening_check.py both-ways
+target,records,adapter,why,acceptance,screens`; if `acceptance` fails only because the random
+numbers changed, regenerate the runs (`runs`) and pass `equivalent` against the committed
+screen_acceptance.csv before committing the new one; if `screens` fails the same way, re-derive the
+screens afresh (remove screen_decisions.json, `consolidated.py screen-report <preset> 0`) and
+report the moved stops in the pin move's commit. epistemetry requires Python >=3.12
+(GeoffChurch/epistemetry #9 asks why), so the project's requires-python rose to >=3.12 (the venv is
+3.12.13; main is untouched).
+
+**The comparison** (screening_check.py `runs` and `equivalent`; screen_acceptance.csv). At 165f98b
+every draw is keyed by a seed and its place (`design.screen.stream`), so no replay reproduces the
+fourth replay's runs bit for bit: the move was checked statistically, run against stored run on the
+same order. Both presets were replayed at the pin with epistemetry's `replay` on the fourth
+replay's frozen designs and orders (screen_designs.json: every pairwise design's 100 orders without
+the veto, C1m4/p64's with it too; order o's draws keyed by (0, o); 1,400 runs a preset, 2,800 in
+all) and paired with the fourth replay's runs of the same policies. Exact where nothing is left to
+draw (the whole design observed, or a veto): 14 of 14 truths a preset (each the call on the whole
+design) and 200 of 200 C1m4/p64 runs a preset (its 12 blocks no more than the floor, so a run sees
+them all or is vetoed; both settings), equal in blocks, call, wrong call, asks, truth and cost. The
+test, registered 2026-10-18 before the run: four quantities a run (blocks; cost, the share of the
+design's GPU-seconds; a wrong call; an ask), d = new - old on each order; equivalence if the 95%
+bootstrap interval of mean(d) (10,000 resamples) lies inside +-delta, delta half the two presets'
+gap on the old runs, so no shift that passes can reorder them (0.609 blocks, 0.0150, 0.0107,
+0.0121); and no shift found by a sign-flip test (100,000 flips; exact under the null, since the two
+runs on one order are exchangeable), on the 8 (preset, quantity) and 26 (preset, design) blocks
+tests, Holm at 0.05, McNemar's exact p beside the 0-1 quantities agreeing:
+
+    preset          quantity  old      new      d [95% interval]              p
+    realized-loss   blocks    15.0336  15.0243  -0.0093 [-0.0529, +0.0379]    0.72
+                    cost      0.4430   0.4426   -0.0004 [-0.0013, +0.0006]    0.44
+                    wrong     0.0479   0.0486   +0.0007 [+0.0000, +0.0021]    1
+                    asks      0.2029   0.2007   -0.0021 [-0.0050, +0.0000]    0.25
+    fewest-wrong    blocks    16.2514  16.2586  +0.0071 [-0.0493, +0.0714]    0.84
+                    cost      0.4731   0.4730   -0.0001 [-0.0016, +0.0015]    0.91
+                    wrong     0.0264   0.0264    0      [-0.0021, +0.0021]    1
+                    asks      0.2271   0.2257   -0.0014 [-0.0043, +0.0014]    0.63
+
+Every interval inside its delta; per design the blocks move by at most 0.38 (smallest raw p 0.20);
+Holm rejects none of the 34: pass. In counts at the pin: realized-loss 68 wrong calls and 281 asks
+in its 1,400 runs (67 and 284 in the fourth replay), fewest-wrong 37 and 316 (37 and 318). The
+test's own check (the migration's `self-check`, deleted with it): the old runs against themselves
+pass; one block more on every r2/base run fails on Holm only (p 1e-05); realized-loss's wrong call
+flipped on 20 runs fails on its interval ([+0.0086, +0.0207] outside 0.0107); a draw-free run
+costing 1e-9 more fails the exact check, and a comparison with no draw-free run fails. The margins
+are now a rule, not numbers (`deltas_of`: half the presets' gap on the old runs it is given), since
+a pin move compares against the committed CSV, whose blocks gap gives 0.617, not 0.609.
+
+**GeoffChurch/epistemetry #10, measured.** A replay charges a step unit by unit (an arm pays for
+the blocks it observed up to its stop); a live wave run in parallel pays the whole step. Beside
+each run's cost the acceptance runs record `wave_cost` (each arm's steps paid whole), equal to cost
+bit for bit wherever no veto cuts a step short. It is higher on 93 of the 1,400 runs a preset, all
+among C1m4/p64's 100 runs under the veto, where the collapse falls inside the floor's first step
+(its 12 blocks): 1,609.3 GPU-seconds charged (5.9 blocks, mean) against 3,067.0 a wave pays;
+(wave_cost - cost) is a mean 0.475 of the design's cost over those 100 runs and 0.034 over all
+1,400; the same for both presets. It moves neither the comparison (both sides are replays charged
+unit by unit) nor the presets' ranking (both share the floor's step); it biases a live screen's
+cost forecast where a veto falls inside a multi-block step, which at step 1 is only the floor's
+first. Commented on #10 (the owner's yes, 2026-10-18):
+https://github.com/GeoffChurch/epistemetry/issues/10#issuecomment-6338646207.
+
+**Phase 5's verdicts**, re-derived through `advance` under `realized-loss`
+(consolidated_rows/summary_screen.csv, its `screen` column the Screen's record;
+screen_decisions.json, six Stopped states, 10 judged readings): every stop and call seqscreen's.
+The lenses and times are phase 5's (above), bit for bit; the break-even rate (the mean gain over
+the mean extra GPU-seconds on the blocks used, Lens A per GPU-second: the rate an ask turns on) is
+new:
+
+    variant      eligible  run  used  stop     call  break-even
+    .r2l2              46   24    20  settled  ask   7.9e-6
+    .pP                46   15    15  settled  keep  7.7e-7
+    seed               46   15    15  settled  keep  0 (-2.6e-16)
+    .m2                15   15    15  ran out  keep  0 (3.2e-15)
+    MMA                46   15    15  settled  keep  -6.9e-5
+    damped OC          46   15    15  settled  keep  -7.2e-4
+
+**The guards** (screening_check.py; each passes on the code and fails under each of its faults, a
+patch inside the guard's process; `both-ways` runs both, single-threaded, after the deletion: 51
+and 43 minutes):
+- `target`: each preset's target as its policy builds it, against the loss recomputed outside
+  epistemetry: realized-loss's risk, call and price 37 of 37 decisions, fewest-wrong's target and
+  own price 37 of 37. Faults `dropped-uses` (the target over 1 use, not FUTURE: 21 of 37 risks off,
+  the other 16 losing exactly 0) and `unstaked` (the own price without its stake: 37 of 37 off):
+  FAIL.
+- `records`: each preset's `Screen.record()` round-trips through JSON and names its target. Fault
+  `array-rates` (the rates the array np.geomspace returns): the record refuses it, FAIL.
+- `adapter`: a live screen fed through `screening.arrived_of` is epistemetry's replay, decision for
+  decision, in 18 cases (r2/base, x2/p64, pPg/p256, C1m4/p64 in both settings and a zero-gain
+  design, orders 0-2); cut one block short of its stop it is Running in 15, waiting for the block
+  the replay took next; the zero-gain design settles at the floor keeping the default, C1m4/p64 is
+  vetoed at its first collapsing block ("collapse") or runs out at 12. Faults `misaligned` (the
+  covariate in the fixture's block order, not the screen's) and `gross-extra` (the variant's gross
+  GPU-seconds as its extra): 8 cases each, FAIL.
+- `why`: a collapse on the screen's last block reads "collapse", not "ran out". Fault
+  `ran-out-first`: FAIL.
+- `screens`: the committed summary_screen.csv and screen_decisions.json are what the code derives,
+  continued from the ledger and afresh; every state round-trips; 10 of 10 judged readings'
+  verdicts, rules and prices re-derived from their records; r2l2's ledger cut to 4 of its 7
+  decisions (Running on 17 blocks), as a wave would store it were the covariates unchanged,
+  continues to the screens derived afresh; refused before any decision, each naming its cause: a
+  held-out block's default time missing, another metric's or preset's ledger, a state or screen
+  record epistemetry cannot read back, a variant's stored blocks off its order. Faults `shuffled`
+  (common.HELD reshuffled), `altered-record` (one stored price times 1 + 1e-6), `wave-seeded` (each
+  wave its own stream): FAIL.
+- `acceptance`: realized-loss replays screen_acceptance.csv's orders 0-9 (140 runs) exactly, 140 of
+  140. Fault `dropped-uses`: both/p64 differs on 4 of 10 runs, FAIL.
+
+**What was deleted** (abe75d6d): seqscreen.py, with its loaders, `next`, `question`, ORDERS,
+STOPPED and POWER (no caller outside it; the ask's number is summary_screen.csv's `break_even`),
+epireplay.py, and screening_migration.py (the move's one reader of the fourth replay's rows); no
+reader of any remains (`git show abe75d6d^:research/roadless/seqscreen.py` has the code). The block
+sets are common.py's (TUNING, 13; HELD, 46, in the order phase 5 ran them, frozen as data, since
+165f98b's `random_orders` no longer draws that permutation). The replays' data (Ruling 6, the
+owner's "delete"), after the comparison passed: 36 git-ignored paths, 58 MB (ten
+epireplay*.parquet, five *_jobs directories with screen_acceptance_jobs, 22 epireplay4 logs);
+screen_acceptance.csv holds every acceptance run. The fixture stays: epireplay_designs.json is
+screen_designs.json, reblock's real-data acceptance fixture (epistemetry's spec puts each project's
+real-data acceptance test in that project, run through its pin), its five many-arm designs read by
+nothing until a many-arm screen exists (BACKLOG). The four replays' sections above stay as they
+were, records of code that is gone.
+
+**Compute.** Here, single-threaded: the acceptance runs 13.0 worker-hours over 8.5 h (112 jobs, 63
+on 1 worker, 49 on 4; the fourth replay's same work about 12.7); the guards after the deletion 1.6
+process-hours (`acceptance` 43 minutes, the others 51).

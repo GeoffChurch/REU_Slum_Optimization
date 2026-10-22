@@ -68,7 +68,8 @@ multi-start `.C<h>.m<k>` and fine `.m<k>` (neither faster nor better); the two-p
 (pairs reach the same blocks); seeding `.g` (loses where a better start polishes worse: `.G`
 instead); greedy screening width `S0.01catw4` (+0.0006, marginal); pairs after the greedy (+0.0005,
 marginal); resolution (res-check: h 0.75 within 0.01 on 35 of 59, h 1.0 understates gated blocks by
-up to 0.31); sequential stopping (seqscreen.py: by the value of more blocks, 15 -- 24 of 46).
+up to 0.31); sequential stopping (by the value of more blocks, 15 -- 24 of 46; epistemetry's
+`advance` on a `Screen` since 2026-10-17, How we run experiments).
 Re-screened under P in the consolidated pass, each against SIMP's default on one card (Owner's
 decisions, "In that pass, prune"): `.r2l2`, `.pP` (+0.00001 L_P at 1.12x), the seed `.g` (the
 default's clearing on all 15 at 1.25x), `.m2`, MMA and damped OC; none deleted.
@@ -88,9 +89,9 @@ Prioritized (owner 2026-10-08: "I want to do all of the following"), each entry 
   on the composite** (Coverage and model): closed with the raster (consolidated pass; wiki
   `pages/reblock/raster-escape-time-metric-retired.md`).
 - **The add/remove search as one Strategy** (New methods): built, with floating search.
-- **An outcome model for kernelcore** (Experiment design): dropped on review (owner
-  2026-10-09); the stop is built in seqscreen.py instead, by the value of more blocks (NOTES,
-  "Stopping by the value of more blocks").
+- **An outcome model for kernelcore** (Experiment design): dropped on review (owner 2026-10-09);
+  the stop was built in seqscreen.py instead, by the value of more blocks (NOTES, "Stopping by the
+  value of more blocks"), now epistemetry's (NOTES, "Pruning by epistemetry: the move").
 
 Owner's agenda (2026-10-10: "we can take things up one by one and write down all the open
 items up front"), in the order proposed:
@@ -662,24 +663,46 @@ Open:
     open"), not when a neighbour cleared within 1 m does; free first frees by the same test. Open:
     T or U (the owner asked what U's two fixes are, and whether a home's source belongs inside its
     footprint rather than on its outline's ring).
-- **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
-  call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
-  owner's answer moves an end of the bracket to that screen's break-even rate. One is live,
-  `.r2l2`'s (the next item, (2)).
+- **The rate bracket** (`consolidated.RATES_PER_GPU_SECOND`, 2e-6 -- 1.9e-5 Lens A per GPU-second).
+  A screen whose call turns on the rate prints an "ask" (this much Lens A for this much more
+  time?); the owner's answer moves an end of the bracket to that screen's break-even rate
+  (summary_screen.csv's `break_even`). One is live, `.r2l2`'s (the next item, (2)).
 - **The consolidated pass's three questions** (the owner's call; NOTES, "The consolidated pass:
   every block under the final metric", phase 5 and the presets):
   - (1) Delete the seed `.g`, `.m2` and damped OC on the weaker reading of the rule? Each is beaten
     on every axis but a tie: the seed and `.m2` give the default's clearing on every block (at
     1.25x and 1.64x its time), damped OC trails on every lens at the default's time (1.01x [0.94,
     1.09]). The rule as written (beaten on every axis, tied on none) keeps them.
-  - (2) Adopt `.r2l2` into the default (seqscreen's "ask")? +0.00013 Lens A of P on 20 blocks
+  - (2) Adopt `.r2l2` into the default (the screen's "ask")? +0.00013 Lens A of P on 20 blocks
     (0.04% of the default's mean; ahead on 2, never behind) for 1.19x its GPU time, 17 s a block. A
-    yes puts RATES' top at its break-even, 7.9e-6 Lens A per GPU-second, a no its bottom.
+    yes puts the bracket's top at its break-even, 7.9e-6 Lens A per GPU-second, a no its bottom.
   - (3) Take S0.005cat into the cheap preset (`cheap005`)? +0.0018 L_P on the 60 large blocks
     (ahead on 38, behind on 22) at 73 s against 69 s a block on one card; +0.0007 on the 220 small
     (41 / 38) at 17 s against 14 s. Both are on the frontier.
+- **A screen continued over real waves** (the owner's call; NOTES, "Pruning by epistemetry: the
+  move"). consolidated.screen_data's cost covariate for a block is the pass's default time until
+  the screen runs it and the screen's own re-run of the default after, so a ledger made in waves
+  continues to the same stop and call as the screens derived afresh but not to an equal record:
+  r2l2 decided as a 17-block wave (the covariates of the seven blocks it runs next moving by up to
+  10.8% once run) and continued onto its 24 rows stops at 20 with "ask", as afresh, its readings
+  about 1% off, and the `screens` guard's afresh check would fail with every call agreeing. Ruling
+  10's "continuing equals afresh" holds only while the covariates stay fixed. No campaign runs in
+  waves today (phase 5's is read, never extended); before one does, choose:
+  - (a) fix each block's covariate before it runs (the pass's time, kept once the screen runs it):
+    continuing stays equal to afresh, at a noisier cost ratio and a re-derivation of phase 5's
+    screens;
+  - (b) compare a continued ledger with afresh by its steps, stops and calls only;
+  - (c) skip the afresh check for ledgers made in more than one wave.
 
 Not pursued, with what would change that:
+- *seqscreen* (deleted 2026-10-17 by the owner's decision, to dogfood epistemetry, not by
+  dominance: the fourth replay tied it within noise; NOTES, "Pruning by epistemetry: the move"):
+  would come back if a pin move's comparison (`screening_check.py equivalent`) shows epistemetry's
+  screen leaving its decisions; the code is at the commit before its deletion (`git show
+  abe75d6d^:research/roadless/seqscreen.py`).
+- *Many-arm screens* (one screen over a design's variants: the per-arm screen and SharedStake;
+  their five designs kept in screen_designs.json, read by nothing): would come back with a screen
+  of several variants run together; reblock screens each variant against the default.
 - *A Galerkin coarse model*: closed, the raster's (its AMG level; every solve on the complex is
   direct; wiki `pages/reblock/raster-escape-time-metric-retired.md`).
 - *The greedy's sweep kernel*: closed, the raster's GPU sweep (the complex's greedy sweeps on the
@@ -762,10 +785,15 @@ Not pursued, with what would change that:
   any block collapses (> 0.1 below its baseline) or its median time exceeds 3x the baseline's.
   Only survivors get the 44.
 - **One GPU process at a time** (large blocks), queued in a detached script.
-- **Sequential stopping** (done 2026-10-09). seqscreen.py: the Bayesian bootstrap's posterior
-  on a variant's mean paired difference, a stop when no number of further blocks is worth its
-  GPU time (the exact value of more blocks through the posterior mean's Polya urn), a 15-block
-  floor and the collapse veto. kernelcore's reweighting collapses on these screens (NOTES).
+- **Sequential stopping** (done 2026-10-09; on epistemetry since 2026-10-17, NOTES "Pruning by
+  epistemetry: the move"). epistemetry's `advance` on a `Screen` (consolidated `screen-report
+  <preset> <wave>`, the presets built at its edge): ValueOfMoreUnits on the finite-population
+  bootstrap of the variant's blocks, a stop when no number of further blocks is worth its GPU time;
+  AdoptKeepAskByStake over the bracket's five rates (`realized-loss`, the default; `fewest-wrong`
+  the 0-1 target at each arm's own stake), over FUTURE uses; a 15-block floor, step 1, and the
+  collapse veto. Each wave continues from the screens' stored ledger
+  (consolidated_rows/screen_decisions.json). kernelcore's reweighting collapses on these screens
+  (NOTES).
 
 ## Greedy
 
@@ -878,35 +906,27 @@ Not pursued, with what would change that:
 
 ## Experiment design
 
-- **Pruning by epistemetry's decision layer** (owner 2026-10-14: "Yes"; replayed 2026-10-15,
-  twice 2026-10-16 and 2026-10-17, NOTES "Pruning by epistemetry: a replay against seqscreen",
-  "Pruning by epistemetry, again: step-wise re-decision and per-arm screens", with its "A price
-  per arm", and "Pruning by epistemetry: the realized loss as the target"):
-  **seqscreen stays** for the consolidated pass. The first replay (c1784af) failed the amended rule
-  (loss below at every rate, no more wrong calls, no more asks) in both veto settings; the owner
-  approved the two changes it named and epistemetry built them (bbe2163 `step`, 64aae7f per-arm
-  screens). Replayed at 64aae7f (epireplay.py on the frozen designs, epireplay_designs.json): step
-  1 is the first replay's stepped diagnostic run for run and fails pairwise (loss above at the
-  bracket's bottom and middle, 318 asks against 280, though 37 wrong calls against 66); the
-  per-arm screen cuts the many-arm screens' cost from 0.821 to 0.464 of the arms' GPU-seconds
-  (seqscreen per variant 0.424) and fails too (loss above at the middle and top, 315 asks against
-  279). At 3a3b9a3 (the feedback built, owner 2026-10-16) each arm priced by its own stake: the
-  many-arm screen is its pairwise step-1 screens summed and fails as they do (203.3 against 174.3
-  and 522.4 against 521.3 at the middle and top, 317 asks against 279); a per-arm price was not
-  the gap. At 674dba4 (`AdoptKeepAskByStake`, the realized loss as the target, priced at
-  PRICE_RATE / FUTURE with no stake; asks queued at no cost, owner 2026-10-16) the screen is
-  seqscreen's stop nearly run for run (the same blocks in 1,152 of 1,300 pairwise runs, the same
-  call in 1,286): its loss is below seqscreen's at every rate, pairwise and many-arm, but it makes
-  67 wrong calls against 66 and 284 asks against 280 pairwise (69 and 282 against 67 and 279
-  many-arm), so it fails (2) and (3), not (3) alone; over nine rates it fails (1) and (2), its
-  counts moving more than those margins. Would come back with: the owner's ruling on whether
-  counts this close (1 to 4 in 2,600 runs) should decide now that asks are free; no target or
-  price is left to build for it. epireplay.py is pinned at 674dba4 (502dec65). epistemetry
-  452052c acts on the fourth replay's notes 2, 4 and 5: `AdoptKeepAskByStake` takes a required
-  `uses` (FUTURE) and carries its price (`target.price`, sum_r w_r r; its values `uses` times
-  larger, so realized losses compare on that scale); every rule and target is `Recordable`, with
-  `stats.records.revive` its inverse (records stored at 674dba4 migrate before `revive` reads
-  them); the replay's types compare by value. The pin moves only with a next replay.
+- **Pruning by epistemetry's decision layer** (owner 2026-10-14: "Yes"; four replays from
+  2026-10-15 to 2026-10-17, NOTES "Pruning by epistemetry: a replay against seqscreen" and the
+  three sections after it): **done, the move** (owner 2026-10-17: dogfood epistemetry; NOTES
+  "Pruning by epistemetry: the move"). The screens decide through epistemetry 165f98b: `advance` on
+  a `Screen`, the presets `realized-loss` (the default) and `fewest-wrong` built at consolidated's
+  edge, each wave continuing from the screens' stored ledger. seqscreen.py and epireplay.py are
+  deleted by that decision, not by dominance (the fourth replay tied seqscreen within noise: 67
+  wrong calls and 284 asks against its 66 and 280 in each setting's 1,300 pairwise runs). The
+  move's comparison passed (both presets' 2,800 runs at the pin against the fourth replay's on the
+  same orders: every mean difference's interval inside half the presets' gap, Holm rejecting none
+  of 34 sign-flip tests), and phase 5's six screens re-derived to seqscreen's stops and calls. The
+  pin is in pyproject.toml (`[tool.uv.sources]`, the full SHA); at every pin move
+  `screening_check.py acceptance` (reblock's real-data acceptance test on screen_designs.json, with
+  the other guards: screening.py, "THE PIN"), and when a pin changes the random numbers, `runs` and
+  then `equivalent` against the committed screen_acceptance.csv (its margins half the presets' gap
+  there) before the new runs are committed, the screens re-derived afresh. The epistemetry issues:
+  #1-#9 filed from reblock (#1-#8 closed by 165f98b; #9, why requires-python >=3.12, open); #10 (a
+  replay charges a step unit by unit, a live wave pays it whole; from the replay driver's spec)
+  open, with the move's measurement commented (an under-charge only where a veto falls inside the
+  floor's first step: 93 of 1,400 runs a preset, a mean 0.475 of the design's cost on C1m4/p64's
+  100 veto runs, 0.034 over all).
 - **Adaptive block selection** (first look done, NOTES "Which blocks tell methods apart": collapses dominate; screen = gated sentinel + random sample; picking 'discriminating' blocks beyond the sentinel misleads. Remaining value: sequential sample size; wiki `pages/methods/adaptive-benchmark-items.md`).
   Fit a factor model to the method x block matrix of paired differences (axes like "opens
   gated pockets", "spreads in dense bands"); for a new variant run first the blocks with the
@@ -914,11 +934,11 @@ Not pursued, with what would change that:
   headline number still comes from the untouched set; keep some random blocks in every
   screen. Cheap first step: an SVD of the matrix we already have (greedy, SIMP variants,
   translucent search; 220 + 59 blocks) to see which blocks load on which axis.
-- *Generalize kernelcore's outcome model* (dropped 2026-10-09). The screens' stop is built in
-  seqscreen.py; reweighting draws collapses past about 4 blocks and a prior grid decides the stop
-  (NOTES, "Stopping by the value of more blocks"). Would come back with a consumer that must
-  choose among blocks that are not exchangeable (the adaptive selection above), designed against
-  it.
+- *Generalize kernelcore's outcome model* (dropped 2026-10-09). The screens' stop was built in
+  seqscreen.py, now epistemetry's; reweighting draws collapses past about 4 blocks and a prior grid
+  decides the stop (NOTES, "Stopping by the value of more blocks"). Would come back with a consumer
+  that must choose among blocks that are not exchangeable (the adaptive selection above), designed
+  against it.
 
 ## Coverage and model
 
