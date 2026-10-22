@@ -417,7 +417,7 @@ def _servable(*, wave: str, ladder: Ladder, nodes: Sequence[str], commit: str,
         throttle_checked(PROJECT, arrays, args.gpus)
 
 
-def _job_line(line: str, *, block: str, item: str, tar: Path | None) -> str:
+def job_line(line: str, *, block: str, item: str, tar: Path | None) -> str:
     """A job's line: the command for (`block`, `item`), keeping what stands
     (row_marker.KEEP_STANDING, Ruling 8's `Keep`: a row that stands is its identity done, so a
     double claim or a job run again after a partial write wastes a run only), after
@@ -534,8 +534,8 @@ def _submit(edge: Edge, a: argparse.Namespace) -> Ran:
     seed = pp.plan_wave(
         wave=wave, commit=commit, family=a.family, ladder=ladder, estimator=estimator,
         nodes=nodes, usable_gb=pp.USABLE_GB, ids=ids, items=items or [""],
-        line=lambda b, i: _job_line(line, block=b, item=i,
-                                    tar=None if a.unpack is None else tars[b]),
+        line=lambda b, i: job_line(line, block=b, item=i,
+                                   tar=None if a.unpack is None else tars[b]),
         created=ctx.stamp())
     unbounded = _unbounded(seed.jobs)
     if unbounded:

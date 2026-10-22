@@ -318,6 +318,8 @@ def propose(rows: Path, scratch: Path, bid: str, name: str, method, fresh: bool,
                    same_as_cached=same)
         print(f"{time.strftime('%H:%M:%S')} {bid} {name}: {n_roads} roads, {road_m:.0f} m, "
               f"{s.wall:.0f}s wall, {s.cpu:.0f}s CPU, peak RSS {s.peak:.2f} GB", flush=True)
+    except clearings.Exists:
+        raise       # another run's network stood at the write (a race under Refuse): no finding
     except Exception as e:                        # a failure is a finding: record it
         traceback.print_exc()
         row.update(status=f"failed {type(e).__name__}: {e}"[:300], hwm_gb=_status_gb("VmHWM"))
@@ -383,12 +385,15 @@ def propose_all(rows: Path, scratch: Path, procs: int, ids: list[str], methods: 
                 prog = scratch / "progress" / f"{bid}__{name}{'__fresh' if fresh else ''}.json"
                 known = json.loads(prog.read_text()) if prog.exists() else {}
                 dest = proposal_row(rows, bid, name, fresh)
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                pd.DataFrame([dict(block=bid, n=int(sizes[bid]), method=name, fresh=fresh,
-                                   status=f"timeout after {timeout_s:.0f} s wall",
-                                   wall_s=known.get("wall_s", np.nan),
-                                   cpu_s=known.get("cpu_s", np.nan),
-                                   peak_rss_gb=known.get("peak_rss_gb", np.nan))]).to_parquet(dest)
+                try:        # written once: the killed run's own row, if it stood first, stays
+                    clearings.write_once(pd.DataFrame([dict(
+                        block=bid, n=int(sizes[bid]), method=name, fresh=fresh,
+                        status=f"timeout after {timeout_s:.0f} s wall",
+                        wall_s=known.get("wall_s", np.nan), cpu_s=known.get("cpu_s", np.nan),
+                        peak_rss_gb=known.get("peak_rss_gb", np.nan))]), dest)
+                except clearings.Exists:
+                    print(f"  {bid} {name}: its own proposal row stood before the kill",
+                          flush=True)
                 rc = "killed"
             if rc is None:
                 continue

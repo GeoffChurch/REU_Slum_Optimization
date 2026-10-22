@@ -69,7 +69,6 @@ import arterial_steps  # noqa: E402
 import clearings  # noqa: E402
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
-import gap_factor  # noqa: E402
 import road_rescore as rr  # noqa: E402
 
 from reblock.budget import road_corridor  # noqa: E402
@@ -110,11 +109,6 @@ def network_name(arm_name: str, method: GreedyArterialReblocker) -> str:
     return f"arterial-{arm_name}-{digest}"
 
 
-def _metric() -> gcl.ComplexMetric:
-    import metrics
-    return gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.factorization_of("cpu"))
-
-
 def steps_path(rows: Path, bid: str, name: str) -> Path:
     return rows / "steps" / f"{bid}__{name}.parquet"
 
@@ -127,8 +121,8 @@ def run(rows: Path, bid: str, arm_name: str, *, standing: clearings.Standing) ->
     rr._check_single_threaded()
     method = method_of(ARMS[arm_name])
     name = network_name(arm_name, method)
-    proposal, scored = rr.proposal_row(rows, bid, name, False), rr.cx_path(rows, _metric(), bid,
-                                                                             name)
+    proposal = rr.proposal_row(rows, bid, name, False)
+    scored = rr.cx_path(rows, rr.lineup_metric(), bid, name)
     proposing, scoring = standing.todo(proposal), standing.todo(scored)
     if not (proposing or scoring):
         print(f"{bid} {name}: its proposal row and its scored row stand", flush=True)
@@ -143,7 +137,7 @@ def run(rows: Path, bid: str, arm_name: str, *, standing: clearings.Standing) ->
         rr._BLOCKS[bid] = b
         if rr.prefixes_one(rr.PrefixJob(rows, scratch, bid, name)) is not None:
             raise SystemExit(f"{bid} {name}: its prefixes failed")
-        rr.cx_network(rows, scratch, _metric(), b, name, standing=standing)
+        rr.cx_network(rows, scratch, rr.lineup_metric(), b, name, standing=standing)
 
 
 def propose(rows: Path, bid: str, arm_name: str, *, standing: clearings.Standing) -> None:
@@ -344,7 +338,7 @@ def _verdict(runs: pd.DataFrame, lenses: pd.DataFrame) -> list[str]:
 
 
 def report(rows: Path, base: Path, ids: list[str]) -> None:
-    metric = _metric()
+    metric = rr.lineup_metric()
     srcs = {"baseline": Sources(base, BASE_NET), **_arm_sources(rows)}
     blocks = {b.block_id: b for b in common.build_blocks(ids)}
     run_rows, lens_frames, prefix_rows = [], [], []

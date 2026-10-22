@@ -95,7 +95,7 @@ def arm_path(arm: Arm, bid: str) -> Path:
     return relax.rows_of(arm.plan, arm.metric.name, BUDGET) / f"{bid}_p{POWER:g}.parquet"
 
 
-def _outs(bid: str) -> tuple[Path, Path, Path]:
+def outs(bid: str) -> tuple[Path, Path, Path]:
     """The block's lenses, facts and walled-in homes' rows."""
     return (ROWS / "lenses" / f"{bid}.parquet", ROWS / "facts" / f"{bid}.parquet",
             ROWS / "homes" / f"{bid}.parquet")
@@ -175,8 +175,8 @@ def lenses(bid: str, device: str, *, standing: clearings.Standing) -> None:
     """Every clearing of `bid` (none, T's, U's) under both metrics; the block's facts; its
     walled-in homes (module docstring); each row written through `standing`
     (clearings.Standing), which answers for all three before any work."""
-    outs = _outs(bid)
-    if not any([standing.todo(o) for o in outs]):       # every one asked: Refuse raises on any
+    paths = outs(bid)
+    if not any([standing.todo(o) for o in paths]):       # every one asked: Refuse raises on any
         return
     t0 = time.time()
     arms = arms_on(device)
@@ -228,7 +228,7 @@ def lenses(bid: str, device: str, *, standing: clearings.Standing) -> None:
         block=bid, home=np.flatnonzero(w), share=share[w], u0_U=sU.u0[w], u0_ratio=sU.u0[w] / med,
         u_T_ratio=sU.u[1][w] / med, u_U_ratio=sU.u[2][w] / med, nodem_U=sU.nodem[w],
         shadowed_U=sU.shadowed[w], left_T=leftT[w], left_U=leftU[w]))
-    for o, df in zip(outs, (pd.DataFrame(sT.rows + sU.rows), pd.DataFrame([block]), homes),
+    for o, df in zip(paths, (pd.DataFrame(sT.rows + sU.rows), pd.DataFrame([block]), homes),
                      strict=True):
         standing.write(df, o)
     print(f"{bid}: {int(w.sum())} walled in; T leaves {block['left_T']}, U {block['left_U']}; "
@@ -237,7 +237,7 @@ def lenses(bid: str, device: str, *, standing: clearings.Standing) -> None:
 
 def block_run(bid: str, device: str, *, standing: clearings.Standing) -> None:
     # a finished block refuses before any work (Refuse), or is done (Keep); every out asked
-    if not any([standing.todo(o) for o in _outs(bid)]):
+    if not any([standing.todo(o) for o in outs(bid)]):
         return
     arms = arms_on(device)
     for arm in arms:

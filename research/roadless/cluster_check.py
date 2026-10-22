@@ -1729,7 +1729,7 @@ def check_wave() -> list[str]:
     return bad
 
 
-_JOB_LINE = cluster_wave._job_line
+_JOB_LINE = cluster_wave.job_line
 
 
 def _no_keep(line: str, *, block: str, item: str, tar: Path | None) -> str:
@@ -1793,7 +1793,7 @@ FAULTS: dict[str, dict[str, Callable[[], contextlib.AbstractContextManager[None]
         "market-always": lambda: _patched(cluster.Waves, "starts",
                                           lambda self, market: tuple(market()))},
     "wave": {
-        "no-keep": lambda: _patched(cluster_wave, "_job_line", _no_keep),
+        "no-keep": lambda: _patched(cluster_wave, "job_line", _no_keep),
         "block-names": lambda: _patched(cluster_wave, "_long_name", _block_names),
         "no-script-check": _no_script_check,
         "no-check": _no_check,

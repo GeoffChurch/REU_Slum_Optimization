@@ -16,5 +16,5 @@ ROW_WRITTEN = "[row] wrote "
 #: A person naming a deliberate replacement of the rows a run would write (clearings.Replace).
 REPLACE = "--replace"
 #: A pool's job: a row that stands is that identity done (clearings.Keep); every pooled job's line
-#: ends with it (cluster_wave._job_line).
+#: ends with it (cluster_wave.job_line).
 KEEP_STANDING = "--keep-standing"

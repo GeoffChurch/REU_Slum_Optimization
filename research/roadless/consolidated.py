@@ -285,12 +285,17 @@ def onecard_path(bid: str, device: str) -> Path:
     return onecard_dir(device) / f"{bid}.parquet"
 
 
+def onecard_partial_dir(device: str) -> Path:
+    """The one-card timings on `device` of runs that kept some of the presets they named
+    (`presets` under clearings.Keep: a pool's job run again after a kill): each timed the rest,
+    with a setup of its own, so it is no lineup's time and is kept apart from onecard_dir's,
+    where nothing reading the lineup's time reads it (lineup-report counts the blocks it leaves
+    out)."""
+    return ROWS / "onecard_partial" / metrics.RUNTIME / device
+
+
 def onecard_partial_path(bid: str, device: str) -> Path:
-    """The one-card timing of a run that kept some of the presets it named (`presets` under
-    clearings.Keep: a pool's job run again after a kill): it timed the rest, with a setup of its
-    own, so it is no lineup's time and is kept apart from onecard_path's, where nothing reading
-    the lineup's time reads it."""
-    return ROWS / "onecard_partial" / metrics.RUNTIME / device / f"{bid}.parquet"
+    return onecard_partial_dir(device) / f"{bid}.parquet"
 
 
 def presets(bid: str, device: str, names: list[str], *, standing: clearings.Standing) -> None:
@@ -799,7 +804,9 @@ def reuse_networks(scratch: Path) -> None:
     4's run, 2026-10-10/11, but for the price and free-first plumbing, float for float under
     Opaque and HoldNothing), so each network of REUSED is item 4's, copied to the lineup's
     scratch with its canonical order, its prefixes' rows and its proposal row (`status` saying
-    so). The arterial is proposed anew (its cap)."""
+    so): the network and the proposal row, a proposal's identities, written once (as
+    road_rescore.propose writes them: a row a proposal left refuses the copy), the order and the
+    prefixes working files. The arterial is proposed anew (its cap)."""
     import road_rescore as rr
     rows = rr.lineup_rows()
     done = 0
@@ -815,8 +822,7 @@ def reuse_networks(scratch: Path) -> None:
                 raise SystemExit(f"{bid} {name}: item 4's network or its row is missing")
             if out.exists():
                 continue
-            out.parent.mkdir(parents=True, exist_ok=True)
-            rr.write_parquet(gpd.read_parquet(src), out)
+            clearings.write_once(gpd.read_parquet(src), out)    # a proposal's identity: once
             # its canonical order and prefixes too: a function of the network and the block
             rr.write_parquet(gpd.read_parquet(rr.ordered_path(STORED_ROADS / "scratch", bid, name)),
                              rr.ordered_path(scratch, bid, name))
@@ -826,9 +832,7 @@ def reuse_networks(scratch: Path) -> None:
             rr.write_parquet(pd.read_parquet(stored), pre)
             r = pd.read_parquet(row).assign(
                 status="reused: item 4's HoldNothing network (RUNTIME walls no home in)")
-            dest = rr.proposal_row(rows, bid, name, False)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            rr.write_parquet(r, dest)
+            clearings.write_once(r, rr.proposal_row(rows, bid, name, False))
             done += 1
     print(f"{done} networks reused into {scratch}", flush=True)
 
@@ -978,6 +982,13 @@ def lineup_report() -> None:
     # run that kept some is timed apart, onecard_partial_path's, and read by nothing here)
     one = _read(onecard_dir("gpu"))
     cpu = _read(onecard_dir("cpu"))
+    for device, whole in (("gpu", one), ("cpu", cpu)):
+        timed = set(whole.block) if len(whole) else set()
+        only = sorted({f.stem for f in onecard_partial_dir(device).glob("*.parquet")} - timed)
+        print(f"\nPARTIAL ONE-CARD ROWS ({device}): {len(only)} blocks have only a partial "
+              "one-card row (a --keep-standing run's after a kill: onecard_partial/), so are "
+              "missing from the time per block and from the pool's presets estimates"
+              + "".join(f"\n  {b}" for b in only))
     tim = pd.concat([one.assign(device="gpu"), cpu.assign(device="cpu")], ignore_index=True)
     tim["size"] = tim.block.map(feat["size"])
     tim.to_csv(out / "summary_lineup_onecard.csv", index=False)

@@ -30,7 +30,8 @@ the wave is configured, and from it the job's class, lane and node.
   long job's need; the groups to those nodes longest-processing-time first on their pool jobs'
   needed minutes (a long job runs as a run of its own, outside the pools' balance).
 
-Rows are read with pandas, here only: nothing on the cluster imports this module.
+Rows are read with pandas, here only. On the cluster only a smoke wave's job imports this module
+(pool_check.py smoke-job, for SMOKE_JOBS), and it reads no rows.
 """
 from __future__ import annotations
 
@@ -330,17 +331,25 @@ class Proposals(_Rows):
         return tuple(out)
 
 
-class Basis(NamedTuple):
-    peak_gb: float
-    minutes: float
+class SmokeJob(NamedTuple):
+    """A smoke wave's job: its estimate, taken as stored (`Smoke`), and what pool_check.py
+    smoke-job does, which the estimate misjudges where a smoke wave wants it to (`oom` estimated
+    at 1 GB allocating 3, `slow` at 3 minutes sleeping 25)."""
+    peak_gb: float      # the estimate's peak (GB)
+    minutes: float      # ... and wall
+    alloc_gb: float     # GB the job allocates and touches page by page (0: none)
+    sleep_s: float      # then the seconds it sleeps
+    gpu: bool           # then whether it imports cupy and touches the card
 
 
-#: The smoke waves' jobs (Task 10), by item: the same on every block, taken as stored.
-SMOKE_JOBS: dict[str, Basis] = {"quick": Basis(peak_gb=0.5, minutes=1.0),
-                                "big": Basis(peak_gb=3.0, minutes=1.0),
-                                "oom": Basis(peak_gb=1.0, minutes=1.0),
-                                "slow": Basis(peak_gb=0.5, minutes=3.0),
-                                "gpu": Basis(peak_gb=2.0, minutes=2.0)}
+#: The smoke waves' jobs (Task 10), by item: the same on every block. One table for the plan's
+#: estimates and the job's work, so the two never name different items.
+SMOKE_JOBS: dict[str, SmokeJob] = {
+    "quick": SmokeJob(peak_gb=0.5, minutes=1.0, alloc_gb=0.0, sleep_s=20.0, gpu=False),
+    "big": SmokeJob(peak_gb=3.0, minutes=1.0, alloc_gb=3.0, sleep_s=20.0, gpu=False),
+    "oom": SmokeJob(peak_gb=1.0, minutes=1.0, alloc_gb=3.0, sleep_s=20.0, gpu=False),
+    "slow": SmokeJob(peak_gb=0.5, minutes=3.0, alloc_gb=0.0, sleep_s=25 * 60.0, gpu=False),
+    "gpu": SmokeJob(peak_gb=2.0, minutes=2.0, alloc_gb=0.0, sleep_s=20.0, gpu=True)}
 
 
 @dataclass(frozen=True, kw_only=True)
