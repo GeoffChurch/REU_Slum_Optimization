@@ -313,6 +313,8 @@ def _summary(queue: Queue, *, round_no: int, at: datetime,
         metric=queue.metric(), lines=psum.lines_of(jobs, queue.workers(), h.ladder),
         reaped=tuple(psum.ReapedWorker(task=r.worker, run=r.run, held_job=r.job is not None,
                                        walltime=r.walltime) for r in queue.reaped()),
+        registered=tuple(psum.RegisteredWorker(task=w.id, run=w.run) for w in queue.workers()
+                         if not w.retired),
         long=psum.long_jobs(jobs))
 
 

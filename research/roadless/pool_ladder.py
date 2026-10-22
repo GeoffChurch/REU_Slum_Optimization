@@ -97,7 +97,11 @@ def rung_of(gb: float, ladder: Ladder) -> int | None:
     return next((r for r in ladder.rungs if gb <= r), None)
 
 
-#: The presets, by name: the command line's choice, resolved once (no default).
+#: The presets, by name: the command line's choice, resolved once (no default). A preset changes
+#: only while no wave of it is live: a wave's queue header records its ladder whole, but this
+#: machine's code plans and counts its leases by name from these (cluster.py's Pool.plan,
+#: Waves.lease and Waves.template), so a preset changed under a live wave would start leases its
+#: jobs were not classed for, and count them as another bundle.
 LADDERS: dict[str, Ladder] = {lad.name: lad for lad in (
     Ladder(name="cpu-score", cards=0, cpus=2, rungs=(4, 12, 24, 56, 88), lease_minutes=120,
            margin_minutes=10, startup_minutes=5, strikes=3, idle_minutes=10, poll_seconds=60,

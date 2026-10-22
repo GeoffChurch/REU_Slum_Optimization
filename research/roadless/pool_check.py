@@ -198,10 +198,11 @@ the steward's own STEWARD_TASK among them, or a failure), no allocation unless a
   round at t0 + 2 h, squeue listing the live one and the steward's own: job 1 PENDING with one
   strike (it wrote no row), job 2 still the live worker's, job 3 PENDING with no strike and its
   minutes raised to the 50 it ran; the summary's reaped the killed worker (held a job, not past
-  its walltime) and the ended one (held a job, past it), summary.json reading back as the
-  summary, one ledger line. `fails`, `hangs` and `without-own`: the same workers (all registered
-  here), squeue failing (exit 1), outliving its timeout, and answering the live worker without
-  the steward's own: nobody reaped, every job still its worker's. Faults: `by-age` (a claim older
+  its walltime) and the ended one (held a job, past it), its registered the live one alone,
+  summary.json reading back as the summary, one ledger line. `fails`, `hangs` and
+  `without-own`: the same workers (all registered here), squeue failing (exit 1), outliving its
+  timeout, and answering the live worker without the steward's own: nobody reaped, every job
+  still its worker's. Faults: `by-age` (a claim older
   than an hour reaped, squeue unasked: the live worker's long job reaped) and `blind` (a failed
   squeue, or one without the steward's own, read as an empty answer: every worker reaped).
 - `aside` (Ruling 5, Review Focus 2): two waves (ASIDE_WORKERS: 4 and 2 live workers on quadro2
@@ -1556,6 +1557,10 @@ def _progress(tmp: Path) -> list[str]:
 
 
 def _idle(tmp: Path) -> list[str]:
+    """A worker on an open queue with nothing pending: it waits, and retires after the ladder's
+    idle minutes. Only an open queue idles a worker (a closed one with nothing pending drains it
+    at once, exit 0), and only a Screened feed (decision 7, not built) leaves a queue open: its
+    open seed stands in for Screened's, as `_end_open`'s does."""
     lad = LADDERS["cpu-score"]
     polls = math.ceil(60 * lad.idle_minutes / lad.poll_seconds)
     bad: list[str] = []
@@ -1927,6 +1932,7 @@ def _dead_round(tmp: Path) -> list[str]:
     want = (psum.ReapedWorker(task=ws.killed, run=lease(ws.killed), held_job=True,
                               walltime=False),
             psum.ReapedWorker(task=ws.ended, run=lease(ws.ended), held_job=True, walltime=True))
+    live = (psum.RegisteredWorker(task=ws.live, run=lease(ws.live)),)
     on_disk = psum.read_summary((d / ps.SUMMARY).read_text(), "summary.json")
     ledger = (d / ps.LEDGER).read_text().splitlines()
     got = {i: (j.state, j.strikes, j.worker) for i, j in jobs.items()}
@@ -1936,6 +1942,7 @@ def _dead_round(tmp: Path) -> list[str]:
         [] if math.isclose(jobs[3].minutes, WALLTIME_RAN, abs_tol=0.1) else
         [f"job 3's minutes {jobs[3].minutes:.2f}, want {WALLTIME_RAN:g} (what it ran)"]) + (
         [] if s.reaped == want else [f"reaped {s.reaped}, want {want}"]) + (
+        [] if s.registered == live else [f"registered {s.registered}, want {live}"]) + (
         [] if on_disk == s else ["summary.json reads back otherwise"]) + (
         [] if len(ledger) == 1 else [f"{len(ledger)} ledger lines, want 1"])
     print(f"dead-claim round: a worker SIGKILLed holding job 1, one live holding job 2, one past "
@@ -2016,7 +2023,7 @@ def _ghost(at: datetime) -> Third:
                                            pending=GHOST_WORKERS, claimed=GHOST_WORKERS,
                                            minutes=30.0, long=0, done=0, failed=0,
                                            workers=GHOST_WORKERS),),
-                     reaped=(), long=())
+                     reaped=(), registered=(), long=())
     return Third(wave=s.wave, text=psum.summary_json(s), left_out="stale")
 
 
@@ -2217,7 +2224,8 @@ def _end_retry(tmp: Path) -> list[str]:
 
 def _end_open(tmp: Path) -> list[str]:
     """A wave whose every job is done but whose queue is open (its feed may grant more, as
-    Screened's would): no end."""
+    Screened's would): no end. It guards `_ended`'s closed() for the Screened feed (decision 7,
+    not built): its open seed stands in for Screened's."""
     lad = LADDERS["cpu-score"]
     waves = tmp / "waves"
     d = waves / "pool-check"

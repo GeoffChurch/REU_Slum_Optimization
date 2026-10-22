@@ -10,6 +10,10 @@ the other waves' stewards stepping aside).
   stated as runs are).
 - **Reaped**: every worker the wave's reaps took (pool_queue's `reaped`), each with whether it
   held a job and whether its walltime had ended (what `more` reads: mycooc's lesson 5).
+- **Registered**: every worker registered and neither retired nor reaped yet, its task and run:
+  so `more` tells a task killed at its walltime that its steward has yet to reap (asked again)
+  from one that never registered (hung in its startup: it held no job), whatever the steward's
+  squeue answered (it abstains when squeue fails, and writes its summary all the same).
 - **Long**: the jobs waiting for a long run (LONG), each with what a run of it needs.
 - **Its ladder's name** (the queue header's, a name of pool_ladder.LADDERS): what this machine's
   `Waves.template` starts a class's pool lease with (`--preset`), so the queue's header stays
@@ -78,6 +82,11 @@ class ReapedWorker(NamedTuple):
     walltime: bool      # its walltime had ended when it was reaped
 
 
+class RegisteredWorker(NamedTuple):
+    task: str           # its Slurm task
+    run: str
+
+
 class LongJob(NamedTuple):
     """A job waiting for a long run: where, and what a run of it needs."""
 
@@ -92,8 +101,8 @@ class LongJob(NamedTuple):
 @dataclass(frozen=True, kw_only=True)
 class Summary:
     """A wave's summary.json: the wave, its commit, its ladder's name, when (STAMP) and at which
-    of its steward's rounds, its state and metric, its lines, every worker reaped, and the jobs
-    waiting for a long run."""
+    of its steward's rounds, its state and metric, its lines, every worker reaped, every worker
+    registered and not yet retired or reaped, and the jobs waiting for a long run."""
 
     wave: str
     commit: str
@@ -104,6 +113,7 @@ class Summary:
     metric: str | None
     lines: tuple[ClassLine, ...]
     reaped: tuple[ReapedWorker, ...]
+    registered: tuple[RegisteredWorker, ...]
     long: tuple[LongJob, ...]
 
 
@@ -167,6 +177,7 @@ def summary_json(s: Summary) -> str:
         "at": s.at, "round": s.round, "state": s.state.value, "metric": s.metric,
         "lines": [line._asdict() for line in s.lines],
         "reaped": [r._asdict() for r in s.reaped],
+        "registered": [w._asdict() for w in s.registered],
         "long": [j._asdict() for j in s.long]}, allow_nan=False) + "\n"
 
 
@@ -185,6 +196,12 @@ def _reaped(o: Obj) -> ReapedWorker:
                      walltime=o.flag("walltime"))
     o.done()
     return r
+
+
+def _registered(o: Obj) -> RegisteredWorker:
+    w = RegisteredWorker(task=o.text("task"), run=o.text("run"))
+    o.done()
+    return w
 
 
 def _long(o: Obj) -> LongJob:
@@ -219,6 +236,8 @@ def read_summary(text: str, where: str) -> Summary:
                             for i, v in enumerate(o.items("lines"))),
                 reaped=tuple(_reaped(Obj(v, f"{where}.reaped[{i}]"))
                              for i, v in enumerate(o.items("reaped"))),
+                registered=tuple(_registered(Obj(v, f"{where}.registered[{i}]"))
+                                 for i, v in enumerate(o.items("registered"))),
                 long=tuple(_long(Obj(v, f"{where}.long[{i}]"))
                            for i, v in enumerate(o.items("long"))))
     o.done()

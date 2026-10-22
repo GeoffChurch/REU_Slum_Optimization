@@ -512,21 +512,29 @@ class Long:
 
 # ---- a wave as the market's leases see it -----------------------------------------------------
 
+def _live(rec: cs.RunRecord) -> bool:
+    """Whether steward run `rec` keeps its wave live: unfinished, or finished and not yet settled
+    (whether its own `more` continues it is undecided: the sync that finished it may decide its
+    pool leases first, or its `more` may have raised). Settled, its continuation (if any) is the
+    run that does (the controller's ruling, 2026-10-21)."""
+    return rec.finished_at is None or not rec.settled
+
+
 def live_stewards(ctx: cs.Context) -> dict[str, cs.RunRecord]:
-    """The live waves of this registry, by name: each wave's unfinished steward run. An
+    """The live waves of this registry, by name: each wave's live steward run (`_live`). An
     unreadable record is refused (SystemExit): a steward among them would go unseen, and a Done
-    on its wave's leases is final. Two unfinished stewards of a wave at two commits are refused."""
+    on its wave's leases is final. Two live stewards of a wave at two commits are refused."""
     recs, unreadable = ctx.registry.all()
     if unreadable:
         raise SystemExit(f"unreadable records: {', '.join(unreadable)}: a wave's steward among "
                          "them would go unseen")
     live: dict[str, cs.RunRecord] = {}
     for r in recs:
-        if r.kind != Steward.name or r.finished_at is not None:
+        if r.kind != Steward.name or not _live(r):
             continue
         wave: str = ctx.parse(r.argv).wave
         if wave in live and live[wave].commit != r.commit:
-            raise SystemExit(f"wave {wave} has unfinished stewards at two commits: "
+            raise SystemExit(f"wave {wave} has live stewards at two commits: "
                              f"{live[wave].name} at {live[wave].commit[:12]}, {r.name} at "
                              f"{r.commit[:12]}")
         live[wave] = r
@@ -549,21 +557,44 @@ def wave_summary(ctx: cs.Context, wave: str) -> psum.Summary:
     return got.read[wave]
 
 
-def _idle_killed(killed: Sequence[str], reaped: Mapping[str, psum.ReapedWorker]) -> list[str]:
-    """The tasks of `killed` (each among `reaped`) reaped holding no job: killed idle."""
-    return [t for t in killed if not reaped[t].held_job]
+def _walltime_reaps(s: psum.Summary, run: str) -> dict[str, psum.ReapedWorker]:
+    """The reaps in `s` of `run`'s workers at or past their walltime, by task: a requeued task's
+    earlier self, reaped when it registered again (its node lost, before its walltime), is not
+    its walltime kill's."""
+    return {r.task: r for r in s.reaped if r.run == run and r.walltime}
+
+
+def _registered(s: psum.Summary, run: str) -> frozenset[str]:
+    """The tasks of `run` registered in `s` and neither retired nor reaped yet."""
+    return frozenset(w.task for w in s.registered if w.run == run)
+
+
+def _unreaped(killed: Sequence[str], reaps: Mapping[str, psum.ReapedWorker],
+              registered: frozenset[str]) -> list[str]:
+    """The tasks of `killed` registered and not yet reaped at their walltime: whether they held a
+    job is not known yet."""
+    return [t for t in killed if t not in reaps and t in registered]
+
+
+def _idle_killed(killed: Sequence[str], reaps: Mapping[str, psum.ReapedWorker]) -> list[str]:
+    """The tasks of `killed` (none of them unreaped) that held no job: reaped idle, or never
+    registered (hung in its startup)."""
+    return [t for t in killed if t not in reaps or not reaps[t].held_job]
 
 
 def pool_more(ctx: cs.Context, rec: cs.RunRecord, *,
               killed: tuple[str, ...]) -> cs.Continue | cs.Done:
     """Whether pool lease `rec`, finished, is continued (Pool.more; the spec's 3.7), read from its
     wave's summary (one ssh call), in this order:
-    - no unfinished steward of its wave in this registry: Done (its wave is over here);
+    - no live steward of its wave in this registry (`live_stewards`): Done (its wave is over
+      here);
     - its summary absent, unreadable or of another format: raise (asked again next sync);
     - the summary written before the lease left squeue (`gone_at`: its last reaps may predate the
-      lease's end), or a task of `killed` (at its walltime) not among its reaped: raise;
-    - a task of `killed` reaped holding no job: Done (GeoffChurch/mycooc's lesson 5: a lease
-      whose worker sat idle to its walltime has nothing to continue for);
+      lease's end), or a task of `killed` (at its walltime) registered and not yet reaped at its
+      walltime, by this run (`_walltime_reaps`: a requeued task's earlier reap is not it): raise;
+    - a task of `killed` reaped holding no job, or never registered (hung in its startup): Done
+      (GeoffChurch/mycooc's lesson 5: a lease whose worker sat idle to its walltime has nothing
+      to continue for);
     - no job of its class pending on its node: Done;
     - else Continue at the market's width (`cs.launches.width`; in shadow, its own width), at
       most the jobs pending."""
@@ -579,15 +610,16 @@ def pool_more(ctx: cs.Context, rec: cs.RunRecord, *,
         raise SystemExit(f"wave {wave}'s summary is of {s.at}, before {rec.name} left squeue "
                          f"({rec.gone_at}): its steward may not have reaped it yet; the next sync "
                          "asks again")
-    reaped = {r.task: r for r in s.reaped}
-    unreaped = [t for t in killed if t not in reaped]
+    reaps = _walltime_reaps(s, rec.name)
+    unreaped = _unreaped(killed, reaps, _registered(s, rec.name))
     if unreaped:
         raise SystemExit(f"{rec.name}'s tasks {', '.join(unreaped)}, killed at their walltime, are "
                          f"not yet reaped (wave {wave}'s summary of {s.at}): whether they held a "
                          "job is not known; the next sync asks again")
-    idle = _idle_killed(killed, reaped)
+    idle = _idle_killed(killed, reaps)
     if idle:
-        return cs.Done(f"its tasks {', '.join(idle)} were killed at their walltime holding no job")
+        return cs.Done(f"its tasks {', '.join(idle)} were killed at their walltime holding no job "
+                       "(idle, or never registered)")
     ladder = LADDERS[a.preset]
     cls = class_name(ladder.cards, a.mem)
     pending = sum(x.pending for x in s.lines if (x.node, x.cls) == (a.node, cls))
@@ -635,7 +667,10 @@ class Waves:
     """reblock's campaign as the market's launches see it (cluster_submit's Campaigns, README "GPU
     market"; its docs/migrating/reblock.md, "a campaign names the template of a lease the market
     starts"): its pool runs are its leases; its stewards and long runs, and the `blocks` and
-    `cpu` runs, are none."""
+    `cpu` runs, are none. `registry` is the project's (every verb's Context has the same), which
+    `starts`, given no Context, reads for a live steward."""
+
+    registry: Registry
 
     def lease(self, ctx: cs.Context, rec: cs.RunRecord) -> cs.Lease | None:
         """A pool run: CAMPAIGN's lease on its --node, each worker its class's bundle."""
@@ -647,13 +682,13 @@ class Waves:
     def template(self, ctx: cs.Context, campaign: str, node: str,
                  bundle: cs.Bundle) -> cs.Template | cs.Done:
         """The pool lease the market starts for `bundle` on `node` (Ruling 4): of the live waves
-        (this registry's unfinished stewards), their summaries read with one ssh call, those
-        whose ladder has a rung of `bundle` and whose summary has jobs of that class pending on
-        `node`, the one with the most (ties to the earlier name), at its steward's commit, a
-        fresh chain (`_start_name`), its throttle Ruling 10's. Done when no live wave has such
-        jobs (a wave whose summary does not read named in why), for another campaign, and with no
-        live wave; raises when no live wave's summary reads, or one names a ladder this
-        machine's LADDERS lacks."""
+        (`live_stewards`), their summaries read with one ssh call, those whose ladder has a rung
+        of `bundle` and whose summary has jobs of that class pending on `node`, the one with the
+        most (ties to the earlier name), at its steward's commit, a fresh chain (`_start_name`),
+        its throttle Ruling 10's. A live wave whose summary does not read, or names a ladder this
+        machine's LADDERS lacks, is left out, and named in a Done's why. Done when no live wave
+        has such jobs, for another campaign, and with no live wave; raises when no live wave's
+        summary reads with a ladder of LADDERS (the next sync asks again)."""
         if campaign != CAMPAIGN:
             return cs.Done(f"reblock's one campaign is {CAMPAIGN}, not {campaign}")
         live = live_stewards(ctx)
@@ -661,15 +696,16 @@ class Waves:
             return cs.Done(f"no wave is live in this registry (no unfinished steward), so none "
                            f"has a job of {bundle.text()} on {node}")
         got = wave_summaries(ctx, sorted(live))
-        if not got.read:
-            unread = "; ".join(f"wave {w}'s: {why}" for w, why in sorted(got.unread.items()))
+        left_out = {**got.unread, **{
+            w: (f"it names the ladder {s.ladder!r}, none of this machine's "
+                f"({', '.join(sorted(LADDERS))}): its pools cannot be planned here")
+            for w, s in got.read.items() if s.ladder not in LADDERS}}
+        usable = {w: s for w, s in got.read.items() if w not in left_out}
+        if not usable:
+            unread = "; ".join(f"wave {w}'s: {why}" for w, why in sorted(left_out.items()))
             raise SystemExit(f"no live wave's summary reads ({unread}): the next sync asks again")
         choices: list[_Choice] = []
-        for w, s in sorted(got.read.items()):
-            if s.ladder not in LADDERS:
-                raise SystemExit(f"wave {w}'s summary names the ladder {s.ladder!r}, none of "
-                                 f"this machine's ({', '.join(sorted(LADDERS))}): its pools "
-                                 "cannot be planned here")
+        for w, s in sorted(usable.items()):
             ladder = LADDERS[s.ladder]
             for rung in ladder.rungs:
                 cls = class_name(ladder.cards, rung)
@@ -677,8 +713,8 @@ class Waves:
                 if ladder.bundle(rung) == bundle and pending:
                     choices.append(_Choice(wave=w, pending=pending, ladder=ladder, rung=rung))
         if not choices:
-            unread = "".join(f"; wave {w}'s summary does not read: {why}"
-                             for w, why in sorted(got.unread.items()))
+            unread = "".join(f"; wave {w}'s summary left out: {why}"
+                             for w, why in sorted(left_out.items()))
             return cs.Done(f"no live wave has a job of {bundle.text()} pending on {node}{unread}")
         c = _chosen(choices)
         cls = class_name(c.ladder.cards, c.rung)
@@ -687,7 +723,13 @@ class Waves:
                            args=_pool_args(wave=c.wave, ladder=c.ladder, node=node, rung=c.rung))
 
     def starts(self, market: Callable[[], Sequence[cs.Start]]) -> tuple[cs.Start, ...]:
-        """The market's starts on freed capacity: its pool runs are leases."""
+        """The market's starts on freed capacity, while a wave is live (a steward of `registry`'s
+        `_live`, or a record that does not read: the market's own reading of the registry refuses
+        it); none, and no allocation read, while none is: no template could answer one, and a
+        stale allocation would fail every sync."""
+        recs, unreadable = self.registry.all()
+        if not unreadable and not any(r.kind == Steward.name and _live(r) for r in recs):
+            return ()
         return tuple(market())
 
 
@@ -713,7 +755,7 @@ PROJECT = cs.Project(name="reblock", repo=REPO, cluster=cs.load_cluster("ai"),
                      checkout_setup=(), sacct_grace=timedelta(minutes=10),
                      attribute_cache=timedelta(seconds=60),
                      market=cs.load_market("ai"), gpu_market=cs.load_gpu_market("ai"),
-                     campaigns=Waves())
+                     campaigns=Waves(registry=Registry(REPO)))
 
 # reblock's one campaign in the GPU market (the controller's ruling, 2026-10-21: one for the
 # project, so its spend accumulates over its waves) is named for the project, and its weight among
