@@ -118,10 +118,10 @@ and another campaign's. A registry whose only live wave is `c`: raises; whose on
 `Waves.starts(market)` is the market's starts while a wave is live, and () with none, the market
 not asked. Faults, one per refusal the template must not trip, one for its choice and one for
 its starts: `other-mem` (its `--mem` the next rung: line_checked refuses the bundle),
-`other-node` (its `--node` another node), `continuation-name` (`<w>-<node>-<class>-l1`), `reused-name` (`-s1`, which
-the registry has), `with-at` (its args carrying `--at` HEAD: the parse reads another commit than
-the template's), `first-wave` (the first live wave by name, whatever its pending jobs) and
-`market-always` (Waves.starts asking the market with no wave live).
+`other-node` (its `--node` another node), `continuation-name` (`<w>-<node>-<class>-l1`),
+`reused-name` (`-s1`, which the registry has), `with-at` (its args carrying `--at` HEAD: the parse
+reads another commit than the template's), `first-wave` (the first live wave by name, whatever
+its pending jobs) and `market-always` (Waves.starts asking the market with no wave live).
 
 (`gpu`, the retired raster's sizing checked against its scorer's measured peaks, went with it:
 NOTES, "The complex as the runtime: the raster retired".)
