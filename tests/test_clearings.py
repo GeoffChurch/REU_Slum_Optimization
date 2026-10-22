@@ -338,7 +338,8 @@ def test_a_runs_row_is_written_once_unless_its_replacement_is_named(
     (clearings.Standing): under Refuse a second write of one identity raises and leaves the first
     row; Replace puts a new row in its place; Keep reads a standing row as the identity done, and
     keeps the first row where a write meets one, raising nothing and printing no
-    row_marker.ROW_WRITTEN. Fault-injected: with `_exclusive` an os.replace (the check removed)
+    row_marker.ROW_WRITTEN; every row Keep finds standing (its check, a reuse, its write) it
+    prints as row_marker.KEPT. Fault-injected: with `_exclusive` an os.replace (the check removed)
     the second write replaced the first and this failed; clearings_check.py `overwrite` runs it
     through the optimizers."""
     wrote = clearings.row_marker.ROW_WRITTEN
@@ -353,9 +354,11 @@ def test_a_runs_row_is_written_once_unless_its_replacement_is_named(
         refuse.write(pd.DataFrame({"perm": [0.2]}), f)
     assert pd.read_parquet(f)["perm"].tolist() == [0.1]
     assert not [g for g in f.parent.iterdir() if g != f]          # no temp file left behind
+    kept = clearings.row_marker.KEPT
     assert not keep.todo(f) and keep.reuse(f) and refuse.reuse(f) and not replace.reuse(f)
+    assert capsys.readouterr().out.splitlines() == [f"{kept}{f}"] * 2  # Keep's check and reuse
     keep.write(pd.DataFrame({"perm": [0.4]}), f)
-    assert capsys.readouterr().out.splitlines() == [f"[row] kept {f}"]
+    assert capsys.readouterr().out.splitlines() == [f"{kept}{f}"]
     assert pd.read_parquet(f)["perm"].tolist() == [0.1]
     assert replace.todo(f)
     replace.write(pd.DataFrame({"perm": [0.3]}), f)

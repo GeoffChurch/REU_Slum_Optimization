@@ -20,9 +20,11 @@ code as it is and must fail under each of its faults.
     uv run python $S aside [--fault <name>]         # faults: whole-yields, stale-kept,
                                                     # unread-fatal
     uv run python $S end [--fault <name>]           # faults: early-end, claimed-runs-on,
-                                                    # open-ended, request-fatal, open-fixed
+                                                    # open-ended, request-fatal, open-fixed,
+                                                    # cancel-open, round-fatal
     uv run python $S keep [--fault <name>]          # faults: refuse, redo-all
     uv run python $S double-claim [--fault <name>]  # fault: refuse
+    uv run python $S history [--fault <name>]       # fault: kept-measured
     uv run python $S both-ways <guards,> [args ...]   # each guard, then under each of its faults
     uv run python $S smoke-job <id> <item> [--replace | --keep-standing]   # a smoke wave's job
 
@@ -243,6 +245,12 @@ the steward's own STEWARD_TASK among them, or a failure), no allocation unless a
   ends), `open-ended` (an open queue's wave ended once its jobs have: open ends) and
   `request-fatal` (a request that does not read, or that the queue refuses, stops the round)
   and `open-fixed` (pool_queue._open_fixed answering no: an open fixed seed accepted).
+  Also `cancel-open`, a cancel request on an open wave (OPEN_FEED, a job pending): its queue
+  closed (the spec's 3.9), the job CANCELLED, exit 0, final.db, the summary CANCELLED (fault
+  `cancel-open`: SqliteQueue.cancel leaving the queue open, so the wave never ends); and `locked`,
+  a wave whose job is done, its steward's first round failing as a locked queue does
+  (sqlite3.OperationalError): said, and the next round ends it, exit 0 (fault `round-fatal`:
+  pool_steward.SURVIVABLE empty, so the steward dies of it).
 
 Every pooled command keeps what stands (the spec's 3.3 and its guard 2, decision 4; the plan's
 Rulings 6 and 8):
@@ -279,10 +287,17 @@ Rulings 6 and 8):
   --keep-standing`), two workers (pool_worker.work, two processes, of two leases, the job a real
   child in the checkout), the second started DOUBLE_LAG after the first claims, its claim patched
   to take the job the first holds (SqliteQueue._pick, once): one set of rows (both by one
-  process, no temporary name left); both attempts DONE, the first's counting its two rows, the
-  second's none, its log holding `[row] kept` for each; the job DONE with no strike; both workers
-  drained (0). Fault `refuse` (as keep's, reaching the jobs through FAULT_ENV, CHILD_FAULTS): the
-  second attempt fails with Exists, a strike.
+  process, no temporary name left); both attempts DONE, the first's counting its two rows written
+  and none kept, the second's none written and two kept (row_marker.KEPT lines, its log holding
+  one for each); the job DONE with no strike; both workers drained (0). Fault `refuse` (as
+  keep's, reaching the jobs through FAULT_ENV, CHILD_FAULTS): the second attempt fails with
+  Exists, a strike.
+- `history` (pool_plan.history_of, the plan's Ruling 15: an earlier wave's measures): a final.db
+  (waves/<w>/final.db, its header the wave's) whose job 1 was done by a whole run (WHOLE_PEAK
+  GB, WHOLE_MINUTES) and again, later, by a double claim's second run that kept both its rows,
+  and whose job 2 was done only by a run that kept every row (a resubmitted wave's, or one after
+  a kill): job 1 measured by its whole run alone, job 2 not at all. Fault `kept-measured`
+  (pool_plan.WHOLE_RUN taking every attempt): job 1 measured by the run that kept its rows.
 
 `smoke-job <id> <item> [--replace | --keep-standing]` (the smoke waves' job, the plan's Task 10;
 its items pool_plan.SMOKE_JOBS's): its two rows (SMOKE_ROWS/<id>__<item>__<k>.parquet) each
@@ -293,6 +308,7 @@ Standing (its host and pid in it).
 """
 from __future__ import annotations
 
+import inspect
 import io
 import json
 import math
@@ -362,14 +378,14 @@ CLAIM_WAIT = 600.0       # ... the most the guard waits for a process (s)
 SPLIT_SLEEP = 0.005      # split-tx: between the claim's select and its update (s)
 # An open queue's feed (Screened's, decision 7: not built yet, so no steward resolves it; the
 # cases of an open queue inject _Unclosed in its place): a fixed feed's seed is closed.
-OPEN_FEED = "screened"
+OPEN_FEED = pq.FeedName.SCREENED
 
 
 # ---- the queues the guards make, as a wave's plan makes them --------------------------------
 
 def _header(ladder: Ladder) -> pq.Header:
     return pq.Header(wave="pool-check", commit=COMMIT, family="pool-check", ladder=ladder,
-                     created=datetime.now(UTC).strftime(STAMP), feed=pq.FIXED)
+                     created=datetime.now(UTC).strftime(STAMP), feed=pq.FeedName.FIXED)
 
 
 def _seed_job(i: int, *, minutes: float, peak_gb: float, ladder: Ladder) -> pq.JobSeed:
@@ -408,6 +424,7 @@ class Attempt(NamedTuple):
     peak_gb: float | None
     rc: int | None
     rows: int
+    kept: int
 
 
 def _attempts(path: Path) -> list[Attempt]:
@@ -415,7 +432,7 @@ def _attempts(path: Path) -> list[Attempt]:
     db.row_factory = sqlite3.Row
     try:
         return [Attempt(id=r["id"], job=r["job"], worker=r["worker"], outcome=r["outcome"],
-                        peak_gb=r["peak_gb"], rc=r["rc"], rows=r["rows"])
+                        peak_gb=r["peak_gb"], rc=r["rc"], rows=r["rows"], kept=r["kept"])
                 for r in db.execute("SELECT * FROM attempts ORDER BY id")]
     finally:
         db.close()
@@ -1260,7 +1277,7 @@ def _work(path: Path, seed: pq.Seed, *, worker: str, run: str, commit: str,
 
     def run_line(c: pq.Claim) -> pw.Ran:
         ran = pw.run_job(c.job.line, cwd=path.parent, env=os.environ, log=log.append,
-                         wrote=lambda: q.wrote(c.attempt))
+                         wrote=lambda: q.wrote(c.attempt), kept=lambda: q.kept(c.attempt))
         after(q, c, clock)
         return ran
 
@@ -1464,7 +1481,8 @@ def identity(_args: list[str]) -> list[str]:
         ex = pw.work_one(queue=q, worker="long", restarts=0, run="pool-check-long-1", job=long.id,
                          commit=OTHER_COMMIT, ends_at=time.time() + 3600.0, now=time.time,
                          run_line=lambda c: pw.run_job(c.job.line, cwd=Path(tmp), env=os.environ,
-                                                       log=log.append, wrote=lambda: None),
+                                                       log=log.append, wrote=lambda: None,
+                                                       kept=lambda: None),
                          oom=Counted(count=0), log=log.append)
         tried = _attempts(path)
         notes = ([] if long.lane == pq.Lane.LONG else [f"the job's lane {long.lane}"]) + (
@@ -1709,7 +1727,7 @@ def _interrupt(tmp: Path, line: str) -> Interrupted:
 
     def run_line(c: pq.Claim) -> pw.Ran:
         return pw.run_job(c.job.line, cwd=tmp, env=os.environ, log=interrupting,
-                          wrote=lambda: q.wrote(c.attempt))
+                          wrote=lambda: q.wrote(c.attempt), kept=lambda: q.kept(c.attempt))
 
     t0 = time.monotonic()
     try:
@@ -2235,6 +2253,44 @@ def _end_finish(tmp: Path) -> list[str]:
     return ["finish"] if notes else []
 
 
+_ROUND = ps.round_
+
+
+def _end_locked(tmp: Path) -> list[str]:
+    """A wave whose one job is done, its steward's first round failing as a locked queue does
+    (sqlite3.OperationalError): the steward goes on, and its next round ends the wave."""
+    lad = LADDERS["cpu-score"]
+    waves = tmp / "waves"
+    d = waves / "pool-check"
+    d.mkdir(parents=True)
+    c = Case(d / "queue.db", lad, [_small(lad)])
+    _inputs(d, _seed(lad, [_small(lad)]))
+    w = c.worker("w1", cls="m4", minutes=120, lease="s1").name
+    got = c.q.claim(worker=w, minutes_left=c.fresh)
+    if got is not None:
+        c.q.finish(got.attempt, worker=w, outcome=pq.Outcome.DONE, peak_gb=3.1, minutes=20.0,
+                   rc=0)
+    failed: list[int] = []
+
+    def locked_once(**kwargs: Any) -> psum.Summary:
+        if not failed:
+            failed.append(1)
+            raise sqlite3.OperationalError("database is locked")
+        return _ROUND(**kwargs)
+    try:
+        with _patched(ps, "round_", locked_once):
+            e = _steward_run(c.q, d, waves, listed=[w], feed=ps.Fixed())
+    except sqlite3.OperationalError as err:
+        print(f"end locked: the steward died of its round's {err!r} -> FAILS", flush=True)
+        return ["locked"]
+    notes = c.notes + ([] if e.exit == 0 else [f"exit {e.exit}, want 0"]) + (
+        [] if e.final else ["no final.db"]) + (
+        [] if any("database is locked" in x for x in e.log) else ["the failed round unsaid"])
+    print(f"end locked: its first round failing locked: exit {e.exit}, final.db {e.final}"
+          + _failing(notes), flush=True)
+    return ["locked"] if notes else []
+
+
 def _end_retry(tmp: Path) -> list[str]:
     """A retry request of a FAILED job, one of a job the wave lacks, and a malformed one (not
     JSON)."""
@@ -2348,6 +2404,30 @@ def _end_cancel(tmp: Path) -> list[str]:
     return ["cancel"] if notes else []
 
 
+def _end_cancel_open(tmp: Path) -> list[str]:
+    """A cancel request on an open wave (its feed may grant more, as Screened's would) with a job
+    pending: the cancel closes its queue (the spec's 3.9), so the wave ends."""
+    lad = LADDERS["cpu-score"]
+    waves = tmp / "waves"
+    d = waves / "pool-check"
+    seed = pq.Seed(header=replace(_header(lad), feed=OPEN_FEED), jobs=(_small(lad),),
+                   closed=False)
+    q = pq.SqliteQueue.open(d / "queue.db", seed)
+    _inputs(d, seed)
+    (d / ps.REQUESTS).mkdir()
+    (d / ps.REQUESTS / "2026-10-21T00:00:00Z.json").write_text(json.dumps({"cancel": True}))
+    e = _steward_run(q, d, waves, listed=[], feed=_Unclosed())
+    states = [j.state for j in q.jobs()]
+    notes = ([] if q.closed() else ["the queue left open"]) + (
+        [] if states == [pq.JobState.CANCELLED] else [f"jobs {states}"]) + (
+        [] if e.exit == 0 else [f"exit {e.exit}, want 0"]) + (
+        [] if e.final else ["no final.db"]) + (
+        [] if e.summary.state == psum.WaveState.CANCELLED else [f"summary {e.summary.state}"])
+    print(f"end cancel-open: an open wave cancelled: closed {q.closed()}, exit {e.exit}, "
+          f"final.db {e.final}, {e.summary.state}" + _failing(notes), flush=True)
+    return ["cancel-open"] if notes else []
+
+
 def _end_long(tmp: Path) -> list[str]:
     """A wave whose one job not done waits for the long lane: no end."""
     lad = LADDERS["cpu-score"]
@@ -2438,8 +2518,8 @@ def _end_fixed_open(tmp: Path) -> list[str]:
 
 def end(_args: list[str]) -> list[str]:
     bad: list[str] = []
-    for case in (_end_finish, _end_retry, _end_cancel, _end_long, _end_open, _end_fixed_open,
-                 _end_command):
+    for case in (_end_finish, _end_locked, _end_retry, _end_cancel, _end_cancel_open, _end_long,
+                 _end_open, _end_fixed_open, _end_command):
         with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
             bad += case(Path(tmp))
     return bad
@@ -3027,11 +3107,9 @@ class Doubled(NamedTuple):
     error: str | None
 
 
-def _doubled(path: Path, seed: pq.Seed, worker: str, run: str, *, forced: bool,
-             out: MpQueue[Doubled]) -> None:
-    """pool_worker.work as `worker` of `run` (a child process), its jobs real children in the
-    checkout (pool_worker.run_job), on the real clock; `forced`: its first claim takes the job
-    another worker holds (SqliteQueue._pick patched once: a double claim)."""
+def _taking_the_held() -> AbstractContextManager[None]:
+    """SqliteQueue._pick patched so that the next claim takes the job another worker holds (a
+    double claim), every later one as it is."""
     pick = pq.SqliteQueue._pick
     used: list[bool] = []
 
@@ -3043,17 +3121,24 @@ def _doubled(path: Path, seed: pq.Seed, worker: str, run: str, *, forced: bool,
         row: sqlite3.Row | None = db.execute("SELECT * FROM jobs WHERE state = ?",
                                              (pq.JobState.CLAIMED.value,)).fetchone()
         return row
+    return _patched(pq.SqliteQueue, "_pick", staticmethod(held_first))
 
+
+def _doubled(path: Path, seed: pq.Seed, worker: str, run: str, *, forced: bool,
+             out: MpQueue[Doubled]) -> None:
+    """pool_worker.work as `worker` of `run` (a child process), its jobs real children in the
+    checkout (pool_worker.run_job), on the real clock; `forced`: its first claim takes the job
+    another worker holds (_taking_the_held: a double claim)."""
     log: list[str] = []
     try:
         q: pq.Queue = pq.SqliteQueue.open(path, seed)
 
         def run_line(c: pq.Claim) -> pw.Ran:
             return pw.run_job(c.job.line, cwd=common.REPO, env=os.environ, log=log.append,
-                              wrote=lambda: q.wrote(c.attempt))
+                              wrote=lambda: q.wrote(c.attempt),
+                              kept=lambda: q.kept(c.attempt))
 
-        with (_patched(pq.SqliteQueue, "_pick", staticmethod(held_first)) if forced
-              else nullcontext()):
+        with _taking_the_held() if forced else nullcontext():
             ex = pw.work(queue=q, worker=worker, restarts=0, run=run, node=NODE, cls="m4",
                          commit=COMMIT, ends_at=time.time() + 7200.0, now=time.time,
                          wait=lambda: time.sleep(1.0), run_line=run_line,
@@ -3126,7 +3211,7 @@ def double_claim(_args: list[str]) -> list[str]:
                 print(f"double-claim: the workers reported {died} -> FAILS", flush=True)
                 return ["double-claim"]
             jobs = pq.SqliteQueue.open(path, seed).jobs()
-            tried = [(a.worker, a.outcome, a.rc, a.rows) for a in _attempts(path)]
+            tried = [(a.worker, a.outcome, a.rc, a.rows, a.kept) for a in _attempts(path)]
         written = [pd.read_parquet(p) for p in rows if p.exists()]
         writers = {(str(d["host"].iloc[0]), int(d["pid"].iloc[0])) for d in written}
         strays = sorted(p.name for p in SMOKE_ROWS.glob(f"{block}__*") if p not in rows)
@@ -3141,7 +3226,8 @@ def double_claim(_args: list[str]) -> list[str]:
         if SMOKE_ROWS.is_dir() and not any(SMOKE_ROWS.iterdir()):
             SMOKE_ROWS.rmdir()          # left empty by the guard: none of a wave's is there
     log1, log2 = reports["w-first"].log, reports["w-second"].log
-    want = [("w-first", "done", 0, SMOKE_ROWS_PER_JOB), ("w-second", "done", 0, 0)]
+    want = [("w-first", "done", 0, SMOKE_ROWS_PER_JOB, 0),
+            ("w-second", "done", 0, 0, SMOKE_ROWS_PER_JOB)]
     [job] = jobs
     notes = ([] if len(written) == len(rows) and len(writers) == 1 else
              [f"rows {len(written)} of {len(rows)}, by {len(writers)} writers (one set: one)"]) + (
@@ -3151,14 +3237,66 @@ def double_claim(_args: list[str]) -> list[str]:
         [f"the job {job.state} with {job.strikes} strikes, want done with none"]) + (
         [] if all(f"{row_marker.ROW_WRITTEN}{p}" in log1 for p in rows) else
         ["the first run's log lacks its ROW_WRITTEN lines"]) + (
-        [] if all(f"[row] kept {p}" in log2 for p in rows) else
-        ["the second run's log lacks its `[row] kept` lines"]) + (
+        [] if all(f"{row_marker.KEPT}{p}" in log2 for p in rows) else
+        ["the second run's log lacks its row_marker.KEPT lines"]) + (
         [] if (reports["w-first"].exit, reports["w-second"].exit) == (0, 0) else
         [f"exits {reports['w-first'].exit}, {reports['w-second'].exit}, want 0, 0"])
     print(f"double-claim: one job ({line}) claimed by two workers, the second {DOUBLE_LAG:g} s "
           f"later: attempts {tried}, the job {job.state} with {job.strikes} strikes, rows by "
           f"{len(writers)} writer" + _failing(notes), flush=True)
     return ["double-claim"] if notes else []
+
+# ---- history: an earlier wave's measures are whole runs' ---------------------------------------
+
+WHOLE_PEAK, WHOLE_MINUTES = 6.0, 40.0   # history: job 1's whole run
+KEPT_PEAK, KEPT_MINUTES = 0.2, 0.5      # ... and the runs that kept rows
+
+
+def history(_args: list[str]) -> list[str]:
+    """`history` (the module's docstring): its failures."""
+    lad = LADDERS["cpu-score"]
+    seed = _seed(lad, [_m4(1, minutes=30.0, line="true"), _m4(2, minutes=20.0, line="true")])
+    left = pq.fresh_minutes(lad)
+    with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
+        waves = Path(tmp) / "waves"
+        path = waves / seed.header.wave / "final.db"
+        path.parent.mkdir(parents=True)
+        q = pq.SqliteQueue.open(path, seed)
+        for w, run in (("w1", RUN), ("w2", NEXT_RUN)):
+            q.register(worker=w, run=run, node=NODE, cls="m4", ends_at=time.time() + 7200.0,
+                       restarts=0)
+        whole = q.claim(worker="w1", minutes_left=left)
+        with _taking_the_held():
+            second = q.claim(worker="w2", minutes_left=left)
+        if whole is None or second is None or whole.job.id != 1 or second.job.id != 1:
+            return ["the double claim of job 1 was not made"]
+        for _ in range(SMOKE_ROWS_PER_JOB):
+            q.wrote(whole.attempt)
+            q.kept(second.attempt)
+        q.finish(whole.attempt, worker="w1", outcome=pq.Outcome.DONE, peak_gb=WHOLE_PEAK,
+                 minutes=WHOLE_MINUTES, rc=0)
+        q.finish(second.attempt, worker="w2", outcome=pq.Outcome.DONE, peak_gb=KEPT_PEAK,
+                 minutes=KEPT_MINUTES, rc=0)
+        stood = q.claim(worker="w1", minutes_left=left)     # job 2: every row stood already
+        if stood is None or stood.job.id != 2:
+            return ["job 2 was not claimed"]
+        for _ in range(SMOKE_ROWS_PER_JOB):
+            q.kept(stood.attempt)
+        q.finish(stood.attempt, worker="w1", outcome=pq.Outcome.DONE, peak_gb=KEPT_PEAK,
+                 minutes=KEPT_MINUTES, rc=0)
+        tried = [(a.job, a.outcome, a.rows, a.kept) for a in _attempts(path)]
+        got = pp.history_of(waves, seed.header.family)
+    j1 = seed.jobs[0]
+    want = [pp.Observed(block=j1.block, item=j1.item, peak_gb=WHOLE_PEAK, minutes=WHOLE_MINUTES,
+                        source=f"wave:{seed.header.wave}")]
+    notes = [] if got == want else [f"history_of read {got}, want job 1's whole run alone"]
+    print(f"history: a final.db whose job 1 was done whole ({WHOLE_PEAK:g} GB, "
+          f"{WHOLE_MINUTES:g} min) and again by a double claim that kept its rows, and whose job 2 "
+          f"was done by a run that kept every row (attempts: job, outcome, rows, kept {tried}): "
+          f"measures {[(o.block, o.peak_gb, o.minutes) for o in got]}" + _failing(notes),
+          flush=True)
+    return ["history"] if notes else []
+
 
 GUARDS: dict[str, Guard] = {"claim": Guard(run=claim, args=()),
                             "transitions": Guard(run=transitions, args=()),
@@ -3171,14 +3309,17 @@ GUARDS: dict[str, Guard] = {"claim": Guard(run=claim, args=()),
                             "aside": Guard(run=aside, args=()),
                             "end": Guard(run=end, args=()),
                             "keep": Guard(run=keep, args=()),
-                            "double-claim": Guard(run=double_claim, args=())}
+                            "double-claim": Guard(run=double_claim, args=()),
+                            "history": Guard(run=history, args=())}
 
 
 # ---- faults ---------------------------------------------------------------------------------
 
 @contextmanager
 def _patched(owner: object, name: str, value: object) -> Iterator[None]:
-    old = getattr(owner, name)
+    """`owner.name` set to `value`, and what it was put back after: as it is stored
+    (inspect.getattr_static: a class's staticmethod itself, not the function it unwraps to)."""
+    old = inspect.getattr_static(owner, name)
     setattr(owner, name, value)
     try:
         yield
@@ -3307,6 +3448,19 @@ def _blind(self: ps.Squeue, workers: Sequence[str]) -> frozenset[str]:
 def _whole_yields(*, yields: int, workers: Mapping[str, int], wave: str) -> int:
     """pool_summary.aside_share asking all the yields of a wave's own workers there."""
     return min(yields, workers[wave])
+
+
+_CANCEL = pq.SqliteQueue.cancel
+
+
+def _cancel_open(self: pq.SqliteQueue) -> int:
+    """SqliteQueue.cancel leaving the queue as open as it was."""
+    was = self.closed()
+    n = _CANCEL(self)
+    if not was:
+        with self._tx() as db:
+            db.execute("DELETE FROM closed")
+    return n
 
 
 def _ended_with_long(jobs: Sequence[pq.Job], *, closed: bool) -> bool:
@@ -3451,9 +3605,12 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
             "claimed-runs-on": lambda: _patched(pq.SqliteQueue, "cancel", _cancel_waiting),
             "open-ended": lambda: _patched(ps, "_ended", _ended_open),
             "request-fatal": lambda: _patched(ps, "_requests", _requests_fatal),
-            "open-fixed": lambda: _patched(pq, "_open_fixed", lambda header, *, closed: False)},
+            "open-fixed": lambda: _patched(pq, "_open_fixed", lambda header, *, closed: False),
+            "cancel-open": lambda: _patched(pq.SqliteQueue, "cancel", _cancel_open),
+            "round-fatal": lambda: _patched(ps, "SURVIVABLE", ())},
     "keep": {"refuse": _refusing, "redo-all": _redo_all},
     "double-claim": {"refuse": _refusing},
+    "history": {"kept-measured": lambda: _patched(pp, "WHOLE_RUN", "1")},
 }
 
 

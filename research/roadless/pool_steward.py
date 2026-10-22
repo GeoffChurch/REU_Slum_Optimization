@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import tempfile
 import time
@@ -49,7 +50,7 @@ from cluster_submit import Bundle
 from cluster_submit.context import STAMP, stamped
 from cluster_submit.gpu import ALLOCATION, GPU, Allocation, mode_named, read_allocation
 from pool_ladder import class_name
-from pool_queue import FIXED, Job, JobState, Obj, Queue, Reaped
+from pool_queue import FeedName, Job, JobState, Obj, Queue, Reaped
 from pool_worker import Exit
 
 #: The one campaign, as the market's allocation names it ("<project>/<campaign>": Ruling 1).
@@ -58,6 +59,12 @@ CAMPAIGN = "reblock/reblock"
 SUMMARY = "summary.json"
 LEDGER = "ledger.jsonl"
 FINAL = "final.db"
+#: The errors a round may fail with and the steward outlive (the next round tries again): the
+#: queue's SQLite busy past its timeout ("database is locked") or its disk failing a read, the
+#: shared home's I/O (a request, the summary, the ledger). Anything else ends the steward (exit 1,
+#: its lease failed): a person restarts it by hand (cluster.py's docstring, "A steward that
+#: died").
+SURVIVABLE: tuple[type[Exception], ...] = (sqlite3.OperationalError, OSError)
 REQUESTS = "requests"
 INPUTS = "inputs"
 SEED = "jobs.json"          # the wave's seed, in its inputs: any process of it makes the queue
@@ -134,7 +141,7 @@ class Fixed:
 
 
 #: The feeds, by the name the queue's header records (`Header.feed`): resolved once, no default.
-FEEDS: dict[str, Callable[[], Feed]] = {FIXED: Fixed}
+FEEDS: dict[FeedName, Callable[[], Feed]] = {FeedName.FIXED: Fixed}
 
 
 # ---- requests ---------------------------------------------------------------------------------
@@ -195,7 +202,12 @@ def _requests(queue: Queue, requests: Path, *, log: Callable[[str], None]
     for path in sorted(requests.glob("*.json")):
         what: dict[str, object]
         try:
-            what = read_request(path.read_text(), str(path)).apply(queue)
+            text = path.read_text()
+        except OSError as e:            # the shared home: left for the next round
+            log(f"request {path.name} cannot be read now ({e}): the next round tries again")
+            continue
+        try:
+            what = read_request(text, str(path)).apply(queue)
         except ValueError as e:
             what = {"refused": str(e)}
         path.unlink()
@@ -404,16 +416,20 @@ def steward(*, queue: Queue, wave_dir: Path, waves: Path, liveness: Liveness, fe
             poll_seconds: float) -> Exit:
     """The wave's steward (the module's doc): a round every `poll_seconds` until its queue is
     closed and every job has ended (its end: 0) or two rounds no longer fit before `ends_at`
-    (epoch seconds on `now`'s clock: 75)."""
+    (epoch seconds on `now`'s clock: 75). A round that fails with an error of SURVIVABLE is said
+    and the next tried; any other ends it."""
     h = queue.header()
     log(f"=== steward of wave {h.wave} at {h.commit}: a round every {poll_seconds:g} s, "
         f"{(ends_at - now().timestamp()) / 60:.1f} minutes of its lease left")
     while True:
         started = time.monotonic()
-        s = round_(queue=queue, wave_dir=wave_dir, waves=waves, liveness=liveness, feed=feed,
-                   allocation=allocation, stale_after=stale_after, now=now, log=log)
-        if _ended(queue.jobs(), closed=queue.closed()):
-            return _end(queue, wave_dir=wave_dir, round_no=s.round, now=now, log=log)
+        try:
+            s = round_(queue=queue, wave_dir=wave_dir, waves=waves, liveness=liveness, feed=feed,
+                       allocation=allocation, stale_after=stale_after, now=now, log=log)
+            if _ended(queue.jobs(), closed=queue.closed()):
+                return _end(queue, wave_dir=wave_dir, round_no=s.round, now=now, log=log)
+        except SURVIVABLE as e:
+            log(f"the round failed ({type(e).__name__}: {e}): the next round tries again")
         if ends_at - now().timestamp() < 2 * poll_seconds:
             log("two rounds no longer fit before the lease's end: retired (75)")
             return Exit.RETIRED

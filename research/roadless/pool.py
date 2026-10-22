@@ -42,7 +42,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -52,11 +51,10 @@ from pathlib import Path
 import pool_queue as pq
 import pool_steward as ps
 import pool_worker as pw
+from cluster_submit.project import NAME
 from cluster_submit.remote_build import MANIFEST
 from pool_ladder import class_name
 
-#: A wave's name (the spec's 3.9): its directory's, so nothing that leaves it.
-WAVE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 #: Where the cgroups are: the task's (/proc/self/cgroup) and their hierarchies' mount.
 PROC_SELF_CGROUP = Path("/proc/self/cgroup")
 CGROUP_ROOT = Path("/sys/fs/cgroup")
@@ -171,7 +169,8 @@ def _work(ap: argparse.ArgumentParser, a: argparse.Namespace,
 
     def run_line(c: pq.Claim) -> pw.Ran:
         return pw.run_job(c.job.line, cwd=checkout, env=child_env, log=_log,
-                          wrote=lambda: queue.wrote(c.attempt))
+                          wrote=lambda: queue.wrote(c.attempt),
+                          kept=lambda: queue.kept(c.attempt))
 
     if a.job is not None:
         check_job_node(a.job, queue, environ)
@@ -214,8 +213,8 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> pw.Exit:
     """`work` or `steward` (the module's doc), with `environ` the task's environment."""
     ap = _parser()
     a = ap.parse_args(argv)
-    if not WAVE_NAME.fullmatch(a.wave):
-        ap.error(f"--wave {a.wave!r} is not a wave's name ({WAVE_NAME.pattern})")
+    if not NAME.fullmatch(a.wave):      # a wave's name is a run name's (the spec's 3.9)
+        ap.error(f"--wave {a.wave!r} is not a wave's name ({NAME.pattern})")
     run: Callable[[argparse.ArgumentParser, argparse.Namespace, Mapping[str, str]],
                   pw.Exit] = a.verb_run
     return run(ap, a, environ)

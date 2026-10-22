@@ -272,7 +272,7 @@ def _standing(what: str, opt: Optimizer) -> list[str]:
     import os
 
     row = opt.row
-    wrote, kept = f"{row_marker.ROW_WRITTEN}{row}", f"[row] kept {row}"
+    wrote, kept = f"{row_marker.ROW_WRITTEN}{row}", f"{row_marker.KEPT}{row}"
 
     def state() -> tuple[bytes, int]:
         return row.read_bytes(), os.stat(row).st_ino

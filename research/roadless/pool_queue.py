@@ -98,23 +98,27 @@ def fresh_minutes(ladder: Ladder) -> float:
     return ladder.lease_minutes - ladder.margin_minutes - ladder.startup_minutes
 
 
-#: The feed of a wave whose jobs are all granted at submit (pool_steward.Fixed, by this name): its
-#: seed closes the queue it makes.
-FIXED = "fixed"
+class FeedName(StrEnum):
+    """The feed a wave's header records, which pool_steward.FEEDS resolves to its Feed."""
+    FIXED = "fixed"             # every job granted at submit (pool_steward.Fixed): its seed
+                                # closes the queue it makes
+    SCREENED = "screened"       # decision 7's jobs granted as screens decide: not built (FEEDS
+                                # lacks it, so pool.py refuses its steward); a queue of it open,
+                                # as the guards' open waves are
 
 
 @dataclass(frozen=True, kw_only=True)
 class Header:
     """A wave's: its name, the commit every run of it is at, the family of its work (the
     estimators'), its ladder (recorded whole), when it was planned (cluster_submit's STAMP) and its
-    feed (FIXED: the jobs granted at submit)."""
+    feed (FeedName)."""
 
     wave: str
     commit: str
     family: str
     ladder: Ladder
     created: str
-    feed: str
+    feed: FeedName
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -155,9 +159,10 @@ class Seed:
         if len(set(ids)) != len(ids) or len(set(work)) != len(work):
             raise ValueError(f"wave {self.header.wave}: a job id or (block, item) twice")
         if _open_fixed(self.header, closed=self.closed):
-            raise ValueError(f"wave {self.header.wave}: its feed is {FIXED} (every job granted "
-                             "at submit) and its seed leaves the queue open: nothing would ever "
-                             "close it, and its steward ends a wave only once its queue is closed")
+            raise ValueError(f"wave {self.header.wave}: its feed is {FeedName.FIXED} (every job "
+                             "granted at submit) and its seed leaves the queue open: nothing "
+                             "would ever close it, and its steward ends a wave only once its "
+                             "queue is closed")
         lad = self.header.ladder
         classes = {class_name(lad.cards, r) for r in lad.rungs}
         odd = [j.id for j in self.jobs if j.lane == Lane.POOL and j.cls not in classes]
@@ -173,7 +178,7 @@ class Seed:
 def _open_fixed(header: Header, *, closed: bool) -> bool:
     """Whether a seed of `header` that is `closed` or not is a fixed feed's left open: its feed
     grants nothing after submit, so it never closes the queue, and the wave would never end."""
-    return header.feed == FIXED and not closed
+    return header.feed == FeedName.FIXED and not closed
 
 
 class Job(NamedTuple):
@@ -235,6 +240,7 @@ class Queue(Protocol):
     def claim(self, *, worker: str, minutes_left: float) -> Claim | None: ...
     def claim_job(self, *, worker: str, job: int) -> Claim | None: ...
     def wrote(self, attempt: int) -> None: ...
+    def kept(self, attempt: int) -> None: ...
     def finish(self, attempt: int, *, worker: str, outcome: Outcome, peak_gb: float,
                minutes: float, rc: int) -> JobState: ...
     def reap(self, worker: str, *, now: float) -> Reaped | None: ...
@@ -342,12 +348,13 @@ def _ladder(o: Obj) -> Ladder:
 
 def _header_json(h: Header) -> dict[str, object]:
     return {"wave": h.wave, "commit": h.commit, "family": h.family,
-            "ladder": _ladder_json(h.ladder), "created": h.created, "feed": h.feed}
+            "ladder": _ladder_json(h.ladder), "created": h.created, "feed": h.feed.value}
 
 
 def _header(o: Obj) -> Header:
     h = Header(wave=o.text("wave"), commit=o.text("commit"), family=o.text("family"),
-               ladder=_ladder(o.obj("ladder")), created=o.text("created"), feed=o.text("feed"))
+               ladder=_ladder(o.obj("ladder")), created=o.text("created"),
+               feed=FeedName(o.text("feed")))
     o.done()
     return h
 
@@ -471,6 +478,12 @@ def _attempted_by(db: sqlite3.Connection, run: str) -> list[int]:
         " WHERE k.run = ? ORDER BY a.job", (run,))]
 
 
+def _close(db: sqlite3.Connection) -> None:
+    """The queue closed, once (its time the first close's)."""
+    if db.execute("SELECT 1 FROM closed").fetchone() is None:
+        db.execute("INSERT INTO closed (at) VALUES (?)", (time.time(),))
+
+
 def _one_claim(db: sqlite3.Connection, worker: str) -> None:
     """Refuse `worker` a claim while it holds one (ValueError naming it): a worker runs one job at
     a time, so whatever settles its claim (finish, retire, reap) settles one."""
@@ -514,7 +527,7 @@ _SCHEMA = (
     "CREATE TABLE IF NOT EXISTS attempts (id INTEGER PRIMARY KEY AUTOINCREMENT,"
     " job INTEGER NOT NULL REFERENCES jobs (id), worker TEXT NOT NULL REFERENCES workers (id),"
     " node TEXT NOT NULL, cls TEXT NOT NULL, start REAL NOT NULL, end REAL, outcome TEXT,"
-    " peak_gb REAL, minutes REAL, rc INTEGER, rows INTEGER NOT NULL)",
+    " peak_gb REAL, minutes REAL, rc INTEGER, rows INTEGER NOT NULL, kept INTEGER NOT NULL)",
     "CREATE TABLE IF NOT EXISTS aside (worker TEXT PRIMARY KEY REFERENCES workers (id),"
     " asked_at REAL NOT NULL)",
     "CREATE TABLE IF NOT EXISTS closed (at REAL NOT NULL)",
@@ -609,8 +622,7 @@ class SqliteQueue:
 
     def close(self) -> None:
         with self._tx() as db:
-            if db.execute("SELECT 1 FROM closed").fetchone() is None:
-                db.execute("INSERT INTO closed (at) VALUES (?)", (time.time(),))
+            _close(db)
 
     def metric(self) -> str | None:
         """The name of the wave's metric, once named."""
@@ -778,7 +790,8 @@ class SqliteQueue:
     def _take(db: sqlite3.Connection, w: sqlite3.Row, job: sqlite3.Row) -> Claim:
         """`job` becomes `w`'s, with a new attempt."""
         attempt = _inserted(db.execute(
-            "INSERT INTO attempts (job, worker, node, cls, start, rows) VALUES (?, ?, ?, ?, ?, 0)",
+            "INSERT INTO attempts (job, worker, node, cls, start, rows, kept)"
+            " VALUES (?, ?, ?, ?, ?, 0, 0)",
             (job["id"], w["id"], w["node"], w["cls"], time.time())))
         db.execute("UPDATE jobs SET state = ?, worker = ?, attempt = ? WHERE id = ?",
                    (JobState.CLAIMED.value, w["id"], attempt, job["id"]))
@@ -816,6 +829,15 @@ class SqliteQueue:
         """`attempt`'s job wrote a row (its worker counts clearings' ROW_WRITTEN lines)."""
         with self._tx() as db:
             if not db.execute("UPDATE attempts SET rows = rows + 1 WHERE id = ?",
+                              (attempt,)).rowcount:
+                raise ValueError(f"no attempt {attempt}")
+
+    def kept(self, attempt: int) -> None:
+        """`attempt`'s job found a row standing and kept it (its worker counts clearings'
+        row_marker.KEPT lines): it ran less than its whole work, so it measures no job
+        (pool_plan.history_of)."""
+        with self._tx() as db:
+            if not db.execute("UPDATE attempts SET kept = kept + 1 WHERE id = ?",
                               (attempt,)).rowcount:
                 raise ValueError(f"no attempt {attempt}")
 
@@ -921,8 +943,11 @@ class SqliteQueue:
         again: its worker's finish moves a job only while the attempt is still its claim (the
         attempt records the code, peak and minutes under its CANCELLED), and a retire or reap
         settles only a CLAIMED job. So the wave ends at once, its jobs as the cancel left them
-        (the plan's Ruling 12; a job that kept running writes rows that stand, as any does)."""
+        (the plan's Ruling 12; a job that kept running writes rows that stand, as any does). The
+        queue is closed too (the spec's 3.9): a cancelled wave grants nothing more, so an open
+        one's feed never adds a job to it, and it ends."""
         with self._tx() as db:
+            _close(db)
             claimed = JobState.CLAIMED.value
             db.execute("UPDATE attempts SET end = ?, outcome = ? WHERE id IN"
                        " (SELECT attempt FROM jobs WHERE state = ?)",

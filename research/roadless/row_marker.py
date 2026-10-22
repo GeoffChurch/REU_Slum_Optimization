@@ -13,6 +13,12 @@ module of its own, importing nothing, so a worker reads the marker without clear
 #: printed.
 ROW_WRITTEN = "[row] wrote "
 
+#: What clearings prints, the row's path after it, for a row a run under Keep found standing and
+#: so did not make (at its check, a reuse, or its write: clearings.Keep): its job ran less than
+#: its whole work. A pool's worker counts these lines too (pool_worker.run_job), and an earlier
+#: wave's measure of a job is only an attempt that kept none (pool_plan.history_of).
+KEPT = "[row] kept "
+
 #: A person naming a deliberate replacement of the rows a run would write (clearings.Replace).
 REPLACE = "--replace"
 #: A pool's job: a row that stands is that identity done (clearings.Keep); every pooled job's line

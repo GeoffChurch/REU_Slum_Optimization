@@ -108,7 +108,8 @@ LADDERS: dict[str, Ladder] = {lad.name: lad for lad in (
            stored_mem=1.2, fit_mem=1.5, stored_time=1.25,
            about="CPU work (the lineup's scoring and proposals): a whole core and one of 4, "
                  "12, 24, 56 or 88 GB a worker (Task 7's classes and a 4-GB rung, "
-                 "which 174 of the 565 lineup networks fit), in 2-hour leases. Optimizes how "
+                 "which 167 of the 565 lineup networks fit, scored alone: the scoring-only "
+                 "basis), in 2-hour leases. Optimizes how "
                  "many jobs share a node and how soon a pool steps aside (jobs no longer than "
                  "105 minutes, a lease less its margin and a worker's startup, small ones "
                  "filling a lease's tail); gives up the jobs past 88 GB or 105 minutes, which "

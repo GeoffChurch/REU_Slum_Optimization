@@ -15,13 +15,15 @@ stages), and checks what a task would get.
                                             # hung-waits, reap-first, none-unreaped,
                                             # split-quiet
     uv run python $C template [fault]       # faults: other-mem, other-node, continuation-name,
-                                            # reused-name, with-at, first-wave, market-always
+                                            # reused-name, with-at, first-wave, market-always,
+                                            # restart-own-fault
     uv run python $C wave [fault]           # faults: no-keep, block-names, no-script-check,
                                             # no-check, fit-capped, uncapped, any-node,
                                             # pools-only, fit-margin, unfinished-only,
                                             # first-cancel-stops, record-reused, no-bank-code,
                                             # common-only, drop-regions, clean-always,
-                                            # outside-import, producers-unseen
+                                            # outside-import, producers-unseen,
+                                            # keeps-unchecked
     uv run python $C both-ways <guards,>    # each guard, then under each of its faults
 
 Each guard but `cpu` has its faults (FAULTS: a patch in this process, no file edited, as
@@ -92,7 +94,11 @@ of a lease whose record does not say what it holds dropped, held and not demande
 (cluster_demand.at_tres_alloc always true: a pool's running workers stated at their tres-alloc as
 well as on their wave's line), `pool-refuses` (cluster.pool_runs refusing a pool run whose record
 does not read) and `split-refuses` (cluster._live_stewards refusing a wave with live stewards at
-two commits): each of the last two leaves the whole campaign unstated for one wave's records.
+two commits): each of the last two leaves the whole campaign unstated for one wave's records. And
+with no wave at all (the registry's runs less every steward, pool and long run: the watch timer's
+path while none is live) and a login that refuses every command, the waves read as no pool run and
+no summary, the login never asked; fault `asks-with-none` (cluster.wave_summaries asking the
+login with no wave to read: the demand fails while no wave is live).
 
 The lease pool's guards (docs/superpowers/specs/2026-10-21-lease-pool-design.md; the plan's
 Rulings 3, 4, 10 and 11, and the controller's: a summary names its ladder) run cluster.py's kinds
@@ -144,12 +150,14 @@ decides a killed task still registered: requeued-late continued on its earlier s
 requeued and requeued-late decided on reaps that are not theirs) and `split-quiet`
 (cluster._one_commit a no-op: the split wave left out of the live waves, its lease Done).
 
-`template` (Ruling 4, Review Focus 2): live waves `a` (its steward at HEAD) and `b` (at HEAD^),
-with 3 and 7 jobs of m12 (cpu-score) pending on quadro2 and none of m24 pending on orion, a pool
+`template` (Ruling 4, Review Focus 2): live waves `a` (its queue at HEAD) and `b` (its queue, as
+its summary says, at HEAD^; both stewards submitted at HEAD), with 3 and 7 jobs of m12 (cpu-score)
+pending on quadro2 and none of m24 pending on orion, a pool
 lease of `b` there already named b-quadro2-m12-s1, a live wave `c` whose summary is absent and a
 live wave `d` whose summary names a ladder LADDERS lacks (no-such, with 9 jobs pending there).
 The template for (quadro2, 0/2/12) is `b`'s: kind `pool`, run b-quadro2-m12-s2, commit `b`'s
-steward's, args `--wave b --preset cpu-score --node quadro2 --mem 12 --gpus 40`; and it passes
+queue's (HEAD^, its summary's: the commit its workers check the queue against, not its
+steward's), args `--wave b --preset cpu-score --node quadro2 --mem 12 --gpus 40`; and it passes
 every refusal of cluster_submit's `launches.start`, by launches' own code: its arguments parsed
 with `--at` its commit read that commit and no --dry, `chain_base` of its run is the run, the
 registry lacks it, the pool kind's plan of it passes `launches.line_checked` for that node and
@@ -158,13 +166,21 @@ the bundle and node: a bundle no live wave has a line of (quadro2, 0/2/24), a no
 (tesla1), lines with nothing pending (orion, 0/2/24; its why naming `c` and `d`, left out, too),
 and another campaign's. A registry whose only live wave is `c`: raises; whose only live wave is
 `d`: raises, naming its ladder; with no live wave (only a steward finished and settled): Done.
+`own-fault` (I2 of the branch review: the worker's own-fault exit is a person's to see, the spec's
+3.5): live wave `a` with jobs of m12 pending on quadro2 and of m4 on orion, its pool run
+a-quadro2-m12-s1 finished with a task exiting 1 (the other killed at its walltime): the template
+there Done, naming the run and its exit; the demand's summaries (cluster.demand_waves) without
+a's quadro2 m12 line, its orion m4 line kept; then a newer pool run there, a-quadro2-m12-s2,
+finished routinely (75, and its walltime): the template a-quadro2-m12-s3.
 `Waves.starts(market)` is the market's starts while a wave is live, and () with none, the market
 not asked. Faults, one per refusal the template must not trip, one for its choice and one for
 its starts: `other-mem` (its `--mem` the next rung: line_checked refuses the bundle),
 `other-node` (its `--node` another node), `continuation-name` (`<w>-<node>-<class>-l1`),
 `reused-name` (`-s1`, which the registry has), `with-at` (its args carrying `--at` HEAD: the parse
 reads another commit than the template's), `first-wave` (the first live wave by name, whatever
-its pending jobs) and `market-always` (Waves.starts asking the market with no wave live).
+its pending jobs), `market-always` (Waves.starts asking the market with no wave live) and
+`restart-own-fault` (cluster.own_fault finding none: own-fault's template starts a-quadro2-m12-s2,
+and the demand keeps the line).
 
 `wave` (the spec's 3.8 and 3.9, cluster_wave.py): `cluster.py wave submit ... --dry` command lines
 at HEAD through cluster.main, cluster_wave's edge a registry in a temporary directory, a runner
@@ -179,7 +195,9 @@ default board, and one long run, of the job whose stored wall (100 minutes, 125 
 passes a fresh lease's 105: `--mem` 45, 1.5 times its stored peak of 30 GB, and `--minutes` 188
 (1.5 times 125, rounded up), every planned run's name a run name's. Refused: the misspelt id of
 `ids` (MISTYPED), by the bank's writer, before anything is planned; a script the commit lacks
-(GONE), naming the commit; `{item}` without --items, and --items without `{item}`; a tar whose name
+(GONE), naming the commit; a script that never resolves --keep-standing (common.py: no call of
+clearings.standing_of), naming it; `{item}` without --items, and --items without `{item}`; a tar
+whose name
 does not end in `.tar`; gpu-presets on orion (its cards unusable); the Ruling's fitted long jobs
 whose estimate passes 7 days (cycle_desire on both blocks, no stored row: the family's longest wall
 under 1 km2, 11000 minutes), naming them; a wave with a local record (`waves/g-10` here); and,
@@ -201,12 +219,14 @@ Retry((1, 2, 3)) and Cancel(); `retry 9` is refused naming 9; `cancel` cancels t
 lease, the undecided one and the long run, every one though the first cancel fails (exit 1), and
 neither the settled lease, the steward nor the other wave's pool. Faults: `no-keep` (the job lines
 without `--keep-standing`), `block-names` (long runs named `<w>-long-<block>`: no run name),
-`no-script-check` and `no-check` (as `script`'s and `ids`'), `fit-capped` (the Ruling's refusal
+`no-script-check` and `no-check` (as `script`'s and `ids`'), `keeps-unchecked`
+(cluster_wave._keeps_standing a no-op: no-keep-script, a script that never calls
+clearings.standing_of, planned), `fit-capped` (the Ruling's refusal
 gone: fitted jobs past 7 days capped), `fit-margin` (the Ruling as first written, 1.5 times the
 estimate past 7 days: fitted_slow refused), `uncapped` (long runs at 1.5 times their estimate,
 uncapped: the long kind refuses slow_stored's), `any-node` (cluster_wave._servable a no-op:
 gpu-presets planned on orion), `pools-only` (cancel leaving the long runs), `unfinished-only`
-(cluster_wave._undone as unfinished alone: the undecided lease left), `first-cancel-stops` (cancel
+(cluster.undone as unfinished alone: the undecided lease left), `first-cancel-stops` (cancel
 stopping at its first failure), `record-reused` (cluster_wave._recorded a no-op), `no-bank-code`
 (BANK_CODE empty), `common-only` (BANK_CODE common.py alone: the Block producers' change unseen),
 `drop-regions` (BANK_CODE without regions.py: the probe's imports name it), `clean-always`
@@ -250,6 +270,7 @@ import pool_plan as pp  # noqa: E402
 import pool_queue as pq  # noqa: E402
 import pool_steward  # noqa: E402
 import pool_summary as psum  # noqa: E402
+import pool_worker as pw  # noqa: E402
 import row_marker  # noqa: E402
 from cluster_submit import Bundle, RunPlan  # noqa: E402
 from cluster_submit.arrays import Array, route, script  # noqa: E402
@@ -259,7 +280,7 @@ from cluster_submit.gpu import DemandLine, chain_base, demand_path, read_demand 
 from cluster_submit.gpuboard import Pending, Running, Seen  # noqa: E402
 from cluster_submit.project import NAME  # noqa: E402
 from cluster_submit.registry import NO_OVERRIDES, ArrayRecord, Registry, RunRecord  # noqa: E402
-from cluster_submit.remote import Completed, Local, SubprocessRunner  # noqa: E402
+from cluster_submit.remote import Completed, Local, Login, Remote, SubprocessRunner  # noqa: E402
 from cluster_submit.submit import throttle_checked  # noqa: E402
 from pool_ladder import LADDERS, Ladder  # noqa: E402
 
@@ -487,7 +508,7 @@ def _demand_summaries(home: Path) -> None:
 
     def made(wave: str, jobs: Sequence[pq.JobSeed]) -> pq.SqliteQueue:
         h = pq.Header(wave=wave, commit=SHA, family="guard", ladder=lad,
-                      created=now.strftime(STAMP), feed=pq.FIXED)
+                      created=now.strftime(STAMP), feed=pq.FeedName.FIXED)
         return pq.SqliteQueue.open(home / cluster.WAVES / wave / "queue.db",
                                    pq.Seed(header=h, jobs=tuple(jobs), closed=True))
 
@@ -658,21 +679,36 @@ def check_demand() -> list[str]:
     bad = []
     with tempfile.TemporaryDirectory() as tmp:
         home = Path(tmp) / "home"
-        login = _context(Path(tmp) / "repo", home).remote()
+        dctx = _context(Path(tmp) / "repo", home)
+        login = dctx.remote()
         _demand_summaries(home)
+        for r in recs:                  # a finished lease's exits, as its sync saved them
+            if r.kind == cluster.Pool.name and r.finished_at is not None:
+                _exited(dctx, r, rc=str(int(pw.Exit.DRAINED)))
 
         def demanded(rs: Sequence[RunRecord], sq: Seen,
                      lim: dict[str, float]) -> cluster_demand.Stated:
             """The demand of `rs`, its waves read as state_demand reads them."""
-            w = cluster.demand_waves(rs, login)
+            w = cluster.demand_waves(rs, login, dctx.registry)
             return cluster_demand.demand_of(
                 rs, sq, lim, pools=w.pools, waves=w.summaries(), project="reblock",
                 campaign="reblock", weight=1.0, at=at,
                 nodes=tuple(n.name for n in PROJECT.cluster.nodes))
 
-        got = cluster.demand_waves(recs, login).pools
+        got = cluster.demand_waves(recs, login, dctx.registry).pools
         if got != pools:
             bad.append(f"pool runs {got}, want {pools}")
+
+        def refuses(argv: Sequence[str], *, input: str | None = None) -> Completed:
+            raise AssertionError(f"a call to the cluster with no wave: {list(argv)}")
+        none = [r for r in recs if r.kind not in cluster_wave.WAVE_KINDS]
+        try:
+            nw = cluster.demand_waves(none, Remote(PROJECT.cluster.host, refuses), dctx.registry)
+            read = nw.summaries()
+            if nw.pools or read.read or read.unread:
+                bad.append(f"no wave: pools {nw.pools}, summaries {read}, want none")
+        except (AssertionError, SystemExit) as e:
+            bad.append(f"no wave, the login refusing every command: {e}")
         s = demanded(recs, seen, limits)
         bad += stated(s, lines=want, waves=("a", "b", "c"), unread=())
         for case, c in broken.items():
@@ -782,6 +818,14 @@ def _every_node(jobs: Sequence[pq.Job], workers: Sequence[pq.Worker],
 
 _POOL_RUNS = cluster.pool_runs
 _LIVE_STEWARDS = cluster._live_stewards
+_WAVE_SUMMARIES = cluster.wave_summaries
+
+
+def _asks_with_none(login: Login, waves: Sequence[str]) -> psum.Summaries:
+    """cluster.wave_summaries asking the login even with no wave to read (fault
+    `asks-with-none`)."""
+    login.probe("true")
+    return _WAVE_SUMMARIES(login, waves)
 
 
 def _pools_refused(recs: Sequence[RunRecord]) -> cluster.PoolRuns:
@@ -815,7 +859,8 @@ DEMAND_FAULTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] 
                                        not cluster_demand.pool_task(j.job, pooled)),
     "running-twice": lambda: _patched(cluster_demand, "at_tres_alloc", lambda j, pooled: True),
     "pool-refuses": lambda: _patched(cluster, "pool_runs", _pools_refused),
-    "split-refuses": lambda: _patched(cluster, "_live_stewards", _split_refused)}
+    "split-refuses": lambda: _patched(cluster, "_live_stewards", _split_refused),
+    "asks-with-none": lambda: _patched(cluster, "wave_summaries", _asks_with_none)}
 
 
 @contextlib.contextmanager
@@ -898,9 +943,10 @@ def _line(node: str, mem: int, *, pending: int, claimed: int) -> psum.ClassLine:
 
 def _summary(wave: str, *, at: str, state: psum.WaveState, ladder: str,
              lines: Sequence[psum.ClassLine], reaped: Sequence[psum.ReapedWorker],
-             registered: Sequence[psum.RegisteredWorker]) -> str:
+             registered: Sequence[psum.RegisteredWorker], commit: str) -> str:
+    """`wave`'s summary.json, its queue at `commit`."""
     return psum.summary_json(psum.Summary(
-        wave=wave, commit=SHA, ladder=ladder, at=at, round=3, state=state, metric=None,
+        wave=wave, commit=commit, ladder=ladder, at=at, round=3, state=state, metric=None,
         lines=tuple(lines), reaped=tuple(reaped), registered=tuple(registered), long=()))
 
 
@@ -1081,7 +1127,8 @@ def check_more() -> list[str]:
     def summary(*, at: str = after, of: Sequence[psum.ClassLine] = lines,
                 reaped: Sequence[psum.ReapedWorker] = (held,),
                 live: Sequence[psum.RegisteredWorker] = ()) -> str:
-        return _summary("w", at=at, state=closed, ladder="cpu-score", lines=of, reaped=reaped,
+        return _summary("w", at=at, state=closed, ladder="cpu-score", lines=of, commit=SHA,
+                        reaped=reaped,
                         registered=live)
 
     none_pending = (lines[0], _line("quadro2", 12, pending=0, claimed=2), lines[2])
@@ -1122,6 +1169,7 @@ def check_more() -> list[str]:
         for name, state, want in (("steward-closed", closed, "Continue(1)"),
                                   ("steward-finished", psum.WaveState.FINISHED, "Done")):
             _put(tmp / "home", "w", _summary("w", at=after, state=state, ladder="cpu-score",
+                                             commit=SHA,
                                              lines=lines, reaped=(), registered=()))
             got[name] = _answer(lambda: cluster.Steward().more(ctx, steward, killed=()))
             cases[name] = MoreCase(None, (), StewardState.UNSETTLED, _width_today, want)
@@ -1188,7 +1236,7 @@ def check_template() -> list[str]:
         return (s,)
 
     def no_such(home: Path) -> None:
-        _put(home, "d", _summary("d", at=after, state=closed, ladder="no-such", lines=(
+        _put(home, "d", _summary("d", at=after, state=closed, ladder="no-such", commit=SHA, lines=(
             _line("quadro2", 12, pending=9, claimed=0),), reaped=(), registered=()))
 
     bad: list[str] = []
@@ -1198,9 +1246,12 @@ def check_template() -> list[str]:
         home = tmp / "home"
         ctx = _context(tmp / "repo", home)
         waves = cluster.Waves(registry=ctx.registry)
+        # b's steward submitted at HEAD, its queue (summary) at HEAD^: a lease starts at the
+        # queue's commit, which its workers check
         for wave, commit, pending in (("a", SHA, 3), ("b", older, 7)):
-            ctx.registry.write(_steward_run(wave, commit=commit, finished=False, settled=False))
-            _put(home, wave, _summary(wave, at=after, state=closed, ladder="cpu-score", lines=(
+            ctx.registry.write(_steward_run(wave, commit=SHA, finished=False, settled=False))
+            _put(home, wave, _summary(wave, at=after, state=closed, ladder="cpu-score",
+                                      commit=commit, lines=(
                 _line("orion", 24, pending=0, claimed=pending),
                 _line("quadro2", 12, pending=pending, claimed=0)), reaped=(), registered=()))
         for wave in ("c", "d"):     # c's summary absent; d's names a ladder LADDERS lacks
@@ -1230,6 +1281,7 @@ def check_template() -> list[str]:
             got.append(f"{w.campaign} on {w.node}, {w.bundle.text()}: {type(x).__name__}")
         if waves.starts(market) != (s,) or asked != ["asked"]:
             bad.append(f"Waves.starts with live waves: {asked}, not the market's starts")
+    bad += _own_fault(m12, after, got)
     for case, (live, says) in {"unread": (("c",), "wave c"),
                                "no-such-ladder": (("d",), "no-such"),
                                "none-live": ((), None)}.items():
@@ -1259,6 +1311,63 @@ def check_template() -> list[str]:
                     bad.append(f"Waves.starts with no live wave: {started}, the market "
                                f"{'asked' if asked else 'not asked'}")
     print(f"template: {'; '.join(got)} -> {'ok' if not bad else 'FAILS'}", flush=True)
+    return bad
+
+
+def _exited(ctx: Context, rec: RunRecord, *, rc: str) -> None:
+    """Every task of finished run `rec` exiting `rc`, as its run directory holds it."""
+    work = ctx.registry.workdir(rec.name)
+    (work / "rc").mkdir(parents=True, exist_ok=True)
+    for a in rec.arrays:
+        for i in range(len(a.tasks)):
+            (work / "rc" / f"{a.job_id}_{i}").write_text(f"{rc}\n")
+
+
+def _ended(ctx: Context, rec: RunRecord, *, rc: str, submitted_at: str) -> RunRecord:
+    """Pool run `rec` (job 500, two tasks) finished: task 0 exiting `rc`, task 1 killed at its
+    walltime (sacct's TIMEOUT), as its run directory holds them; written to the registry,
+    submitted at `submitted_at`."""
+    work = ctx.registry.workdir(rec.name)
+    (work / "rc").mkdir(parents=True, exist_ok=True)
+    (work / "rc" / "500_0").write_text(f"{rc}\n")
+    (work / "sacct.txt").write_text("500_1|TIMEOUT|0:0|02:00:00|quadro2\n")
+    rec = replace(rec, submitted_at=submitted_at)
+    ctx.registry.write(rec)
+    return rec
+
+
+def _own_fault(m12: Bundle, after: str, got: list[str]) -> list[str]:
+    """`template`'s case `own-fault` (the module's docstring): its problems."""
+    bad: list[str] = []
+    with tempfile.TemporaryDirectory() as d:
+        tmp = Path(d)
+        home = tmp / "home"
+        ctx = _context(tmp / "repo", home)
+        waves = cluster.Waves(registry=ctx.registry)
+        ctx.registry.write(_steward_run("a", commit=SHA, finished=False, settled=False))
+        _put(home, "a", _summary("a", at=after, state=psum.WaveState.CLOSED, ladder="cpu-score",
+                                 commit=SHA, lines=(_line("quadro2", 12, pending=5, claimed=0),
+                                                    _line("orion", 4, pending=2, claimed=0)),
+                                 reaped=(), registered=()))
+        first = _ended(ctx, _pool_run("a-quadro2-m12-s1", "a", node="quadro2", mem=12,
+                                      finished=True), rc="1", submitted_at="2026-10-21T09:00:00Z")
+        t = waves.template(ctx, "reblock", "quadro2", m12)
+        if not isinstance(t, cs.Done) or first.name not in t.why or "exited 1" not in t.why:
+            bad.append(f"own-fault: the template after {first.name} exited 1: {t}, want Done "
+                       "naming it")
+        got.append(f"own-fault: {type(t).__name__}")
+        recs = ctx.registry.all()[0]
+        lines = cluster.demand_waves(recs, ctx.remote(), ctx.registry).summaries().read["a"].lines
+        stated = sorted((x.node, x.cls) for x in lines)
+        if stated != [("orion", "m4")]:
+            bad.append(f"own-fault: the demand states a's lines {stated}, want orion's m4 alone")
+        _ended(ctx, _pool_run("a-quadro2-m12-s2", "a", node="quadro2", mem=12, finished=True),
+               rc="75", submitted_at="2026-10-21T11:00:00Z")
+        t = waves.template(ctx, "reblock", "quadro2", m12)
+        if not isinstance(t, cs.Template) or t.run != "a-quadro2-m12-s3":
+            bad.append(f"own-fault: the template after a newer lease retired (75) and walltime: "
+                       f"{t}, want a-quadro2-m12-s3")
+        got.append(f"after a routine lease: {type(t).__name__}")
     return bad
 
 
@@ -1459,7 +1568,7 @@ def _main_wave(got: _Waved, *, work: Path, scratch: str) -> list[str]:
 def _wave_seed(wave: str) -> str:
     """A seed of three cpu-score jobs of `wave`, as a submit ships it (the requests' case)."""
     header = pq.Header(wave=wave, commit=SHA, family="lineup-score", ladder=LADDERS["cpu-score"],
-                       created="2026-10-21T10:00:00Z", feed=pq.FIXED)
+                       created="2026-10-21T10:00:00Z", feed=pq.FeedName.FIXED)
     jobs = tuple(pq.JobSeed(id=k, block=f"b{k}", item="", group=f"b{k}", line="true",
                             node="orion", cls="m4", gb=1.0, minutes=10.0, peak_gb=1.0,
                             source="smoke", lane=pq.Lane.POOL) for k in (1, 2, 3))
@@ -1645,6 +1754,9 @@ def _wave_cases(edge: cluster_wave.Edge, planned: list[_Planned], *, tmp: Path, 
         "no-script": (_submit_line("g-3", "--nodes", "orion", "--items", "clearance",
                                    preset=cpu, ids=(b,), command=(GONE, "{id}", "{item}")),
                       (SHA[:12],)),
+        "no-keep-script": (_submit_line("g-12", "--nodes", "orion", "--items", "clearance",
+                                        preset=cpu, ids=(b,), command=(COMMON, "{id}", "{item}")),
+                           ("standing_of", COMMON)),
         "item-unfilled": (_submit_line("g-4", "--nodes", "orion", preset=cpu, ids=(b,),
                                        command=score), ("{item}",)),
         "item-unused": (_submit_line("g-5", "--nodes", "orion", "--items", "clearance",
@@ -1770,7 +1882,7 @@ FAULTS: dict[str, dict[str, Callable[[], contextlib.AbstractContextManager[None]
     "kinds": {"lease-bundle": lambda: _patched(cluster.Waves, "lease", _one_cpu_lease)},
     "more": {"continue-idle": lambda: _patched(cluster, "_idle_killed",
                                                lambda killed, reaps: []),
-             "finished-dead": lambda: _patched(cluster, "_live",
+             "finished-dead": lambda: _patched(cluster, "undone",
                                                lambda rec: rec.finished_at is None),
              "task-reaps": lambda: _patched(cluster, "_walltime_reaps",
                                             lambda s, run: {r.task: r for r in s.reaped}),
@@ -1791,9 +1903,12 @@ FAULTS: dict[str, dict[str, Callable[[], contextlib.AbstractContextManager[None]
         "first-wave": lambda: _patched(cluster, "_chosen",
                                        lambda choices: min(choices, key=lambda c: c.wave)),
         "market-always": lambda: _patched(cluster.Waves, "starts",
-                                          lambda self, market: tuple(market()))},
+                                          lambda self, market: tuple(market())),
+        "restart-own-fault": lambda: _patched(cluster, "own_fault", lambda registry, rec: None)},
     "wave": {
         "no-keep": lambda: _patched(cluster_wave, "job_line", _no_keep),
+        "keeps-unchecked": lambda: _patched(cluster_wave, "_keeps_standing",
+                                            lambda script, commit: None),
         "block-names": lambda: _patched(cluster_wave, "_long_name", _block_names),
         "no-script-check": _no_script_check,
         "no-check": _no_check,
@@ -1802,7 +1917,7 @@ FAULTS: dict[str, dict[str, Callable[[], contextlib.AbstractContextManager[None]
         "any-node": lambda: _patched(cluster_wave, "_servable", _any_node),
         "pools-only": lambda: _patched(cluster_wave, "CANCELLED_KINDS", (cluster.Pool.name,)),
         "fit-margin": lambda: _patched(cluster_wave, "_unbounded", _fit_margin),
-        "unfinished-only": lambda: _patched(cluster_wave, "_undone",
+        "unfinished-only": lambda: _patched(cluster, "undone",
                                             lambda rec: rec.finished_at is None),
         "first-cancel-stops": lambda: _patched(cluster_wave, "_every", cluster_wave._each),
         "record-reused": lambda: _patched(cluster_wave, "_recorded", lambda records, wave: None),

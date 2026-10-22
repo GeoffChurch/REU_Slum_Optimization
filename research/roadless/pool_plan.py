@@ -483,12 +483,19 @@ class _Wave(NamedTuple):
     observed: list[Observed]
 
 
+#: An attempt that measured its whole job: it kept no row (row_marker.KEPT, counted by the worker:
+#: under --keep-standing a double claim's second run, a run after a kill or a resubmitted wave's
+#: may have run part of its job, or none of it), as history_of's SQL reads it.
+WHOLE_RUN = "kept = 0"
+
+
 def history_of(waves: Path, family: str) -> list[Observed]:
     """The earlier waves' measures of `family`'s work: of each `waves/<w>/final.db` (a wave's
     final snapshot, the plan's Ruling 14) whose header's family is `family`, each job's last
-    attempt that ended DONE (its peak and minutes, source `wave:<w>`), newest wave first by the
-    header's `created`. A final.db whose header names another wave than its directory is refused
-    (ValueError)."""
+    attempt that ended DONE having kept no row (WHOLE_RUN: it ran its whole job), its peak and
+    minutes, source `wave:<w>`, newest wave first by the header's `created`. A job none of whose
+    done attempts ran whole has no measure here (its stored rows estimate it). A final.db whose
+    header names another wave than its directory is refused (ValueError)."""
     found: list[_Wave] = []
     for path in sorted(waves.glob("*/final.db")):
         h = pq.read_header(path)
@@ -501,7 +508,8 @@ def history_of(waves: Path, family: str) -> list[Observed]:
         try:
             rows = db.execute(
                 "SELECT j.block, j.item, a.peak_gb, a.minutes FROM jobs j JOIN attempts a"
-                " ON a.id = (SELECT MAX(id) FROM attempts WHERE job = j.id AND outcome = ?)"
+                " ON a.id = (SELECT MAX(id) FROM attempts WHERE job = j.id AND outcome = ?"
+                f" AND {WHOLE_RUN})"
                 " ORDER BY j.id", (pq.Outcome.DONE.value,)).fetchall()
         finally:
             db.close()
@@ -572,6 +580,12 @@ def _able(nodes: Sequence[str], *, usable_gb: Mapping[str, float], need: float) 
     return [n for n in nodes if need <= usable_gb[n]]
 
 
+class Work(NamedTuple):
+    """One job's work: its block and its item ("" for a command without `{item}`)."""
+    block: str
+    item: str
+
+
 def plan_wave(*, wave: str, commit: str, family: str, ladder: Ladder, estimator: Estimator,
               nodes: Sequence[str], usable_gb: Mapping[str, float], ids: Sequence[str],
               items: Sequence[str], line: Callable[[str, str], str], created: str) -> pq.Seed:
@@ -596,13 +610,13 @@ def plan_wave(*, wave: str, commit: str, family: str, ladder: Ladder, estimator:
     if unknown:
         raise ValueError(f"wave {wave}: no usable memory known for {', '.join(unknown)} "
                          f"(nodes: {', '.join(usable_gb)})")
-    work = [(b, i) for b in ids for i in items]
-    est = {w: estimator.estimate(*w) for w in work}
+    work = [Work(block=b, item=i) for b in ids for i in items]
+    est = {w: estimator.estimate(w.block, w.item) for w in work}
     size = {w: _sized(e, ladder=ladder) for w, e in est.items()}
     pooled = dict.fromkeys(ids, 0.0)                     # a group's pool minutes
-    largest: dict[str, tuple[str, str]] = {}              # a group's largest job
+    largest: dict[str, Work] = {}                        # a group's largest job
     for w, s in size.items():
-        b = w[0]
+        b = w.block
         if s.lane == pq.Lane.POOL:
             pooled[b] += est[w].needed_minutes()
         if b not in largest or s.hold_gb > size[largest[b]].hold_gb:
@@ -614,17 +628,19 @@ def plan_wave(*, wave: str, commit: str, family: str, ladder: Ladder, estimator:
         able = _able(nodes, usable_gb=usable_gb, need=top.hold_gb)
         if not able:
             raise SystemExit(f"wave {wave}: no node of {', '.join(nodes)} holds {b}'s "
-                             f"{largest[b][1] or 'job'} ({top.lane} needing {top.hold_gb:.0f} GB; "
-                             f"usable: " + ", ".join(f"{n} {usable_gb[n]:g}" for n in nodes) + ")")
+                             f"{largest[b].item or 'job'} ({top.lane} needing "
+                             f"{top.hold_gb:.0f} GB; usable: "
+                             + ", ".join(f"{n} {usable_gb[n]:g}" for n in nodes) + ")")
         n = min(able, key=lambda n: load[n])             # the first of the least loaded
         node_of[b] = n
         load[n] += pooled[b]
     jobs = []
-    for k, (b, i) in enumerate(work, 1):
-        e, s = est[(b, i)], size[(b, i)]
+    for k, w in enumerate(work, 1):
+        e, s = est[w], size[w]
         jobs.append(pq.JobSeed(
-            id=k, block=b, item=i, group=b, line=line(b, i), node=node_of[b], cls=s.cls, gb=s.gb,
-            minutes=e.needed_minutes(), peak_gb=e.peak_gb, source=e.source, lane=s.lane))
+            id=k, block=w.block, item=w.item, group=w.block, line=line(w.block, w.item),
+            node=node_of[w.block], cls=s.cls, gb=s.gb, minutes=e.needed_minutes(),
+            peak_gb=e.peak_gb, source=e.source, lane=s.lane))
     header = pq.Header(wave=wave, commit=commit, family=family, ladder=ladder, created=created,
-                       feed=pq.FIXED)
+                       feed=pq.FeedName.FIXED)
     return pq.Seed(header=header, jobs=tuple(jobs), closed=True)

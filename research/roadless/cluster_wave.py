@@ -20,7 +20,8 @@ with the plan's Rulings 4, 7 and 12): a wave submitted whole, then read and stee
    `reblock-waves/<w>`. Nothing of the bank's code (BANK_CODE: common.py and all common.write_bank
    builds through, its imports from this repo and the Hydra config it composes) has an uncommitted
    change: the bank is built here by the working tree's code while every run is `--at` HEAD. The
-   command's script is a file at the commit (cluster._script_at); it has `{id}`, and `{item}`
+   command's script is a file at the commit (cluster._script_at) that resolves --keep-standing
+   through clearings.standing_of (`_keeps_standing`); it has `{id}`, and `{item}`
    exactly when --items is given; --unpack's tars end in `.tar` (the steward deletes the wave's
    inputs/*.tar at its end). Each of --nodes has its usable memory known (pool_plan.USABLE_GB) and
    serves the preset: the pool the market would start there (Waves.template's arguments) plans and
@@ -67,7 +68,7 @@ of the wave there (the market starts them as the allocation gives them units; in
 does): a first lease for each (node, class) with jobs pending and no pool lease of the wave there,
 as Waves.template names and argues it (`<w>-<node>-<class>-s<N>`, `_pool_args`), at the wave's
 commit. A lease "there" is a pool run of the wave that runs, or whose continuation is undecided
-(`_undone`).
+(cluster.undone).
 
 `long`: a long run for each LONG job of the summary (pool_summary.LongJob, sized from it) with no
 unfinished long run, `<w>-long-<job>`, or `<w>-long-<job>-r<N>` when the registry has that.
@@ -109,6 +110,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import cluster
+import cluster_demand
 import cluster_submit as cs
 import pool_plan as pp
 import pool_queue as pq
@@ -246,17 +248,11 @@ def _wave_runs(ctx: Context, wave: str) -> list[RunRecord]:
     return [r for r in recs if r.kind in WAVE_KINDS and ctx.parse(r.argv).wave == wave]
 
 
-def _undone(rec: RunRecord) -> bool:
-    """Whether run `rec` runs, or may yet be continued: unfinished, or finished with its
-    continuation undecided (not settled)."""
-    return rec.finished_at is None or not rec.settled
-
-
 def _pools_held(ctx: Context, runs: Iterable[RunRecord]) -> set[tuple[str, str]]:
-    """The (node, class) of each pool run of `runs` that is `_undone`: a lease there."""
+    """The (node, class) of each pool run of `runs` that is cluster.undone: a lease there."""
     out: set[tuple[str, str]] = set()
     for r in runs:
-        if r.kind == cluster.Pool.name and _undone(r):
+        if r.kind == cluster.Pool.name and cluster.undone(r):
             a = ctx.parse(r.argv)
             out.add((a.node, class_name(LADDERS[a.preset].cards, a.mem)))
     return out
@@ -265,7 +261,7 @@ def _pools_held(ctx: Context, runs: Iterable[RunRecord]) -> set[tuple[str, str]]
 def _long_held(ctx: Context, runs: Iterable[RunRecord]) -> set[int]:
     """The jobs of the unfinished long runs of `runs` (a long run is never continued)."""
     return {ctx.parse(r.argv).job for r in runs
-            if r.kind == cluster.Long.name and r.finished_at is None}
+            if r.kind == cluster.Long.name and not cluster_demand.finished(r)}
 
 
 def _live_commit(ctx: Context, wave: str) -> str:
@@ -335,6 +331,26 @@ def _head() -> str:
     """The wave's commit: HEAD of this checkout."""
     return subprocess.run(["git", "-C", str(cluster.REPO), "rev-parse", "HEAD"], check=True,
                           capture_output=True, text=True).stdout.strip()
+
+
+#: How a wave's script resolves the --keep-standing its job lines end with (job_line): its source
+#: calls clearings.standing_of.
+RESOLVES_STANDING = "clearings.standing_of("
+
+
+def _keeps_standing(script: str, commit: str) -> None:
+    """The wave's `script` at `commit` resolves --keep-standing through clearings.standing_of (its
+    source calls it), else a SystemExit: every job line passes the flag (job_line, Ruling 8), and
+    a script that does not resolve it refuses the flag, or, reading its command line loosely,
+    runs as a person's run and refuses what stands (a double claim's second run a strike)."""
+    shown = subprocess.run(["git", "-C", str(cluster.REPO), "show", f"{commit}:{script}"],
+                           capture_output=True, text=True)
+    if shown.returncode:            # no file there: cluster._script_at's to refuse
+        return
+    if RESOLVES_STANDING not in shown.stdout:
+        raise SystemExit(f"{script} at {commit[:12]} never calls {RESOLVES_STANDING[:-1]}: a "
+                         f"wave's job line ends with {row_marker.KEEP_STANDING}, which its script "
+                         "must resolve (clearings.Keep: a row that stands is that identity done)")
 
 
 def _wave_name(wave: str) -> str:
@@ -508,6 +524,7 @@ def _submit(edge: Edge, a: argparse.Namespace) -> Ran:
         raise SystemExit("the command has {item}, and no --items to fill it")
     commit = _head()
     cluster._script_at(a, commit)
+    _keeps_standing(a.command[0], commit)
     ids = cluster._listed(a.ids)
     for what, names in (("ids", ids), ("items", items)):
         if len(set(names)) != len(names) or not all(names):
@@ -592,7 +609,7 @@ def _wanting_pools(s: psum.Summary, held: set[tuple[str, str]]) -> list[psum.Cla
 
 def _run_state(r: RunRecord) -> str:
     """A run's state as its record has it."""
-    if r.finished_at is None:
+    if not cluster_demand.finished(r):
         state = "unfinished"
     elif r.continued_by is not None:
         state = f"finished {r.finished_at}, continued by {r.continued_by}"
@@ -759,7 +776,7 @@ def _cancel(edge: Edge, wave: str) -> Ran:
     else:
         print(f"wave {wave}: no live steward of it in this registry, so no request written")
     calls = [Call(run=r.name, argv=("cancel", r.name)) for r in _wave_runs(ctx, wave)
-             if r.kind in CANCELLED_KINDS and _undone(r)]
+             if r.kind in CANCELLED_KINDS and cluster.undone(r)]
     code = _every(edge, calls, what=f"wave {wave}'s cancels")
     if not code:
         print(f"wave {wave}: cancelled " + (", ".join(c.run for c in calls) or "no run")

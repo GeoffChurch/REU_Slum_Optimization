@@ -530,19 +530,27 @@ class Keep:
     (not run) and at the write, where the `Exists` of a row written meanwhile (a double claim's
     other run) means the same: the first row stays, `[row] kept <path>` is printed and nothing
     is raised. A kept row is not written, so prints no row_marker.ROW_WRITTEN: a job that keeps
-    rows and then fails is a strike, never progress (the lease pool's plan, Ruling 6)."""
+    rows and then fails is a strike, never progress (the lease pool's plan, Ruling 6). Every row
+    it finds standing, at its check, a reuse or its write, it prints as row_marker.KEPT: the run
+    did less than its whole work, so no earlier wave's measure of the job is taken from it."""
 
     def todo(self, path: Path) -> bool:
-        return not path.exists()
+        if path.exists():
+            print(f"{row_marker.KEPT}{path}", flush=True)
+            return False
+        return True
 
     def reuse(self, path: Path) -> bool:
-        return path.exists()
+        if path.exists():
+            print(f"{row_marker.KEPT}{path}", flush=True)
+            return True
+        return False
 
     def write(self, df: pd.DataFrame, path: Path) -> None:
         try:
             write_once(df, path)
         except Exists:
-            print(f"[row] kept {path}", flush=True)
+            print(f"{row_marker.KEPT}{path}", flush=True)
 
 
 def standing_of(argv: list[str]) -> tuple[list[str], Standing]:

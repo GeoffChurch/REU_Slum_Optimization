@@ -18,7 +18,9 @@ its command line (the queue, the OOM evidence, the clock, the job's runner) and 
   it held goes back as if never claimed.
 - **A job** (`run_job`): `bash -c <line>` in the checkout, stdout and stderr merged and streamed
   into the worker's log between the job's markers; each row_marker.ROW_WRITTEN line counted into
-  the attempt as it comes (so a reaper sees what a killed job had written); its code, and its
+  the attempt as it comes (so a reaper sees what a killed job had written), and each
+  row_marker.KEPT line too (a row it found standing: the attempt measures no whole job); its
+  code, and its
   peak (`ru_maxrss`, the child's and its descendants' maximum) from `os.wait4`. The child runs at
   oom_score_adj 1000, set by itself before it execs (raising its own needs no privilege), so a
   cgroup's OOM killer takes the job, not the worker (the plan's Review Focus 4); every process it
@@ -198,6 +200,7 @@ class Ran(NamedTuple):
     peak_gb: float
     minutes: float      # its wall
     rows: int           # the row_marker.ROW_WRITTEN lines it printed
+    kept: int           # ... and its row_marker.KEPT lines
 
 
 def _last_for_the_oom_killer() -> None:
@@ -214,13 +217,13 @@ def _kill(proc: subprocess.Popen[str]) -> None:
 
 
 def run_job(line: str, *, cwd: Path, env: Mapping[str, str], log: Callable[[str], None],
-            wrote: Callable[[], None]) -> Ran:
+            wrote: Callable[[], None], kept: Callable[[], None]) -> Ran:
     """`bash -c <line>` in `cwd` with `env`, at oom_score_adj OOM_SCORE_ADJ, leading a process
     group of its own, its output (stdout and stderr merged, undecodable bytes replaced) given to
     `log` line by line as it comes, `wrote()` called for each line starting with
-    row_marker.ROW_WRITTEN; its code and peak from `os.wait4` once its output ends. If reading it
-    raises, its group is killed and the child reaped before the error goes on, so no process of
-    the job outlives its worker's attempt."""
+    row_marker.ROW_WRITTEN and `kept()` for each starting with row_marker.KEPT; its code and peak
+    from `os.wait4` once its output ends. If reading it raises, its group is killed and the child
+    reaped before the error goes on, so no process of the job outlives its worker's attempt."""
     start = time.monotonic()
     # preexec_fn runs between fork and exec, unsafe only beside other threads: the worker has
     # none; start_new_session's setsid runs before it, so the job leads its group from its exec
@@ -230,7 +233,7 @@ def run_job(line: str, *, cwd: Path, env: Mapping[str, str], log: Callable[[str]
                             preexec_fn=_last_for_the_oom_killer)
     if proc.stdout is None:
         raise RuntimeError("Popen gave no stdout pipe")
-    rows = 0
+    rows = held = 0
     try:
         for out in proc.stdout:
             text = out.rstrip("\n")
@@ -238,6 +241,9 @@ def run_job(line: str, *, cwd: Path, env: Mapping[str, str], log: Callable[[str]
             if text.startswith(row_marker.ROW_WRITTEN):
                 rows += 1
                 wrote()
+            elif text.startswith(row_marker.KEPT):
+                held += 1
+                kept()
     except BaseException:
         _kill(proc)
         proc.wait()         # Popen's: an already reaped child is no new error over this one
@@ -247,7 +253,7 @@ def run_job(line: str, *, cwd: Path, env: Mapping[str, str], log: Callable[[str]
     _, status, usage = os.wait4(proc.pid, 0)
     proc.returncode = os.waitstatus_to_exitcode(status)     # so Popen never waits again
     return Ran(rc=proc.returncode, peak_gb=usage.ru_maxrss / 2 ** 20,
-               minutes=(time.monotonic() - start) / 60, rows=rows)
+               minutes=(time.monotonic() - start) / 60, rows=rows, kept=held)
 
 
 def _outcome(rc: int, *, before: int | None, after: int | None) -> Outcome:
@@ -271,7 +277,7 @@ def _attempt(c: Claim, *, queue: Queue, worker: str, run_line: Callable[[Claim],
     state = queue.finish(c.attempt, worker=worker, outcome=outcome, peak_gb=ran.peak_gb,
                          minutes=ran.minutes, rc=ran.rc)
     log(f"=== job {j.id} {outcome} rc {ran.rc} {ran.minutes:.2f} min peak {ran.peak_gb:.2f} GB "
-        f"rows {ran.rows}")
+        f"rows {ran.rows} kept {ran.kept}")
     if outcome == Outcome.FAILED and (before is None or after is None):
         log(f"job {j.id}: failed, not told from an OOM ({oom.about})")
     if state != JobState.DONE:

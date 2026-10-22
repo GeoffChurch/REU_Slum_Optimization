@@ -35,8 +35,8 @@ a block's tasks unpack one tar at once into the checkout they share.
         -- <script> <args with {id} and {item}>
     uv run python research/roadless/cluster.py submit steward <w>-steward --at <commit> \
         --wave <w> --board <board>
-    uv run python research/roadless/cluster.py submit pool <w>-<node>-<class> --at <commit> \
-        --wave <w> --preset <p> --node <node> --mem <GB> --gpus <throttle>
+    uv run python research/roadless/cluster.py submit pool <w>-<node>-<class>-s<N> \
+        --at <commit> --wave <w> --preset <p> --node <node> --mem <GB> --gpus <throttle>
     uv run python research/roadless/cluster.py submit long <w>-long-<id> --at <commit> \
         --wave <w> --preset <p> --job <id> --node <node> --mem <GB> --minutes <m>
     uv run python research/roadless/cluster.py status|sync [<run>]
@@ -80,6 +80,15 @@ commit:
   ledger and final queue into research/roadless/waves/<w>/ (git-ignored, as rows are).
 - `long`: one job no lease can hold, run alone and sized for it (`pool.py work --job`).
 
+A steward that died (its lease failed: an error its rounds do not survive,
+pool_steward.SURVIVABLE) leaves its wave without summaries, so no lease is continued or started
+and the demand states its running workers alone. A person restarts it by hand at the wave's
+commit (its queue's, summary.json's `commit`): `submit steward <w>-steward-r<N> --at <commit>
+--wave <w> --board <board>`; it opens the wave's queue as it stands and goes on. A (wave, node,
+class) whose newest pool run ended on its own fault (exit 1, or no exit and no walltime kill:
+`own_fault`) gets no lease from the market and no line in the demand (`stopped_classes`) until a
+person, having looked, submits a pool run of it by hand (`submit pool <w>-<node>-<class>-s<N>`).
+
 The `wave` verb (cluster_wave.py) submits a wave whole (its steward and long runs: the market
 starts its pools) and reads and steers it. A wave's state lives on the cluster, in
 `<WAVES>/<w>/` below its home (the queue, the inputs shipped once, summary.json, the ledger, the
@@ -102,7 +111,7 @@ import math
 import shlex
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from pathlib import Path
 from typing import NamedTuple
@@ -113,11 +122,14 @@ import pool
 import pool_summary as psum
 from cluster_submit.cli import VERB_NAMES, parser
 from cluster_submit.context import stamped, utcnow
-from cluster_submit.project import Source
+from cluster_submit.project import NAME, Source
 from cluster_submit.registry import Registry
 from cluster_submit.remote import Login, Remote, SubprocessRunner
+from cluster_submit.slurm import sacct_rows, task_states
+from cluster_submit.sync import WALLTIME
 from cluster_submit.tree import blob_at
 from pool_ladder import LADDERS, STEWARD, Ladder, class_name
+from pool_steward import CAMPAIGN as STEWARD_CAMPAIGN
 from pool_steward import FINAL, LEDGER, SUMMARY
 from pool_worker import Exit
 
@@ -346,9 +358,9 @@ def slurm_time(minutes: float) -> str:
 
 
 def _wave(name: str) -> str:
-    """A wave's name (pool.WAVE_NAME: its directory's), or a SystemExit."""
-    if not pool.WAVE_NAME.fullmatch(name):
-        raise SystemExit(f"--wave {name!r} is not a wave's name ({pool.WAVE_NAME.pattern})")
+    """A wave's name (a run name's, cluster_submit's NAME: its directory's), or a SystemExit."""
+    if not NAME.fullmatch(name):
+        raise SystemExit(f"--wave {name!r} is not a wave's name ({NAME.pattern})")
     return name
 
 
@@ -522,12 +534,13 @@ class Long:
 
 # ---- a wave as the market's leases see it -----------------------------------------------------
 
-def _live(rec: cs.RunRecord) -> bool:
-    """Whether steward run `rec` keeps its wave live: unfinished, or finished and not yet settled
-    (whether its own `more` continues it is undecided: the sync that finished it may decide its
-    pool leases first, or its `more` may have raised). Settled, its continuation (if any) is the
-    run that does (the controller's ruling, 2026-10-21)."""
-    return rec.finished_at is None or not rec.settled
+def undone(rec: cs.RunRecord) -> bool:
+    """Whether run `rec` runs, or may yet be continued: unfinished, or finished and not yet
+    settled (whether its `more` continues it is undecided: the sync that finished it may decide
+    other leases first, or its `more` may have raised). A steward so keeps its wave live, and a
+    pool so holds its (node, class) for its wave (cluster_wave); settled, its continuation (if
+    any) is the run that does (the controller's ruling, 2026-10-21)."""
+    return not cluster_demand.finished(rec) or not rec.settled
 
 
 #: How a step reads a record's submit arguments: a verb's ctx.parse of its argv, or, with no
@@ -550,12 +563,12 @@ class LiveWaves(NamedTuple):
 
 
 def _live_stewards(recs: Sequence[cs.RunRecord], args: Args) -> LiveWaves:
-    """The live waves among `recs`: each wave's live steward run (`_live`), its wave its --wave
+    """The live waves among `recs`: each wave's live steward run (`undone`), its wave its --wave
     (read by `args`), and apart, each wave with live stewards at two commits."""
     live: dict[str, cs.RunRecord] = {}
     split: dict[str, str] = {}
     for r in recs:
-        if r.kind != Steward.name or not _live(r):
+        if r.kind != Steward.name or not undone(r):
             continue
         wave: str = args(r).wave
         if wave in live and live[wave].commit != r.commit:
@@ -679,6 +692,69 @@ def pool_more(ctx: cs.Context, rec: cs.RunRecord, *,
     return cs.Continue(workers=min(c.workers, pending))
 
 
+#: A pool run's exits that are no fault of its own: drained (0) and retired (75: pool_worker.Exit).
+ROUTINE_POOL_EXITS = frozenset({str(int(Exit.DRAINED)), str(int(Exit.RETIRED))})
+
+
+def own_fault(registry: Registry, rec: cs.RunRecord) -> str | None:
+    """Why finished pool run `rec` ended on a fault of its own (the spec's 3.5: a worker exits 1
+    on a bad node, a queue of another commit or different jobs failing in a row, and one that dies
+    in its startup has no exit at all), from its rc files and sacct.txt (as cluster_submit's sync
+    summarizes a run): a task's exit outside ROUTINE_POOL_EXITS, or a task with none that was not
+    killed at its walltime (nor cancelled before it started); None for one cancelled, and for one
+    whose every task ended 0 or 75 or at its walltime."""
+    if rec.cancelled_at is not None:
+        return None
+    work = registry.workdir(rec.name)
+    states: dict[str, str] | None = None        # sacct's, read once a task has no exit
+    for a in rec.arrays:
+        if a.job_id is None:
+            continue
+        for i in range(len(a.tasks)):
+            task = f"{a.job_id}_{i}"
+            rc = work / "rc" / task
+            if rc.exists():
+                code = rc.read_text().strip()
+                if code not in ROUTINE_POOL_EXITS:
+                    return f"its task {task} exited {code}"
+            elif task not in rec.unstarted:
+                if states is None:
+                    states = task_states(sacct_rows((work / "sacct.txt").read_text()))
+                if states[task] != WALLTIME:
+                    return f"its task {task} ended {states[task]} with no exit"
+    return None
+
+
+#: A (wave, node, class) of the pool runs.
+PoolKey = tuple[str, str, str]
+
+
+def stopped_classes(registry: Registry, recs: Sequence[cs.RunRecord],
+                    args: Args) -> dict[PoolKey, str]:
+    """Each (wave, node, class) whose newest pool run among `recs` (its arguments read by `args`)
+    has finished on a fault of its own (`own_fault`), with why: the market starts no lease there
+    (Waves.template answers Done) and the demand states no line there (`demand_waves`), so a bad
+    node or a startup that always fails is not restarted every sync, each start striking a job,
+    until a person looks (the spec's 3.5) and submits a pool run of it by hand (`submit pool`:
+    then the newest)."""
+    newest: dict[PoolKey, cs.RunRecord] = {}
+    for r in recs:
+        if r.kind != Pool.name:
+            continue
+        a = args(r)
+        key = (a.wave, a.node, class_name(LADDERS[a.preset].cards, a.mem))
+        if key not in newest or r.submitted_at > newest[key].submitted_at:
+            newest[key] = r
+    out: dict[PoolKey, str] = {}
+    for key, r in newest.items():
+        if not cluster_demand.finished(r):
+            continue
+        why = own_fault(registry, r)
+        if why is not None:
+            out[key] = f"its newest pool run {r.name} ended on its own fault: {why}"
+    return out
+
+
 class _Choice(NamedTuple):
     """A live wave with jobs of a start's class pending on its node."""
 
@@ -766,11 +842,14 @@ class Waves:
         """The pool lease the market starts for `bundle` on `node` (Ruling 4): of the live waves
         (`live_stewards`), their summaries read with one ssh call, those whose ladder has a rung
         of `bundle` and whose summary has jobs of that class pending on `node`, the one with the
-        most (ties to the earlier name), at its steward's commit, a fresh chain (`_start_name`),
-        its throttle Ruling 10's. A live wave whose summary does not read, or names a ladder this
-        machine's LADDERS lacks, is left out, and named in a Done's why. Done when no live wave
-        has such jobs, for another campaign, and with no live wave; raises when no live wave's
-        summary reads with a ladder of LADDERS (the next sync asks again)."""
+        most (ties to the earlier name), at its queue's commit (its summary's: the commit its
+        workers check the queue against, whichever commit its steward was submitted at), a fresh
+        chain (`_start_name`), its throttle Ruling 10's. A live wave whose summary does not read,
+        or names a ladder this machine's LADDERS lacks, is left out, and named in a Done's why; so
+        is a (wave, node, class) whose newest pool run ended on its own fault
+        (`stopped_classes`). Done when no live wave has such jobs, for another campaign, and with
+        no live wave; raises when no live wave's summary reads with a ladder of LADDERS (the next
+        sync asks again)."""
         if campaign != CAMPAIGN:
             return cs.Done(f"reblock's one campaign is {CAMPAIGN}, not {campaign}")
         live = live_stewards(ctx)
@@ -786,31 +865,40 @@ class Waves:
         if not usable:
             unread = "; ".join(f"wave {w}'s: {why}" for w, why in sorted(left_out.items()))
             raise SystemExit(f"no live wave's summary reads ({unread}): the next sync asks again")
+        stopped = stopped_classes(ctx.registry, ctx.registry.all()[0],
+                                  lambda r: ctx.parse(r.argv))
         choices: list[_Choice] = []
+        halted: list[str] = []
         for w, s in sorted(usable.items()):
             ladder = LADDERS[s.ladder]
             for rung in ladder.rungs:
                 cls = class_name(ladder.cards, rung)
                 pending = sum(x.pending for x in s.lines if (x.node, x.cls) == (node, cls))
-                if ladder.bundle(rung) == bundle and pending:
-                    choices.append(_Choice(wave=w, pending=pending, ladder=ladder, rung=rung))
+                if ladder.bundle(rung) != bundle or not pending:
+                    continue
+                if (w, node, cls) in stopped:
+                    halted.append(f"wave {w}'s {cls} there: {stopped[(w, node, cls)]}")
+                    continue
+                choices.append(_Choice(wave=w, pending=pending, ladder=ladder, rung=rung))
         if not choices:
             unread = "".join(f"; wave {w}'s summary left out: {why}"
                              for w, why in sorted(left_out.items()))
-            return cs.Done(f"no live wave has a job of {bundle.text()} pending on {node}{unread}")
+            stops = "".join(f"; {h} (a person looks)" for h in halted)
+            return cs.Done(f"no live wave has a job of {bundle.text()} pending on {node} that a "
+                           f"lease may start for{stops}{unread}")
         c = _chosen(choices)
         cls = class_name(c.ladder.cards, c.rung)
         return cs.Template(kind=Pool.name, run=_start_name(ctx, c.wave, node, cls),
-                           commit=live[c.wave].commit,
+                           commit=usable[c.wave].commit,
                            args=_pool_args(wave=c.wave, ladder=c.ladder, node=node, rung=c.rung))
 
     def starts(self, market: Callable[[], Sequence[cs.Start]]) -> tuple[cs.Start, ...]:
         """The market's starts on freed capacity, while a wave is live (a steward of `registry`'s
-        `_live`, or a record that does not read: the market's own reading of the registry refuses
+        `undone`, or a record that does not read: the market's own reading of the registry refuses
         it); none, and no allocation read, while none is: no template could answer one, and a
         stale allocation would fail every sync."""
         recs, unreadable = self.registry.all()
-        if not unreadable and not any(r.kind == Steward.name and _live(r) for r in recs):
+        if not unreadable and not any(r.kind == Steward.name and undone(r) for r in recs):
             return ()
         return tuple(market())
 
@@ -844,6 +932,11 @@ PROJECT = cs.Project(name="reblock", repo=REPO, cluster=cs.load_cluster("ai"),
 # reblock's campaigns, the only one, is 1 (the project's own weight, against mycooc's and
 # bookgen's, is the market file's).
 CAMPAIGN = PROJECT.name
+# The steward asks the market's allocation for the campaign's yields by its full name
+# ("<project>/<campaign>"), spelt in pool_steward, which runs on the cluster without this module.
+if STEWARD_CAMPAIGN != f"{PROJECT.name}/{CAMPAIGN}":
+    raise SystemExit(f"pool_steward.CAMPAIGN is {STEWARD_CAMPAIGN!r}, not "
+                     f"{PROJECT.name}/{CAMPAIGN}: the stewards would ask another campaign aside")
 CAMPAIGN_WEIGHT = 1.0
 # The verbs after which reblock states its demand: those that submit a run or change what the
 # registry knows of one (a dry submit or resubmit submits nothing, and is left out). The watch
@@ -862,15 +955,20 @@ class DemandWaves(NamedTuple):
     summaries: Callable[[], psum.Summaries]
 
 
-def demand_waves(recs: Sequence[cs.RunRecord], login: Login) -> DemandWaves:
-    """The waves as the demand reads them from the records `recs`, each record's arguments its own
-    (this step has no Context): the unfinished pool runs (`pool_runs`), and a reader of the live
-    waves' summaries (`_live_stewards`; one ssh call, `wave_summaries`). A wave whose records do
-    not read (a pool run whose --mem is no rung, live stewards at two commits) is read as unread,
-    why among the summaries' (its running workers stated alone, and said), not refused: a refusal
-    would leave every run of the campaign, a wave's or not, without a demand."""
+def demand_waves(recs: Sequence[cs.RunRecord], login: Login,
+                 registry: Registry) -> DemandWaves:
+    """The waves as the demand reads them from the records `recs` (of `registry`, whose run
+    directories hold their exits), each record's arguments its own (this step has no Context): the
+    unfinished pool runs (`pool_runs`), and a reader of the live waves' summaries
+    (`_live_stewards`; one ssh call, `wave_summaries`), less each line of a (wave, node, class)
+    whose newest pool run ended on its own fault (`stopped_classes`: no lease is started there,
+    so no unit is asked for it; said). A wave whose records do not read (a pool run whose --mem is
+    no rung, live stewards at two commits) is read as unread, why among the summaries' (its
+    running workers stated alone, and said), not refused: a refusal would leave every run of the
+    campaign, a wave's or not, without a demand."""
     live = _live_stewards(recs, _submitted)
     pools = pool_runs(recs)
+    stopped = stopped_classes(registry, recs, _submitted)
     whys: dict[str, list[str]] = {}
     for got in (live.split, pools.unread):
         for w, why in got.items():
@@ -880,7 +978,13 @@ def demand_waves(recs: Sequence[cs.RunRecord], login: Login) -> DemandWaves:
 
     def summaries() -> psum.Summaries:
         got = wave_summaries(login, read)
-        return psum.Summaries(read=got.read, unread={**got.unread, **broken})
+        for (w, node, cls), why in sorted(stopped.items()):
+            if w in got.read:
+                print(f"[demand] wave {w}'s {cls} on {node} not stated: {why}", file=sys.stderr)
+        kept = {w: replace(s, lines=tuple(x for x in s.lines
+                                          if (w, x.node, x.cls) not in stopped))
+                for w, s in got.read.items()}
+        return psum.Summaries(read=kept, unread={**got.unread, **broken})
 
     return DemandWaves(pools=pools.pools, summaries=summaries)
 
@@ -891,7 +995,7 @@ def state_demand(registry: Registry) -> cluster_demand.Written:
     wrote."""
     login = Remote(PROJECT.cluster.host, SubprocessRunner())
     recs, unreadable = registry.all()
-    waves = demand_waves(recs, login)
+    waves = demand_waves(recs, login, registry)
     return cluster_demand.state(
         recs=recs, unreadable=unreadable, pools=waves.pools, summaries=waves.summaries,
         login=login,
