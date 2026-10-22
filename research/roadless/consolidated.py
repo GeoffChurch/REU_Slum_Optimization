@@ -610,18 +610,28 @@ def _decisions_json() -> Any:
 def read_decisions(screen: Screen, *, metric: str) -> dict[str, Stored]:
     """The screens' stored ledgers by variant (DECISIONS, the one JSON boundary, every key read by
     name): no file is no ledger yet. Refused (SystemExit) unless they were made under `metric` (on
-    another metric's rows they decided on other numbers) and under `screen`, and each is a variant's
-    of SCREENS, a Running or Stopped state with its blocks."""
+    another metric's rows they decided on other numbers) and under `screen`, each record revives
+    (a record epistemetry cannot read back, one of another pin, is refused saying that removing
+    DECISIONS starts afresh), and each ledger is a variant's of SCREENS, a Running or Stopped state
+    with its blocks."""
     j = _decisions_json()
     if j is None:
         return {}
     afresh = f"removing {DECISIONS.name} starts the screens afresh under the injected preset"
+
+    def revived(record: Any, *, what: str) -> object:
+        try:
+            return revive(record)
+        except (TypeError, ValueError) as e:     # what revive raises on a record it cannot read
+            raise SystemExit(f"{DECISIONS.name}: {what} is no record epistemetry reads back "
+                             f"({e}); {afresh}") from e
+
     if not (isinstance(j, dict) and set(j) == {"metric", "screen", "screens"}):
         raise SystemExit(f"{DECISIONS.name}: not an object of metric, screen and screens")
     if j["metric"] != metric:
         raise SystemExit(f"{DECISIONS.name}: ledgers under the metric {j['metric']}, not the "
                          f"screens' {metric}; {afresh}")
-    if revive(j["screen"]) != screen:
+    if revived(j["screen"], what="the screen") != screen:
         raise SystemExit(f"{DECISIONS.name}: ledgers under the screen "
                          f"{json.dumps(j['screen'], sort_keys=True)}, not the injected preset's "
                          f"{json.dumps(screen.record(), sort_keys=True)}; {afresh}")
@@ -631,7 +641,7 @@ def read_decisions(screen: Screen, *, metric: str) -> dict[str, Stored]:
                                                        and set(e) == {"blocks", "state"}):
             raise SystemExit(f"{DECISIONS.name}: {v!r} is not a variant's ledger of blocks and "
                              f"state (the variants: {[k for k in SCREENS if k != 'default']})")
-        blocks, state = e["blocks"], revive(e["state"])
+        blocks, state = e["blocks"], revived(e["state"], what=f"{v}'s state")
         if not (isinstance(blocks, list) and all(isinstance(k, str) for k in blocks)
                 and isinstance(state, Running | Stopped)):
             raise SystemExit(f"{DECISIONS.name}: {v}'s ledger is not a list of block ids and a "
@@ -718,11 +728,15 @@ def screen_report(screen: Screen, *, wave: int, metric: str) -> None:
     pd.set_option("display.width", 220)
     st = screen_table(screen, data=screen_data(metric=metric),
                       ledgers=read_decisions(screen, metric=metric), wave=wave, metric=metric)
-    st.table.to_csv(ROWS / "summary_screen.csv", index=False)
-    DECISIONS.write_text(json.dumps(
+    # The ledgers' JSON built before either file is written: a record or a number JSON cannot hold
+    # refuses here, leaving the table and the ledgers as they were, never one written without the
+    # other.
+    decisions = json.dumps(
         {"metric": metric, "screen": screen.record(),
          "screens": {v: {"blocks": list(s.blocks), "state": s.state.record()}
-                     for v, s in st.states.items()}}, allow_nan=False, indent=1) + "\n")
+                     for v, s in st.states.items()}}, allow_nan=False, indent=1) + "\n"
+    st.table.to_csv(ROWS / "summary_screen.csv", index=False)
+    DECISIONS.write_text(decisions)
     print(st.table.drop(columns="screen").round(5).T.to_string())
     for v, ks in st.upcoming.items():
         print(f"{v} runs on: next {','.join(ks)}")

@@ -7,7 +7,7 @@ passes on the code as it is and must fail under each of its faults.
     uv run python $S records [fault]           # fault: array-rates
     uv run python $S adapter [fault]           # faults: misaligned, gross-extra
     uv run python $S why [fault]               # fault: ran-out-first
-    uv run python $S screens [fault]           # faults: shuffled, altered-record
+    uv run python $S screens [fault]           # faults: shuffled, altered-record, wave-seeded
     uv run python $S acceptance [fault] [--workers W]   # fault: dropped-uses
     uv run python $S both-ways <guards,> [--workers W]  # each guard, then under each of its faults
     uv run python $S runs [--workers W]        # the acceptance runs -> screen_acceptance.csv
@@ -66,13 +66,22 @@ relative) and the stored states, record for record, with their blocks; every sto
 round-trips through JSON; every judged arm's verdict, re-derived from its rule and reading alone,
 is its take; every rule is the preset's stop, and every reading's price the target's (PRICES,
 from the edge recomputed here: realized-loss's the mean rate, fewest-wrong's the mean rate over
-FUTURE over the arm's own stake on its prefix then; to 1e-12 relative). And refused before any
-decision: a held-out block's default time dropped from the pass's rows (`screen_data`, naming the
-block), the JSON's metric or screen another's (`read_decisions`), a variant's stored blocks
-starting off its order (`screen_table`, naming the variant). Faults: `shuffled` (common.HELD
-reshuffled by np.random.default_rng(1): the rows are off every screen's order, which screen_data
-refuses), `altered-record` (one judged reading's stored price times 1 + 1e-6: the screens derived
-afresh are not the stored ones, and the price is not the target's).
+FUTURE over the arm's own stake on its prefix then; to 1e-12 relative). A live wave's ledger
+(epistemetry's resume property: continuing from a prefix of a ledger gives what starting afresh
+gives): the longest stored ledger cut to the first half of its decisions (rounded up), as a wave
+stores it, Running for the rest of its last decision's step, on the blocks run when that decision
+was made (`_cut`), read back through the JSON and continued on the whole rows, is the screens
+derived afresh, the table and every state. And refused before any decision: a held-out block's
+default time dropped from the pass's rows (`screen_data`, naming the block), the JSON's metric or
+screen another's, a stored state or screen record epistemetry cannot read back (a field dropped,
+a field added: `read_decisions`, saying that removing the JSON starts afresh), a variant's stored
+blocks starting off its order (`screen_table`, naming the variant).
+Faults: `shuffled` (common.HELD reshuffled by np.random.default_rng(1): the rows are off every
+screen's order, which screen_data refuses), `altered-record` (one judged reading's stored price
+times 1 + 1e-6: the screens derived afresh are not the stored ones, and the price is not the
+target's), `wave-seeded` (consolidated's advance continuing a ledger under a seed keyed by the
+ledger's length, each wave its own stream: the cut ledger's continuation draws other numbers than
+the screens derived afresh).
 `acceptance`: reblock's real-data acceptance test for epistemetry's pin (its spec, owner
 2026-10-16). realized-loss, as the presets build it now, replays ACCEPTANCE's runs of it on orders
 0-9 (13 pairwise designs without the veto, C1m4/p64 with it too: 140 runs, each order's draws
@@ -129,6 +138,7 @@ from epistemetry.design.replay import AsksApart, Design, Order, Replay, Run, Tru
 from epistemetry.design.screen import (
     Arrived,
     Bootstrap,
+    Decision,
     DropRule,
     NoVeto,
     Running,
@@ -588,7 +598,8 @@ def _table_differences(table: pd.DataFrame, committed: pd.DataFrame) -> list[str
 
 
 def _refused(what: str, call: Callable[[], object], *, naming: str) -> list[str]:
-    """`call` must raise SystemExit, its message naming `naming`: a negative case of `screens`."""
+    """`call` must raise SystemExit, its message naming `naming`: a negative case of `screens`.
+    Any other error is a failure of the case, reported as one, not a crash of the guard."""
     try:
         call()
     except SystemExit as e:
@@ -596,8 +607,74 @@ def _refused(what: str, call: Callable[[], object], *, naming: str) -> list[str]
         print(f"  {what}: refused{'' if ok else f', not naming {naming}: {e.code}'}"
               + (" -> ok" if ok else " -> FAILS"), flush=True)
         return [] if ok else [f"{what} (refused, not naming {naming})"]
+    except Exception as e:
+        print(f"  {what}: raised {type(e).__name__} ({e}), not refused -> FAILS", flush=True)
+        return [f"{what} (raised {type(e).__name__}, not refused)"]
     print(f"  {what}: not refused -> FAILS", flush=True)
     return [f"{what} (not refused)"]
+
+
+def _cut(stored: consolidated.Stored, *, run: Sequence[str]) -> consolidated.Stored:
+    """`stored` as a live wave would have stored it part way: the first half of its decisions
+    (rounded up), Running for the rest of the last one's step (`advance`'s `want`: each arm it
+    names, from its prefix then to the step's end, the units positions in the screen's order), on
+    the blocks run when that decision was made (the first `at` of `run`). Refused (ValueError)
+    unless the cut keeps a judged decision and leaves one to make."""
+    ds = stored.state.decisions
+    k = (len(ds) + 1) // 2
+    last = ds[k - 1]
+    step = last.judgement.step
+    if not (any(d.judgement.rules for d in ds[:k]) and any(d.judgement.rules for d in ds[k:])
+            and step.arms):
+        raise ValueError(f"a ledger of {len(ds)} decisions cut to {k} keeps no judged decision, "
+                         f"or leaves none to make")
+    want = {a: tuple(range(last.arm_units[a], last.at + step.units)) for a in sorted(step.arms)}
+    return consolidated.Stored(blocks=tuple(run[:last.at]),
+                               state=Running(decisions=ds[:k], want=want))
+
+
+def _continued_from_cut(name: str, preset: Screen, j: Any, *,
+                        data: Mapping[str, consolidated.ScreenData],
+                        stored: Mapping[str, consolidated.Stored],
+                        afresh: consolidated.ScreenTable, metric: str) -> list[str]:
+    """The live-wave path: the longest stored ledger cut part way (`_cut`), written into the
+    stored JSON `j` in its place, read back (`read_decisions`) and continued on the whole rows
+    (`screen_table`, wave 0), is `afresh`, the screens derived afresh: the table, and every state
+    with its blocks."""
+    if not stored:
+        return ["cut: no stored ledger to cut"]
+    v = max(stored, key=lambda w: len(stored[w].state.decisions))
+    try:
+        cut = _cut(stored[v], run=data[v].run)
+    except ValueError as e:
+        print(f"{name} cut: {v}'s ledger: {e} -> FAILS", flush=True)
+        return [f"cut: {e}"]
+    entry = json.loads(json.dumps({"blocks": list(cut.blocks), "state": cut.state.record()},
+                                  allow_nan=False))
+    partway = {**j, "screens": {**j["screens"], v: entry}}
+    try:
+        with _patched(consolidated, "_decisions_json", lambda: partway):
+            ledgers = consolidated.read_decisions(preset, metric=metric)
+        st = consolidated.screen_table(preset, data=data, ledgers=ledgers, wave=0, metric=metric)
+    except SystemExit as refusal:
+        print(f"{name} cut: refused: {refusal.code} -> FAILS", flush=True)
+        return [f"cut: refused ({refusal.code})"]
+    differ = _table_differences(st.table,
+                                pd.read_csv(io.StringIO(afresh.table.to_csv(index=False))))
+    unlike = sorted(w for w in set(st.states) | set(afresh.states)
+                    if w not in st.states or w not in afresh.states
+                    or st.states[w].state.record() != afresh.states[w].state.record()
+                    or st.states[w].blocks != afresh.states[w].blocks)
+    running = isinstance(ledgers[v].state, Running)
+    print(f"{name} continued from {v}'s ledger cut to {len(cut.state.decisions)} of "
+          f"{len(stored[v].state.decisions)} decisions ({'Running' if running else 'NOT Running'}"
+          f" on {len(cut.blocks)} blocks): the table "
+          + ("as afresh" if not differ else f"differs from afresh in {differ}") + "; the states "
+          + ("as afresh" if not unlike else f"differ from afresh on {unlike}")
+          + (" -> ok" if running and not differ and not unlike else " -> FAILS"), flush=True)
+    return ([] if running else [f"cut: {v}'s cut ledger read back not Running"]) + (
+        [f"cut: the table differs from afresh in {differ}"] if differ else []) + (
+        [f"cut: the states differ from afresh on {unlike}"] if unlike else [])
 
 
 def screens() -> list[str]:
@@ -645,6 +722,8 @@ def screens() -> list[str]:
               + (" -> ok" if not differ and not unlike else " -> FAILS"), flush=True)
         bad += ([f"{how}: the table differs in {differ}"] if differ else []) + (
             [f"{how}: the states differ on {unlike}"] if unlike else [])
+    bad += _continued_from_cut(name, preset, j, data=data, stored=stored, afresh=tables["afresh"],
+                               metric=metric)
 
     e, price_of = _edge(), dict(PRICES)[name]
     judged = 0
@@ -702,6 +781,17 @@ def screens() -> list[str]:
         bad += _refused("the stored screen the other preset's",
                         lambda: consolidated.read_decisions(preset, metric=metric),
                         naming="injected preset")
+    starts = f"removing {consolidated.DECISIONS.name} starts the screens afresh"
+    state = j["screens"][ahead]["state"]
+    dropped = {**j, "screens": {**j["screens"], ahead: {
+        **j["screens"][ahead], "state": {k: x for k, x in state.items() if k != "decisions"}}}}
+    with _patched(consolidated, "_decisions_json", lambda: dropped):
+        bad += _refused(f"{ahead}'s stored state without its decisions, which revive cannot read",
+                        lambda: consolidated.read_decisions(preset, metric=metric), naming=starts)
+    with _patched(consolidated, "_decisions_json",
+                  lambda: {**j, "screen": {**j["screen"], "pin": pinned_rev()}}):
+        bad += _refused("the stored screen with a field Screen lacks, which revive cannot read",
+                        lambda: consolidated.read_decisions(preset, metric=metric), naming=starts)
     off = {**stored, ahead: stored[ahead]._replace(blocks=(common.TUNING[0],)
                                                    + stored[ahead].blocks[1:])}
     bad += _refused(f"{ahead}'s stored blocks starting {common.TUNING[0]}, off its order",
@@ -818,6 +908,18 @@ def _altered_record() -> AbstractContextManager[None]:
     return _patched(consolidated, "_decisions_json", altered)
 
 
+def _wave_seeded() -> AbstractContextManager[None]:
+    """consolidated's `advance` continuing a ledger under a seed keyed by the ledger's length (each
+    wave its own stream): the decisions a continued screen adds draw other numbers than a screen
+    derived afresh draws in their places."""
+    def continued(screen: Screen, *, ledger: tuple[Decision, ...],
+                  arrived: Arrived) -> Running | Stopped:
+        seeded = replace(screen, seed=(*screen.seed, len(ledger))) if ledger else screen
+        return advance(seeded, ledger=ledger, arrived=arrived)     # epistemetry's own
+
+    return _patched(consolidated, "advance", continued)
+
+
 #: Each guard's faults by name (and so every guard's name: each has at least one).
 FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "target": {"dropped-uses": _dropped_uses,
@@ -825,7 +927,8 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "records": {"array-rates": _array_rates},
     "adapter": {"misaligned": _misaligned, "gross-extra": _gross_extra},
     "why": {"ran-out-first": lambda: _patched(screening, "why_of", _ran_out_first)},
-    "screens": {"shuffled": _shuffled, "altered-record": _altered_record},
+    "screens": {"shuffled": _shuffled, "altered-record": _altered_record,
+                "wave-seeded": _wave_seeded},
     "acceptance": {"dropped-uses": _dropped_uses},
 }
 
