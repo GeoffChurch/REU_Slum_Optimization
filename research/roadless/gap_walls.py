@@ -761,41 +761,64 @@ class WallModel:
     def grad(self, net: Relaxed, s: Solved, lam: NDArray[np.float64],
              b_lam: NDArray[np.float64]) -> NDArray[np.float64]:
         """dJ / drho per building at the design `net` by the adjoint (module docstring, THE
-        RELAXATION): dJ / dg = -du dlam per passage on its current's side (`s`: the settled
-        solve, its potentials u), -u lam per street face, through each element's slopes in its
-        owners' densities; an owned obtuse cell's resistance share Ro by (G u)(G lam) / Gs, at a
-        ground one its limit, the drain currents under u and lam (`b_lam` the adjoint's
-        right-hand side per cell, unmasked; the population's injection the u's)."""
+        RELAXATION; `s` the settled solve of the run's demand, its potentials u; `lam` J's adjoint,
+        u for P; `b_lam` the adjoint's right-hand side per cell, unmasked): the passages', the
+        street faces' and the obtuse exits' terms."""
         t = time.time()
-        it, c, u = self.interp, self.sys.cells, s.u
+        out = (self.grad_passages(net, s, lam) + self.grad_faces(net, s, lam)
+               + self.grad_exits(net, s, lam, b_lam))
+        self.timing.add("gradient", time.time() - t)
+        return out
+
+    def grad_passages(self, net: Relaxed, s: Solved,
+                      lam: NDArray[np.float64]) -> NDArray[np.float64]:
+        """The passages' term: dJ / dg = -du dlam per passage, its conductance on its current's
+        side (a diode's: the side `s` settled on), through its slopes in its owners' densities."""
+        c, u = self.sys.cells, s.u
         du = u[c.ea] - u[c.eb]
         wp = -du * (lam[c.ea] - lam[c.eb])
         fwd = du > 0.0
-        rho = net.rho
         out = np.zeros(self.n)
-        for o in it.passages:
-            sl = _slopes(o.ab, rho[o.own])
+        for o in self.interp.passages:
+            r = net.rho[o.own]
+            sl = _slopes(o.ab, r)
             if o.ba is not o.ab:
-                sl = np.where(fwd[o.pos][:, None], sl, _slopes(o.ba, rho[o.own]))
+                sl = np.where(fwd[o.pos][:, None], sl, _slopes(o.ba, r))
             out += np.bincount(o.own.ravel(), weights=(wp[o.pos][:, None] * sl).ravel(),
                                minlength=self.n)
-        wf = -u[c.fc] * lam[c.fc]
-        for o in it.faces:
+        return out
+
+    def grad_faces(self, net: Relaxed, s: Solved,
+                   lam: NDArray[np.float64]) -> NDArray[np.float64]:
+        """The street faces' term: dJ / dGf = -u lam at its cell, through its slopes."""
+        c = self.sys.cells
+        wf = -s.u[c.fc] * lam[c.fc]
+        out = np.zeros(self.n)
+        for o in self.interp.faces:
             out += np.bincount(o.own.ravel(), weights=(wf[o.pos][:, None]
-                                                       * _slopes(o.ab, rho[o.own])).ravel(),
+                                                       * _slopes(o.ab, net.rho[o.own])).ravel(),
                                minlength=self.n)
-        if it.exits:
-            Iu, Il = net.Go * u, net.Go * lam
-            gr = it.ocell & net.ground
-            if gr.any():
-                Iu = np.where(gr, self.drain(s.g, u, np.asarray(self.Pc @ self.inj)), Iu)
-                Il = np.where(gr, self.drain(s.g, lam, b_lam), Il)
-            we = Iu * Il / np.where(it.ocell, it.Gs, 1.0)
-            for o in it.exits:
-                out += np.bincount(o.own.ravel(), weights=(we[o.pos][:, None]
-                                                           * _slopes(o.ab, rho[o.own])).ravel(),
-                                   minlength=self.n)
-        self.timing.add("gradient", time.time() - t)
+        return out
+
+    def grad_exits(self, net: Relaxed, s: Solved, lam: NDArray[np.float64],
+                   b_lam: NDArray[np.float64]) -> NDArray[np.float64]:
+        """The owned obtuse exits' term: J's slope in a cell's resistance share Ro is (G u)(G lam)
+        / Gs (G = Gs / Ro, dJ / dG = -u lam), through its slopes; at a ground cell (every owner
+        cleared) its limit, the currents that drain there under u and lam (`drain`)."""
+        it, u = self.interp, s.u
+        out = np.zeros(self.n)
+        if not it.exits:
+            return out
+        Iu, Il = net.Go * u, net.Go * lam
+        gr = it.ocell & net.ground
+        if gr.any():
+            Iu = np.where(gr, self.drain(s.g, u, np.asarray(self.Pc @ self.inj)), Iu)
+            Il = np.where(gr, self.drain(s.g, lam, b_lam), Il)
+        we = Iu * Il / np.where(it.ocell, it.Gs, 1.0)
+        for o in it.exits:
+            out += np.bincount(o.own.ravel(), weights=(we[o.pos][:, None]
+                                                       * _slopes(o.ab, net.rho[o.own])).ravel(),
+                               minlength=self.n)
         return out
 
     def drain(self, g: NDArray[np.float64], u: NDArray[np.float64],

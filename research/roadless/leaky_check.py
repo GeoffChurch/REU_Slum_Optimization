@@ -82,14 +82,17 @@ import shapely
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import clear  # noqa: E402
 import common  # noqa: E402
 import digests  # noqa: E402
 import gap_clear as gcl  # noqa: E402
 import gap_complex as gc  # noqa: E402
 import gap_factor  # noqa: E402
 import gap_walls as gw  # noqa: E402
+import leaky_simp  # noqa: E402
 import metrics  # noqa: E402
 import region_leaks  # noqa: E402
+import relax  # noqa: E402
 
 if TYPE_CHECKING:
     from reblock.contracts import Block
@@ -115,6 +118,15 @@ BUDGET = 0.05
 ONE_K = 3
 REACH_RANDOM = 2
 SEED = 20261021
+GRAD_STEPS = (1e-3, 1e-4)  # relax-gradient's steps h (each with h / 2, extrapolated: as
+                           # gap_clear_check's)
+GRAD_TOL = 1e-4          # the gradient against differences, of its largest (gap_clear_check's)
+GRAD_PICK = 6            # buildings checked per design: the largest |gradient| and the owners of
+                         # shared zones and of inside street faces
+ENDS_TOL = 1e-12         # the relaxation's J at a 0/1 clearing against W's scorer's (relative: the
+                         # network is W's bit for bit; a diode's loop from another start ties)
+WARM_ITERS = 6           # relax-warm: SIMP's first updates replayed warm and cold
+WARM_TOL = 1e-10         # ... their potentials apart (of the largest)
 
 
 @contextmanager
@@ -387,11 +399,10 @@ def monotone(ids: list[str]) -> list[str]:
 _OPEN_FACTOR = gw.WallModel.open_factor
 
 
-def _cleared_slow(self: gw.WallModel, standing: np.ndarray) -> np.ndarray:
+def _cleared_slow(self: gw.WallModel, cleared: np.ndarray) -> np.ndarray:
     """WallModel.open_factor with a cleared building's ground (open, in a cleared building's
     grown footprint) at CLEARED_SLOW (fault `cleared-slow`)."""
-    cleared = np.asarray(self.zone @ (~standing).astype(np.float64)).ravel() > 0
-    return np.where(cleared, CLEARED_SLOW, 1.0) * _OPEN_FACTOR(self, standing)
+    return np.where(cleared, CLEARED_SLOW, 1.0) * _OPEN_FACTOR(self, cleared)
 
 
 def walled_count(ids: list[str]) -> list[str]:
@@ -532,10 +543,303 @@ def _name_without_part(self: gw.WallMetric) -> str:
     return self.base.name
 
 
+# ------------------------------------------------------------------ stage 2: the relaxation
+
+def _designs(wm: gw.WallModel, rng: np.random.Generator) -> list[tuple[str, np.ndarray]]:
+    """SIMP's start (x = D: relax.start_x) and a random design in [0.1, 0.9]."""
+    return [("start", relax.start_x(0, wm.cost, BUDGET)), ("random", rng.uniform(0.1, 0.9, wm.n))]
+
+
+def _pick(wm: gw.WallModel, g: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """GRAD_PICK buildings: the largest |gradient|, an owner of a passage with two or more owners
+    and an owner of an inside street face, two of each where there are."""
+    it = wm.interp
+    shared = np.unique(np.concatenate([o.own.ravel() for o in it.passages if o.own.shape[1] > 1]
+                                      + [np.zeros(0, dtype=np.int64)]))
+    faced = np.unique(np.concatenate([o.own.ravel() for o in it.faces]
+                                     + [np.zeros(0, dtype=np.int64)]))
+    out = list(np.argsort(-np.abs(g), kind="stable")[:GRAD_PICK // 3])
+    for pool in (shared, faced):
+        pool = np.setdiff1d(pool, out)
+        out += list(rng.choice(pool, min(GRAD_PICK // 3, len(pool)), replace=False))
+    return np.asarray(out, dtype=np.int64)
+
+
+def _central(rel: gw.WallRelaxation, x0: np.ndarray, g: np.ndarray, pick: np.ndarray) -> float:
+    """The gradient `g` at x0 against central differences on `pick` (each the closest over
+    GRAD_STEPS of 2 D(h / 2) - D(h)), of the largest |g| among them."""
+    err = []
+    for j in pick:
+        best = np.inf
+        for h in GRAD_STEPS:
+            d = []
+            for step in (h, h / 2.0):
+                e = np.zeros(len(x0))
+                e[j] = step
+                d.append((rel.value(x0 + e) - rel.value(x0 - e)) / (2.0 * step))
+            best = min(best, abs(2.0 * d[1] - d[0] - g[j]))
+        err.append(best)
+    return float(np.max(err) / np.abs(g[pick]).max())
+
+
+def _one_sided(rel: gw.WallRelaxation, x0: np.ndarray, g: np.ndarray, j: int) -> float:
+    """dJ / dx_j at x0 (x0_j 1) against one-sided differences from below, extrapolated, the
+    closest over GRAD_STEPS, of |g_j|."""
+    best = np.inf
+    J0 = rel.value(x0)
+    for h in GRAD_STEPS:
+        d = []
+        for step in (h, h / 2.0):
+            e = np.zeros(len(x0))
+            e[j] = step
+            d.append((J0 - rel.value(x0 - e)) / step)
+        best = min(best, abs(2.0 * d[1] - d[0] - g[j]))
+    return float(best / abs(g[j]))
+
+
+def relax_gradient(ids: list[str]) -> list[str]:
+    bad = []
+    rng = np.random.default_rng(SEED + 5)
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        for walls in WALLS:
+            wm = _walls_model(b, _uniform(), walls, start=WARM)
+            rel = wm.relaxation(1.0, q=1.0, eps=clear.EPS)
+            for q in (1.0, 3.0):
+                rel.q = q
+                for label, x0 in _designs(wm, rng):
+                    _J, g = rel.value_grad(x0)
+                    err = _central(rel, x0, g, _pick(wm, g, rng))
+                    ok = err <= GRAD_TOL
+                    print(f"relax-gradient {bid} {walls.name} q {q:g} {label}: {err:.1e} of the "
+                          f"largest -> {'ok' if ok else 'FAILS'}", flush=True)
+                    if not ok:
+                        bad.append(f"{bid} {walls.name} q {q:g} {label}: {err:.1e}")
+            # an owned obtuse exit's cell ground (every owner of every owned exit cleared, x 1):
+            # the limit, against one-sided differences
+            owners = np.unique(np.concatenate([o.own.ravel() for o in wm.interp.exits]
+                                              + [np.zeros(0, dtype=np.int64)]))
+            if len(owners) == 0:
+                bad.append(f"{bid}: no owned obtuse exit (the premise)")
+                continue
+            rel.q = 1.0
+            x0 = rng.uniform(0.1, 0.9, wm.n)
+            x0[owners] = 1.0
+            _J, g = rel.value_grad(x0)
+            j = int(owners[np.argmax(np.abs(g[owners]))])
+            err = _one_sided(rel, x0, g, j)
+            ok = err <= GRAD_TOL
+            print(f"relax-gradient {bid} {walls.name} ground: building {j} at x 1, "
+                  f"{int((wm.interp.ocell & wm.relaxed(rel.rho(x0)).ground).sum())} owned cells "
+                  f"ground, {err:.1e} of its gradient -> {'ok' if ok else 'FAILS'}", flush=True)
+            if not ok:
+                bad.append(f"{bid} {walls.name} ground: {err:.1e}")
+    return bad
+
+
+def _faces_dropped(self: gw.WallModel, net: gw.Relaxed, s: gw.Solved,
+                   lam: np.ndarray) -> np.ndarray:
+    """WallModel.grad_faces left out (fault `no-faces`)."""
+    return np.zeros(self.n)
+
+
+def _forward_only(self: gw.WallModel, net: gw.Relaxed, s: gw.Solved,
+                  lam: np.ndarray) -> np.ndarray:
+    """WallModel.grad_passages with every passage's slope its first-to-second table's, whatever
+    its current's side (fault `forward-only`)."""
+    c, u = self.sys.cells, s.u
+    wp = -(u[c.ea] - u[c.eb]) * (lam[c.ea] - lam[c.eb])
+    out = np.zeros(self.n)
+    for o in self.interp.passages:
+        sl = gw._slopes(o.ab, net.rho[o.own])
+        out += np.bincount(o.own.ravel(), weights=(wp[o.pos][:, None] * sl).ravel(),
+                           minlength=self.n)
+    return out
+
+
+def _drain_zero(self: gw.WallModel, g: np.ndarray, u: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """WallModel.drain nothing: a ground cell's term 0 (fault `ground-zero`)."""
+    return np.zeros(self.sys.cells.n)
+
+
+def _clearings(wm: gw.WallModel, rng: np.random.Generator) -> list[tuple[str, np.ndarray]]:
+    """The baseline, a random clearing within BUDGET, one owner of each shared passage of two
+    owners cleared (shared zones half cleared) and every building cleared."""
+    order = rng.permutation(wm.n)
+    rand = np.zeros(wm.n, dtype=bool)
+    rand[order[np.cumsum(wm.cost[order]) <= BUDGET]] = True
+    half = np.zeros(wm.n, dtype=bool)
+    for o in wm.interp.passages:
+        if o.own.shape[1] == 2:
+            half[o.own[:, 0]] = True
+            half[o.own[:, 1]] = False
+    return [("baseline", np.zeros(wm.n, dtype=bool)), ("random", rand), ("half", half),
+            ("all", np.ones(wm.n, dtype=bool))]
+
+
+def relax_ends(ids: list[str]) -> list[str]:
+    bad = []
+    rng = np.random.default_rng(SEED + 6)
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        for walls in WALLS:
+            wm = _walls_model(b, _uniform(), walls, start=WARM)
+            rel = wm.relaxation(1.0, q=3.0, eps=clear.EPS)
+            for label, r in _clearings(wm, rng):
+                net, st = wm.relaxed(r.astype(np.float64)), wm.state(r)
+                same = [k for k, a, z in (("g_ab", net.g_ab, st.g_ab), ("g_ba", net.g_ba, st.g_ba),
+                                          ("Gf", net.Gf, st.Gf), ("G", net.G, st.G),
+                                          ("ground", net.ground, st.ground),
+                                          ("unknown", net.unknown, st.unknown))
+                        if not np.array_equal(a, z)]
+                Jr, Je = rel.value(r.astype(np.float64)), wm.exact(r, 1.0)[0]
+                apart = abs(Jr / Je - 1.0)
+                ok = not same and apart <= ENDS_TOL
+                verdict = "W's bit for bit" if not same else "apart on " + ", ".join(same)
+                print(f"relax-ends {bid} {walls.name} {label} ({int(r.sum())} cleared): network "
+                      f"{verdict}, J {Jr:.10g} against W's {Je:.10g} ({apart:.1e}) -> "
+                      f"{'ok' if ok else 'FAILS'}", flush=True)
+                if not ok:
+                    bad.append(f"{bid} {walls.name} {label}: {same} {apart:.1e}")
+    return bad
+
+
+_WEIGHTS = gw._weights
+
+
+def _owners_reversed(r: np.ndarray) -> np.ndarray:
+    """gap_walls._weights reading each element's owners in reverse order (fault
+    `owners-reversed`)."""
+    return _WEIGHTS(r[:, ::-1])
+
+
+def relax_monotone(ids: list[str]) -> list[str]:
+    bad = []
+    rng = np.random.default_rng(SEED + 7)
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        for walls in WALLS:
+            wm = _walls_model(b, _uniform(), walls, start=WARM)
+            it = wm.interp
+            # every element's values rise as an owner clears (an obtuse exit's resistance falls)
+            drops = 0
+            for groups, sign in ((it.passages, 1.0), (it.faces, 1.0), (it.exits, -1.0)):
+                for o in groups:
+                    k = o.own.shape[1]
+                    s = np.arange(1 << k)
+                    for i in range(k):
+                        lo = s[((s >> i) & 1) == 0]
+                        for tab in (o.ab, o.ba):
+                            d = sign * (tab[:, lo | (1 << i)] - tab[:, lo])
+                            drops += int((d < 0).sum())
+            # P along designs: MONO_STEPS buildings raised 0 -> 0.5 -> 1 one after another, the
+            # rest at a random design
+            rel = wm.relaxation(1.0, q=3.0, eps=clear.EPS)
+            rises = []
+            for _k in range(MONO_ORDERS):
+                x = rng.uniform(0.0, 0.6, wm.n)
+                order = rng.permutation(wm.n)[:MONO_STEPS]
+                x[order] = 0.0
+                P = [rel.value(x)]
+                for j in order:
+                    for v in (0.5, 1.0):
+                        x[j] = v
+                        P.append(rel.value(x))
+                rises.append(float((np.diff(P) / np.asarray(P[:-1])).max()))
+            ok = drops == 0 and max(rises) <= MONO_TOL
+            print(f"relax-monotone {bid} {walls.name}: {drops} table steps down; P's largest step "
+                  f"{max(rises):+.2e} (relative) -> {'ok' if ok else 'FAILS'}", flush=True)
+            if not ok:
+                bad.append(f"{bid} {walls.name}: {drops} steps down, P rises {max(rises):.2e}")
+    return bad
+
+
+def relax_warm(ids: list[str]) -> list[str]:
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        wm = _walls_model(b, _uniform(), DIODE, start=WARM)
+        # SIMP's first updates (q 1.5), their designs replayed: each solved warm (the relaxation
+        # from the last design's sides) and cold (from the outward sides)
+        xs: list[np.ndarray] = []
+
+        def keep(x: np.ndarray, stage: tuple[float, float], into: list[np.ndarray] = xs) -> None:
+            into.append(x.copy())
+
+        rel = wm.relaxation(1.0, q=1.0, eps=clear.EPS)
+        relax.simp(rel, relax.start_x(0, wm.cost, BUDGET), BUDGET, ((1.5, 0.0),), WARM_ITERS,
+                   relax.DEFAULT_UPDATE, log=lambda s: None, watch=keep)
+        rep = wm.relaxation(1.0, q=1.5, eps=clear.EPS)
+        worst, wrong, passes = 0.0, 0, []
+        for x in xs:
+            net, warm, _uh = rep.solved(x)
+            cold = wm.walls.solver(wm, net, np.zeros(len(wm.sys.cells.pe), dtype=np.int8)).solve(
+                wm.rhs(net, wm.inj))
+            worst = max(worst, float(np.abs(warm.u - cold.u).max() / np.abs(cold.u).max()))
+            c = wm.sys.cells
+            w = net.wall
+            du = warm.u[c.ea[w]] - warm.u[c.eb[w]]
+            tol = gw.SIDE_REL * float(np.abs(warm.u).max())
+            want = np.where(du > tol, net.g_ab[w], np.where(du < -tol, net.g_ba[w], warm.g[w]))
+            wrong += int(((warm.g[w] != want) & (net.g_ab[w] != net.g_ba[w])).sum())
+            passes.append((warm.passes, cold.passes))
+        ok = worst <= WARM_TOL and wrong == 0 and len(xs) > 0
+        print(f"relax-warm {bid} {DIODE.name}: {len(xs)} of SIMP's designs; warm against cold "
+              f"{worst:.1e} apart, {wrong} wall passages off their current's side; passes (warm, "
+              f"cold) {passes} -> {'ok' if ok else 'FAILS'}", flush=True)
+        if not ok:
+            bad.append(f"{bid}: {worst:.1e} apart, {wrong} off side")
+    return bad
+
+
+_RELAXATION = gw.WallModel.relaxation
+
+
+def _eps_accepted(self: gw.WallModel, power: float, *, q: float,
+                  eps: float) -> gw.WallRelaxation:
+    """WallModel.relaxation accepting any eps (fault `eps-accepted`)."""
+    return _RELAXATION(self, power, q=q, eps=clear.EPS)
+
+
+def relax_identity(_ids: list[str]) -> list[str]:
+    bad = []
+    plan = relax.plan_of(leaky_simp.W_PLAN)
+    if plan.name != leaky_simp.W_PLAN or not isinstance(plan.free, relax.NoFree) or \
+            plan.polish_scoring.suffix != "E" or plan.kscore != 0.0 or plan.eps != clear.EPS:
+        bad.append(f"W's plan {leaky_simp.W_PLAN!r} reads back as {plan.name!r}")
+    a = leaky_simp.arms()
+    for arm, part in ((a.s10, leaky_simp.S10), (a.b, leaky_simp.DIODE_B)):
+        back = gw.walls_of(arm.metric.name, factorization=gap_factor.SuperLU())
+        path = leaky_simp.arm_path(arm, "x")
+        if back.walls != arm.metric.walls or back.name != arm.metric.name or \
+                f"+{part}+" not in arm.metric.name or \
+                path.parts[-4:-1] != (arm.metric.name, arm.plan.name, "D0.05"):
+            bad.append(f"{arm.label}: {arm.metric.name} / {path} does not round-trip")
+    wm = _walls_model(_direction_block(), PER_BLOCK, SYM, start=WARM)
+    refused: list[Callable[[], object]] = [
+        lambda: wm.relaxation(1.0, q=1.0, eps=relax.plan_of(relax.SIMP_DEFAULT).eps),
+        lambda: wm.relaxation(1.0, q=1.0, eps=clear.EPS).scorer(
+            relax.plan_of(relax.SIMP_DEFAULT).kscore)]
+    for k, make in enumerate(refused):
+        try:
+            make()
+            bad.append(f"T's eps world {('`.e`', '`s`')[k]} accepted under W")
+        except ValueError:
+            pass
+    sc = wm.relaxation(1.0, q=1.0, eps=clear.EPS).scorer(plan.kscore)
+    if sc.q != 1.0 or sc.beta != 0.0:
+        bad.append("W's scorer not at q 1, unprojected")
+    verdict = "ok" if not bad else "FAILS: " + "; ".join(bad[:3])
+    print(f"relax-identity: W's plan {plan.name}; {a.s10.metric.name[:60]}...; T's eps worlds "
+          f"refused -> {verdict}", flush=True)
+    return bad
+
+
 GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "direction": direction, "party": party, "settles": settles, "energy": energy,
     "monotone": monotone, "walled-count": walled_count, "sources": sources,
-    "walls-identity": walls_identity}
+    "walls-identity": walls_identity, "relax-gradient": relax_gradient, "relax-ends": relax_ends,
+    "relax-monotone": relax_monotone, "relax-warm": relax_warm, "relax-identity": relax_identity}
 
 
 def _diode_costs_swapped(self: gw.DiodeWalls, leave: np.ndarray, enter: np.ndarray
@@ -564,6 +868,18 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
                                                        _through_walls)},
     "sources": {"doors": lambda: _patched(gw.WallModel, "sources", _doors)},
     "walls-identity": {"part-dropped": lambda: _patched(gw.WallMetric, "name",
+                                                        property(_name_without_part))},
+    "relax-gradient": {"no-faces": lambda: _patched(gw.WallModel, "grad_faces", _faces_dropped),
+                       "forward-only": lambda: _patched(gw.WallModel, "grad_passages",
+                                                        _forward_only),
+                       "ground-zero": lambda: _patched(gw.WallModel, "drain", _drain_zero)},
+    "relax-ends": {"owners-reversed": lambda: _patched(gw, "_weights", _owners_reversed)},
+    "relax-monotone": {"cleared-slow": lambda: _patched(gw.WallModel, "open_factor",
+                                                        _cleared_slow)},
+    "relax-warm": {"one-pass": lambda: _patched(gw.DiodeSolver, "solve", _one_pass)},
+    "relax-identity": {"eps-accepted": lambda: _patched(gw.WallModel, "relaxation",
+                                                        _eps_accepted),
+                       "part-dropped": lambda: _patched(gw.WallMetric, "name",
                                                         property(_name_without_part))},
 }
 

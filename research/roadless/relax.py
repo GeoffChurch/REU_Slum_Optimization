@@ -483,7 +483,8 @@ class Incumbent:
     the rounding of update 3 scores 0.810 and the last 0.012, the gate and its neighbours, being
     substitutes, flipping between x 0.3 and 0.5 until the continuation drops them (NOTES)."""
 
-    def __init__(self, rel: gap_clear.Relaxation, budget: float, every: int, *, samples: int,
+    def __init__(self, rel: gap_clear.Relaxation | gap_walls.WallRelaxation, budget: float,
+                 every: int, *, samples: int,
                  sample_in: tuple[tuple[float, float], ...],
                  first: np.ndarray | None = None, score_eps: float = 0.0):
         self.rel, self.budget, self.every, self.first = rel, budget, every, first
@@ -571,7 +572,7 @@ class Incumbent:
             f"{moves} moves kept, {used} scorings, J {J0:.6g} -> {self.J:.6g}")
 
 
-def simp(rel: gap_clear.Relaxation, x0: np.ndarray, budget: float,
+def simp(rel: gap_clear.Relaxation | gap_walls.WallRelaxation, x0: np.ndarray, budget: float,
          stages: tuple[tuple[float, float], ...], iters: int, update: Update, log=print,
          xlo: np.ndarray | None = None, watch=None) -> np.ndarray:
     """SIMP continuation from x0: for (q, beta) in stages, up to `iters` updates by `update`
