@@ -541,32 +541,42 @@ def _submitted(rec: cs.RunRecord) -> argparse.Namespace:
     return cs.submitted(PROJECT, rec)
 
 
-def _live_stewards(recs: Sequence[cs.RunRecord], args: Args) -> dict[str, cs.RunRecord]:
-    """The live waves among `recs`, by name: each wave's live steward run (`_live`), its wave its
-    --wave (read by `args`). Two live stewards of a wave at two commits are refused
-    (SystemExit)."""
+class LiveWaves(NamedTuple):
+    """The live waves among some records (`_live_stewards`): each one's live steward run, by
+    wave, and each wave with live stewards at two commits, why (none of them in `stewards`)."""
+
+    stewards: dict[str, cs.RunRecord]
+    split: dict[str, str]
+
+
+def _live_stewards(recs: Sequence[cs.RunRecord], args: Args) -> LiveWaves:
+    """The live waves among `recs`: each wave's live steward run (`_live`), its wave its --wave
+    (read by `args`), and apart, each wave with live stewards at two commits."""
     live: dict[str, cs.RunRecord] = {}
+    split: dict[str, str] = {}
     for r in recs:
         if r.kind != Steward.name or not _live(r):
             continue
         wave: str = args(r).wave
         if wave in live and live[wave].commit != r.commit:
-            raise SystemExit(f"wave {wave} has live stewards at two commits: "
-                             f"{live[wave].name} at {live[wave].commit[:12]}, {r.name} at "
-                             f"{r.commit[:12]}")
+            split[wave] = (f"live stewards at two commits: {live[wave].name} at "
+                           f"{live[wave].commit[:12]}, {r.name} at {r.commit[:12]}")
         live[wave] = r
-    return live
+    return LiveWaves(stewards={w: r for w, r in live.items() if w not in split}, split=split)
 
 
 def live_stewards(ctx: cs.Context) -> dict[str, cs.RunRecord]:
     """The live waves of this registry, by name (`_live_stewards`). An unreadable record is
     refused (SystemExit): a steward among them would go unseen, and a Done on its wave's leases is
-    final."""
+    final. So is a wave with live stewards at two commits."""
     recs, unreadable = ctx.registry.all()
     if unreadable:
         raise SystemExit(f"unreadable records: {', '.join(unreadable)}: a wave's steward among "
                          "them would go unseen")
-    return _live_stewards(recs, lambda r: ctx.parse(r.argv))
+    got = _live_stewards(recs, lambda r: ctx.parse(r.argv))
+    if got.split:
+        raise SystemExit("; ".join(f"wave {w} has {why}" for w, why in sorted(got.split.items())))
+    return got.stewards
 
 
 def wave_summaries(login: Login, waves: Sequence[str]) -> psum.Summaries:
@@ -691,22 +701,38 @@ def _pool_args(*, wave: str, ladder: Ladder, node: str, rung: int) -> tuple[str,
             "--gpus", str(throttle(ladder, node)))
 
 
-def _pool_run(rec: cs.RunRecord, args: Args) -> cluster_demand.PoolRun | None:
+def _pool_of(a: argparse.Namespace) -> cluster_demand.PoolRun:
     """A pool run's wave, its node and what each of its workers holds there (its class's bundle),
-    read from its submit arguments (`args`); None for a run of another kind. What Waves.lease says
-    of a run, and the demand's pool runs (`pool_runs`)."""
-    if rec.kind != Pool.name:
-        return None
-    a = args(rec)
+    from its submit arguments `a`; a --mem that is no rung of its preset is refused (ValueError).
+    What Waves.lease says of a pool run, and the demand's pool runs (`pool_runs`)."""
     return cluster_demand.PoolRun(wave=a.wave, node=a.node,
                                   bundle=LADDERS[a.preset].bundle(a.mem))
 
 
-def pool_runs(recs: Sequence[cs.RunRecord]) -> dict[str, cluster_demand.PoolRun]:
-    """The unfinished pool runs of `recs`, by name (`_pool_run`, each read from its own record:
-    `_submitted`)."""
-    return {r.name: p for r in recs
-            if r.finished_at is None and (p := _pool_run(r, _submitted)) is not None}
+class PoolRuns(NamedTuple):
+    """The unfinished pool runs of some records as the demand reads them (`pool_runs`): each by
+    name, with what its workers hold, or None when its record does not say; and each wave one of
+    whose pool runs does not, why."""
+
+    pools: dict[str, cluster_demand.PoolRun | None]
+    unread: dict[str, str]
+
+
+def pool_runs(recs: Sequence[cs.RunRecord]) -> PoolRuns:
+    """The unfinished pool runs of `recs` (cluster_demand.finished), each read from its own record
+    (`_submitted`, `_pool_of`): a --mem that is no rung of its preset (a preset changed under a
+    live wave) leaves it None and its wave unread, not the demand refused."""
+    out = PoolRuns(pools={}, unread={})
+    for r in recs:
+        if r.kind != Pool.name or cluster_demand.finished(r):
+            continue
+        a = _submitted(r)
+        try:
+            out.pools[r.name] = _pool_of(a)
+        except ValueError as e:
+            out.pools[r.name] = None
+            out.unread[a.wave] = f"its pool run {r.name} does not read: {e}"
+    return out
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -720,10 +746,12 @@ class Waves:
     registry: Registry
 
     def lease(self, ctx: cs.Context, rec: cs.RunRecord) -> cs.Lease | None:
-        """A pool run (`_pool_run`): CAMPAIGN's lease on its --node, each worker its class's
+        """A pool run (`_pool_of`): CAMPAIGN's lease on its --node, each worker its class's
         bundle."""
-        p = _pool_run(rec, lambda r: ctx.parse(r.argv))
-        return None if p is None else cs.Lease(CAMPAIGN, p.node, p.bundle)
+        if rec.kind != Pool.name:
+            return None
+        p = _pool_of(ctx.parse(rec.argv))
+        return cs.Lease(CAMPAIGN, p.node, p.bundle)
 
     def template(self, ctx: cs.Context, campaign: str, node: str,
                  bundle: cs.Bundle) -> cs.Template | cs.Done:
@@ -818,30 +846,63 @@ if not STATES_DEMAND <= set(VERB_NAMES):
                      f"{sorted(STATES_DEMAND - set(VERB_NAMES))}")
 
 
-def state_demand(registry: Registry) -> int:
+class DemandWaves(NamedTuple):
+    """What the demand reads of the waves (`demand_waves`): the unfinished pool runs, and a reader
+    of the live waves' summaries."""
+
+    pools: dict[str, cluster_demand.PoolRun | None]
+    summaries: Callable[[], psum.Summaries]
+
+
+def demand_waves(recs: Sequence[cs.RunRecord], login: Login) -> DemandWaves:
+    """The waves as the demand reads them from the records `recs`, each record's arguments its own
+    (this step has no Context): the unfinished pool runs (`pool_runs`), and a reader of the live
+    waves' summaries (`_live_stewards`; one ssh call, `wave_summaries`). A wave whose records do
+    not read (a pool run whose --mem is no rung, live stewards at two commits) is read as unread,
+    why among the summaries' (its running workers stated alone, and said), not refused: a refusal
+    would leave every run of the campaign, a wave's or not, without a demand."""
+    live = _live_stewards(recs, _submitted)
+    pools = pool_runs(recs)
+    broken = {**live.split, **pools.unread}
+    read = sorted(w for w in live.stewards if w not in broken)
+
+    def summaries() -> psum.Summaries:
+        got = wave_summaries(login, read)
+        return psum.Summaries(read=got.read, unread={**got.unread, **broken})
+
+    return DemandWaves(pools=pools.pools, summaries=summaries)
+
+
+def state_demand(registry: Registry) -> cluster_demand.Written:
     """The project's demand (cluster_demand.state; Ruling 1: this step is its file's one writer),
-    from squeue, `registry` read once (its records, its unfinished pool runs, `pool_runs`, and its
-    live waves, `_live_stewards`, each record's arguments its own: this step has no Context) and
-    the live waves' summaries, read with one ssh call (`wave_summaries`): 0 once written."""
+    from squeue, `registry` read once and its waves as `demand_waves` reads them: what it
+    wrote."""
     login = Remote(PROJECT.cluster.host, SubprocessRunner())
     recs, unreadable = registry.all()
-    live = sorted(_live_stewards(recs, _submitted))
+    waves = demand_waves(recs, login)
     return cluster_demand.state(
-        recs=recs, unreadable=unreadable, pools=pool_runs(recs),
-        summaries=lambda: wave_summaries(login, live), login=login,
+        recs=recs, unreadable=unreadable, pools=waves.pools, summaries=waves.summaries,
+        login=login,
         board=PROJECT.cluster.board(), project=PROJECT.name, campaign=CAMPAIGN,
         weight=CAMPAIGN_WEIGHT, nodes=tuple(n.name for n in PROJECT.cluster.nodes),
         now=utcnow())
 
 
 def _demand_after() -> None:
-    """reblock's demand written after a verb that submitted or changed runs; its failure is said
-    and leaves the verb's exit as it was (a submit that took, a wait's verdict)."""
+    """reblock's demand written after a verb that submitted or changed runs; its failure, or what
+    the demand written lacks, is said and leaves the verb's exit as it was (a submit that took, a
+    wait's verdict)."""
     try:
-        if state_demand(Registry(REPO)):
-            print("[demand] the next sync states it again", file=sys.stderr)
+        w = state_demand(Registry(REPO))
     except (SystemExit, ValueError, OSError) as e:      # ssh, squeue's output, the registry
         print(f"[demand] not stated: {e}; the next sync states it again", file=sys.stderr)
+        return
+    if not w.written:
+        print("[demand] not stated; the next sync states it again", file=sys.stderr)
+    elif not w.whole():
+        lacks = [*(f"wave {x}'s lines (its running workers stated alone)" for x in w.unread),
+                 *(f"record {x}'s waiting tasks" for x in w.unreadable)]
+        print(f"[demand] stated, without {'; '.join(lacks)}", file=sys.stderr)
 
 
 def main(argv: list[str]) -> int:
@@ -850,7 +911,7 @@ def main(argv: list[str]) -> int:
     (`Ran.states_demand`: every one but status and a dry submit); and `demand`, that write
     alone, its exit its own."""
     if argv == ["demand"]:
-        return state_demand(Registry(REPO))
+        return 0 if state_demand(Registry(REPO)).whole() else 1
     if argv[:1] == ["wave"]:
         import cluster_wave  # pandas, the estimators and the bank's sources: only a wave needs them
         ran = cluster_wave.main(argv[1:], edge=cluster_wave.here(argv[1:]))

@@ -40,9 +40,13 @@ the market, charged to nobody (on 2026-10-21 reblock's cp-roads4-desire-g3a and 
   exited, and a line of 0 units is no line), summed over the waves that share the (node, bundle)
   and with the other runs' units there. A pool run's waiting tasks are no units: its wave's jobs
   pending are. A live wave whose summary does not read (absent, of another format, another
-  wave's) has its running workers stated alone, a unit each, and is said (Stated.unread). So is
-  any other running worker no line read covers (one of a wave no longer live, retiring once its
-  steward has ended it), stated alone and not said.
+  wave's), or whose records do not (cluster.demand_waves: a pool run whose --mem is no rung of its
+  preset, live stewards at two commits), has its running workers stated alone, a unit each, and
+  is said (Stated.unread): one wave's fault leaves the rest of the campaign stated. So is any
+  other running worker no line read covers (one of a wave no longer live, retiring once its
+  steward has ended it), stated alone and not said. A pool run whose record does not say what its
+  workers hold has its running tasks stated at what Slurm holds, and its waiting ones as no
+  units.
 - minutes, with units: the mean of the units' times, each unit's as it is stated. A running or
   waiting task's is its time limit as Slurm holds it (squeue's TimeLimit: the run's --time, a
   resubmit's, the site's default, or a later scontrol change), an upper bound on its busy time; a
@@ -73,7 +77,7 @@ from typing import NamedTuple
 from cluster_submit import Bundle
 from cluster_submit.context import STAMP
 from cluster_submit.gpu import Demand, DemandLine, chain_base, demand_json, demand_path, run_of
-from cluster_submit.gpuboard import Abstained, Running, Seen, look
+from cluster_submit.gpuboard import Abstained, Pending, Running, Seen, look
 
 # Re-exported so a guard can replace it (cluster_check.py `demand`, fault any-reason).
 from cluster_submit.gpuboard import waits_for as waits_for
@@ -101,8 +105,21 @@ class Stated(NamedTuple):
     unplaced: int       # this registry's waiting tasks that would start now but name no node
     elsewhere: int      # waiting tasks of the project's runs this registry does not hold
     waves: tuple[str, ...]      # the live waves whose summaries read: their lines stated
-    unread: tuple[str, ...]     # the live waves whose summaries did not: their running workers
-                                # stated alone
+    unread: tuple[str, ...]     # the waves whose summaries or records did not: their running
+                                # workers stated alone
+
+
+class Written(NamedTuple):
+    """What `state` did: whether it wrote the demand, and what the demand it wrote lacks (each
+    said): the waves whose lines it does not state (their running workers stated alone) and the
+    records that did not read (their waiting tasks not stated)."""
+    written: bool
+    unread: tuple[str, ...]
+    unreadable: tuple[str, ...]
+
+    def whole(self) -> bool:
+        """Written, lacking nothing."""
+        return self.written and not self.unread and not self.unreadable
 
 
 def limits_of(text: str) -> dict[str, float]:
@@ -177,14 +194,32 @@ def wave_lines(read: Mapping[str, Summary], workers: Mapping[PoolRun, Sequence[f
     return out
 
 
+def pool_task(job: str, pooled: Mapping[str, PoolRun | None]) -> bool:
+    """Whether task `job` is a pool lease's (`pooled`: each unfinished pool run's array job, with
+    what its workers hold, or None when its record does not say)."""
+    return array_of(job) in pooled
+
+
+def at_tres_alloc(j: Running, pooled: Mapping[str, PoolRun | None]) -> bool:
+    """Whether running task `j` is stated at what Slurm holds (tres-alloc), a unit: every one but a
+    pool lease's whose record says what it holds, which its wave's line states."""
+    return not pool_task(j.job, pooled) or pooled[array_of(j.job)] is None
+
+
+def pool_waiting(p: Pending, pooled: Mapping[str, PoolRun | None]) -> bool:
+    """Whether waiting task `p` is a pool lease's: no unit (its wave's pending jobs are)."""
+    return pool_task(p.job, pooled)
+
+
 def demand_of(recs: Sequence[RunRecord], seen: Seen, limits: dict[str, float], *,
-              pools: Mapping[str, PoolRun], waves: Summaries, project: str, campaign: str,
+              pools: Mapping[str, PoolRun | None], waves: Summaries, project: str, campaign: str,
               weight: float, at: str, nodes: Sequence[str]) -> Stated:
     """The project's demand as `campaign`, at `weight`, written `at` (STAMP), from what squeue
     lists (`seen`; `limits`, each task's time limit in minutes, read after it: a task it lacks
     left squeue between the reads, and is left out), this registry's runs (`recs`), its unfinished
-    pool runs (`pools`, by name) and its live waves' summaries as they were read (`waves`: those
-    that read, and those that did not); `nodes` the site's, on which a task of an unpinned run
+    pool runs (`pools`, by name, each with what its workers hold, or None when its record does not
+    say) and its live waves' summaries as they were read (`waves`: those that read, and those that
+    did not, or whose records did not); `nodes` the site's, on which a task of an unpinned run
     may wait (the module's doc)."""
     def ours(job: str, name: str, user: str) -> bool:
         return user == seen.user and run_of(project, name) is not None and job in limits
@@ -199,9 +234,9 @@ def demand_of(recs: Sequence[RunRecord], seen: Seen, limits: dict[str, float], *
     pooled = {a: pools[r.name] for a, r in owner.items() if r.name in pools}
     workers: dict[PoolRun, list[float]] = {}
     for j in running:
-        if array_of(j.job) in pooled:
-            workers.setdefault(pooled[array_of(j.job)], []).append(limits[j.job])
-    busy = held([j for j in running if array_of(j.job) not in pooled], limits)
+        if pool_task(j.job, pooled) and (pool := pooled[array_of(j.job)]) is not None:
+            workers.setdefault(pool, []).append(limits[j.job])
+    busy = held([j for j in running if at_tres_alloc(j, pooled)], limits)
     wanted: dict[tuple[str, Bundle], list[float]] = {}
     left = {a: room(r, sum(1 for j in running if array_of(j.job) == a))
             for a, r in owner.items()}
@@ -210,9 +245,9 @@ def demand_of(recs: Sequence[RunRecord], seen: Seen, limits: dict[str, float], *
         if len(p.required) > 1:
             raise ValueError(f"task {p.job} requires {len(p.required)} nodes: a task of a "
                              "reblock run runs on one")
+        if pool_waiting(p, pooled):
+            continue
         a = array_of(p.job)
-        if a in pooled:
-            continue                        # a pool lease's: its wave's pending jobs are units
         node = p.required[0] if p.required else None
         if node is not None:
             wanted.setdefault((node, p.bundle), [])
@@ -251,22 +286,24 @@ def board_script(board: str, demand: Demand) -> str:
             f"|| {{ rm -f {tmp}; exit 2; }}\n")
 
 
-def state(*, recs: Sequence[RunRecord], unreadable: Sequence[str], pools: Mapping[str, PoolRun],
-          summaries: Callable[[], Summaries], login: Login, board: str, project: str,
-          campaign: str, weight: float, nodes: Sequence[str], now: datetime) -> int:
+def state(*, recs: Sequence[RunRecord], unreadable: Sequence[str],
+          pools: Mapping[str, PoolRun | None], summaries: Callable[[], Summaries], login: Login,
+          board: str, project: str, campaign: str, weight: float, nodes: Sequence[str],
+          now: datetime) -> Written:
     """The project's demand, from squeue, this registry's records (`recs`; `unreadable`, those
     that did not read), its unfinished pool runs (`pools`, by name) and its live waves' summaries
-    (`summaries`, read with one ssh call once squeue has been), written on the board `board`
-    (Cluster.board()) through `login`. 0 once written; 1 when squeue could not be read (nothing
-    is written: a blind step states nothing it could not see; the last demand stands, and still
-    attributes once stale), or when a live wave's summary does not read or a record does not
-    (each said; the rest stated, that wave's running workers alone). A command reading the
-    summaries that fails is refused (SystemExit, pool_summary.read_summaries'), nothing written,
-    as with a blind squeue."""
+    (`summaries`, read with one ssh call once squeue has been; a wave whose records did not read
+    among those that did not), written on the board `board` (Cluster.board()) through `login`:
+    what it did (Written). Nothing is written when squeue could not be read (a blind step states
+    nothing it could not see; the last demand stands, and still attributes once stale); a wave
+    whose summary or records do not read, and a record that does not, are said and left out of
+    what is written (the wave's running workers stated alone). A command reading the summaries
+    that fails is refused (SystemExit, pool_summary.read_summaries'), nothing written, as with a
+    blind squeue."""
     seen = look(login)
     if isinstance(seen, Abstained):
         print(f"[demand] nothing stated: {seen.why}", file=sys.stderr)
-        return 1
+        return Written(written=False, unread=(), unreadable=())
     limits = limits_of(login.sh(LIMITS))
     waves = summaries()
     s = demand_of(recs, seen, limits, pools=pools, waves=waves, project=project,
@@ -282,9 +319,9 @@ def state(*, recs: Sequence[RunRecord], unreadable: Sequence[str], pools: Mappin
           + (f"; {s.elsewhere} waiting tasks of other checkouts' runs left to their registry"
              if s.elsewhere else ""))
     for w in s.unread:
-        print(f"[demand] wave {w}'s summary does not read, its running workers stated alone: "
+        print(f"[demand] wave {w} does not read, its running workers stated alone: "
               f"{waves.unread[w]}", file=sys.stderr)
     if unreadable:
         print(f"[demand] unreadable records, their waiting tasks not stated (and a wave's "
               f"steward or pool among them unseen): {', '.join(unreadable)}", file=sys.stderr)
-    return 1 if s.unread or unreadable else 0
+    return Written(written=True, unread=s.unread, unreadable=tuple(unreadable))
