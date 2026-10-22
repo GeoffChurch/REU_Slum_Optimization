@@ -9194,3 +9194,18 @@ and homes 0.7; peak memory 6.8 GB (8152); the GxL fit run's first 1.7 h on 3 pro
 when GxLr10 replaced it; the guards 1.2 (greedy-exact three times, relax-identity). Within the
 brief's 20 and 30 process-h; estimated from the pilot at 11 and 8 before the run, the large
 controls and 18286's diode ran longer than the pilot's blocks implied.
+
+**The own-wall term does not bias the clearing (2026-10-22, null).** Under S10 every home pays to
+cross its own wall, a term near q^2 / G_own that only demolishing the home removes; at the walls'
+infinite limit T is the lexicographic optimum (walls' crossings first, then P0), and the question
+was whether S10's clearing leans toward homes with many people behind a short wall, an artifact
+rather than freeing anyone. It does not. On the 82 blocks' stored clearings at equal D (D_S10x -
+D_T mean +0.0002), the cleared homes' mean against the block's: q/perimeter S10x 0.833, T 0.842,
+S10x - T -0.009 [-0.023, +0.003], above on 36; q^2/perimeter -0.008 [-0.044, +0.030], 32; the
+model's own q^2/G_own -0.008 [-0.046, +0.031], 32 (Bayesian bootstrap, 95%). SIMP's default
+under S10 leans +0.17 on q^2/perimeter, all from clearing larger homes (q +0.11 [+0.085,
++0.146]), none from shape (compactness -0.002). The term is large: at baseline wall resistors
+dissipate 0.70 of S10's P0 (0.48-0.88) and the isolated own-wall term 0.39 (0.10-0.65); S10x's
+clearing takes 0.073 of the baseline wall dissipation against T's 0.059, which is current crossing
+walls, the thing W should go after. Compute 286 process-s. Scripts and rows:
+.superpowers/sdd/2026-10-21-leaky-walls/ownwall/ (not committed).
