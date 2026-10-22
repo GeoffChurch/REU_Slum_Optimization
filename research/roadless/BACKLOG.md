@@ -662,7 +662,7 @@ Open:
     open"), not when a neighbour cleared within 1 m does; free first frees by the same test. Open:
     T or U (the owner asked what U's two fixes are, and whether a home's source belongs inside its
     footprint rather than on its outline's ring).
-- **Walls that leak** (stage 2 measured, the owner's call; owner 2026-10-21: "can't they go through
+- **Walls that leak** (stage 3 measured, the owner's call; owner 2026-10-21: "can't they go through
   other buildings, just slowly?", "everyone would pay to get out of their own home", "walls be
   (imperfect/leaky) diodes", "launch these one at a time so we can be adaptive"; NOTES, "Walls that
   leak: every home's source inside it, each wall priced as a length"; built on
@@ -707,10 +707,18 @@ Open:
   15; T 0). On the 82 S10's clearing loses 0.075 L_P under T's metric (behind on 77) and leads by
   0.022 under its own (ahead on 70); it leaves 48 of 327 walled-in homes on 17 blocks (T none: free
   first). SIMP is weak under W (its last iterate grey, median 0.34 under S10; the polish keeps no
-  move on 58 of 82; T's clearing beats S10's own under S10's metric on 12 blocks): an optimizer
-  under W (a steeper penalty on the walls, a projection, or a greedy over W's exact gains) before W
-  replaces T; then the optimizer's re-run under the owner's pick, and a leaks-in-interiors variant
-  later.
+  move on 58 of 82). Stage 3, an optimizer fit for the walls (walls_greedy.py: a greedy over W's
+  exact gains per unit D; CELF parted from the full greedy on all seven pilot blocks it was checked
+  on, so GxLr10, CELF with every candidate within 10 m of a building taken re-scored, which takes
+  the full greedy's choices on four of seven and is within its L_P on the rest at a fraction of its
+  ~n^3 cost; SIMP with a projection or q to 5 no better than its default): on a pilot of 10 GxLr10
+  led W's own L_P (+0.016 over SIMP's default) and freed the most. Run on the 82 and B's 20: S10
+  and B stay different, not worse (S10's clearing 0.036 L_P short under B's metric on all 20, B's
+  0.026 short under S10's on all 20, a tie under T's) and the symmetric wall leaves fewer walled in
+  (4 homes against 11; T 0); against T on the 82 the walls' clearing loses 0.050 L_P under T's
+  metric (11%) and leads by 0.034 under its own, leaving 27 of 327 walled-in homes (SIMP's default
+  48). Next: the owner's call (W with GxLr10 as the walls' default, or T); a leaks-in-interiors
+  variant later.
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
   owner's answer moves an end of the bracket to that screen's break-even rate. One is live,

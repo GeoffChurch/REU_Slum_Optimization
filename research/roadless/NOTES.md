@@ -9089,3 +9089,108 @@ GPU), B's 2.65 for its 20 (median 331 s, 5.9x S10's on the same blocks), the len
 homes' rows 0.1; peak memory 7.1 GB (8152); the guards 3.9 (relax-gradient 0.5 a sweep, run three
 times as its ground check was settled; gap_clear_check's list 1.6). Estimated from three blocks
 before the run (S10 about 2, B about 1.5 process-h; the brief's thresholds 20 and 30).
+
+**Stage 3: an optimizer fit for the walls** (the owner 2026-10-21, through the controller: yes to
+an optimizer suited to the walls before judging them: a greedy over W's exact gains and a
+projection on SIMP, the better on a pilot run on the 82 and B's 20; the rulings in progress.md,
+Stage 3).
+
+**The candidates.** (1) SIMP with a projection or a steeper penalty, chosen on three tuning blocks
+(3786, 19570, 18286: stage 2's timing blocks, kept out of the pilot). W's L_P under S10 and the
+last iterate's grey: SIMP's default 0.2123 / 0.3391 / 0.2063 (grey 0.24 / 0.36 / 0.29); relax's
+Heaviside projection with its sharpness doubling over the continuation, .b1-16 0.1931 / 0.3378 /
+0.2041 (0.04 / 0.08 / 0.06), .b1-64 0.1931 / 0.3378 / 0.2046 (0.01 / 0.02 / 0.003), .b4-64 0.2073 /
+0.2965 / 0.1786; the steeper penalty, q continued to 5 (`.q5`), 0.2093 / 0.3423 / 0.2063 (0.12 /
+0.16 / 0.09). Ruling: SIMP's candidate is .q5, the default's L_P (the same mean, 0.2526) at half
+its grey; the projection makes SIMP binary but lands lower (.b1-64 0.007 a block below, .b4-64
+0.025). (2) A greedy over W's exact gains (walls_greedy.py): each step the building with the
+largest gain in P per unit of its D among those that still fit, each gain W's discrete scorer's
+(the clearing's state and its solve, warm from the current clearing's sides), to D 0.05. Three
+Strategies in the rows' identity: `Gx` (every candidate re-scored each step), `GxL` (CELF: stale
+gains as bounds, the top re-scored and taken once on top with a current gain) and `GxLr<radius_m>`
+(GxL, and after each building taken every candidate within radius_m of it re-scored at once).
+
+**Lazy against full.** CELF takes the full greedy's choices only where gains fall as the clearing
+grows; here they rise where a neighbour's clearing opens a way. On the pilot's seven blocks of at
+most 250 buildings GxL parted from Gx on every one (from its second to its ninth step), Gx ahead by
+a mean 0.0095 of L_P [-0.025, -0.002] (21622: after 140 and 20, Gx took 60 at 335,160 a unit D, its
+gain risen from a stale value well below the top; GxL 0.2896 against 0.3409). The buildings GxL
+missed lay 0 -- 7.4 m from one already taken. Ruling: GxLr10 (refresh within 10 m, the largest such
+distance with a margin). It takes Gx's choices on four of the seven (21269, 20318, 43304, 21622)
+and is within -0.0004 -- +0.0039 of its L_P on the other three (52730 ahead of the full greedy: a
+greedy is no optimum), mean +0.0005 [-0.000, +0.002], at 1.5x GxL's scores. Gx costs ~n^3 (its
+scores grow as the steps times n: 217 -- 2,842 s on blocks of 119 -- 203 buildings, about a day on
+18286 or 5618, days on the large controls), far over the brief's 20 process-h; GxLr10 199 -- 454
+scores there against Gx's 695 -- 3,322.
+
+**The pilot** (leaky_rows/simp/pilot_blocks.csv, committed before any result: the 77 walled-in
+small blocks less the tuning three, by walled-in homes then id, five strata, two drawn from each by
+default_rng(20261023); leaky_rows/simp/pilot/summary_*.csv). W's own L_P under S10, mean over the
+ten, and the walled-in homes left of 99 by T's street reach: SIMP's default 0.2653, 21; .q5 0.2670,
+26; GxL 0.2693, 16; GxLr10 0.2810, 14 (+0.0157 [+0.009, +0.025] over the default, ahead on 9 of
+10); on its seven (19 walled-in homes) Gx 0.2530 and GxLr10 0.2535, each leaving 1 home, GxL 2,
+SIMP's default none. GxLr10 is the fit optimizer (leaky_simp.FIT).
+
+**Guard** (leaky_check `greedy-exact`, both ways on 41940 under the guards' SYM and DIODE, GxL and
+GxLr10): every step's gain is W's exact gain (J before less J after, each scored afresh by
+WallModel.exact) to 0 of J0, and the run stops at the budget (D within it, no building left that
+fits); faults `stale-gain` (a popped gain taken without re-scoring: 2.7e-2 -- 4.3e-2 of J0) and
+`over-budget` (a candidate's fit ignoring its cost: D 1.0). relax-identity both ways on the arms by
+label (each arm's name and rows' path read back).
+
+**The measurement** (leaky_simp.py's `fit` study: rows leaky_rows/simp/fit/,
+summary_{blocks,groups,pairs}.csv). GxLr10 under S10 (S10x) on the 82 blocks and under diode B (Bx)
+on B's 20, beside T's stored arm and stage 2's SIMP defaults (S10, B), every clearing under T's,
+S10's and (on the 20) B's metric; a greedy's clearing is 0/1 throughout (grey 0, against SIMP's
+default 0.34 under S10 and 0.17 under B).
+
+**People left walled in** (B (i), T's street reach). Of the 327 walled-in homes on the 77, T leaves
+none (free first), S10x 27 on 12 blocks (4 of the 11 with no open ground within ring_m, 23 in
+pockets; SIMP's default S10 left 48 on 17). On B's 20 (57 homes, all in pockets): S10x leaves 4 on
+2 blocks, Bx 11 on 6 (B's default 15 on 8, S10's 11 on 5).
+
+**Lens A**, the first arm's clearing less the second's, mean [95% Bayesian-bootstrap interval]
+(S10x - T and S10x - S10 on all 82 but under B's metric, B's 20 there):
+
+    scorer    lens    S10x - Bx (20)           S10x - T                 S10x - S10
+    T's       L_P     -0.004 [-0.025, +0.014]  -0.050 [-0.061, -0.039]  +0.026 [+0.016, +0.039]
+              L_P1/2  +0.016 [-0.009, +0.040]  -0.050 [-0.063, -0.038]  +0.027 [+0.013, +0.047]
+              L_J2    +0.014 [-0.009, +0.039]  -0.047 [-0.059, -0.036]  +0.031 [+0.019, +0.046]
+    S10's     L_P     +0.026 [+0.019, +0.033]  +0.034 [+0.029, +0.041]  +0.012 [+0.010, +0.014]
+              L_P1/2  +0.045 [+0.034, +0.059]  +0.058 [+0.048, +0.068]  +0.015 [+0.012, +0.019]
+              L_J2    +0.036 [+0.028, +0.046]  +0.046 [+0.039, +0.054]  +0.016 [+0.013, +0.018]
+    B's (20)  L_P     -0.036 [-0.044, -0.029]  -0.006 [-0.020, +0.009]  +0.000 [-0.006, +0.006]
+              L_P1/2  -0.031 [-0.040, -0.022]  +0.010 [-0.010, +0.036]  +0.003 [-0.005, +0.011]
+              L_J2    -0.031 [-0.040, -0.024]  +0.003 [-0.016, +0.023]  +0.003 [-0.003, +0.009]
+
+Blocks ahead / behind on L_P: under T's metric S10x - Bx 10 / 10, S10x - T 10 / 72, S10x - S10 54 /
+28; under S10's 20 / 0, 80 / 2, 76 / 6; under B's 0 / 20, 8 / 12, 11 / 9. Each metric's own fit
+arm's L_P: T 0.471 (82), S10x 0.256 (82), Bx 0.354 (20). Bx against B's default under B's metric
++0.005 [+0.000, +0.010] (12 / 7); Bx against T under B's +0.030 [+0.019, +0.043]. D used: a mean
+0.0498 every greedy arm. Jaccard: median T-S10x 0.29, S10x-Bx 0.42, S10-S10x 0.37.
+
+**With a fit optimizer, S10 against B on the 20.** Under B's metric S10x's clearing is short of
+Bx's on all 20 (L_P -0.036 [-0.044, -0.029], a mean 11% of Bx's gain, median 9%); under S10's
+metric Bx's is short of S10x's on all 20 (-0.026 [-0.033, -0.019], 10%, median 11%); under T's they
+tie (-0.004 [-0.025, +0.014]); and S10x leaves fewer walled in (4 homes on 2 blocks against Bx's 11
+on 6). Different, not worse, as under SIMP's default: each clearing gives up about a tenth of the
+other's gain under the other's metric, and on the walled-in count the symmetric wall is the better.
+
+**With a fit optimizer, S10 against T on the 82.** Under T's metric S10x's clearing loses a mean
+0.050 of L_P (11% of T's 0.471; P_{1/2} and J_2 alike), behind on 72 (SIMP's default under S10 lost
+0.075, behind on 77); under S10's metric it leads by 0.034 (13% of its own 0.256; P_{1/2} +0.058,
+J_2 +0.046), ahead on 80, behind on 2 (0.002 and 0.008: SIMP's default was beaten on 12). T leaves
+no one walled in (free first), S10x 27 homes on 12 blocks. Under B's metric S10x's clearing ties
+T's (-0.006 [-0.020, +0.009]), while Bx's beats T's by 0.030: each wall's optimum stays its own.
+The fit optimizer moved the walls' clearing toward T's (Jaccard with T 0.29 against SIMP's 0.28;
+T's metric's shortfall from 0.075 to 0.050) and further from SIMP's own (+0.012 under S10, +0.026
+under T).
+
+**Compute** (here, single-threaded, at most 4 processes): the tuning trials 0.6 process-h; the
+pilot's arms 4.4 (Gx 2.3 of it, GxLr10 1.1, GxL 0.7, .q5 0.27) and its lenses and homes 0.1; the
+fit run S10x 17.5 process-h (8152 5.5 h, 20023 2.8 h, the 80 small 9.2; median 255 s a block
+against SIMP's default 58 s and T's 39 s), Bx 12.7 (median 1,405 s, B's default 331 s), the lenses
+and homes 0.7; peak memory 6.8 GB (8152); the GxL fit run's first 1.7 h on 3 processes discarded
+when GxLr10 replaced it; the guards 1.2 (greedy-exact three times, relax-identity). Within the
+brief's 20 and 30 process-h; estimated from the pilot at 11 and 8 before the run, the large
+controls and 18286's diode ran longer than the pilot's blocks implied.
