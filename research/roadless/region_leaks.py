@@ -335,13 +335,15 @@ def run_path(label: str, preset: str, bid: str) -> Path:
     return ROWS / "runs" / label / preset / metric_of(label, preset, "cpu").name / f"{bid}.parquet"
 
 
-def run(bid: str, label: str, preset: str, device: str, *, replace: bool) -> None:
-    """A preset under a configuration (module docstring), its row written once
-    (clearings.write_once: a row standing under its identity refuses the run before any work,
-    unless `replace`)."""
+def run(bid: str, label: str, preset: str, device: str, *,
+        standing: clearings.Standing) -> None:
+    """A preset under a configuration (module docstring), its row written through `standing`
+    (clearings.Standing: a row standing under its identity refuses the run before any work under
+    Refuse, is replaced under Replace, is the identity done under Keep)."""
     metric = metric_of(label, preset, device)
     out = run_path(label, preset, bid)
-    clearings.check_new(out, replace=replace)
+    if not standing.todo(out):
+        return
     t0 = time.time()
 
     def go() -> dict[str, object]:
@@ -358,7 +360,7 @@ def run(bid: str, label: str, preset: str, device: str, *, replace: bool) -> Non
     row.update(label=label, preset=preset, metric=metric.name, trip_m=CONFIGS[label].trip_m,
                host=socket.gethostname(),
                peak_rss_gb=gap_calib.peak_gb(), gpu_gb=gpu_gb, wall=time.time() - t0)
-    clearings.write_once(pd.DataFrame([row]), out, replace=replace)
+    standing.write(pd.DataFrame([row]), out)
     print(f"{bid} {label} {preset} on {device}: {metric.name}; peak {gap_calib.peak_gb():.1f} GB, "
           f"GPU {gpu_gb:.1f} GB, {row['wall']:.0f}s", flush=True)
 
@@ -1496,12 +1498,12 @@ def _single_threaded() -> None:
 
 def main(argv: list[str]) -> None:
     _single_threaded()
-    argv, again = clearings.replace_flag(argv)
+    argv, standing = clearings.standing_of(argv)
     cmd = argv[0] if argv else ""
     if cmd == "warm" and len(argv) == 3:
         warm(common.ids_of(argv[1])[0], argv[2])
     elif cmd == "run" and len(argv) == 5 and argv[3] in PRESETS:
-        run(common.ids_of(argv[1])[0], argv[2], argv[3], argv[4], replace=again)
+        run(common.ids_of(argv[1])[0], argv[2], argv[3], argv[4], standing=standing)
     elif cmd == "run" and len(argv) == 5 and argv[3] == "prior" and argv[2] in CONFIGS:
         prior(common.ids_of(argv[1])[0], argv[2], argv[4])
     elif cmd == "members" and len(argv) == 2:

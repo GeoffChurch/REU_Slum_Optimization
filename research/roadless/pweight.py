@@ -133,15 +133,17 @@ def bound(bid: str, obj: Objective) -> dict[str, object]:
                 fw_D=float(c.cost @ x), t=time.time() - t0)
 
 
-def task(bid: str, item: str, *, replace: bool) -> None:
+def task(bid: str, item: str, *, standing: clearings.Standing) -> None:
     """One (block, item), single-threaded: SIMP base (simp-) or the bound (fw-), its row to
-    row_path, written whole and once (clearings.write_once: a row standing under its identity
-    refuses the task before any work, unless `replace`)."""
+    row_path, written whole through `standing` (clearings.Standing: a row standing under its
+    identity refuses the task before any work under Refuse, is replaced under Replace, is the
+    identity done under Keep)."""
     rr._check_single_threaded()
     stage, _, token = item.partition("-")
     obj = objective_of(token)
     out = row_path(stage, obj, bid)
-    clearings.check_new(out, replace=replace)
+    if not standing.todo(out):
+        return
     t0 = time.time()
     if stage == "simp":
         row = relax.one(bid, obj.power, METRIC, PLAN, BUDGET, demand=obj.demand)
@@ -151,7 +153,7 @@ def task(bid: str, item: str, *, replace: bool) -> None:
         raise SystemExit(f"unknown item {item!r}: simp-<objective> or fw-<objective>")
     row.update(objective=obj.name, item=item, budget=BUDGET, host=socket.gethostname(),
                peak_rss_gb=rr._status_gb("VmHWM"), wall=time.time() - t0)
-    clearings.write_once(pd.DataFrame([row]), out, replace=replace)
+    standing.write(pd.DataFrame([row]), out)
     print(f"{time.strftime('%H:%M:%S')} {bid} {item} done in {time.time() - t0:.0f}s", flush=True)
 
 
@@ -438,9 +440,9 @@ def report() -> None:
 
 
 if __name__ == "__main__":
-    a, again = clearings.replace_flag(sys.argv[1:])
+    a, standing = clearings.standing_of(sys.argv[1:])
     if a[:1] == ["task"] and len(a) == 3:
-        task(a[1], a[2], replace=again)
+        task(a[1], a[2], standing=standing)
     elif a[:1] == ["score"] and len(a) == 3:
         score(int(a[1]), common.recipients() if a[2] == "all" else common.ids_of(a[2]))
     elif a == ["report"]:

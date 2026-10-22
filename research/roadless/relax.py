@@ -20,8 +20,9 @@ score exactly.
 
 metric: the gap complex's name (gap_clear.ComplexMetric; cpu or gpu, its factorization's),
 resolved here (metrics.metric_of) and handed down. A block whose rows stand under the run's
-identity refuses the run (clearings.write_once: the no-overwrite guard) unless `--replace` is
-given anywhere on the line. one: SIMP at one budget (default D_LENS, 0.05;
+identity refuses the run (clearings.Refuse: the no-overwrite guard) unless `--replace` is
+given anywhere on the line (clearings.Replace), or is kept and not run again under
+`--keep-standing` (clearings.Keep: a pool's job). one: SIMP at one budget (default D_LENS, 0.05;
 plus the Frank-Wolfe relaxation and bound if fw > 0), rows in relax_rows/<metric>/<plan>/D<budget>/.
 path: nested budgets D 0.01 .. 0.15, rows in the greedy's format (clear.rows_dir, picker
 SIMP<plan>).
@@ -774,23 +775,36 @@ def rows_of(plan: Plan, along: str, budget: float) -> Path:
     return OUT / along / plan.name / f"D{budget:g}"
 
 
-_CFG: dict = {}
+@dataclass(frozen=True, kw_only=True)
+class _Config:
+    """main's run, which _run reads in this process or in each forked worker (set before the
+    pool forks: never pickled)."""
+    mode: str
+    power: float
+    metric: gap_clear.ComplexMetric
+    plan: Plan
+    budget: float
+    standing: clearings.Standing
+
+
+_CFG: _Config | None = None
 
 
 def _run(bid: str) -> str | None:
     """`bid` if it failed (reported, and main exits non-zero at the end). The rows (named by
     the power alone) are the population's own demand's; pweight.py runs priority-weighted P."""
-    mode, power, metric, plan, budget, replace = (_CFG[k] for k in (
-        "mode", "power", "metric", "plan", "budget", "replace"))
+    assert _CFG is not None, "relax._run runs under main, which sets its _Config"
+    mode, power, metric, plan, budget, standing = (
+        _CFG.mode, _CFG.power, _CFG.metric, _CFG.plan, _CFG.budget, _CFG.standing)
     demand = common.PopulationDemand()
     out = _target(mode, bid, power, plan, metric.name, budget)
     try:
         if mode == "one":
-            clearings.write_once(pd.DataFrame([one(bid, power, metric, plan, budget,
-                                                   demand=demand)]), out, replace=replace)
+            standing.write(pd.DataFrame([one(bid, power, metric, plan, budget,
+                                             demand=demand)]), out)
         else:
-            clearings.write_once(path(bid, power, metric, plan, demand=demand).assign(
-                device=metric.device), out, replace=replace)
+            standing.write(path(bid, power, metric, plan, demand=demand).assign(
+                device=metric.device), out)
             print(f"{time.strftime('%H:%M:%S')} {bid} path done", flush=True)
     except Exception as e:
         print(f"{bid} FAILED {type(e).__name__}: {e}"[:300], flush=True)
@@ -805,15 +819,18 @@ def _target(mode: str, bid: str, power: float, plan: Plan, along: str, budget: f
 
 
 def main(mode: str, ids: list[str], power: float, metric: gap_clear.ComplexMetric, plan: Plan,
-         workers: int, budget: float, *, replace: bool) -> None:
-    """Every block's run; a block whose rows stand under this identity refuses the whole run
-    before any work (clearings.check_new), unless `replace` names the replacement."""
+         workers: int, budget: float, *, standing: clearings.Standing) -> None:
+    """Every block's run that `standing` answers is to be run, checked before any work: under
+    Refuse a block whose rows stand under this identity refuses the whole run, under Replace
+    every block runs, under Keep a block whose rows stand is done (none left: no work)."""
     if mode not in ("one", "path"):
         raise ValueError(f"unknown mode {mode!r}")
-    for i in ids:
-        clearings.check_new(_target(mode, i, power, plan, metric.name, budget), replace=replace)
-    _CFG.update(mode=mode, power=power, metric=metric, plan=plan, budget=budget, replace=replace)
-    todo = list(ids)
+    todo = [i for i in ids if standing.todo(_target(mode, i, power, plan, metric.name, budget))]
+    if not todo:
+        return
+    global _CFG
+    _CFG = _Config(mode=mode, power=power, metric=metric, plan=plan, budget=budget,
+                   standing=standing)
     if workers == 1:
         failed = [f for f in map(_run, todo) if f]
     else:
@@ -826,10 +843,10 @@ def main(mode: str, ids: list[str], power: float, metric: gap_clear.ComplexMetri
 
 if __name__ == "__main__":
     import metrics
-    argv, again = clearings.replace_flag(sys.argv)
+    argv, standing = clearings.standing_of(sys.argv)
     ids = common.recipients() if argv[2] == "all" else common.ids_of(argv[2])
     plan = plan_of(argv[5])
     main(argv[1], ids, float(argv[3]),
          metrics.metric_of(argv[6], device=argv[4]), plan,
          int(argv[7]) if len(argv) > 7 else 1,
-         float(argv[8]) if len(argv) > 8 else D_LENS, replace=again)
+         float(argv[8]) if len(argv) > 8 else D_LENS, standing=standing)

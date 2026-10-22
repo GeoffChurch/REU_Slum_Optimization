@@ -38,8 +38,10 @@ def _load(name: str, register_as: str | None = None) -> ModuleType:
 
 
 # The exporter imports the library as `clearings` and puts research/roadless on sys.path; load the
-# library under that name first so both are one module, and put sys.path back.
+# library under that name first so both are one module, and put sys.path back. The library imports
+# row_marker (a sibling, not on sys.path here), so that is loaded first.
 _saved_path = list(sys.path)
+_load("row_marker")
 clearings: Any = _load("clearings")
 exporter: Any = _load("clearings_export")
 sys.path[:] = _saved_path
@@ -330,23 +332,44 @@ def test_the_audit_refuses_a_column_it_does_not_know() -> None:
         exporter.audit([*cols, "brand_new"], exporter.SIMP, Path("f"))
 
 
-def test_a_runs_row_is_written_once_unless_its_replacement_is_named(tmp_path: Path) -> None:
-    """The optimizers' no-overwrite guard (clearings.write_once): a second write of one identity
-    raises and leaves the first row; `replace` names the replacement. Fault-injected: with
-    `_exclusive` an os.replace (the check removed) the second write replaced the first and this
-    failed; clearings_check.py `overwrite` runs it through the optimizers."""
+def test_a_runs_row_is_written_once_unless_its_replacement_is_named(
+        tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """The optimizers' no-overwrite guard and the pool's keeping of what stands
+    (clearings.Standing): under Refuse a second write of one identity raises and leaves the first
+    row; Replace puts a new row in its place; Keep reads a standing row as the identity done, and
+    keeps the first row where a write meets one, raising nothing and printing no
+    row_marker.ROW_WRITTEN; every row Keep finds standing (its check, a reuse, its write) it
+    prints as row_marker.KEPT. Fault-injected: with `_exclusive` an os.replace (the check removed)
+    the second write replaced the first and this failed; clearings_check.py `overwrite` runs it
+    through the optimizers."""
+    wrote = clearings.row_marker.ROW_WRITTEN
     f = tmp_path / "relax_rows" / "m" / "plan" / "D0.05" / "b_p1.parquet"
-    clearings.write_once(pd.DataFrame({"perm": [0.1]}), f, replace=False)
+    refuse, replace, keep = clearings.Refuse(), clearings.Replace(), clearings.Keep()
+    assert refuse.todo(f) and keep.todo(f) and replace.todo(f)
+    refuse.write(pd.DataFrame({"perm": [0.1]}), f)
+    assert capsys.readouterr().out.splitlines() == [f"{wrote}{f}"]
     with pytest.raises(clearings.Exists):
-        clearings.check_new(f, replace=False)
+        refuse.todo(f)
     with pytest.raises(clearings.Exists):
-        clearings.write_once(pd.DataFrame({"perm": [0.2]}), f, replace=False)
+        refuse.write(pd.DataFrame({"perm": [0.2]}), f)
     assert pd.read_parquet(f)["perm"].tolist() == [0.1]
     assert not [g for g in f.parent.iterdir() if g != f]          # no temp file left behind
-    clearings.check_new(f, replace=True)
-    clearings.write_once(pd.DataFrame({"perm": [0.3]}), f, replace=True)
+    kept = clearings.row_marker.KEPT
+    assert not keep.todo(f) and keep.reuse(f) and refuse.reuse(f) and not replace.reuse(f)
+    assert capsys.readouterr().out.splitlines() == [f"{kept}{f}"] * 2  # Keep's check and reuse
+    keep.write(pd.DataFrame({"perm": [0.4]}), f)
+    assert capsys.readouterr().out.splitlines() == [f"{kept}{f}"]
+    assert pd.read_parquet(f)["perm"].tolist() == [0.1]
+    assert replace.todo(f)
+    replace.write(pd.DataFrame({"perm": [0.3]}), f)
     assert pd.read_parquet(f)["perm"].tolist() == [0.3]
-    assert clearings.replace_flag(["one", "--replace", "x"]) == (["one", "x"], True)
+    assert capsys.readouterr().out.splitlines() == [f"{wrote}{f}"]
+    assert not [g for g in f.parent.iterdir() if g != f]
+    assert clearings.standing_of(["one", "--replace", "x"]) == (["one", "x"], replace)
+    assert clearings.standing_of(["--keep-standing", "one"]) == (["one"], keep)
+    assert clearings.standing_of(["one"]) == (["one"], refuse)
+    with pytest.raises(SystemExit):
+        clearings.standing_of(["--replace", "one", "--keep-standing"])
 
 
 def test_merging_keeps_what_the_sources_lost_adds_what_is_new_and_flags_an_overwrite(

@@ -8,14 +8,17 @@ the shipped permeability (reblock.permeability) recorded; then the area prefixes
 complex (decision (2)).
 
     S=research/roadless/road_rescore.py    # from the repo root, PYTHONPATH=., single-threaded
-    uv run python $S propose <rows> <scratch> <id> <method> <cache|fresh>
+    uv run python $S propose <rows> <scratch> <id> <method> <cache|fresh> \
+        [--replace | --keep-standing]
     uv run python $S propose-all <rows> <scratch> <procs> <ids,> <methods,> <timeout h> \
         <time-hits|no>
     uv run python $S prefixes <rows> <lineup,> <scratch> <procs> <ids,>
     uv run python $S cx <rows> <scratch> <metric> <cpu|gpu> <id> <items,> [--replace]
     uv run python $S cxreport <rows> <lineup,> <metric> <cpu|gpu>
-    uv run python $S lineup-one <scratch> <id> <method> [--replace]   # propose, cut, score
-    uv run python $S lineup-score <scratch> <id> <methods,> [--replace]   # cut, score
+    uv run python $S lineup-one <scratch> <id> <method> \
+        [--replace | --keep-standing]                    # propose, cut, score
+    uv run python $S lineup-score <scratch> <id> <methods,> \
+        [--replace | --keep-standing]                    # cut, score
 
 ON THE COMPLEX (phase 2b; NOTES, "The complex as the runtime: the ports and the cross-checks"):
 `cx` scores the area prefixes on the gap complex's metric (<metric>, refused unless it is one:
@@ -41,7 +44,11 @@ the derive cache (and says whether it hit); `fresh` calls the method directly, b
 cache (a refiner's base too), to time a cached proposal (propose-all queues one after every cache
 hit) and to check the cached roads against a recomputation. Rows: <rows>/proposals/
 (feasibility), <rows>/prefixes_<budgets>/ (the prefixes, their displacement under both
-weightings, and the shipped permeability). Every process single-threaded.
+weightings, and the shipped permeability). A proposal (its row and its network) and a scored
+network are written through the run's clearings.Standing: a second `propose` of a (block,
+method) is refused unless --replace, as every optimizer's second run is (propose-all proposes
+only the pairs without a row), and under --keep-standing (a pool's job) a row that stands is that
+identity done. Every process single-threaded.
 """
 from __future__ import annotations
 
@@ -123,12 +130,14 @@ def _check_single_threaded() -> None:
 
 
 def write_parquet(df: pd.DataFrame, path: Path) -> None:
-    """`df` to `path` whole or not at all: written under a name no pull matches (cluster.py's
-    pulls take `*.parquet`, while a task runs too, and never replace a local file), then renamed.
-    A GeoDataFrame writes its own way (its to_parquet)."""
-    tmp = path.with_name(path.name + ".tmp")
-    df.to_parquet(tmp)
-    os.replace(tmp, path)
+    """`df` to `path` whole or not at all, replacing what stands: written under a name no pull
+    matches (cluster.py's pulls take `*.parquet`, while a task runs too, and never replace a local
+    file) and no other process's (the host and the pid: clearings.place), then renamed. A
+    GeoDataFrame writes its own way (its to_parquet). What it writes is a working file a run makes
+    again (an ordered network, its prefixes, a step log), so it prints no row_marker.ROW_WRITTEN:
+    no progress of a pool's job (the lease pool's plan, Ruling 6); a run's rows go through its
+    clearings.Standing."""
+    clearings.place(df, path, os.replace)
 
 
 # ------------------------------------------------------------------ memory and time
@@ -256,10 +265,22 @@ def _fresh(method, block):
     return method.propose(block)
 
 
-def propose(rows: Path, scratch: Path, bid: str, name: str, method, fresh: bool) -> None:
+def propose(rows: Path, scratch: Path, bid: str, name: str, method, fresh: bool, *,
+            standing: clearings.Standing) -> None:
     """One (block, network) proposal by `method` (resolved by the caller), timed; the roads to
-    <scratch>/networks as `name`, a feasibility row to <rows>/proposals."""
+    <scratch>/networks as `name`, a feasibility row to <rows>/proposals (a failed proposal's too:
+    a failure is a finding), each written through `standing` (clearings.Standing), both asked
+    before any work: a proposal whose row stands is refused (Refuse: a person's second proposal
+    of a (block, method), `--replace` proposing again) or done (Keep: returned before the block is
+    built); a network that stands without its row (a run killed between the two) is kept under
+    Keep, the proposal run again for its row."""
     _check_single_threaded()
+    dest, out = proposal_row(rows, bid, name, fresh), net_path(scratch, bid, name, fresh)
+    proposing = standing.todo(dest)
+    standing.todo(out)          # asked too: Refuse raises on a network standing without its row
+    if not proposing:
+        print(f"{bid} {name}: its proposal row stands ({dest})", flush=True)
+        return
     from reblock import derivations
     from reblock.derive_graph import DerivationKey, _code_version, _l2, env_version
     t_all = time.perf_counter()
@@ -283,10 +304,8 @@ def propose(rows: Path, scratch: Path, bid: str, name: str, method, fresh: bool)
         roads = prop.roads
         n_roads = 0 if roads is None else len(roads)
         road_m = 0.0 if roads is None else float(roads.geometry.length.sum())
-        out = net_path(scratch, bid, name, fresh)
-        out.parent.mkdir(parents=True, exist_ok=True)
         if roads is not None:
-            write_parquet(roads, out)
+            standing.write(roads, out)
         same = np.nan
         if fresh and net_path(scratch, bid, name, False).exists():
             import geopandas as gpd
@@ -299,13 +318,13 @@ def propose(rows: Path, scratch: Path, bid: str, name: str, method, fresh: bool)
                    same_as_cached=same)
         print(f"{time.strftime('%H:%M:%S')} {bid} {name}: {n_roads} roads, {road_m:.0f} m, "
               f"{s.wall:.0f}s wall, {s.cpu:.0f}s CPU, peak RSS {s.peak:.2f} GB", flush=True)
+    except clearings.Exists:
+        raise       # another run's network stood at the write (a race under Refuse): no finding
     except Exception as e:                        # a failure is a finding: record it
         traceback.print_exc()
         row.update(status=f"failed {type(e).__name__}: {e}"[:300], hwm_gb=_status_gb("VmHWM"))
     row["total_wall_s"] = time.perf_counter() - t_all
-    dest = proposal_row(rows, bid, name, fresh)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    write_parquet(pd.DataFrame([row]), dest)
+    standing.write(pd.DataFrame([row]), dest)
 
 
 def propose_all(rows: Path, scratch: Path, procs: int, ids: list[str], methods: list[str],
@@ -366,12 +385,15 @@ def propose_all(rows: Path, scratch: Path, procs: int, ids: list[str], methods: 
                 prog = scratch / "progress" / f"{bid}__{name}{'__fresh' if fresh else ''}.json"
                 known = json.loads(prog.read_text()) if prog.exists() else {}
                 dest = proposal_row(rows, bid, name, fresh)
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                pd.DataFrame([dict(block=bid, n=int(sizes[bid]), method=name, fresh=fresh,
-                                   status=f"timeout after {timeout_s:.0f} s wall",
-                                   wall_s=known.get("wall_s", np.nan),
-                                   cpu_s=known.get("cpu_s", np.nan),
-                                   peak_rss_gb=known.get("peak_rss_gb", np.nan))]).to_parquet(dest)
+                try:        # written once: the killed run's own row, if it stood first, stays
+                    clearings.write_once(pd.DataFrame([dict(
+                        block=bid, n=int(sizes[bid]), method=name, fresh=fresh,
+                        status=f"timeout after {timeout_s:.0f} s wall",
+                        wall_s=known.get("wall_s", np.nan), cpu_s=known.get("cpu_s", np.nan),
+                        peak_rss_gb=known.get("peak_rss_gb", np.nan))]), dest)
+                except clearings.Exists:
+                    print(f"  {bid} {name}: its own proposal row stood before the kill",
+                          flush=True)
                 rc = "killed"
             if rc is None:
                 continue
@@ -582,15 +604,28 @@ def _block_row(m: gcl.Model) -> dict[str, object]:
                 nodem=int(m.nodem.sum()), host=socket.gethostname())
 
 
+def cx_path(rows: Path, metric: gcl.ComplexMetric, bid: str, name: str) -> Path:
+    """Network `name`'s rows on `bid` scored on the complex (cx_network)."""
+    return cx_dir(rows, metric) / f"{bid}__{name}.parquet"
+
+
 def cx_network(rows: Path, scratch: Path, metric: gcl.ComplexMetric, b: Block,
-               name: str, *, replace: bool) -> None:
-    """One network on the complex: its area prefixes' corridors (prefix_dir's rows: every budget
-    and the whole network) cut into the footprints, one mesh (built in a temporary directory:
-    it serves this network only), each prefix a state; the rows, the prefix rows with the lenses
-    added, to cx_dir, written once (clearings.write_once, unless `replace`)."""
+               name: str, *, standing: clearings.Standing) -> None:
+    """One network on the complex (network_rows), its rows to cx_path, written through `standing`
+    (clearings.Standing), which answers first."""
+    out = cx_path(rows, metric, b.block_id, name)
+    if not standing.todo(out):
+        return
+    standing.write(network_rows(rows, scratch, metric, b, name), out)
+
+
+def network_rows(rows: Path, scratch: Path, metric: gcl.ComplexMetric, b: Block,
+                 name: str) -> pd.DataFrame:
+    """One network scored on the complex: its area prefixes' corridors (prefix_dir's rows: every
+    budget and the whole network) cut into the footprints, one mesh (built in a temporary
+    directory: it serves this network only), each prefix a state; the rows, the prefix rows with
+    the lenses added."""
     bid = b.block_id
-    out = cx_dir(rows, metric) / f"{bid}__{name}.parquet"
-    clearings.check_new(out, replace=replace)
     t0 = time.perf_counter()
     every = pd.read_parquet(prefix_dir(rows) / f"{bid}__{name}.parquet")
     pre = every[every["pop"] == CX_POP].reset_index(drop=True)
@@ -615,33 +650,34 @@ def cx_network(rows: Path, scratch: Path, metric: gcl.ComplexMetric, b: Block,
         **{k: v for k, v in _block_row(m).items() if k != "n"}, t_carve=t_carve,
         t_mesh=t_mesh, t_model=t_model, t_total=time.perf_counter() - t0,
         peak_rss_gb=_status_gb("VmHWM"))
-    clearings.write_once(df, out, replace=replace)
     at = df[np.isclose(df.budget, PRICE_BUDGET)]
     print(f"{time.strftime('%H:%M:%S')} {bid} {name}: {len(stops)} prefixes, {carving.n} atoms, "
           f"mesh {fx.fm.nt} triangles in {t_mesh:.0f}s, model {t_model:.0f}s, states "
           f"{sum(v['t_state'] for v in got.values()):.0f}s; at D {PRICE_BUDGET:g} L_P "
           + ", ".join(f"{v:.4f}" for v in at.L_P), flush=True)
+    return df
 
 
 def cx_plain(rows: Path, metric: gcl.ComplexMetric, b: Block, *,
-             scoring: search.PolishScoring, replace: bool) -> None:
+             scoring: search.PolishScoring, standing: clearings.Standing) -> None:
     """The block's plain mesh (the node's cache): its baseline and each home's P_{1/2} weight
     (`<id>__homes`), the stored clearings (cx_stored) scored, then SIMP's default and the cheap
     preset run under P at D PRICE_BUDGET (their rows where relax.py and polish_greedy.py keep them,
     their polish scored by `scoring`; a preset whose rows stand is read, not run again) and their
-    clearings scored (`<id>__plain`). Every row written once (clearings.write_once, unless
-    `replace`, which runs the presets again too)."""
+    clearings scored (`<id>__plain`). Every row written through `standing` (clearings.Standing;
+    Replace runs the presets again too: a preset's standing row is read where `standing.reuse`
+    says)."""
     bid = b.block_id
     d = cx_dir(rows, metric)
     out = d / f"{bid}__plain.parquet"
-    clearings.check_new(out, replace=replace)
+    if not standing.todo(out):
+        return
     pop = common.PopulationDemand()
     t0 = time.perf_counter()
     m = metric.clearing(b, demand=pop)
-    clearings.write_once(pd.DataFrame(dict(block=bid, home=np.arange(m.n), pop=m.pop,
-                                           u0=m.u_pop0, a_q=m.inj_q / m.pop, nodem=m.nodem,
-                                           walled0=m.walled0)),
-                         d / f"{bid}__homes.parquet", replace=replace)
+    standing.write(pd.DataFrame(dict(block=bid, home=np.arange(m.n), pop=m.pop, u0=m.u_pop0,
+                                     a_q=m.inj_q / m.pop, nodem=m.nodem, walled0=m.walled0)),
+                   d / f"{bid}__homes.parquet")
     store = clearings.Store.committed()
     out_rows = [dict(clearing="baseline", run="", n_cleared=0, D=0.0, stored_perm=np.nan,
                      **_lens_row(m, m.base), t=0.0)]
@@ -673,15 +709,15 @@ def cx_plain(rows: Path, metric: gcl.ComplexMetric, b: Block, *,
     dirs = cx_presets(metric, scoring)
     simp_rows = dirs.simp / f"{bid}_p{CX_POWER:g}.parquet"
     ts = time.perf_counter()
-    if replace or not simp_rows.exists():
-        clearings.write_once(pd.DataFrame([relax.one(bid, CX_POWER, metric, plan, PRICE_BUDGET,
-                                                     demand=pop)]), simp_rows, replace=replace)
+    if not standing.reuse(simp_rows):
+        standing.write(pd.DataFrame([relax.one(bid, CX_POWER, metric, plan, PRICE_BUDGET,
+                                               demand=pop)]), simp_rows)
     t_simp = time.perf_counter() - ts
     cheap_rows = dirs.cheap / f"{bid}_p{CX_POWER:g}.parquet"
     ts = time.perf_counter()
-    if replace or not cheap_rows.exists():
+    if not standing.reuse(cheap_rows):
         polish_greedy.main(bid, CX_POWER, c.on(metric), c.picker, c.tries, c.width,
-                           PRICE_BUDGET, c.pairs, scoring=scoring, replace=replace)
+                           PRICE_BUDGET, c.pairs, scoring=scoring, standing=standing)
     t_cheap = time.perf_counter() - ts
     m = metric.clearing(b, demand=pop)
     cheap_search = c.on(metric).name.removeprefix(metric.name)       # the cheap preset's @e<eps>
@@ -692,62 +728,82 @@ def cx_plain(rows: Path, metric: gcl.ComplexMetric, b: Block, *,
         r = pd.read_parquet(f).iloc[0]
         score(key, store_run(f.parent), np.asarray(r[ids_col], dtype=np.int64),
               float(r[perm_col]))
-    clearings.write_once(pd.DataFrame(out_rows).assign(
+    standing.write(pd.DataFrame(out_rows).assign(
         block=bid, metric=metric.name, device=metric.device, **_block_row(m),
         t_stored=t_stored, t_simp=t_simp, t_cheap=t_cheap, t_total=time.perf_counter() - t0,
-        peak_rss_gb=_status_gb("VmHWM")), out, replace=replace)
+        peak_rss_gb=_status_gb("VmHWM")), out)
     print(f"{time.strftime('%H:%M:%S')} {bid} plain: {len(out_rows)} states, SIMP {t_simp:.0f}s, "
           f"cheap {t_cheap:.0f}s, total {time.perf_counter() - t0:.0f}s", flush=True)
 
 
 def cx(rows: Path, scratch: Path, metric: gcl.ComplexMetric, bid: str, items: list[str], *,
-       scoring: search.PolishScoring, replace: bool) -> None:
+       scoring: search.PolishScoring, standing: clearings.Standing) -> None:
     """The block's items on the complex, one after another: `plain` (cx_plain) or a network of
     prefix_dir (cx_network)."""
     _check_single_threaded()
     [b] = common.build_blocks([bid])
     for item in items:
         if item == "plain":
-            cx_plain(rows, metric, b, scoring=scoring, replace=replace)
+            cx_plain(rows, metric, b, scoring=scoring, standing=standing)
         else:
-            cx_network(rows, scratch, metric, b, item, replace=replace)
+            cx_network(rows, scratch, metric, b, item, standing=standing)
 
 
 # ------------------------------------------------------------------ the lineup, one (block, method)
 
-def _cut_and_score(scratch: Path, b: Block, name: str, *, replace: bool) -> None:
-    """A proposed network of the lineup cut to its canonical prefixes under the lineup's measure
-    (prefixes_one) and its area prefixes scored on the complex under RUNTIME on a core
-    (cx_network), every row under lineup_rows()."""
+def lineup_metric() -> gcl.ComplexMetric:
+    """The lineup's scoring metric: RUNTIME on a core."""
     import metrics
+    return gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.factorization_of("cpu"))
+
+
+def _cut_and_score(scratch: Path, b: Block, name: str, *, metric: gcl.ComplexMetric,
+                   standing: clearings.Standing) -> None:
+    """A proposed network of the lineup cut to its canonical prefixes under the lineup's measure
+    (prefixes_one) and its area prefixes scored on the complex under `metric` (cx_network), every
+    row under lineup_rows()."""
     rows = lineup_rows()
     _BLOCKS[b.block_id] = b
     if prefixes_one(PrefixJob(rows, scratch, b.block_id, name)) is not None:
         raise SystemExit(f"{b.block_id} {name}: its prefixes failed")
-    metric = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.factorization_of("cpu"))
-    cx_network(rows, scratch, metric, b, name, replace=replace)
+    cx_network(rows, scratch, metric, b, name, standing=standing)
 
 
-def lineup_one(scratch: Path, bid: str, name: str, *, replace: bool) -> None:
-    """One (block, method) of the research lineup end to end in this process (a cluster `cpu`
-    task): its network proposed by lineup_arms' method (propose, through the derive cache), then
-    cut and scored (_cut_and_score)."""
+def lineup_one(scratch: Path, bid: str, name: str, *, standing: clearings.Standing) -> None:
+    """One (block, method) of the research lineup end to end in this process (a cluster task, or
+    a pool's job): its network proposed by lineup_arms' method (propose, through the derive
+    cache, under `standing`: a proposal that stands is done under Keep), then cut and scored
+    (_cut_and_score). Its scored row is asked first (clearings.Standing): standing, the job is
+    done (Keep) or refused (Refuse) before any work."""
     _check_single_threaded()
-    propose(lineup_rows(), scratch, bid, name, lineup_arms()[name], False)
+    rows, metric = lineup_rows(), lineup_metric()
+    scored = cx_path(rows, metric, bid, name)
+    if not standing.todo(scored):
+        print(f"{bid} {name}: its scored row stands ({scored})", flush=True)
+        return
+    propose(rows, scratch, bid, name, lineup_arms()[name], False, standing=standing)
     if not net_path(scratch, bid, name, False).exists():
         raise SystemExit(f"{bid} {name}: no network (its proposal row says why)")
     [b] = common.build_blocks([bid])
-    _cut_and_score(scratch, b, name, replace=replace)
+    _cut_and_score(scratch, b, name, metric=metric, standing=standing)
 
 
-def lineup_score(scratch: Path, bid: str, names: list[str], *, replace: bool) -> None:
+def lineup_score(scratch: Path, bid: str, names: list[str], *,
+                 standing: clearings.Standing) -> None:
     """The lineup's networks of `bid` already proposed (shipped in, or kept across a change of
     the measure: the arterial plan's Task 7), each cut and scored (_cut_and_score): a prefix row
-    is a function of the measure, so it is cut where it is scored, never carried over."""
+    is a function of the measure, so it is cut where it is scored, never carried over. Every
+    network's scored row is asked before any work (clearings.Standing), and only those it
+    answers for are cut and scored: none, and the block is never built."""
     _check_single_threaded()
+    rows, metric = lineup_rows(), lineup_metric()
+    todo = [n for n in names if standing.todo(cx_path(rows, metric, bid, n))]
+    if not todo:
+        print(f"{bid}: the scored rows of {', '.join(names)} stand", flush=True)
+        return
     [b] = common.build_blocks([bid])
-    for name in names:
-        _cut_and_score(scratch, b, name, replace=replace)
+    for name in todo:
+        _cut_and_score(scratch, b, name, metric=metric, standing=standing)
 
 
 # ------------------------------------------------------------------ report
@@ -890,13 +946,13 @@ def lineup_of(arg: str) -> tuple[str, ...]:
 
 
 if __name__ == "__main__":
-    a, again = clearings.replace_flag(sys.argv[1:])
+    a, standing = clearings.standing_of(sys.argv[1:])
     cmd = a[0]
     if cmd == "propose":
         if a[5] not in ("cache", "fresh"):
             raise SystemExit(f"propose takes cache or fresh, not {a[5]!r}")
         propose(_lineup_root(Path(a[1])), Path(a[2]), a[3], a[4], lineup_arms()[a[4]],
-                a[5] == "fresh")
+                a[5] == "fresh", standing=standing)
     elif cmd == "propose-all":
         if a[7] not in ("time-hits", "no"):
             raise SystemExit(f"propose-all takes time-hits or no, not {a[7]!r}")
@@ -913,15 +969,16 @@ if __name__ == "__main__":
         polish = {"cpu": "E", "gpu": ""}[a[4]]
         cx(Path(a[1]), Path(a[2]),
            gcl.complex_of(a[3], factorization=gap_factor.factorization_of(a[4])), a[5],
-           a[6].split(","), scoring=search.polish_scoring_of(polish), replace=again)
+           a[6].split(","), scoring=search.polish_scoring_of(polish), standing=standing)
     elif cmd == "lineup-one":
         if len(a) != 4:
-            raise SystemExit("lineup-one <scratch> <id> <method> [--replace]")
-        lineup_one(Path(a[1]), common.ids_of(a[2])[0], a[3], replace=again)
+            raise SystemExit("lineup-one <scratch> <id> <method> [--replace | --keep-standing]")
+        lineup_one(Path(a[1]), common.ids_of(a[2])[0], a[3], standing=standing)
     elif cmd == "lineup-score":
         if len(a) != 4:
-            raise SystemExit("lineup-score <scratch> <id> <methods,> [--replace]")
-        lineup_score(Path(a[1]), common.ids_of(a[2])[0], a[3].split(","), replace=again)
+            raise SystemExit("lineup-score <scratch> <id> <methods,> "
+                             "[--replace | --keep-standing]")
+        lineup_score(Path(a[1]), common.ids_of(a[2])[0], a[3].split(","), standing=standing)
     elif cmd == "cxreport":
         if len(a) != 5:
             raise SystemExit("cxreport <rows> <lineup,> <metric> <cpu|gpu>")

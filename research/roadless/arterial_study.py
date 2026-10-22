@@ -19,8 +19,10 @@ written after every one to <rows>/steps/<id>__<net>.parquet.partial, a name clus
 match, and to <rows>/steps/<id>__<net>.parquet when the run ends); the network to
 <rows>/scratch/networks, a proposal row (wall, CPU, peak RSS, commits, stop, roads, host) to
 <rows>/proposals; then the lineup's canonical prefixes (road_rescore.prefixes_one) and their
-scores on the complex under RUNTIME on a core (road_rescore.cx_network). A proposal row that
-stands refuses the run unless --replace (clearings.check_new). The study's <rows> is
+scores on the complex under RUNTIME on a core (road_rescore.cx_network). A proposal row or a
+scored row that stands refuses the run unless --replace (clearings.Refuse, .Replace), or under
+--keep-standing is that identity done (clearings.Keep): a proposal that stands is scored all the
+same, and with both standing the run returns before its block is built. The study's <rows> is
 research/roadless/arterial_rows/study (untracked). `propose` is `run` without the scoring (a
 region-scale timing, whose scoring would cost more than the proposal).
 
@@ -67,7 +69,6 @@ import arterial_steps  # noqa: E402
 import clearings  # noqa: E402
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
-import gap_factor  # noqa: E402
 import road_rescore as rr  # noqa: E402
 
 from reblock.budget import road_corridor  # noqa: E402
@@ -108,35 +109,58 @@ def network_name(arm_name: str, method: GreedyArterialReblocker) -> str:
     return f"arterial-{arm_name}-{digest}"
 
 
-def _metric() -> gcl.ComplexMetric:
-    import metrics
-    return gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.factorization_of("cpu"))
-
-
 def steps_path(rows: Path, bid: str, name: str) -> Path:
     return rows / "steps" / f"{bid}__{name}.parquet"
 
 
-def run(rows: Path, bid: str, arm_name: str, *, replace: bool) -> None:
-    """One (block, arm) end to end (the module's docstring)."""
-    b, name = propose(rows, bid, arm_name, replace=replace)
-    scratch = rows / "scratch"
-    rr._BLOCKS[bid] = b
-    if rr.prefixes_one(rr.PrefixJob(rows, scratch, bid, name)) is not None:
-        raise SystemExit(f"{bid} {name}: its prefixes failed")
-    rr.cx_network(rows, scratch, _metric(), b, name, replace=replace)
-
-
-def propose(rows: Path, bid: str, arm_name: str, *, replace: bool) -> tuple[Block, str]:
-    """`run`'s proposal half alone (the network, its steps and its proposal row; no scoring):
-    the block and the network's name."""
+def run(rows: Path, bid: str, arm_name: str, *, standing: clearings.Standing) -> None:
+    """One (block, arm) end to end (the module's docstring): its proposal and its scoring, each
+    an identity (its proposal row, its scored row) that `standing` (clearings.Standing) answers
+    before any work; each done is skipped (Keep: a proposal that stands, its network written
+    before its row, is scored all the same), and with both done the block is never built."""
     rr._check_single_threaded()
     method = method_of(ARMS[arm_name])
     name = network_name(arm_name, method)
+    proposal = rr.proposal_row(rows, bid, name, False)
+    scored = rr.cx_path(rows, rr.lineup_metric(), bid, name)
+    proposing, scoring = standing.todo(proposal), standing.todo(scored)
+    if not (proposing or scoring):
+        print(f"{bid} {name}: its proposal row and its scored row stand", flush=True)
+        return
+    [b] = common.build_blocks([bid])
+    if proposing:
+        _propose(rows, b, arm_name, method, name, standing=standing)
+    else:
+        print(f"{bid} {name}: its proposal row stands ({proposal})", flush=True)
+    if scoring:
+        scratch = rows / "scratch"
+        rr._BLOCKS[bid] = b
+        if rr.prefixes_one(rr.PrefixJob(rows, scratch, bid, name)) is not None:
+            raise SystemExit(f"{bid} {name}: its prefixes failed")
+        rr.cx_network(rows, scratch, rr.lineup_metric(), b, name, standing=standing)
+
+
+def propose(rows: Path, bid: str, arm_name: str, *, standing: clearings.Standing) -> None:
+    """`run`'s proposal half alone (the network, its steps and its proposal row; no scoring). A
+    proposal whose row `standing` answers is done (Keep) returns before its block is built."""
+    rr._check_single_threaded()
+    method = method_of(ARMS[arm_name])
+    name = network_name(arm_name, method)
+    proposal = rr.proposal_row(rows, bid, name, False)
+    if not standing.todo(proposal):
+        print(f"{bid} {name}: its proposal row stands ({proposal})", flush=True)
+        return
+    [b] = common.build_blocks([bid])
+    _propose(rows, b, arm_name, method, name, standing=standing)
+
+
+def _propose(rows: Path, b: Block, arm_name: str, method: GreedyArterialReblocker, name: str, *,
+             standing: clearings.Standing) -> None:
+    """`method`'s proposal on `b`, timed and stepped: its steps and network written (working
+    files, road_rescore.write_parquet), then its proposal row through `standing`."""
+    bid = b.block_id
     scratch = rows / "scratch"
     row_path = rr.proposal_row(rows, bid, name, False)
-    clearings.check_new(row_path, replace=replace)
-    [b] = common.build_blocks([bid])
     print(f"{bid} n={len(b.buildings)} {arm_name} as {name}: {method}", flush=True)
     sp = steps_path(rows, bid, name)
     sp.parent.mkdir(parents=True, exist_ok=True)
@@ -165,11 +189,9 @@ def propose(rows: Path, bid: str, arm_name: str, *, replace: bool) -> tuple[Bloc
                n_roads=len(roads),
                road_m=float(roads.geometry.length.sum()), steps=len(log.rows),
                host=socket.gethostname())
-    row_path.parent.mkdir(parents=True, exist_ok=True)
-    rr.write_parquet(pd.DataFrame([row]), row_path)
+    standing.write(pd.DataFrame([row]), row_path)
     print(f"{bid} {name}: {row['commits']} commits ({row['stop']}), {len(roads)} roads, "
           f"{s.wall:.0f} s wall, peak RSS {s.peak:.2f} GB", flush=True)
-    return b, name
 
 
 # ------------------------------------------------------------------ report
@@ -316,7 +338,7 @@ def _verdict(runs: pd.DataFrame, lenses: pd.DataFrame) -> list[str]:
 
 
 def report(rows: Path, base: Path, ids: list[str]) -> None:
-    metric = _metric()
+    metric = rr.lineup_metric()
     srcs = {"baseline": Sources(base, BASE_NET), **_arm_sources(rows)}
     blocks = {b.block_id: b for b in common.build_blocks(ids)}
     run_rows, lens_frames, prefix_rows = [], [], []
@@ -355,12 +377,13 @@ def report(rows: Path, base: Path, ids: list[str]) -> None:
 
 
 if __name__ == "__main__":
-    a, again = clearings.replace_flag(sys.argv[1:])
+    argv = sys.argv[1:]
+    a, standing = clearings.standing_of(argv)
     if len(a) == 4 and a[0] == "run":
-        run(Path(a[1]), common.ids_of(a[2])[0], a[3], replace=again)
+        run(Path(a[1]), common.ids_of(a[2])[0], a[3], standing=standing)
     elif len(a) == 4 and a[0] == "propose":
-        propose(Path(a[1]), common.ids_of(a[2])[0], a[3], replace=again)
-    elif len(a) == 4 and a[0] == "report" and not again:
-        report(Path(a[1]), Path(a[2]), common.ids_of(a[3]))
+        propose(Path(a[1]), common.ids_of(a[2])[0], a[3], standing=standing)
+    elif len(argv) == 4 and argv[0] == "report":        # writes no row: takes no Standing's flag
+        report(Path(argv[1]), Path(argv[2]), common.ids_of(argv[3]))
     else:
         raise SystemExit(__doc__)

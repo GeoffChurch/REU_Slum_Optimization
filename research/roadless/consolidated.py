@@ -10,15 +10,20 @@ polish_greedy.py, search.py, road_rescore.py), keyed by the metric's name.
 
     S=research/roadless/consolidated.py    # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S features <ids,|@file|store> <procs>   # what meets each block: ROWS/features
-    uv run python $S baselines <id> <parts,>     # a block's baselines under the switch's parts
-    uv run python $S presets <id> <cpu|gpu> <default,hard,cheap,cheap005> [--replace]
-    uv run python $S lenses <id> [--replace]      # every preset clearing's lenses, on a core
+    uv run python $S baselines <id> <parts,> [K]  # a block's baselines under the switch's parts
+    uv run python $S presets <id> <cpu|gpu> <default,hard,cheap,cheap005> [K]
+    uv run python $S lenses <id> [K]              # every preset clearing's lenses, on a core
     uv run python $S reuse-networks <scratch>    # the lineup's networks nothing changes
     uv run python $S report                      # ROWS/summary_*.csv
     uv run python $S lineup-report               # ROWS/summary_lineup_*.csv
-    uv run python $S screen <id> <variants,> [--replace]   # phase 5's screens on a block, on a card
-    uv run python $S screen-lenses <id> [--replace]        # their clearings' lenses, on a core
+    uv run python $S screen <id> <variants,> [K]  # phase 5's screens on a block, on a card
+    uv run python $S screen-lenses <id> [K]       # their clearings' lenses, on a core
     uv run python $S screen-report <preset> <wave>         # each screen by epistemetry, its axes
+
+[K] is `--replace` or `--keep-standing` (clearings.standing_of): a row that stands under its
+identity refuses a run (before any work) unless `--replace` names a replacement, and under
+`--keep-standing` (a pool's job) is that identity done, the rest run; a command with nothing left
+returns before building its block.
 
 `features`: per block (the store's 303: clearings.Store's blocks), its OSM features (attrs["osm"])
 as the metric reads them: the barriers' cut (gap_exits.OsmBarriers.parts within the block: its
@@ -31,7 +36,9 @@ block, not a street of its ring). Rows ROWS/features/<id>.parquet.
 (items_of: SIMP's default `.p256w8x2`, the hard-block preset `.p256w8x2.GS0.01cate1`, the cheap
 preset, and the cheap preset at S0.005cat), each free first at area D 0.05 optimizing P, its rows
 in relax_rows/ and polish_rows/ under the metric's name, and the run's one-card timing
-(ROWS/onecard/<metric>/<device>/<id>.parquet).
+(ROWS/onecard/<metric>/<device>/<id>.parquet: the lineup's time, its setup included; a
+`--keep-standing` run that kept some of its presets times the rest apart, in
+ROWS/onecard_partial/, read by nothing that reads the lineup's time).
 
 `screen` (phase 5, pruning): the dominated variants on record that still exist on the complex
 (SCREENS), each in the default's company, run on a block one after another in this process on one
@@ -167,7 +174,7 @@ def _features_one(bid: str) -> str | None:
                    other_inside_m=float(deep[~drive & ~foot].sum()),
                    drive_classes=" ".join(sorted(set(cls[drive & (deep > 0)]))))
         out.parent.mkdir(parents=True, exist_ok=True)
-        clearings.write_once(pd.DataFrame([row]), out, replace=True)
+        clearings.Replace().write(pd.DataFrame([row]), out)
         print(f"{bid}: barrier {row['barrier_share']:.4f}, drivable inside "
               f"{row['drive_inside_m']:.0f} m, on the edge {row['drive_edge_m']:.0f} m", flush=True)
     except Exception as e:      # noqa: BLE001 -- reported, the pool goes on
@@ -193,13 +200,16 @@ def baseline_path(bid: str, part: str) -> Path:
     return ROWS / "baselines" / part_metric(part, "cpu").name / f"{bid}.parquet"
 
 
-def baselines(bid: str, parts: list[str], *, replace: bool) -> None:
+def baselines(bid: str, parts: list[str], *, standing: clearings.Standing) -> None:
     """The block's baseline under each part (module docstring), one after another, each written
-    once under its metric's name."""
+    through `standing` (clearings.Standing) under its metric's name: every part asked before any
+    work, only those it answers for run, and with none the block is never built."""
+    todo = [p for p in parts if standing.todo(baseline_path(bid, p))]
+    if not todo:
+        return
     [b] = common.build_blocks([bid])
-    for part in parts:
+    for part in todo:
         out = baseline_path(bid, part)
-        clearings.check_new(out, replace=replace)
         metric = part_metric(part, "cpu")
         t0 = time.time()
         fx = metric.fixed(b, cache=gcl.CACHE, carving=gcl.Carving.none(gc.geometry(b)))
@@ -211,7 +221,7 @@ def baselines(bid: str, parts: list[str], *, replace: bool) -> None:
                    unknowns=m.cells0, nt=fx.fm.nt, t_build=fx.t_build, t_mesh=t_mesh,
                    t_model=time.time() - t0 - t_mesh, host=socket.gethostname(),
                    peak_rss_gb=gap_calib.peak_gb())
-        clearings.write_once(pd.DataFrame([row]), out, replace=replace)
+        standing.write(pd.DataFrame([row]), out)
         print(f"{bid} {part}: P0 {row['P0']:.6g} Pq0 {row['Pq0']:.6g} J2_0 {row['J2_0']:.6g} "
               f"walled {row['walled']}; {fx.fm.nt} triangles, mesh {t_mesh:.0f}s, model "
               f"{row['t_model']:.0f}s, peak {row['peak_rss_gb']:.1f} GB", flush=True)
@@ -264,27 +274,55 @@ def items_of(bid: str, device: str) -> dict[str, Item]:
             "cheap005": cheap(CHEAP_005)}
 
 
+def onecard_dir(device: str) -> Path:
+    """The one-card timings on `device` of runs of every preset their commands named (`presets`):
+    each the lineup's time with its setup, read as such by lineup-report's time per block and the
+    pool's estimates (pool_plan.Onecard)."""
+    return ROWS / "onecard" / metrics.RUNTIME / device
+
+
 def onecard_path(bid: str, device: str) -> Path:
-    return ROWS / "onecard" / metrics.RUNTIME / device / f"{bid}.parquet"
+    return onecard_dir(device) / f"{bid}.parquet"
 
 
-def presets(bid: str, device: str, names: list[str], *, replace: bool) -> None:
+def onecard_partial_dir(device: str) -> Path:
+    """The one-card timings on `device` of runs that kept some of the presets they named
+    (`presets` under clearings.Keep: a pool's job run again after a kill): each timed the rest,
+    with a setup of its own, so it is no lineup's time and is kept apart from onecard_dir's,
+    where nothing reading the lineup's time reads it (lineup-report counts the blocks it leaves
+    out)."""
+    return ROWS / "onecard_partial" / metrics.RUNTIME / device
+
+
+def onecard_partial_path(bid: str, device: str) -> Path:
+    return onecard_partial_dir(device) / f"{bid}.parquet"
+
+
+def presets(bid: str, device: str, names: list[str], *, standing: clearings.Standing) -> None:
     """The lineup's presets `names` on `bid`, one after another in this process (on a GPU: one
-    card), each row written once with the device, the host, the wall time and the peak memory;
-    and the whole run's timing, its setup (the block built and the first mesh) included
-    (`onecard`: the measurement gap, BACKLOG's "one-card timing of the whole lineup with
-    setup")."""
+    card), each row written through `standing` (clearings.Standing) with the device, the host,
+    the wall time and the peak memory; and the whole run's timing, its setup (the block built and
+    the first mesh) included (`onecard`: the measurement gap, BACKLOG's "one-card timing of the
+    whole lineup with setup"). Every identity (each preset and the one-card row) is asked before
+    any work, and the presets run are those `standing.todo` answers True for (Refuse: all, or
+    Exists; Keep: those whose rows do not stand). The one-card row times this run's own work and
+    names in `presets` the presets it ran: a run of all of `names` writes it at onecard_path (the
+    lineup's time), one that kept some at onecard_partial_path (Keep's re-run of a killed job:
+    the rest's time), each if `standing` answers for it; with no preset to run there is nothing
+    to time."""
     t_task = time.time()
     items = items_of(bid, device)
     unknown = sorted(set(names) - set(items))
     if unknown:
         raise SystemExit(f"unknown presets {unknown}: {sorted(items)}")
-    for k in names:
-        clearings.check_new(items[k].path, replace=replace)
-    clearings.check_new(onecard_path(bid, device), replace=replace)
+    ran = [k for k in names if standing.todo(items[k].path)]
+    timing_path = (onecard_path if ran == names else onecard_partial_path)(bid, device)
+    timed = standing.todo(timing_path)
+    if not ran:
+        return
     timing: dict[str, object] = dict(block=bid, device=device, metric=metrics.RUNTIME,
-                                     host=socket.gethostname(), presets=",".join(names))
-    for k in names:
+                                     host=socket.gethostname(), presets=",".join(ran))
+    for k in ran:
         item = items[k]
         t0 = time.time()
         if device == "gpu":
@@ -296,13 +334,14 @@ def presets(bid: str, device: str, names: list[str], *, replace: bool) -> None:
         wall = time.time() - t0
         row.update(device=device, host=socket.gethostname(), peak_rss_gb=gap_calib.peak_gb(),
                    gpu_gb=gpu_gb, wall=wall)
-        clearings.write_once(pd.DataFrame([row]), item.path, replace=replace)
+        standing.write(pd.DataFrame([row]), item.path)
         timing.update({f"wall_{k}": wall, f"t_{k}": float(cast(float, row["t"])),
                        f"gpu_gb_{k}": gpu_gb})
         print(f"{bid} {k} ({item.name}) on {device}: {wall:.0f}s, peak "
               f"{gap_calib.peak_gb():.1f} GB, GPU {gpu_gb:.1f} GB", flush=True)
     timing.update(wall=time.time() - t_task, peak_rss_gb=gap_calib.peak_gb())
-    clearings.write_once(pd.DataFrame([timing]), onecard_path(bid, device), replace=replace)
+    if timed:
+        standing.write(pd.DataFrame([timing]), timing_path)
 
 
 # ------------------------------------------------------------------ every clearing's lenses
@@ -311,14 +350,16 @@ def lenses_path(bid: str) -> Path:
     return ROWS / "lenses" / metrics.RUNTIME / f"{bid}.parquet"
 
 
-def lenses(bid: str, *, replace: bool) -> None:
+def lenses(bid: str, *, standing: clearings.Standing) -> None:
     """Every preset clearing of `bid` under RUNTIME (the lineup's rows on either device: items_of's
     paths), each scored on a core under RUNTIME on P, P_{1/2} and J_2 (Lens A at its D) with B (i),
     as road_rescore's rows are (`_lens_row`), the baseline's first: the presets' lenses and the
-    price of roads' clearings. Rows ROWS/lenses/<metric>/<id>.parquet."""
+    price of roads' clearings. Rows ROWS/lenses/<metric>/<id>.parquet, written through
+    `standing` (clearings.Standing)."""
     import road_rescore as rr
     out = lenses_path(bid)
-    clearings.check_new(out, replace=replace)
+    if not standing.todo(out):
+        return
     [b] = common.build_blocks([bid])
     m = metrics.metric_of(metrics.RUNTIME, device="cpu").clearing(b, demand=POP)
     rows = [dict(preset="baseline", device="", run="", n_cleared=0, D=0.0, stored_perm=np.nan,
@@ -336,8 +377,7 @@ def lenses(bid: str, *, replace: bool) -> None:
                              D=float(m.cost[x].sum()),
                              stored_perm=float(r["simp_perm"] if simp else r["perm"]),
                              **rr._lens_row(m, m.lenses(x))))
-    clearings.write_once(pd.DataFrame(rows).assign(block=bid, metric=metrics.RUNTIME),
-                         out, replace=replace)
+    standing.write(pd.DataFrame(rows).assign(block=bid, metric=metrics.RUNTIME), out)
     print(f"{bid}: {len(rows) - 1} clearings scored", flush=True)
 
 
@@ -467,18 +507,21 @@ def screens_metric(metric: str, *, device: str) -> gcl.ComplexMetric:
                          f"ledger afresh") from e
 
 
-def screen(bid: str, variants: list[str], *, replace: bool, metric: str) -> None:
-    """Phase 5's screens on `bid` under `metric`: each of `variants` (SCREENS) in turn in this
-    process, on one card, each row written once with the device, the host, the wall time and the
-    peak memory (as `presets` writes the presets')."""
+def screen(bid: str, variants: list[str], *, standing: clearings.Standing, metric: str) -> None:
+    """Phase 5's screens on `bid` under `metric`: each of `variants` (SCREENS) that
+    `standing.todo` answers True for (clearings.Standing; every one asked before any work, the
+    metric built only if one is), in turn in this process, on one card, each row written through
+    `standing` with the device, the host, the wall time and the peak memory (as `presets` writes
+    the presets')."""
     import relax
     unknown = sorted(set(variants) - set(SCREENS))
     if unknown:
         raise SystemExit(f"unknown variants {unknown}: {sorted(SCREENS)}")
+    ran = [v for v in variants if standing.todo(screen_path(v, bid, metric=metric))]
+    if not ran:
+        return
     m = screens_metric(metric, device="gpu")
-    for v in variants:
-        clearings.check_new(screen_path(v, bid, metric=metric), replace=replace)
-    for v in variants:
+    for v in ran:
         plan = screen_plan(v)
         t0 = time.time()
         with gap_calib.GpuPeak() as peak:
@@ -490,8 +533,7 @@ def screen(bid: str, variants: list[str], *, replace: bool, metric: str) -> None
         wall = time.time() - t0
         row.update(device="gpu", host=socket.gethostname(), peak_rss_gb=gap_calib.peak_gb(),
                    gpu_gb=peak.peak, wall=wall)
-        clearings.write_once(pd.DataFrame([row]), screen_path(v, bid, metric=metric),
-                             replace=replace)
+        standing.write(pd.DataFrame([row]), screen_path(v, bid, metric=metric))
         print(f"{bid} {v} ({plan.name}): {wall:.0f}s, GPU {peak.peak:.1f} GB", flush=True)
 
 
@@ -499,13 +541,15 @@ def screen_lenses_path(bid: str, *, metric: str) -> Path:
     return ROWS / "screen_lenses" / metric / f"{bid}.parquet"
 
 
-def screen_lenses(bid: str, *, replace: bool, metric: str) -> None:
+def screen_lenses(bid: str, *, standing: clearings.Standing, metric: str) -> None:
     """Every screen clearing of `bid` scored on a core under `metric`, as `lenses` scores the
-    presets'. Rows ROWS/screen_lenses/<metric>/<id>.parquet."""
+    presets'. Rows ROWS/screen_lenses/<metric>/<id>.parquet, written through `standing`
+    (clearings.Standing)."""
     import road_rescore as rr
     out = screen_lenses_path(bid, metric=metric)
+    if not standing.todo(out):
+        return
     built = screens_metric(metric, device="cpu")
-    clearings.check_new(out, replace=replace)
     [b] = common.build_blocks([bid])
     m = built.clearing(b, demand=POP)
     rows = []
@@ -517,8 +561,7 @@ def screen_lenses(bid: str, *, replace: bool, metric: str) -> None:
         x[np.asarray(r["simp_cleared"], dtype=np.int64)] = True
         rows.append(dict(variant=v, n_cleared=int(x.sum()), D=float(m.cost[x].sum()),
                          stored_perm=float(r["simp_perm"]), **rr._lens_row(m, m.lenses(x))))
-    clearings.write_once(pd.DataFrame(rows).assign(block=bid, metric=metric),
-                         out, replace=replace)
+    standing.write(pd.DataFrame(rows).assign(block=bid, metric=metric), out)
     print(f"{bid}: {len(rows)} screen clearings scored", flush=True)
 
 
@@ -764,7 +807,9 @@ def reuse_networks(scratch: Path) -> None:
     4's run, 2026-10-10/11, but for the price and free-first plumbing, float for float under
     Opaque and HoldNothing), so each network of REUSED is item 4's, copied to the lineup's
     scratch with its canonical order, its prefixes' rows and its proposal row (`status` saying
-    so). The arterial is proposed anew (its cap)."""
+    so): the network and the proposal row, a proposal's identities, written once (as
+    road_rescore.propose writes them: a row a proposal left refuses the copy), the order and the
+    prefixes working files. The arterial is proposed anew (its cap)."""
     import road_rescore as rr
     rows = rr.lineup_rows()
     done = 0
@@ -780,8 +825,7 @@ def reuse_networks(scratch: Path) -> None:
                 raise SystemExit(f"{bid} {name}: item 4's network or its row is missing")
             if out.exists():
                 continue
-            out.parent.mkdir(parents=True, exist_ok=True)
-            rr.write_parquet(gpd.read_parquet(src), out)
+            clearings.write_once(gpd.read_parquet(src), out)    # a proposal's identity: once
             # its canonical order and prefixes too: a function of the network and the block
             rr.write_parquet(gpd.read_parquet(rr.ordered_path(STORED_ROADS / "scratch", bid, name)),
                              rr.ordered_path(scratch, bid, name))
@@ -791,9 +835,7 @@ def reuse_networks(scratch: Path) -> None:
             rr.write_parquet(pd.read_parquet(stored), pre)
             r = pd.read_parquet(row).assign(
                 status="reused: item 4's HoldNothing network (RUNTIME walls no home in)")
-            dest = rr.proposal_row(rows, bid, name, False)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            rr.write_parquet(r, dest)
+            clearings.write_once(r, rr.proposal_row(rows, bid, name, False))
             done += 1
     print(f"{done} networks reused into {scratch}", flush=True)
 
@@ -939,8 +981,17 @@ def lineup_report() -> None:
     first = to[to["rank"] == 1].groupby(["lens", "preset"]).size().unstack(fill_value=0)
     print("\nFIRST IN B'S ORDER among default, hard, cheap (blocks; ties count for each)\n"
           + first.to_string())
-    one = _read(ROWS / "onecard" / metrics.RUNTIME / "gpu")
-    cpu = _read(ROWS / "onecard" / metrics.RUNTIME / "cpu")
+    # the lineup's time per block: onecard_dir's rows, each a run of every preset it names (a
+    # run that kept some is timed apart, onecard_partial_path's, and read by nothing here)
+    one = _read(onecard_dir("gpu"))
+    cpu = _read(onecard_dir("cpu"))
+    for device, whole in (("gpu", one), ("cpu", cpu)):
+        timed = set(whole.block) if len(whole) else set()
+        only = sorted({f.stem for f in onecard_partial_dir(device).glob("*.parquet")} - timed)
+        print(f"\nPARTIAL ONE-CARD ROWS ({device}): {len(only)} blocks have only a partial "
+              "one-card row (a --keep-standing run's after a kill: onecard_partial/), so are "
+              "missing from the time per block and from the pool's presets estimates"
+              + "".join(f"\n  {b}" for b in only))
     tim = pd.concat([one.assign(device="gpu"), cpu.assign(device="cpu")], ignore_index=True)
     tim["size"] = tim.block.map(feat["size"])
     tim.to_csv(out / "summary_lineup_onecard.csv", index=False)
@@ -1067,14 +1118,14 @@ def lineup_report() -> None:
 
 
 def main(argv: list[str]) -> None:
-    argv, again = clearings.replace_flag(argv)
+    argv, standing = clearings.standing_of(argv)
     cmd = argv[0] if argv else ""
     if cmd == "features" and len(argv) == 3:
         features(ids_arg(argv[1]), int(argv[2]))
     elif cmd == "presets" and len(argv) == 4 and argv[2] in ("cpu", "gpu"):
-        presets(common.ids_of(argv[1])[0], argv[2], argv[3].split(","), replace=again)
+        presets(common.ids_of(argv[1])[0], argv[2], argv[3].split(","), standing=standing)
     elif cmd == "lenses" and len(argv) == 2:
-        lenses(common.ids_of(argv[1])[0], replace=again)
+        lenses(common.ids_of(argv[1])[0], standing=standing)
     elif cmd == "reuse-networks" and len(argv) == 2:
         reuse_networks(Path(argv[1]))
     elif cmd == "report" and len(argv) == 1:
@@ -1082,10 +1133,10 @@ def main(argv: list[str]) -> None:
     elif cmd == "lineup-report" and len(argv) == 1:
         lineup_report()
     elif cmd == "screen" and len(argv) == 3:
-        screen(common.ids_of(argv[1])[0], argv[2].split(","), replace=again,
+        screen(common.ids_of(argv[1])[0], argv[2].split(","), standing=standing,
                metric=SCREENS_METRIC)
     elif cmd == "screen-lenses" and len(argv) == 2:
-        screen_lenses(common.ids_of(argv[1])[0], replace=again, metric=SCREENS_METRIC)
+        screen_lenses(common.ids_of(argv[1])[0], standing=standing, metric=SCREENS_METRIC)
     elif cmd == "screen-report" and len(argv) == 3 and argv[2].isdigit():
         named = screen_presets()     # the preset resolved once, here: a name with no default
         if argv[1] not in named:
@@ -1095,7 +1146,7 @@ def main(argv: list[str]) -> None:
         parts = argv[2].split(",")
         if not set(parts) <= set(PARTS):
             raise SystemExit(f"parts: {PARTS}")
-        baselines(common.ids_of(argv[1])[0], parts, replace=again)
+        baselines(common.ids_of(argv[1])[0], parts, standing=standing)
     else:
         raise SystemExit(__doc__)
 

@@ -31,10 +31,11 @@ relax.py's rows of that plan, power and conductance): the seed is the first move
 and checked against SIMP's own score of it, so a swing from it finishes SIMP's answer.
 
     CUDA_PATH=/usr PYTHONPATH=. uv run python research/roadless/search.py <ids,> <spec> <p> \
-        <cpu|gpu> <metric> <d_max> [--replace]
+        <cpu|gpu> <metric> <d_max> [--replace | --keep-standing]
 
-A block whose rows stand under the run's identity refuses the run (clearings.write_once: the
-no-overwrite guard) unless `--replace` names the replacement.
+A block whose rows stand under the run's identity refuses the run (clearings.Refuse: the
+no-overwrite guard) unless `--replace` names the replacement (clearings.Replace), or is done and
+not run again under `--keep-standing` (clearings.Keep: a pool's job).
 
 metric: the complex's name (gap_clear.ComplexMetric; cpu or gpu, its factorization's):
 metrics.metric_of, resolved here and handed down.
@@ -74,6 +75,7 @@ import clear  # noqa: E402
 from clear import rows_dir  # noqa: E402
 
 if TYPE_CHECKING:
+    import clearings    # main's Standing (the caller's, resolved by clearings.standing_of)
     import gap_clear    # gap_clear imports this module at run time
 
 R = TypeVar("R")
@@ -1354,10 +1356,10 @@ def prune_block(b: Any, plan: SearchPlan, *, metric: gap_clear.ComplexMetric,
 
 
 def main(ids: list[str], plan: SearchPlan, power: float, metric: gap_clear.ComplexMetric,
-         d_max: float, *, replace: bool) -> None:
-    """Every block's rows in clear.rows_dir, written once (clearings.write_once): a block whose
-    rows stand under this identity refuses the run before any work, unless `replace`."""
-    import clearings
+         d_max: float, *, standing: clearings.Standing) -> None:
+    """Every block's rows in clear.rows_dir, written through `standing` (clearings.Standing),
+    which answers before any work which blocks run: under Refuse a block whose rows stand under
+    this identity refuses the run, under Keep it is done."""
     import polish_greedy  # the cheap preset's polish world
 
     def screen_of(c: gap_clear.Model, pw: float) -> Valuer:
@@ -1369,10 +1371,11 @@ def main(ids: list[str], plan: SearchPlan, power: float, metric: gap_clear.Compl
                             eps=polish_greedy.SCORE_EPS).metric_world(polish_greedy.SCORE_EPS)
 
     out = rows_dir(f"{plan.name}D{d_max:g}", power=power, metric=metric.name)
-    for bid in ids:
-        clearings.check_new(out / f"{bid}.parquet", replace=replace)
+    todo = [bid for bid in ids if standing.todo(out / f"{bid}.parquet")]
+    if not todo:
+        return
     failed = []
-    for b in common.build_blocks(ids):
+    for b in common.build_blocks(todo):
         f = out / f"{b.block_id}.parquet"
         try:
             rows = prune_block(b, plan, metric=metric, screen_of=screen_of, polish_of=polish_of,
@@ -1381,7 +1384,7 @@ def main(ids: list[str], plan: SearchPlan, power: float, metric: gap_clear.Compl
             print(f"{b.block_id} FAILED {type(e).__name__}: {str(e)[:200]}", flush=True)
             failed.append(b.block_id)
             continue
-        clearings.write_once(rows, f, replace=replace)
+        standing.write(rows, f)
     if failed:
         raise SystemExit(f"{len(failed)} blocks failed: {', '.join(failed)}")
 
@@ -1392,7 +1395,7 @@ if __name__ == "__main__":
     import search       # run as a script this file would be `__main__`, and relax's `search`
                         # a second copy of the engine (its own EXACT and classes)
     import clearings
-    argv, again = clearings.replace_flag(sys.argv)
+    argv, standing = clearings.standing_of(sys.argv)
     power, device, along, d_max = (float(argv[3]), argv[4], argv[5], float(argv[6]))
     metric = metrics.metric_of(along, device=device)
 
@@ -1411,4 +1414,4 @@ if __name__ == "__main__":
     search.main(common.ids_of(argv[1]),
                 search.plan_of(argv[2], pool=relax.PAIR_POOL,
                                simp_seeds=simp_seeds),
-                power, metric, d_max, replace=again)
+                power, metric, d_max, standing=standing)
