@@ -888,6 +888,22 @@ Not pursued, with what would change that:
   `pages/methods/plus-l-take-away-r.md` ("Dead end: the two planned next rows, dropped unbuilt"),
   with what would reopen them (the whole curve in one run at better quality than the greedy's, or a
   block class where the relaxation is weak, like 30796).
+- **The optimizer space, screened on the cluster** (owner 2026-10-22, **queued**): every optimizer
+  as a point of one composed space, the start (SIMP, none), the step to a binary clearing (round,
+  fix-and-resolve at a confidence p: fix the sure buildings and re-solve the rest warm, greedy over
+  SIMP's grey buildings, the full greedy with a local refresh of radius r: research/leaky-walls'
+  GxLr10) and a refinement (none, the add/remove search's swaps), under T and under the walls
+  metric W (research/leaky-walls). Much of it exists for T: search.py's Round under a schedule
+  (floating search, grow-then-prune, swings, the exchange polish) and SIMP's default with the
+  undecided-set polish, which beat floating search (-0.011 at 10x) and swings under T (above);
+  under W SIMP's default ends grey and GxLr10 beat it (+0.016 [+0.009, +0.025] on the pilot), so
+  the ranking may differ by metric. Screened by epistemetry on the cluster through the lease pool,
+  each wave a screen's next units. The outcomes (owner 2026-10-22): P, P_{1/2} and runtime, at
+  one displacement budget or as curves over several; not the people left walled in ("its
+  definition is somewhat arbitrary ... nobody is actually walled in"). Waits on epistemetry
+  #13 (a Pareto-frontier target with per-arm stopping by dominance) and #14 (choosing units
+  without bias: stratified orders by block size), and on the owner's call on Open, "A screen
+  continued over real waves" (a block's cost covariate before and after it runs).
 - **Swing schedules** (owner 2026-10-09; tested 2026-10-10, NOTES "Swing schedules at the
   cheap preset's budget" and "Swings as SIMP's finisher"). Several grow-then-prune swings past
   the budget, each smaller, then the polish (search.py
