@@ -12,6 +12,7 @@ code as it is and must fail under each of its faults.
                                                     # with-proposed, one-run
     uv run python $S walltime [--fault <name>]      # faults: no-fit, left-once
     uv run python $S oom [--fault <name>]           # faults: fail-on-oom, unified-first
+    uv run python $S memory [--fault <name>]        # faults: no-watchdog, leader-only
     uv run python $S identity [--fault <name>]      # fault: no-identity
     uv run python $S worker [--fault <name>]        # faults: fail-worker, no-exclude,
                                                     # no-retire, no-kill, pid-only, no-rebirth,
@@ -152,6 +153,17 @@ says another:
   for a v2 cgroup with no memory.events, a v1 one with no oom_kill line (before kernel 4.13) and no
   line at all; this machine's is printed, unchecked. Faults: `fail-on-oom` (an OOM recorded
   FAILED: promote fails) and `unified-first` (the v2 line taken first: hybrid fails).
+- `memory` (the owner's "Worker enforces it", 2026-10-22: ai's Slurm sets no memory limit, so
+  the worker watches its job's summed session RSS): each case one job of m4, its memory the
+  worker's own RSS and MEMORY_LIMIT_GB (0.5), so its limit is that; a python allocating and
+  holding MEMORY_HOLD (10 s). `over`, one process of 1 GB: killed within MEMORY_KILL_WITHIN
+  (5 s), its attempt `oom` rc -9 with a peak past the limit, the job promoted (PENDING in m12),
+  the log naming the worker's measure ("worker: rss X GB > limit Y GB") once; `under`, one of
+  0.2 GB: untouched, done (rc 0), its peak at least 0.2 GB, no such line; `forked`, a shell
+  forking three of 0.3 GB each (none past the limit, their sum past it): killed as `over`.
+  Faults: `no-watchdog` (the watch's thread watching nothing: over and forked run to done) and
+  `leader-only` (pool_worker._members counting the session's leader alone, the shell: forked
+  runs to done).
 - `identity` (guard 9): a queue at COMMIT and a worker's checkout at another: work exits 1 before
   registering, no attempt; work_one (the long lane's) the same. Fault `no-identity` (the check
   patched out): each runs its job.
@@ -183,10 +195,11 @@ says another:
   quadro2: each a SystemExit naming what it is not, no worker registered.
   `idle`: an open queue with nothing pending: retired (75) after the ladder's idle minutes, 10
   polls; `idle-at-end`, the same with less than the margin left: at once. `aside`: asked aside
-  during job 1: retired (75) after it, job 2 never claimed. `long-lane`: pool.py `work --job` of a
-  LONG job, twice: done (0), then not waiting (1), each worker registered on the job's node in the
-  class `long`. Faults: `fail-worker` (one failed job ends the worker, exit 1) and `no-exclude`
-  (no lease's attempts excluded: a lease spends a failed job's every strike), each failing
+  during job 1: retired (75) after it, job 2 never claimed. `long-lane`: pool.py `work --job
+  --mem` of a LONG job, twice: done (0), then not waiting (1), each worker registered on the
+  job's node in the class `long`. Faults: `fail-worker` (one failed job ends the worker, exit 1)
+  and `no-exclude` (no lease's attempts excluded: a lease spends a failed job's every strike),
+  each failing
   absent-queue, bad-node, one-job and progress; `no-retire` (SqliteQueue.retire a no-op: raises
   and the cases reading the workers fail), `no-kill` (pool_worker._kill a no-op: raises and group
   wait out the child), `pid-only` (pool_worker._kill kills the shell alone, not its group: group's
@@ -1207,6 +1220,7 @@ GRANDCHILD = ("true && sh -c 'echo \"grandchild $$\"; echo started; "
               f"exec sleep {RAISE_SLEEP:g}'; echo after")
 GONE_WAIT = 2.0                   # ... the most the grandchild takes to be gone after the kill (s)
 QUADRO = "quadro2"                # a node other than NODE
+M4_GB = 4                         # the class m4's memory, against which its jobs are watched
 
 
 class Clock:
@@ -1269,17 +1283,26 @@ def _nothing(q: pq.Queue, c: pq.Claim, clock: Clock) -> None:
 
 def _work(path: Path, seed: pq.Seed, *, worker: str, run: str, commit: str,
           minutes_left: float, oom: pw.OomEvidence, after: After) -> Worked:
+    """`_work_with` at the memory of the class m4 (M4_GB)."""
+    return _work_with(path, seed, worker=worker, run=run, commit=commit,
+                      minutes_left=minutes_left, oom=oom, after=after, memory_gb=M4_GB)
+
+
+def _work_with(path: Path, seed: pq.Seed, *, worker: str, run: str, commit: str,
+               minutes_left: float, oom: pw.OomEvidence, after: After,
+               memory_gb: float) -> Worked:
     """pool_worker.work as `worker` of `run` (of NODE, m4) on a queue at `path` made from `seed`
     (or opened, made already), its checkout at `commit`, `minutes_left` of walltime on a fake
-    clock (Clock), each job a real child (pool_worker.run_job in `path`'s directory), `after`
-    called after each (with the clock, which it may move)."""
+    clock (Clock), each job a real child (pool_worker.run_job in `path`'s directory, watched
+    against `memory_gb`), `after` called after each (with the clock, which it may move)."""
     q: pq.Queue = pq.SqliteQueue.open(path, seed)
     clock = Clock(start=time.time(), poll=seed.header.ladder.poll_seconds)
     log: list[str] = []
 
     def run_line(c: pq.Claim) -> pw.Ran:
-        ran = pw.run_job(c.job.line, cwd=path.parent, env=os.environ, log=log.append,
-                         wrote=lambda: q.wrote(c.attempt), kept=lambda: q.kept(c.attempt))
+        ran = pw.run_job(c.job.line, cwd=path.parent, env=os.environ, memory_gb=memory_gb,
+                         log=log.append, wrote=lambda: q.wrote(c.attempt),
+                         kept=lambda: q.kept(c.attempt))
         after(q, c, clock)
         return ran
 
@@ -1460,6 +1483,87 @@ def oom(_args: list[str]) -> list[str]:
         return _oom_cases(Path(tmp)) + _readers(Path(tmp))
 
 
+#: memory: the limit each case's job is watched against (GB): its memory the worker's own RSS and
+#: this (pool_worker.run_job's limit is its memory less the worker's own RSS)
+MEMORY_LIMIT_GB = 0.5
+MEMORY_HOLD = 10.0                # ... how long a case's job holds what it allocated (s)
+MEMORY_KILL_WITHIN = 5.0          # ... the most a killed case's worker takes (s): a few periods
+MEMORY_OVER_GB = 1.0              # over: the one process's allocation, twice the limit
+MEMORY_UNDER_GB = 0.2             # under: ... below it
+MEMORY_FORKS = 3                  # forked: processes each allocating MEMORY_FORK_GB, together
+MEMORY_FORK_GB = 0.3              # ... past the limit, each below it
+
+
+def _holding(gb: float) -> str:
+    """A python allocating `gb` (every byte written: resident), saying so, then holding it
+    MEMORY_HOLD seconds."""
+    code = (f"import time; held = b'x' * {int(gb * 2 ** 30)}; print('holding', len(held), "
+            f"flush=True); time.sleep({MEMORY_HOLD:g})")
+    return f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
+
+
+class MemoryCase(NamedTuple):
+    """A memory case: its job's line, and whether its worker should kill it."""
+    name: str
+    line: str
+    killed: bool
+
+
+MEMORY_CASES = (
+    MemoryCase(name="over", line=_holding(MEMORY_OVER_GB), killed=True),
+    MemoryCase(name="under", line=_holding(MEMORY_UNDER_GB), killed=False),
+    # the shell forks each (`&`) and waits: the session's sum passes the limit, no process does
+    MemoryCase(name="forked", line=" ".join(f"{_holding(MEMORY_FORK_GB)} &"
+                                            for _ in range(MEMORY_FORKS)) + " wait",
+               killed=True),
+)
+
+
+def _memory_case(tmp: Path, case: MemoryCase) -> list[str]:
+    """`case`'s job, m4's under cpu-score, run by pool_worker.work with its memory the worker's
+    own RSS and MEMORY_LIMIT_GB: killed within MEMORY_KILL_WITHIN, an attempt `oom` rc -9 (its
+    peak past the limit), the job promoted (PENDING in m12) and the log naming the worker's
+    measure past its limit; or, not to be killed, done (rc 0, its peak at least its
+    allocation) and no such line."""
+    lad = LADDERS["cpu-score"]
+    memory_gb = pw.own_rss_gb() + MEMORY_LIMIT_GB
+    t0 = time.monotonic()
+    w = _work_with(tmp / f"{case.name}.db", _seed(lad, [_m4(1, minutes=30.0, line=case.line)]),
+                   worker=WORKER, run=RUN, commit=COMMIT, minutes_left=120.0,
+                   oom=Counted(count=0), after=_nothing, memory_gb=memory_gb)
+    took = time.monotonic() - t0
+    said = [x for x in w.log if x.startswith("job 1: killed for memory (worker: rss ")]
+    peak = w.attempts[0].peak_gb if len(w.attempts) == 1 else None
+    if case.killed:
+        notes = _state(w, 1, state=pq.JobState.PENDING, cls="m12", strikes=0)
+        notes += [] if _tried(w) == [(1, "oom", -9)] else [f"attempts {_tried(w)}"]
+        notes += [] if took < MEMORY_KILL_WITHIN else [
+            f"took {took:.1f} s (its job holds {MEMORY_HOLD:g}): not killed in time"]
+        notes += [] if len(said) == 1 else [f"the log names the worker's measure {len(said)} "
+                                            "times, want once"]
+        notes += [] if peak is not None and peak > MEMORY_LIMIT_GB else [
+            f"the attempt's peak {peak} GB, want past the limit {MEMORY_LIMIT_GB:g}"]
+    else:
+        notes = _state(w, 1, state=pq.JobState.DONE, cls="m4", strikes=0)
+        notes += [] if _tried(w) == [(1, "done", 0)] else [f"attempts {_tried(w)}"]
+        notes += [] if not said else [f"the log says it was killed: {said}"]
+        notes += [] if peak is not None and peak >= MEMORY_UNDER_GB else [
+            f"the attempt's peak {peak} GB, want at least {MEMORY_UNDER_GB:g}"]
+    print(f"memory {case.name}: limit {MEMORY_LIMIT_GB:g} GB, attempts {_tried(w)}, peak "
+          f"{peak if peak is None else round(peak, 2)} GB, {took:.1f} s"
+          + (f", {said[0].split('(', 1)[1].rstrip(')')}" if said else "") + _failing(notes),
+          flush=True)
+    return [case.name] if notes else []
+
+
+def memory(_args: list[str]) -> list[str]:
+    bad: list[str] = []
+    for case in MEMORY_CASES:
+        with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
+            bad += _memory_case(Path(tmp), case)
+    return bad
+
+
 def identity(_args: list[str]) -> list[str]:
     lad = LADDERS["cpu-score"]
     bad: list[str] = []
@@ -1483,6 +1587,7 @@ def identity(_args: list[str]) -> list[str]:
         ex = pw.work_one(queue=q, worker="long", restarts=0, run="pool-check-long-1", job=long.id,
                          commit=OTHER_COMMIT, ends_at=time.time() + 3600.0, now=time.time,
                          run_line=lambda c: pw.run_job(c.job.line, cwd=Path(tmp), env=os.environ,
+                                                       memory_gb=math.ceil(long.gb),
                                                        log=log.append, wrote=lambda: None,
                                                        kept=lambda: None),
                          oom=Counted(count=0), log=log.append)
@@ -1682,10 +1787,9 @@ def _long_lane(tmp: Path) -> list[str]:
     long = _line(1, minutes=30.0, line="true", peak_gb=100.0)
     w = _shipped(tmp, _seed(lad, [long]))
     run = "pool-check-long-1"
-    first, _ = _task(w, ["work", "--wave", "pool-check", "--job", "1"], task=0, run=run, on=NODE,
-                     restarts=None)
-    again, _ = _task(w, ["work", "--wave", "pool-check", "--job", "1"], task=1, run=run, on=NODE,
-                     restarts=None)
+    argv = ["work", "--wave", "pool-check", "--job", "1", "--mem", str(math.ceil(long.gb))]
+    first, _ = _task(w, argv, task=0, run=run, on=NODE, restarts=None)
+    again, _ = _task(w, argv, task=1, run=run, on=NODE, restarts=None)
     q = pq.SqliteQueue.open(w.queue, _seed(lad, []))
     job = q.jobs()[0]
     workers = [(x.id, x.node, x.cls, x.retired) for x in q.workers()]
@@ -1728,8 +1832,9 @@ def _interrupt(tmp: Path, line: str) -> Interrupted:
             raise _Interrupted("the worker's log failed mid-job")
 
     def run_line(c: pq.Claim) -> pw.Ran:
-        return pw.run_job(c.job.line, cwd=tmp, env=os.environ, log=interrupting,
-                          wrote=lambda: q.wrote(c.attempt), kept=lambda: q.kept(c.attempt))
+        return pw.run_job(c.job.line, cwd=tmp, env=os.environ, memory_gb=M4_GB,
+                          log=interrupting, wrote=lambda: q.wrote(c.attempt),
+                          kept=lambda: q.kept(c.attempt))
 
     t0 = time.monotonic()
     try:
@@ -1849,7 +1954,8 @@ def _refusals(tmp: Path) -> list[str]:
     for k, (name, argv, on, names) in enumerate((
             ("class", [*pooled, "m5"], NODE, ["m5", *(class_name(0, r) for r in lad.rungs)]),
             ("node", [*pooled, "m4"], QUADRO, [NODE, QUADRO]),
-            ("job", ["work", "--wave", "pool-check", "--job", "1"], QUADRO, ["1", NODE, QUADRO]))):
+            ("job", ["work", "--wave", "pool-check", "--job", "1", "--mem", str(M4_GB)], QUADRO,
+             ["1", NODE, QUADRO]))):
         try:
             ex, _ = _task(w, argv, task=k, run=RUN, on=on, restarts=None)
             notes.append(f"--{name}: exit {ex}, want refused")
@@ -3174,8 +3280,8 @@ def _doubled(path: Path, seed: pq.Seed, worker: str, run: str, *, forced: bool,
         q: pq.Queue = pq.SqliteQueue.open(path, seed)
 
         def run_line(c: pq.Claim) -> pw.Ran:
-            return pw.run_job(c.job.line, cwd=common.REPO, env=os.environ, log=log.append,
-                              wrote=lambda: q.wrote(c.attempt),
+            return pw.run_job(c.job.line, cwd=common.REPO, env=os.environ, memory_gb=M4_GB,
+                              log=log.append, wrote=lambda: q.wrote(c.attempt),
                               kept=lambda: q.kept(c.attempt))
 
         with _taking_the_held() if forced else nullcontext():
@@ -3343,6 +3449,7 @@ GUARDS: dict[str, Guard] = {"claim": Guard(run=claim, args=()),
                             "class": Guard(run=classes, args=("rows",)),
                             "walltime": Guard(run=walltime, args=()),
                             "oom": Guard(run=oom, args=()),
+                            "memory": Guard(run=memory, args=()),
                             "identity": Guard(run=identity, args=()),
                             "worker": Guard(run=worker, args=()),
                             "dead-claim": Guard(run=dead_claim, args=()),
@@ -3447,7 +3554,7 @@ def _unchecked() -> Iterator[None]:
     """pool.py's checks of --node, --job's node and --class patched out."""
     with _patched(pl, "check_node", lambda node, environ: None), _patched(
             pl, "check_job_node", lambda job, queue, environ: None), _patched(
-            pl, "check_class", lambda cls, header: None):
+            pl, "class_gb", lambda cls, header: header.ladder.rungs[-1]):
         yield
 
 
@@ -3539,10 +3646,24 @@ def _requests_fatal(queue: pq.Queue, requests: Path, *,
 _OUTCOME = pw._outcome
 
 
-def _oom_failed(rc: int, *, before: int | None, after: int | None) -> pq.Outcome:
+def _oom_failed(rc: int, *, overrun: pw.Overrun | None, before: int | None,
+                after: int | None) -> pq.Outcome:
     """pool_worker._outcome recording an OOM as FAILED."""
-    o = _OUTCOME(rc, before=before, after=after)
+    o = _OUTCOME(rc, overrun=overrun, before=before, after=after)
     return pq.Outcome.FAILED if o == pq.Outcome.OOM else o
+
+
+def _unwatched(self: pw._Watch) -> None:
+    """pool_worker._Watch's thread watching nothing: it waits for its stop."""
+    self._stopped.wait()
+
+
+_MEMBERS = pw._members
+
+
+def _leader_only(session: int) -> list[pw.Member]:
+    """pool_worker._members counting the session's leader alone (the job's shell)."""
+    return [m for m in _MEMBERS(session) if m.pid == session]
 
 
 _OOM_EVIDENCE = pw.oom_evidence
@@ -3628,12 +3749,15 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
                  "left-once": _left_once},
     "oom": {"fail-on-oom": lambda: _patched(pw, "_outcome", _oom_failed),
             "unified-first": lambda: _patched(pw, "oom_evidence", _unified_first)},
+    "memory": {"no-watchdog": lambda: _patched(pw._Watch, "_run", _unwatched),
+               "leader-only": lambda: _patched(pw, "_members", _leader_only)},
     "identity": {"no-identity": lambda: _patched(pw, "_refused", lambda header, commit: None)},
     "worker": {"fail-worker": lambda: _patched(pw, "FAILED_IN_A_ROW", 1),
                "no-exclude": _no_exclusion,
                "no-retire": lambda: _patched(pq.SqliteQueue, "retire", lambda self, worker: 0),
-               "no-kill": lambda: _patched(pw, "_kill", lambda proc: None),
-               "pid-only": lambda: _patched(pw, "_kill", lambda proc: proc.kill()),
+               "no-kill": lambda: _patched(pw, "_kill", lambda leader: None),
+               "pid-only": lambda: _patched(pw, "_kill",
+                                            lambda leader: os.kill(leader, signal.SIGKILL)),
                "no-rebirth": lambda: _patched(pq, "_reborn", lambda had, restarts: False),
                "no-checks": _unchecked},
     "dead-claim": {"by-age": lambda: _patched(ps, "_reap", _reap_by_age),

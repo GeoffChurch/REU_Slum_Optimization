@@ -78,7 +78,7 @@ commit:
   summary.json, which `pool_more`, `Waves.template` and the demand read; it ends the wave, and
   is continued (its own `more`) until then. Its pull (WaveRecord) mirrors the wave's summary,
   ledger and final queue into research/roadless/waves/<w>/ (git-ignored, as rows are).
-- `long`: one job no lease can hold, run alone and sized for it (`pool.py work --job`).
+- `long`: one job no lease can hold, run alone and sized for it (`pool.py work --job --mem`).
 
 A steward that died (its lease failed: an error its rounds do not survive, or one of
 pool_steward.SURVIVABLE in FAILED_ROUNDS rounds in a row) leaves its wave without summaries, so no
@@ -520,7 +520,8 @@ class Long:
         if not 0 < args.minutes <= LONG_MAX_MINUTES:
             raise SystemExit(f"--minutes {args.minutes:g}: more than 0 and at most "
                              f"{LONG_MAX_MINUTES:g} (the partition's 7 days)")
-        line = f"python -u research/roadless/pool.py work --wave {wave} --job {args.job}"
+        line = (f"python -u research/roadless/pool.py work --wave {wave} --job {args.job} "
+                f"--mem {args.mem}")
         return cs.RunPlan(
             tasks=(cs.Task(line, CARD_GB if ladder.cards else 0.0),),
             resources=cs.Resources(cpus=ladder.cpus, mem_gb=args.mem,
