@@ -5,14 +5,18 @@ passes on the code as it is and must fail under each of its faults.
     S=research/roadless/screening_check.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S target [fault]            # faults: dropped-uses, unstaked
     uv run python $S records [fault]           # fault: array-rates
-    uv run python $S adapter [fault]           # faults: misaligned, gross-extra, ran-out-first
+    uv run python $S adapter [fault]           # faults: misaligned, gross-extra
+    uv run python $S why [fault]               # fault: ran-out-first
+    uv run python $S screens [fault]           # faults: shuffled, altered-record
     uv run python $S acceptance [fault] [--workers W]   # fault: dropped-uses
     uv run python $S both-ways <guards,> [--workers W]  # each guard, then under each of its faults
-    uv run python $S runs <workers>            # the acceptance runs -> screen_acceptance.csv
+    uv run python $S runs [--workers W]        # the acceptance runs -> screen_acceptance.csv
     uv run python $S equivalent <old.csv> <new.csv>   # two sets of acceptance runs compared
 
-`--workers W` is the processes the acceptance guard replays on, 1 when not given (exempt from the
-required-parameter rule: a count that changes no result, each run drawing from its own seed).
+`--workers W` is the processes `runs` and the pooled guards (POOLED: `acceptance`) run on, 1 when
+not given (exempt from the required-parameter rule: a count that changes no result, each run
+drawing from its own seed). It is refused on a command that runs on no pool (a both-ways run
+takes it when one of its guards is pooled).
 
 THE FIXTURE is DESIGNS (screen_designs.json, committed: the replays' frozen designs, reblock's
 real-data acceptance fixture), read at one boundary (`designs`): per design its block ids, each
@@ -44,14 +48,31 @@ nothing); cut one block short of its stop (where it used more than one and no co
 it) it is `Running`, its decisions the replay's so far, waiting for the block the replay took
 next. Beside the replay: the zero-gain design stops at the floor, keeping the default, "settled",
 in every order; C1m4/p64 under the veto at its first block below -COLLAPSE, vetoed to KEEP,
-"collapse"; without it, "ran out" at 12 (screening.why_of). And why_of's precedence, on a screen
-`advance` stops so: C1m4/p64 under the veto, its gains clipped at 0 but on order 0's last block,
-set below -COLLAPSE, is vetoed on the screen's last block, its prefix the whole order: "collapse",
-not "ran out". Faults: `misaligned` (arrived_of passes the covariate in the fixture's own block
-order, not the screen's: ProportionalTo prices each block to come by another block's base time),
-`gross-extra` (b's gross GPU-seconds in the extra column, not seconds - base_seconds: the targets
-read the wrong cost), `ran-out-first` (why_of asks whether the prefix is the whole order before
-whether the arm was vetoed: the last-block collapse reads "ran out").
+"collapse"; without it, "ran out" at 12 (screening.why_of). Faults: `misaligned` (arrived_of
+passes the covariate in the fixture's own block order, not the screen's: ProportionalTo prices
+each block to come by another block's base time), `gross-extra` (b's gross GPU-seconds in the
+extra column, not seconds - base_seconds: the targets read the wrong cost).
+`why`: why_of's precedence, on a screen `advance` stops so: C1m4/p64 under the veto, its gains
+clipped at 0 but on order 0's last block, set below -COLLAPSE, is vetoed on the screen's last
+block, its prefix the whole order: "collapse", not "ran out". Fault `ran-out-first` (why_of asks
+whether the prefix is the whole order before whether the arm was vetoed: the last-block collapse
+reads "ran out").
+`screens`: the screens' committed decisions (consolidated's summary_screen.csv and
+screen_decisions.json, under consolidated.SCREENS_METRIC) are what the code derives from the
+screens' rows. The preset is the one whose Screen is the JSON's. On the screens' data
+(`consolidated.screen_data`), every screen derived afresh, and every screen continued from its
+stored ledger (`screen_table`, wave 0), is the committed table (every column; a float one to 1e-9
+relative) and the stored states, record for record, with their blocks; every stored state
+round-trips through JSON; every judged arm's verdict, re-derived from its rule and reading alone,
+is its take; every rule is the preset's stop, and every reading's price the target's (PRICES,
+from the edge recomputed here: realized-loss's the mean rate, fewest-wrong's the mean rate over
+FUTURE over the arm's own stake on its prefix then; to 1e-12 relative). And refused before any
+decision: a held-out block's default time dropped from the pass's rows (`screen_data`, naming the
+block), the JSON's metric or screen another's (`read_decisions`), a variant's stored blocks
+starting off its order (`screen_table`, naming the variant). Faults: `shuffled` (common.HELD
+reshuffled by np.random.default_rng(1): the rows are off every screen's order, which screen_data
+refuses), `altered-record` (one judged reading's stored price times 1 + 1e-6: the screens derived
+afresh are not the stored ones, and the price is not the target's).
 `acceptance`: reblock's real-data acceptance test for epistemetry's pin (its spec, owner
 2026-10-16). realized-loss, as the presets build it now, replays ACCEPTANCE's runs of it on orders
 0-9 (13 pairwise designs without the veto, C1m4/p64 with it too: 140 runs, each order's draws
@@ -73,6 +94,8 @@ streams differ cannot reproduce a run bit for bit, only its law.
 """
 from __future__ import annotations
 
+import copy
+import io
 import json
 import math
 import os
@@ -87,7 +110,7 @@ from dataclasses import dataclass, replace
 from functools import cache, partial
 from multiprocessing import Pool, get_context
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, Protocol
 
 import numpy as np
 import pandas as pd
@@ -123,6 +146,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import consolidated  # noqa: E402
+import metrics  # noqa: E402
 import screening  # noqa: E402
 
 DESIGNS = HERE / "screen_designs.json"   # committed: the designs, frozen
@@ -357,7 +381,7 @@ def records() -> list[str]:
     return bad
 
 
-ADAPTER_PRESET = "realized-loss"   # adapter: the preset its live screens run
+ADAPTER_PRESET = "realized-loss"   # adapter and why: the preset their live screens run
 ADAPTER_ORDERS = 3                 # adapter: each case on its design's orders 0 .. 2
 
 
@@ -451,7 +475,7 @@ def _live(preset: Screen, f: Fixture, *, veto: bool, o: int) -> Live:
     return Live(stopped=s, cut=m)
 
 
-LAST_COLLAPSE = "C1m4/p64"   # adapter: the design whose screen it collapses on its last block
+LAST_COLLAPSE = "C1m4/p64"   # why: the design whose screen it collapses on its last block
 
 
 def last_block_collapse(preset: Screen) -> list[str]:
@@ -482,7 +506,7 @@ def adapter() -> list[str]:
     if not __debug__:
         return ["the adapter's checks are asserts, and python -O strips them"]
     preset = consolidated.screen_presets()[ADAPTER_PRESET]
-    bad = last_block_collapse(preset)
+    bad: list[str] = []
     cases = cut = 0
     for case in adapter_cases():
         f, u = case.fixture, len(case.fixture.blocks)
@@ -513,8 +537,176 @@ def adapter() -> list[str]:
             if not ok:
                 bad.append(f"{where} (stops at {s.arm_units}, {why}, vetoed {dict(s.vetoed)}, "
                            f"calls {s.calls}; want {e})")
-    print(f"adapter: {cases} live screens against their replays, {cut} of them cut short, and "
-          f"the last-block collapse", flush=True)
+    print(f"adapter: {cases} live screens against their replays, {cut} of them cut short",
+          flush=True)
+    return bad
+
+
+def why() -> list[str]:
+    return last_block_collapse(consolidated.screen_presets()[ADAPTER_PRESET])
+
+
+#: A preset's price a judged reading must hold: (the arm's prefix's outcomes at the decision, the
+#: edge recomputed here) -> the price.
+Price = Callable[[np.ndarray, Edge], float]
+
+
+def _stake_price(prefix: np.ndarray, e: Edge) -> float:
+    """realized-loss's: its target's own price (the mean rate), whatever the arm's prefix."""
+    return AdoptKeepAskByStake(rates=e.rates, weights=e.weights, uses=e.future).price
+
+
+def _own_price(prefix: np.ndarray, e: Edge) -> float:
+    """fewest-wrong's: the mean rate over FUTURE over the arm's own stake on its prefix."""
+    return e.price_rate / e.future / own_stake(prefix, price_rate=e.price_rate)
+
+
+#: Each preset by name, with its price: every preset of screen_presets() is here.
+PRICES: tuple[tuple[str, Price], ...] = (("realized-loss", _stake_price),
+                                         ("fewest-wrong", _own_price))
+SUMMARY = consolidated.ROWS / "summary_screen.csv"   # screens: the committed table
+
+
+def _table_differences(table: pd.DataFrame, committed: pd.DataFrame) -> list[str]:
+    """The columns in which `table`, read back from its CSV as the committed one is read, is not
+    `committed`: exactly, but a float column to 1e-9 relative (NaN where NaN)."""
+    new = pd.read_csv(io.StringIO(table.to_csv(index=False)))
+    if list(new.columns) != list(committed.columns) or new["variant"].tolist() != committed[
+            "variant"].tolist():
+        return [f"columns {list(new.columns)} and variants {new['variant'].tolist()}"]
+    differ = []
+    for c in new.columns:
+        a, b = new[c], committed[c]
+        if pd.api.types.is_float_dtype(a) and pd.api.types.is_float_dtype(b):
+            same = bool(np.allclose(a.to_numpy(), b.to_numpy(), rtol=1e-9, atol=0.0,
+                                    equal_nan=True))
+        else:
+            same = a.equals(b)
+        if not same:
+            differ.append(c)
+    return differ
+
+
+def _refused(what: str, call: Callable[[], object], *, naming: str) -> list[str]:
+    """`call` must raise SystemExit, its message naming `naming`: a negative case of `screens`."""
+    try:
+        call()
+    except SystemExit as e:
+        ok = naming in str(e.code)
+        print(f"  {what}: refused{'' if ok else f', not naming {naming}: {e.code}'}"
+              + (" -> ok" if ok else " -> FAILS"), flush=True)
+        return [] if ok else [f"{what} (refused, not naming {naming})"]
+    print(f"  {what}: not refused -> FAILS", flush=True)
+    return [f"{what} (not refused)"]
+
+
+def screens() -> list[str]:
+    j = consolidated._decisions_json()
+    if j is None:
+        print(f"screens: no {consolidated.DECISIONS.name} -> FAILS", flush=True)
+        return [f"no {consolidated.DECISIONS.name}"]
+    presets = consolidated.screen_presets()
+    if set(presets) != {name for name, _ in PRICES}:
+        return [f"presets {sorted(presets)}, priced {[name for name, _ in PRICES]}"]
+    recorded = revive(j["screen"])
+    named = [name for name, screen in presets.items() if screen == recorded]
+    if len(named) != 1:
+        print(f"screens: {consolidated.DECISIONS.name}'s screen is {len(named)} presets' -> FAILS",
+              flush=True)
+        return [f"the stored screen is {len(named)} presets'"]
+    (name,), metric = named, consolidated.SCREENS_METRIC
+    preset = presets[name]
+    policy = preset.policy
+    if not isinstance(policy, ValueOfMoreUnits):
+        return [f"{name}: a {type(policy).__name__}, not ValueOfMoreUnits"]
+    try:
+        data = consolidated.screen_data(metric=metric)
+        stored = consolidated.read_decisions(preset, metric=metric)
+        tables = {"continued": consolidated.screen_table(preset, data=data, ledgers=stored,
+                                                         wave=0, metric=metric),
+                  "afresh": consolidated.screen_table(preset, data=data, ledgers={}, wave=0,
+                                                      metric=metric)}
+    except SystemExit as refusal:
+        print(f"screens: refused: {refusal.code} -> FAILS", flush=True)
+        return [f"refused ({refusal.code})"]
+    committed = pd.read_csv(SUMMARY)
+    bad: list[str] = []
+    for how, st in tables.items():
+        differ = _table_differences(st.table, committed)
+        if set(st.states) != set(j["screens"]):
+            unlike = sorted(set(st.states) ^ set(j["screens"]))
+        else:
+            unlike = [v for v, x in st.states.items()
+                      if x.state.record() != j["screens"][v]["state"]
+                      or list(x.blocks) != j["screens"][v]["blocks"]]
+        print(f"{name} {how}: {len(st.states)} screens; the table "
+              + ("as committed" if not differ else f"differs in {differ}") + "; the states "
+              + ("as stored" if not unlike else f"differ on {unlike}")
+              + (" -> ok" if not differ and not unlike else " -> FAILS"), flush=True)
+        bad += ([f"{how}: the table differs in {differ}"] if differ else []) + (
+            [f"{how}: the states differ on {unlike}"] if unlike else [])
+
+    e, price_of = _edge(), dict(PRICES)[name]
+    judged = 0
+    wrong: Counter[str] = Counter()
+    first: dict[str, str] = {}
+    for v, x in stored.items():
+        rec = j["screens"][v]["state"]
+        if revive(json.loads(json.dumps(rec, allow_nan=False))).record() != rec:
+            wrong["round trip"] += 1
+            first.setdefault("round trip", v)
+        for d in x.state.decisions:
+            for arm, rule in d.judgement.rules.items():
+                judged += 1
+                reading = d.judgement.readings[arm]
+                price = reading["price"]
+                want = price_of(data[v].arrived.arms[arm].outcomes[:d.arm_units[arm]], e)
+                for check, ok in (("verdict", rule.met_reading(reading)
+                                   == (arm not in d.judgement.step.arms)),
+                                  ("rule", rule == policy.stop),
+                                  ("price", price is not None
+                                   and math.isclose(price, want, rel_tol=1e-12))):
+                    if not ok:
+                        wrong[check] += 1
+                        first.setdefault(check, f"{v} at {d.at} blocks")
+    totals = {"round trip": len(stored), "verdict": judged, "rule": judged, "price": judged}
+    print(f"{name} records: {len(stored)} stored states, {judged} judged readings; "
+          + ", ".join(f"{check} {n - wrong[check]} of {n}" for check, n in totals.items())
+          + (" -> ok" if not wrong else f" -> FAILS (first: {first})"), flush=True)
+    bad += [f"{check} ({n}, first {first[check]})" for check, n in wrong.items()]
+    if not judged:
+        bad.append("no judged reading stored: the record checks checked nothing")
+
+    rest = [(v, d.eligible[len(d.run)]) for v, d in data.items() if len(d.eligible) > len(d.run)]
+    other = next((s for n, s in presets.items() if n != name), None)
+    ahead = next((v for v in data if v in stored), None)
+    if not rest or other is None or ahead is None:
+        return bad + ["the negative cases have no rest block, other preset or stored ledger"]
+    v, block = rest[0]
+    original = consolidated._pass_rows
+
+    def untimed(*, metric: str) -> pd.DataFrame:
+        rows = original(metric=metric).copy()
+        rows.loc[block, "t"] = np.nan
+        return rows
+
+    print("negative cases, each refused before any decision:", flush=True)
+    with _patched(consolidated, "_pass_rows", untimed):
+        bad += _refused(f"{v}'s first rest block {block} untimed in the pass's rows",
+                        lambda: consolidated.screen_data(metric=metric), naming=block)
+    with _patched(consolidated, "_decisions_json", lambda: {**j, "metric": metrics.PER_BLOCK}):
+        bad += _refused("the stored metric another's (metrics.PER_BLOCK)",
+                        lambda: consolidated.read_decisions(preset, metric=metric),
+                        naming=metrics.PER_BLOCK)
+    with _patched(consolidated, "_decisions_json", lambda: {**j, "screen": other.record()}):
+        bad += _refused("the stored screen the other preset's",
+                        lambda: consolidated.read_decisions(preset, metric=metric),
+                        naming="injected preset")
+    off = {**stored, ahead: stored[ahead]._replace(blocks=(common.TUNING[0],)
+                                                   + stored[ahead].blocks[1:])}
+    bad += _refused(f"{ahead}'s stored blocks starting {common.TUNING[0]}, off its order",
+                    lambda: consolidated.screen_table(preset, data=data, ledgers=off, wave=0,
+                                                      metric=metric), naming=ahead)
     return bad
 
 
@@ -598,13 +790,42 @@ def _ran_out_first(s: Stopped, *, arm: int, units: int) -> screening.Why:
     return "settled"
 
 
+def _shuffled() -> AbstractContextManager[None]:
+    """common.HELD reshuffled by np.random.default_rng(1): the screens' rows, run in its order, are
+    off every screen's order."""
+    held = common.HELD
+    return _patched(common, "HELD",
+                    tuple(held[i] for i in np.random.default_rng(1).permutation(len(held))))
+
+
+def _altered_record() -> AbstractContextManager[None]:
+    """The stored ledgers as loaded with one judged reading's price times 1 + 1e-6 (the first
+    stored screen's first judged decision's, its first arm's)."""
+    original = consolidated._decisions_json
+
+    def altered() -> Any:
+        j = copy.deepcopy(original())
+        if j is None:
+            return None
+        for e in j["screens"].values():
+            for d in e["state"]["decisions"]:
+                readings = d["judgement"]["readings"]
+                if readings:
+                    readings[min(readings, key=int)]["price"] *= 1 + 1e-6
+                    return j
+        raise SystemExit("altered-record: no judged reading stored to alter")
+
+    return _patched(consolidated, "_decisions_json", altered)
+
+
 #: Each guard's faults by name (and so every guard's name: each has at least one).
 FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "target": {"dropped-uses": _dropped_uses,
                "unstaked": lambda: _patched(screening.OwnStake, "of", _unstaked)},
     "records": {"array-rates": _array_rates},
-    "adapter": {"misaligned": _misaligned, "gross-extra": _gross_extra,
-                "ran-out-first": lambda: _patched(screening, "why_of", _ran_out_first)},
+    "adapter": {"misaligned": _misaligned, "gross-extra": _gross_extra},
+    "why": {"ran-out-first": lambda: _patched(screening, "why_of", _ran_out_first)},
+    "screens": {"shuffled": _shuffled, "altered-record": _altered_record},
     "acceptance": {"dropped-uses": _dropped_uses},
 }
 
@@ -868,8 +1089,9 @@ STORED_TYPES = {"preset": str, "plan": str, "veto": bool, "order": int, "seed": 
 
 def stored_acceptance(screen: Screen) -> list[Stored]:
     """ACCEPT_PRESET's runs in ACCEPTANCE on orders 0 .. ACCEPT_ORDERS - 1, one Stored a design
-    and setting, in the file's order; refused unless they are each design and setting of
-    `screen`'s `comparison` on each of those orders once, in turn."""
+    and setting, in the order the file first meets them; refused unless they are each design and
+    setting of `screen`'s `comparison`, each on those orders once, ascending (a design and
+    setting's rows need not be contiguous in the file)."""
     frame = pd.read_csv(ACCEPTANCE, usecols=list(STORED_TYPES), dtype=STORED_TYPES)
     mine: pd.DataFrame = frame[((frame["preset"] == ACCEPT_PRESET)
                                 & (frame["order"] < ACCEPT_ORDERS)).to_numpy()]
@@ -888,7 +1110,7 @@ def stored_acceptance(screen: Screen) -> list[Stored]:
         raise SystemExit(f"{ACCEPTANCE.name}: {ACCEPT_PRESET}'s runs on orders 0-"
                          f"{ACCEPT_ORDERS - 1} are not those of {len(want)} designs and settings "
                          f"({', '.join(f'{c.plan} {setting(c.veto)}' for c in want)}), each on "
-                         f"each order once, in turn")
+                         f"each order once, ascending")
     return stored
 
 
@@ -916,6 +1138,11 @@ def _reproduced(s: Stored) -> Reproduced:
 
 
 def acceptance(*, workers: int) -> list[str]:
+    """ACCEPT_PRESET as the presets build it now, replaying ACCEPTANCE's runs of it on orders
+    0 .. ACCEPT_ORDERS - 1 (`stored_acceptance`), a design and setting at a time in the file's
+    order, on a forked pool of `workers` processes (exempt: a count that changes no result, each
+    run drawing from its row's seed); its failure, the first design and setting whose runs are not
+    the stored ones (`differences`), at which it returns."""
     stored = stored_acceptance(consolidated.screen_presets()[ACCEPT_PRESET])
     total = sum(len(s.orders) for s in stored)
     print(f"acceptance: {ACCEPT_PRESET} at epistemetry {pinned_rev()[:7]} against "
@@ -1209,10 +1436,21 @@ def equivalent(old: pd.DataFrame, new: pd.DataFrame, *, fixtures: Mapping[str, F
 
 # ---- the command line -----------------------------------------------------------------------
 
+class Pooled(Protocol):
+    """A guard that runs on a pool of `workers` processes."""
+    def __call__(self, *, workers: int) -> list[str]: ...
+
+
+#: The guards by name that run in this process alone.
+SERIAL: dict[str, Callable[[], list[str]]] = {"target": target, "records": records,
+                                              "adapter": adapter, "why": why, "screens": screens}
+#: The guards by name that run on a pool, its size `--workers W`.
+POOLED: dict[str, Pooled] = {"acceptance": acceptance}
+
+
 def guards(*, workers: int) -> dict[str, Callable[[], list[str]]]:
-    """Every guard by name (FAULTS' names), `acceptance` on a pool of `workers` processes."""
-    return {"target": target, "records": records, "adapter": adapter,
-            "acceptance": partial(acceptance, workers=workers)}
+    """Every guard by name (FAULTS' names), POOLED's on a pool of `workers` processes."""
+    return {**SERIAL, **{name: partial(g, workers=workers) for name, g in POOLED.items()}}
 
 
 def main(guard: str, fault: str | None, *, workers: int) -> None:
@@ -1248,16 +1486,21 @@ def both_ways(names: list[str], *, workers: int) -> None:
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    workers = 1   # exempt: the acceptance guard's processes, a count that changes no result
+    count: int | None = None
     if a[-2:-1] == ["--workers"]:
         if not (a[-1].isdigit() and int(a[-1]) >= 1):
             raise SystemExit(__doc__)
-        workers, a = int(a[-1]), a[:-2]
-    if len(a) == 2 and a[0] == "both-ways" and set(a[1].split(",")) <= set(FAULTS):
-        both_ways(a[1].split(","), workers=workers)
+        count, a = int(a[-1]), a[:-2]
+    named = a[1].split(",") if len(a) == 2 and a[0] == "both-ways" else a[:1]
+    if count is not None and not (a == ["runs"] or set(named) & set(POOLED)):
+        raise SystemExit(f"--workers is the processes of `runs` and of the pooled guards "
+                         f"({', '.join(POOLED)}); `{' '.join(a)}` runs on no pool")
+    workers = 1 if count is None else count   # exempt: a count that changes no result
+    if len(a) == 2 and a[0] == "both-ways" and set(named) <= set(FAULTS):
+        both_ways(named, workers=workers)
         raise SystemExit(0)
-    if len(a) == 2 and a[0] == "runs" and a[1].isdigit() and int(a[1]) >= 1:
-        runs(workers=int(a[1]))
+    if a == ["runs"]:
+        runs(workers=workers)
         raise SystemExit(0)
     if len(a) == 3 and a[0] == "equivalent":
         failures = equivalent(pd.read_csv(a[1]), pd.read_csv(a[2]), fixtures=designs(),

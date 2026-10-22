@@ -18,7 +18,7 @@ polish_greedy.py, search.py, road_rescore.py), keyed by the metric's name.
     uv run python $S lineup-report               # ROWS/summary_lineup_*.csv
     uv run python $S screen <id> <variants,> [--replace]   # phase 5's screens on a block, on a card
     uv run python $S screen-lenses <id> [--replace]        # their clearings' lenses, on a core
-    uv run python $S screen-report <wave>        # each screen's stop (seqscreen) and dominance
+    uv run python $S screen-report <preset> <wave>         # each screen by epistemetry, its axes
 
 `features`: per block (the store's 303: clearings.Store's blocks), its OSM features (attrs["osm"])
 as the metric reads them: the barriers' cut (gap_exits.OsmBarriers.parts within the block: its
@@ -36,19 +36,27 @@ in relax_rows/ and polish_rows/ under the metric's name, and the run's one-card 
 `screen` (phase 5, pruning): the dominated variants on record that still exist on the complex
 (SCREENS), each in the default's company, run on a block one after another in this process on one
 card beside SIMP's default (re-run there: its time on the same card), each free first at area D
-0.05 optimizing P; rows screen_rows/<metric>/<plan>/D0.05/<id>_p1.parquet, relax_rows' layout
-(exported to the store; a variant not built for the block's free stage, `.m` where free first holds
-buildings, writes none). `screen-lenses`: their
-clearings scored on a core as `lenses` scores the presets'. `screen-report`: the blocks run in
-seqscreen's order over its held-out blocks (seqscreen.blocks_of("held"), its ORDER_SEED), each
-variant against the default as seqscreen screens (stop_at, call: Lens A of P, the times on one
-card, the default's rows of the pass forecasting the blocks not run; `.m` screened over the
-blocks free first holds nothing on, relax.built_for_holds), and every axis the dominance rule
+0.05 optimizing P, under the screens' metric (SCREENS_METRIC, a screen campaign's: phase 5's is
+the previous boost's, which this code no longer builds, so `screen` refuses to extend it); rows
+screen_rows/<metric>/<plan>/D0.05/<id>_p1.parquet, relax_rows' layout (exported to the store; a
+variant not built for the block's free stage, `.m` where free first holds buildings, writes none).
+`screen-lenses`: their clearings scored on a core as `lenses` scores the presets'.
+`screen-report <preset> <wave>`: each variant screened against the default by epistemetry's
+`advance` under the named preset (screen_presets(), resolved once, here: a Screen whose record is
+the screens' identity), over the variant's order (common.HELD's blocks it is built for,
+relax.built_for_holds: `.m` not where free first holds buildings), its rows a prefix of it: Lens A
+of P its gain, its GPU-seconds on one card its cost, the default's there on the blocks run, then
+the pass's on the rest, the cost model's covariate (screening.arrived_of). Each wave continues
+from the screens' stored ledgers (ROWS/screen_decisions.json: the metric, the Screen's record and
+each screen's state, Running or Stopped, with the blocks it was decided on; a ledger of another
+metric or preset, or on blocks the rows no longer start with, is refused, and removing the file
+starts the screens afresh). Beside each screen's stop and call, every axis the dominance rule
 reads: each lens's paired difference (L_P, L_{P_1/2}, L_J2: the mean, a 95% Bayesian-bootstrap
 interval, ahead / behind), B's order, the time on one card (the ratio's geometric mean and its
-interval); the next `<wave>` blocks of each screen still running. (The GPU's memory in use, the
-rows' gpu_gb, counts the pool earlier runs in the process left: not an axis.)
-ROWS/summary_screen.csv.
+interval), and the break-even rate (the mean gain over the mean extra GPU-seconds, on the blocks
+used: the rate an ask turns on); the next blocks of each screen still running (its step's, or
+`<wave>` if more). (The GPU's memory in use, the rows' gpu_gb, counts the pool earlier runs in the
+process left: not an axis.) ROWS/summary_screen.csv, the Screen's record in its `screen` column.
 
 `baselines`: a block's baseline (P0, P_{1/2},0, J_2,0, the homes walled in, the unknowns, the
 mesh's triangles and times) under each of PARTS, cumulative: `block` the per-block metric
@@ -59,11 +67,12 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
+import json
 import multiprocessing
 import socket
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple, cast
 
@@ -72,8 +81,9 @@ import numpy as np
 import pandas as pd
 import shapely
 from epistemetry.design.decide import KEEP
-from epistemetry.design.screen import (Bootstrap, ProportionalTo, Screen, ValueOfMoreUnits,
-                                       VetoBelow)
+from epistemetry.design.screen import (Arrived, Bootstrap, ProportionalTo, Running, Screen,
+                                       Stopped, ValueOfMoreUnits, VetoBelow, advance)
+from epistemetry.stats.records import revive
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -366,6 +376,19 @@ SCREEN_BLOCKS = 20      # batch-means blocks of a value's Monte Carlo standard e
 SCREEN_DRAWS = 4000     # draws a stop and a call read (seqscreen's DRAWS)
 SCREEN_SEED = (0,)      # the live screens' draws, keyed by it and each draw's place (epistemetry
                         # `stream`)
+# The horizons a screen values: one Screen per preset, whatever the population. ValueOfMoreUnits
+# caps each horizon at the blocks left, so a screen of u <= 46 blocks values 1..left exactly as the
+# fourth replay's range(1, u + 1) did; a screen of more blocks than the horizons is refused
+# (screen_data, and the fixture's loader, screening_check.designs).
+SCREEN_HORIZONS = tuple(range(1, len(common.HELD) + 1))
+# The metric the screens' rows, lenses and ledgers are under: a screen campaign's, since a ledger
+# continued on another metric's rows would decide on other numbers. Phase 5's screens ran under the
+# previous boost (every drivable way, whatever its surface: RUNTIME before 7e3af8dc), which this
+# code no longer builds, so they are read, never extended. A screen campaign under another metric
+# moves it and starts its ledger afresh (removing ROWS/screen_decisions.json).
+SCREENS_METRIC = ("cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a+xB8c3Lo6214b562S10hliving_street-"
+                  "motorway-primary-residential-secondary-service-tertiary-trunk-unclassified"
+                  "va03a092b")
 # The rule's rate points, a tuple of floats: a record holds a tuple, and an array (as seqscreen
 # builds its rates) would not record.
 SCREEN_RATES = tuple(float(r) for r in np.geomspace(*RATES_PER_GPU_SECOND, RATE_POINTS))
@@ -378,14 +401,9 @@ def screen_presets() -> dict[str, Screen]:
     weights = (1.0 / RATE_POINTS,) * RATE_POINTS
 
     def screen_of(rule: screening.Rule) -> Screen:
-        # The horizons: one Screen per preset, whatever the population. ValueOfMoreUnits caps each
-        # horizon at the blocks left, so a screen of u <= 46 blocks values 1..left exactly as the
-        # fourth replay's range(1, u + 1) did. A screen of more blocks would value only the first
-        # 46: at this commit only the fixture's loader refuses one (screening_check.designs); the
-        # live screens' data is not checked here yet.
         policy = ValueOfMoreUnits(
             belief=Bootstrap(), functionals=((1.0, 0.0), (0.0, 1.0)),  # gain, extra GPU-s
-            target=rule.target_of(), horizons=tuple(range(1, len(common.HELD) + 1)),
+            target=rule.target_of(), horizons=SCREEN_HORIZONS,
             step=SCREEN_STEP, cost=ProportionalTo(covariate=screening.BASE_SECONDS),
             stop=rule.stop(),
             floor=SCREEN_FLOOR, outer=SCREEN_OUTER, inner=SCREEN_INNER, blocks=SCREEN_BLOCKS,
@@ -424,138 +442,289 @@ def screen_plan(variant: str) -> Any:
     return plan
 
 
-def screen_path(variant: str, bid: str) -> Path:
-    """`variant`'s row on `bid`: relax_rows' layout under screen_rows/ (SIMP's default re-run here
-    would otherwise meet the pass's own row)."""
+def screen_path(variant: str, bid: str, *, metric: str) -> Path:
+    """`variant`'s row on `bid` under `metric`: relax_rows' layout under screen_rows/ (SIMP's
+    default re-run here would otherwise meet the pass's own row)."""
     plan = str(screen_plan(variant).name)
-    return (HERE / "screen_rows" / metrics.RUNTIME / plan / f"D{BUDGET:g}"
+    return (HERE / "screen_rows" / metric / plan / f"D{BUDGET:g}"
             / f"{bid}_p{POWER:g}.parquet")
 
 
-def screen(bid: str, variants: list[str], *, replace: bool) -> None:
-    """Phase 5's screens on `bid`: each of `variants` (SCREENS) in turn in this process, on one
-    card, each row written once with the device, the host, the wall time and the peak memory (as
-    `presets` writes the presets')."""
+def screens_metric(metric: str, *, device: str) -> gcl.ComplexMetric:
+    """The screens' metric built on `device`, refused where this code no longer builds it (a
+    campaign's rows under a metric whose code has moved on are read, never extended)."""
+    try:
+        return metrics.metric_of(metric, device=device)
+    except ValueError as e:
+        raise SystemExit(f"the screens' metric {metric} does not build under this code ({e}): its "
+                         f"screens are finished, read by screen-report and never extended; a "
+                         f"screen campaign under RUNTIME moves SCREENS_METRIC and starts its "
+                         f"ledger afresh") from e
+
+
+def screen(bid: str, variants: list[str], *, replace: bool, metric: str) -> None:
+    """Phase 5's screens on `bid` under `metric`: each of `variants` (SCREENS) in turn in this
+    process, on one card, each row written once with the device, the host, the wall time and the
+    peak memory (as `presets` writes the presets')."""
     import relax
     unknown = sorted(set(variants) - set(SCREENS))
     if unknown:
         raise SystemExit(f"unknown variants {unknown}: {sorted(SCREENS)}")
+    m = screens_metric(metric, device="gpu")
     for v in variants:
-        clearings.check_new(screen_path(v, bid), replace=replace)
-    metric = metrics.metric_of(metrics.RUNTIME, device="gpu")
+        clearings.check_new(screen_path(v, bid, metric=metric), replace=replace)
     for v in variants:
         plan = screen_plan(v)
         t0 = time.time()
         with gap_calib.GpuPeak() as peak:
             try:
-                row = relax.one(bid, POWER, metric, plan, BUDGET, demand=POP)
+                row = relax.one(bid, POWER, m, plan, BUDGET, demand=POP)
             except NotImplementedError as e:    # `.m`: not built for the free stage's holds
                 print(f"{bid} {v}: {e}", flush=True)
                 continue
         wall = time.time() - t0
         row.update(device="gpu", host=socket.gethostname(), peak_rss_gb=gap_calib.peak_gb(),
                    gpu_gb=peak.peak, wall=wall)
-        clearings.write_once(pd.DataFrame([row]), screen_path(v, bid), replace=replace)
+        clearings.write_once(pd.DataFrame([row]), screen_path(v, bid, metric=metric),
+                             replace=replace)
         print(f"{bid} {v} ({plan.name}): {wall:.0f}s, GPU {peak.peak:.1f} GB", flush=True)
 
 
-def screen_lenses_path(bid: str) -> Path:
-    return ROWS / "screen_lenses" / metrics.RUNTIME / f"{bid}.parquet"
+def screen_lenses_path(bid: str, *, metric: str) -> Path:
+    return ROWS / "screen_lenses" / metric / f"{bid}.parquet"
 
 
-def screen_lenses(bid: str, *, replace: bool) -> None:
-    """Every screen clearing of `bid` scored on a core under RUNTIME, as `lenses` scores the
+def screen_lenses(bid: str, *, replace: bool, metric: str) -> None:
+    """Every screen clearing of `bid` scored on a core under `metric`, as `lenses` scores the
     presets'. Rows ROWS/screen_lenses/<metric>/<id>.parquet."""
     import road_rescore as rr
-    out = screen_lenses_path(bid)
+    out = screen_lenses_path(bid, metric=metric)
+    built = screens_metric(metric, device="cpu")
     clearings.check_new(out, replace=replace)
     [b] = common.build_blocks([bid])
-    m = metrics.metric_of(metrics.RUNTIME, device="cpu").clearing(b, demand=POP)
+    m = built.clearing(b, demand=POP)
     rows = []
     for v in SCREENS:
-        if not screen_path(v, bid).exists():
+        if not screen_path(v, bid, metric=metric).exists():
             continue
-        r = pd.read_parquet(screen_path(v, bid)).iloc[0]
+        r = pd.read_parquet(screen_path(v, bid, metric=metric)).iloc[0]
         x = np.zeros(m.n, dtype=bool)
         x[np.asarray(r["simp_cleared"], dtype=np.int64)] = True
         rows.append(dict(variant=v, n_cleared=int(x.sum()), D=float(m.cost[x].sum()),
                          stored_perm=float(r["simp_perm"]), **rr._lens_row(m, m.lenses(x))))
-    clearings.write_once(pd.DataFrame(rows).assign(block=bid, metric=metrics.RUNTIME),
+    clearings.write_once(pd.DataFrame(rows).assign(block=bid, metric=metric),
                          out, replace=replace)
     print(f"{bid}: {len(rows)} screen clearings scored", flush=True)
 
 
 def _bb_interval(d: np.ndarray, rng: np.random.Generator) -> tuple[float, float]:
-    """The 95% interval of the mean of `d` under the Bayesian bootstrap (seqscreen's posterior)."""
+    """The 95% interval of the mean of `d` under the Bayesian bootstrap (Rubin 1981): a reporting
+    interval, not a decision (the screens decide through epistemetry)."""
     w = rng.dirichlet(np.ones(len(d)), size=4000)
     lo, hi = np.quantile(w @ d, [0.025, 0.975])
     return float(lo), float(hi)
 
 
-def screen_report(wave: int) -> None:
-    """Each screen's stop and call (seqscreen.stop_at over its held-out order) and its axes;
-    each running screen's next `wave` blocks. ROWS/summary_screen.csv."""
+class ScreenData(NamedTuple):
+    """A variant's screen as its rows give it: its order (common.HELD's blocks it is built for), the
+    blocks it has run (a prefix of the order), and those rows as epistemetry's Arrived
+    (screening.arrived_of: its gain and GPU-seconds on the blocks run, the default's GPU-seconds on
+    every block of the order)."""
+    eligible: tuple[str, ...]
+    run: tuple[str, ...]
+    arrived: Arrived
+
+
+def _rows_by_block(d: Path) -> pd.DataFrame:
+    """Every row under `d`, by block; refused where there is none (no run under that metric)."""
+    rows = _read(d)
+    if rows.empty:
+        raise SystemExit(f"{d}: no rows")
+    return rows.set_index("block")
+
+
+def _pass_rows(*, metric: str) -> pd.DataFrame:
+    """SIMP's default in the pass under `metric` (relax_rows), by block: free first's clearing (does
+    it hold buildings there?) and the GPU-seconds, a screen's forecast on the blocks it has not
+    run."""
     import relax
-    import seqscreen as sq
-    pd.set_option("display.width", 220)
-    held = sq.blocks_of("held")
-    order = [held[i] for i in np.random.default_rng(sq.ORDER_SEED).permutation(len(held))]
-    rows = {v: _read(screen_path(v, "x").parent).set_index("block") for v in SCREENS}
-    lens = _read(ROWS / "screen_lenses" / metrics.RUNTIME)
-    la = lens[lens.variant == "default"].set_index("block")
-    passed = _read(relax.rows_of(relax.plan_of(relax.SIMP_DEFAULT), metrics.RUNTIME, BUDGET)
-                   ).set_index("block")
-    holds = {k: len(passed.free_cleared[k]) > 0 for k in order}     # free first's, the pass's
+    return _rows_by_block(relax.rows_of(relax.plan_of(relax.SIMP_DEFAULT), metric, BUDGET))
+
+
+def screen_data(*, metric: str) -> dict[str, ScreenData]:
+    """Every variant's screen but the default's, from the rows under `metric`, whatever the preset.
+    Refused before any decision (SystemExit, naming it): a held-out block with no default time in
+    the pass's rows (the cost model's covariate on a block not run, which epistemetry's Arrived
+    would refuse without naming the block), a variant's rows off its order or without the
+    default's beside them, and an order longer than the horizons."""
+    import relax
+    passed = _pass_rows(metric=metric)
+    seconds = passed["t"].reindex(list(common.HELD)).to_numpy(dtype=float)
+    untimed = [k for k, t in zip(common.HELD, seconds, strict=True) if not np.isfinite(t)]
+    if untimed:
+        raise SystemExit(f"the pass's rows under {metric} hold no default time on the held-out "
+                         f"blocks {untimed}: a screen's cost model reads it on every block not run")
+    holds = {k: len(passed.free_cleared[k]) > 0 for k in common.HELD}     # free first's
+    rows = {v: _rows_by_block(screen_path(v, "x", metric=metric).parent) for v in SCREENS}
     a = rows["default"]
-    rates = np.geomspace(*sq.RATES, sq.RATE_POINTS)
-    out, nxt = [], {}
+    out = {}
     for v, b in rows.items():
         if v == "default":
             continue
-        # the variant's order: seqscreen's over the blocks it is built for (relax.built_for_holds:
-        # `.m` not where free first holds buildings); its rows a prefix of it, the default's on each
-        mine = [k for k in order if relax.built_for_holds(screen_plan(v)) or not holds[k]]
-        built = mine[:len(b)]
-        if set(b.index) != set(built) or not set(built) <= set(a.index):
-            raise SystemExit(f"{v}: rows off its order, or without the default's beside them")
-        rest = mine[len(built):]
-        s = sq.Screen((b.simp_perm[built] - a.simp_perm[built]).to_numpy(dtype=float),
-                      b.t[built].to_numpy(dtype=float),
-                      np.concatenate([a.t[built].to_numpy(dtype=float),
-                                      passed.t.reindex(rest).to_numpy(dtype=float)]))
-        stop = sq.stop_at(s, rates=rates, future=sq.FUTURE, floor=sq.MIN_BLOCKS,
-                          rng=np.random.default_rng([sq.ORDER_SEED, 0]))
-        n = stop.n if stop is not None else len(built)
-        on = built[:n]
-        ratio = np.log((b.t[on] / a.t[on]).to_numpy(dtype=float))
+        plan = screen_plan(v)
+        eligible = tuple(k for k in common.HELD if relax.built_for_holds(plan) or not holds[k])
+        if len(eligible) > max(SCREEN_HORIZONS):
+            raise SystemExit(f"{v}: {len(eligible)} blocks in its order, more than the screens' "
+                             f"horizons value ({max(SCREEN_HORIZONS)})")
+        run = eligible[:len(b)]
+        if set(b.index) != set(run):
+            raise SystemExit(f"{v}: rows off its order: its {len(b)} blocks are not its order's "
+                             f"first {len(b)} (off them: {sorted(set(b.index) - set(run))})")
+        bare = sorted(set(run) - set(a.index))
+        if bare:
+            raise SystemExit(f"{v}: rows without the default's beside them, on {bare}")
+        on, rest = list(run), list(eligible[len(run):])
+        out[v] = ScreenData(eligible=eligible, run=run, arrived=screening.arrived_of(
+            gain=(b.simp_perm[on] - a.simp_perm[on]).to_numpy(dtype=float),
+            seconds=b.t[on].to_numpy(dtype=float),
+            base_seconds=np.concatenate([a.t[on].to_numpy(dtype=float),
+                                         passed.t[rest].to_numpy(dtype=float)])))
+    return out
+
+
+class Stored(NamedTuple):
+    """A screen's state with the blocks it was decided on (its blocks run then, in its order): its
+    decisions are the ledger the next wave continues from."""
+    blocks: tuple[str, ...]
+    state: Running | Stopped
+
+
+DECISIONS = ROWS / "screen_decisions.json"
+
+
+def _decisions_json() -> Any:
+    """DECISIONS parsed, None where there is none (no screen decided yet)."""
+    return json.loads(DECISIONS.read_text()) if DECISIONS.exists() else None
+
+
+def read_decisions(screen: Screen, *, metric: str) -> dict[str, Stored]:
+    """The screens' stored ledgers by variant (DECISIONS, the one JSON boundary, every key read by
+    name): no file is no ledger yet. Refused (SystemExit) unless they were made under `metric` (on
+    another metric's rows they decided on other numbers) and under `screen`, and each is a variant's
+    of SCREENS, a Running or Stopped state with its blocks."""
+    j = _decisions_json()
+    if j is None:
+        return {}
+    afresh = f"removing {DECISIONS.name} starts the screens afresh under the injected preset"
+    if not (isinstance(j, dict) and set(j) == {"metric", "screen", "screens"}):
+        raise SystemExit(f"{DECISIONS.name}: not an object of metric, screen and screens")
+    if j["metric"] != metric:
+        raise SystemExit(f"{DECISIONS.name}: ledgers under the metric {j['metric']}, not the "
+                         f"screens' {metric}; {afresh}")
+    if revive(j["screen"]) != screen:
+        raise SystemExit(f"{DECISIONS.name}: ledgers under the screen "
+                         f"{json.dumps(j['screen'], sort_keys=True)}, not the injected preset's "
+                         f"{json.dumps(screen.record(), sort_keys=True)}; {afresh}")
+    out = {}
+    for v, e in j["screens"].items():
+        if v not in SCREENS or v == "default" or not (isinstance(e, dict)
+                                                       and set(e) == {"blocks", "state"}):
+            raise SystemExit(f"{DECISIONS.name}: {v!r} is not a variant's ledger of blocks and "
+                             f"state (the variants: {[k for k in SCREENS if k != 'default']})")
+        blocks, state = e["blocks"], revive(e["state"])
+        if not (isinstance(blocks, list) and all(isinstance(k, str) for k in blocks)
+                and isinstance(state, Running | Stopped)):
+            raise SystemExit(f"{DECISIONS.name}: {v}'s ledger is not a list of block ids and a "
+                             f"Running or Stopped state")
+        out[v] = Stored(blocks=tuple(blocks), state=state)
+    return out
+
+
+class ScreenTable(NamedTuple):
+    """The screens decided: summary_screen.csv's rows (one a variant), each screen's state with the
+    blocks it was decided on, and each running screen's next blocks."""
+    table: pd.DataFrame
+    states: dict[str, Stored]
+    upcoming: dict[str, list[str]]
+
+
+def screen_table(screen: Screen, *, data: Mapping[str, ScreenData],
+                 ledgers: Mapping[str, Stored], wave: int, metric: str) -> ScreenTable:
+    """Each variant of `data` screened by `screen` (epistemetry's advance), continuing from its
+    ledger in `ledgers` where it has one (refused unless that ledger's blocks are a prefix of the
+    variant's blocks run), with every axis the dominance rule reads, the lenses' rows under
+    `metric`; a running screen's next blocks, its step's or `wave` if more. Computes, writes
+    nothing."""
+    unknown = sorted(set(ledgers) - set(data))
+    if unknown:
+        raise SystemExit(f"ledgers of {unknown}, which no screen's rows hold")
+    for v, stored in ledgers.items():     # every ledger checked before any decision
+        if data[v].run[:len(stored.blocks)] != stored.blocks:
+            raise SystemExit(f"{v}: its ledger was decided on blocks its rows do not start with "
+                             f"(stored {list(stored.blocks)}, run {list(data[v].run)}); removing "
+                             f"{DECISIONS.name} starts the screens afresh")
+    lens = _read(ROWS / "screen_lenses" / metric)
+    la = lens[lens.variant == "default"].set_index("block")
+    identity = json.dumps(screen.record(), sort_keys=True)
+    out, states, upcoming = [], {}, {}
+    for v, d in data.items():
+        s = advance(screen, ledger=ledgers[v].state.decisions if v in ledgers else (),
+                    arrived=d.arrived)
+        states[v] = Stored(blocks=d.run, state=s)
+        stop: str
+        if isinstance(s, Stopped):
+            n = s.arm_units[0]
+            stop = screening.why_of(s, arm=0, units=len(d.eligible))
+            call = screening.CALLS[s.calls[0][0]]
+        else:
+            n, stop, call = len(d.run), "", ""
+            want = s.want[0]
+            upcoming[v] = list(d.eligible[want[0]:want[0] + max(wave, len(want))])
+        arm = d.arrived.arms[0]
+        base = d.arrived.covariates[screening.BASE_SECONDS][:n]
+        ratio = np.log(arm.costs[:n] / base)
         lo_t, hi_t = _bb_interval(ratio, np.random.default_rng(2))
         row: dict[str, object] = dict(
-            variant=v, plan=screen_plan(v).name, eligible=len(mine), run=len(built), used=n,
-            stop="" if stop is None else stop.why, call="" if stop is None else stop.call,
-            time_ratio=float(b.t[on].sum() / a.t[on].sum()),
+            variant=v, plan=screen_plan(v).name, eligible=len(d.eligible), run=len(d.run), used=n,
+            stop=stop, call=call,
+            # the rate an ask turns on: Lens A per extra GPU-second, on the blocks used
+            break_even=float(arm.outcomes[:n, 0].mean() / arm.outcomes[:n, 1].mean()),
+            time_ratio=float(arm.costs[:n].sum() / base.sum()),
             time_geo=float(np.exp(ratio.mean())), time_lo=float(np.exp(lo_t)),
             time_hi=float(np.exp(hi_t)), slower=int((ratio > 0).sum()))
-        if stop is None:
-            nxt[v] = rest[:wave]
         rng = np.random.default_rng(1)
         lb = lens[lens.variant == v].set_index("block")
-        both = [k for k in on if k in la.index and k in lb.index]
+        both = [k for k in d.run[:n] if k in la.index and k in lb.index]
         row["scored"] = len(both)
         for x in LENSES:
-            d = (lb[x][both] - la[x][both]).to_numpy(dtype=float)
-            lo, hi = _bb_interval(d, rng) if len(d) else (np.nan, np.nan)
-            row.update({f"{x}_mean": float(d.mean()) if len(d) else np.nan, f"{x}_lo": lo,
-                        f"{x}_hi": hi, f"{x}_ahead": int((d > 1e-9).sum()),
-                        f"{x}_behind": int((d < -1e-9).sum())})
+            diff = (lb[x][both] - la[x][both]).to_numpy(dtype=float)
+            lo, hi = _bb_interval(diff, rng) if len(diff) else (np.nan, np.nan)
+            row.update({f"{x}_mean": float(diff.mean()) if len(diff) else np.nan, f"{x}_lo": lo,
+                        f"{x}_hi": hi, f"{x}_ahead": int((diff > 1e-9).sum()),
+                        f"{x}_behind": int((diff < -1e-9).sum())})
         rb = [b_rank(np.array([la.enclosed[k], lb.enclosed[k]]),
                      np.array([la.L_P[k], lb.L_P[k]])) for k in both]
         row.update(B_ahead=sum(int(r[1] < r[0]) for r in rb),
-                   B_behind=sum(int(r[1] > r[0]) for r in rb))
+                   B_behind=sum(int(r[1] > r[0]) for r in rb), screen=identity)
         out.append(row)
-    t = pd.DataFrame(out)
-    t.to_csv(ROWS / "summary_screen.csv", index=False)
-    print(t.round(5).T.to_string())
-    for v, ks in nxt.items():
+    return ScreenTable(table=pd.DataFrame(out), states=states, upcoming=upcoming)
+
+
+def screen_report(screen: Screen, *, wave: int, metric: str) -> None:
+    """Each screen decided by `screen` from its rows under `metric`, each continuing from its
+    stored ledger (`screen_table`), and its axes; each running screen's next blocks.
+    ROWS/summary_screen.csv, and DECISIONS: the metric, the screen's record, and each screen's
+    state with the blocks it was decided on."""
+    pd.set_option("display.width", 220)
+    st = screen_table(screen, data=screen_data(metric=metric),
+                      ledgers=read_decisions(screen, metric=metric), wave=wave, metric=metric)
+    st.table.to_csv(ROWS / "summary_screen.csv", index=False)
+    DECISIONS.write_text(json.dumps(
+        {"metric": metric, "screen": screen.record(),
+         "screens": {v: {"blocks": list(s.blocks), "state": s.state.record()}
+                     for v, s in st.states.items()}}, allow_nan=False, indent=1) + "\n")
+    print(st.table.drop(columns="screen").round(5).T.to_string())
+    for v, ks in st.upcoming.items():
         print(f"{v} runs on: next {','.join(ks)}")
 
 
@@ -896,11 +1065,15 @@ def main(argv: list[str]) -> None:
     elif cmd == "lineup-report" and len(argv) == 1:
         lineup_report()
     elif cmd == "screen" and len(argv) == 3:
-        screen(common.ids_of(argv[1])[0], argv[2].split(","), replace=again)
+        screen(common.ids_of(argv[1])[0], argv[2].split(","), replace=again,
+               metric=SCREENS_METRIC)
     elif cmd == "screen-lenses" and len(argv) == 2:
-        screen_lenses(common.ids_of(argv[1])[0], replace=again)
-    elif cmd == "screen-report" and len(argv) == 2:
-        screen_report(int(argv[1]))
+        screen_lenses(common.ids_of(argv[1])[0], replace=again, metric=SCREENS_METRIC)
+    elif cmd == "screen-report" and len(argv) == 3 and argv[2].isdigit():
+        named = screen_presets()     # the preset resolved once, here: a name with no default
+        if argv[1] not in named:
+            raise SystemExit(f"unknown preset {argv[1]!r}: the presets are {', '.join(named)}")
+        screen_report(named[argv[1]], wave=int(argv[2]), metric=SCREENS_METRIC)
     elif cmd == "baselines" and len(argv) == 3:
         parts = argv[2].split(",")
         if not set(parts) <= set(PARTS):
