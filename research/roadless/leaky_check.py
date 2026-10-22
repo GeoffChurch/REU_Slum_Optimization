@@ -121,6 +121,12 @@ SEED = 20261021
 GRAD_STEPS = (1e-3, 1e-4)  # relax-gradient's steps h (each with h / 2, extrapolated: as
                            # gap_clear_check's)
 GRAD_TOL = 1e-4          # the gradient against differences, of its largest (gap_clear_check's)
+GROUND_STEPS = (1e-6, 5e-7)  # relax-gradient at a grounded exit's owner (x 1): the gradient
+                         # just below, at 1 - t, extrapolated to t 0. The ground turns on over
+                         # 1 - x ~ Gs / K (the exits' standing conductance over their cell's
+                         # others'): on 19570 at 200 m the slope is -45.08 at x 1, -42.7 at
+                         # 1 - 1e-4, -45.06 at 1 - 1e-6, so differences of J reach it only at
+                         # steps whose roundoff (the refined solves', ~1e-13 of J) swamps them
 GRAD_PICK = 6            # buildings checked per design: the largest |gradient| and the owners of
                          # shared zones and of inside street faces
 ENDS_TOL = 1e-12         # the relaxation's J at a 0/1 clearing against W's scorer's (relative: the
@@ -582,19 +588,16 @@ def _central(rel: gw.WallRelaxation, x0: np.ndarray, g: np.ndarray, pick: np.nda
     return float(np.max(err) / np.abs(g[pick]).max())
 
 
-def _one_sided(rel: gw.WallRelaxation, x0: np.ndarray, g: np.ndarray, j: int) -> float:
-    """dJ / dx_j at x0 (x0_j 1) against one-sided differences from below, extrapolated, the
-    closest over GRAD_STEPS, of |g_j|."""
-    best = np.inf
-    J0 = rel.value(x0)
-    for h in GRAD_STEPS:
-        d = []
-        for step in (h, h / 2.0):
-            e = np.zeros(len(x0))
-            e[j] = step
-            d.append((J0 - rel.value(x0 - e)) / step)
-        best = min(best, abs(2.0 * d[1] - d[0] - g[j]))
-    return float(best / abs(g[j]))
+def _limit(rel: gw.WallRelaxation, x0: np.ndarray, g: np.ndarray, j: int) -> float:
+    """dJ / dx_j at x0 (x0_j 1: the drain currents' limit) against the gradient just below it,
+    at x_j 1 - t for t in GROUND_STEPS (the formula the central differences check, the cell not
+    ground), extrapolated to t 0 (2 g(t / 2) - g(t)); of |g_j|."""
+    gs = []
+    for t in GROUND_STEPS:
+        x = x0.copy()
+        x[j] = 1.0 - t
+        gs.append(float(rel.value_grad(x)[1][j]))
+    return float(abs(2.0 * gs[1] - gs[0] - g[j]) / abs(g[j]))
 
 
 def relax_gradient(ids: list[str]) -> list[str]:
@@ -616,7 +619,7 @@ def relax_gradient(ids: list[str]) -> list[str]:
                     if not ok:
                         bad.append(f"{bid} {walls.name} q {q:g} {label}: {err:.1e}")
             # an owned obtuse exit's cell ground (every owner of every owned exit cleared, x 1):
-            # the limit, against one-sided differences
+            # the limit, against the gradient just below it
             owners = np.unique(np.concatenate([o.own.ravel() for o in wm.interp.exits]
                                               + [np.zeros(0, dtype=np.int64)]))
             if len(owners) == 0:
@@ -627,7 +630,7 @@ def relax_gradient(ids: list[str]) -> list[str]:
             x0[owners] = 1.0
             _J, g = rel.value_grad(x0)
             j = int(owners[np.argmax(np.abs(g[owners]))])
-            err = _one_sided(rel, x0, g, j)
+            err = _limit(rel, x0, g, j)
             ok = err <= GRAD_TOL
             print(f"relax-gradient {bid} {walls.name} ground: building {j} at x 1, "
                   f"{int((wm.interp.ocell & wm.relaxed(rel.rho(x0)).ground).sum())} owned cells "
