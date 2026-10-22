@@ -390,7 +390,7 @@ SCREENS_METRIC = ("cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a+xB8c3Lo6214b562S10h
                   "motorway-primary-residential-secondary-service-tertiary-trunk-unclassified"
                   "va03a092b")
 # The rule's rate points, a tuple of floats: a record holds a tuple, and an array (as seqscreen
-# builds its rates) would not record.
+# built its rates) would not record.
 SCREEN_RATES = tuple(float(r) for r in np.geomspace(*RATES_PER_GPU_SECOND, RATE_POINTS))
 
 

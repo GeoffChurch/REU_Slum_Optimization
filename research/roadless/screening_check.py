@@ -37,7 +37,7 @@ price a decision used is read off its reading: the target's, under the policy's 
 `records`: each preset's `Screen.record()` round-trips, through JSON and again, and names its
 target's type (realized-loss epistemetry.SameTarget, fewest-wrong reblock.OwnStake). Fault
 `array-rates` (consolidated.SCREEN_RATES the array np.geomspace returns, not a tuple of floats,
-the slip seqscreen's arrays invite: the record refuses it, which the guard reports).
+the slip seqscreen's arrays invited: the record refuses it, which the guard reports).
 `adapter`: a live screen fed through screening.arrived_of is epistemetry's replay. Under
 realized-loss, on r2/base (a near-tie ask), x2/p64 (an ask) and pPg/p256 (a keep) without the
 veto, C1m4/p64 (a collapse, 12 blocks) in both settings, and p64/base with every gain 0 without
@@ -829,7 +829,7 @@ def _unstaked(self: screening.OwnStake, seen: Seen, *, arm: int) -> Priced:
 
 
 def _array_rates() -> AbstractContextManager[None]:
-    """The edge's rates the array np.geomspace returns, as seqscreen builds its rates."""
+    """The edge's rates the array np.geomspace returns, as seqscreen built its rates."""
     return _patched(consolidated, "SCREEN_RATES",
                     np.geomspace(*consolidated.RATES_PER_GPU_SECOND, consolidated.RATE_POINTS))
 
