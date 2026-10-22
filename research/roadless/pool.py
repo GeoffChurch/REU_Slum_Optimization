@@ -21,7 +21,9 @@ passed to pool_worker (`work`, `work_one`) and pool_steward (`steward`):
   it is not);
 - a job's memory (pool_worker.run_job's `memory_gb`, against which its worker watches it): the
   GB its task asked, a pool's its class's rung in the wave's ladder (`class_gb`), a long run's
-  its `--mem` (the run's sbatch --mem, cluster.py's Long);
+  its `--mem` (the run's sbatch --mem, cluster.py's Long); a kernel whose smaps_rollup cannot
+  measure a job's unique memory (pool_worker.Unmeasurable) is refused before the worker
+  registers, a SystemExit;
 - the OOM evidence: resolved from /proc/self/cgroup (pool_worker.oom_evidence);
 - a job: `bash -c <its line>` in the checkout, its environment the worker's with the wave's
   inputs (`CLUSTER_SUBMIT_INPUTS=<wave>/inputs`, where cluster_submit's would name the run's own)
@@ -167,6 +169,10 @@ def _work(ap: argparse.ArgumentParser, a: argparse.Namespace,
     ends_at = float(_env(environ, "SLURM_JOB_END_TIME"))
     checkout = Path(_env(environ, "CLUSTER_SUBMIT_CHECKOUT"))
     commit = checkout_commit(checkout)
+    try:
+        pw.own_unique_gb()      # the measure a job's class is enforced by, or no worker
+    except pw.Unmeasurable as e:
+        raise SystemExit(f"pool.py work: {e}") from e
     oom = pw.oom_evidence(PROC_SELF_CGROUP.read_text(), CGROUP_ROOT)
     wave = Path(_env(environ, "HOME")) / WAVES / a.wave
     inputs = wave / ps.INPUTS

@@ -12,7 +12,8 @@ code as it is and must fail under each of its faults.
                                                     # with-proposed, one-run
     uv run python $S walltime [--fault <name>]      # faults: no-fit, left-once
     uv run python $S oom [--fault <name>]           # faults: fail-on-oom, unified-first
-    uv run python $S memory [--fault <name>]        # faults: no-watchdog, leader-only
+    uv run python $S memory [--fault <name>]        # faults: no-watchdog, leader-only,
+                                                    # rss-sum, error-lost
     uv run python $S identity [--fault <name>]      # fault: no-identity
     uv run python $S worker [--fault <name>]        # faults: fail-worker, no-exclude,
                                                     # no-retire, no-kill, pid-only, no-rebirth,
@@ -154,16 +155,22 @@ says another:
   line at all; this machine's is printed, unchecked. Faults: `fail-on-oom` (an OOM recorded
   FAILED: promote fails) and `unified-first` (the v2 line taken first: hybrid fails).
 - `memory` (the owner's "Worker enforces it", 2026-10-22: ai's Slurm sets no memory limit, so
-  the worker watches its job's summed session RSS): each case one job of m4, its memory the
-  worker's own RSS and MEMORY_LIMIT_GB (0.5), so its limit is that; a python allocating and
-  holding MEMORY_HOLD (10 s). `over`, one process of 1 GB: killed within MEMORY_KILL_WITHIN
-  (5 s), its attempt `oom` rc -9 with a peak past the limit, the job promoted (PENDING in m12),
-  the log naming the worker's measure ("worker: rss X GB > limit Y GB") once; `under`, one of
-  0.2 GB: untouched, done (rc 0), its peak at least 0.2 GB, no such line; `forked`, a shell
-  forking three of 0.3 GB each (none past the limit, their sum past it): killed as `over`.
-  Faults: `no-watchdog` (the watch's thread watching nothing: over and forked run to done) and
-  `leader-only` (pool_worker._members counting the session's leader alone, the shell: forked
-  runs to done).
+  the worker watches its job's session's unique memory, smaps_rollup's Pss_Anon + Pss_Shmem):
+  each case one job of m4, its memory the worker's own unique memory and MEMORY_LIMIT_GB (0.5),
+  so its limit is that; a python allocating and holding MEMORY_HOLD (10 s). `over`, one process
+  of 1 GB: killed within MEMORY_KILL_WITHIN (5 s), its attempt `oom` rc -9 with a peak past the
+  limit, the job promoted (PENDING in m12), the log naming the worker's measure ("worker: unique
+  X GB > limit Y GB") once; `under`, one of 0.2 GB: untouched, done (rc 0), its peak at least
+  0.2 GB, no such line; `forked`, a shell forking three of 0.3 GB each (none past the limit,
+  their sum past it): killed as `over`; `cow`, a parent of 0.3 GB forking three idle children
+  (copy-on-write: their RSS summed past the limit, their unique memory not): untouched as
+  `under`, its peak at least 0.3 GB. `scan-error`: pool_worker.run_job of a job sleeping 10 s
+  whose watch's scan raises: run_job raises that error within 5 s, the job gone. Faults:
+  `no-watchdog` (the watch's thread watching nothing: over and forked run to done, scan-error
+  raises nothing), `leader-only` (pool_worker._members counting the session's leader alone,
+  the shell: forked runs to done), `rss-sum` (each process measured by its RSS: cow killed) and
+  `error-lost` (the watch's thread as fdf4a4ea had it, killing by _kill, which scans again,
+  before keeping a scan's error: scan-error raises nothing).
 - `identity` (guard 9): a queue at COMMIT and a worker's checkout at another: work exits 1 before
   registering, no attempt; work_one (the long lane's) the same. Fault `no-identity` (the check
   patched out): each runs its job.
@@ -1492,6 +1499,9 @@ MEMORY_OVER_GB = 1.0              # over: the one process's allocation, twice th
 MEMORY_UNDER_GB = 0.2             # under: ... below it
 MEMORY_FORKS = 3                  # forked: processes each allocating MEMORY_FORK_GB, together
 MEMORY_FORK_GB = 0.3              # ... past the limit, each below it
+MEMORY_COW_GB = 0.3               # cow: a parent's allocation, its idle forks sharing it
+MEMORY_COW_FORKS = 3              # ... its forks: their RSS summed past the limit, unique not
+MEMORY_SCAN_ERROR = "the guard's scan error"     # scan-error: what the scan raises
 
 
 def _holding(gb: float) -> str:
@@ -1502,37 +1512,53 @@ def _holding(gb: float) -> str:
     return f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
 
 
+def _cow(gb: float, forks: int) -> str:
+    """A python allocating `gb` (written: resident), then forking `forks` children that touch
+    nothing and sleep MEMORY_HOLD (its pages theirs copy-on-write), waiting for them."""
+    code = (f"import os, time\nheld = b'x' * {int(gb * 2 ** 30)}\n"
+            f"for _ in range({forks}):\n"
+            f"    if os.fork() == 0:\n        time.sleep({MEMORY_HOLD:g})\n        os._exit(0)\n"
+            f"print('holding', len(held), flush=True)\nfor _ in range({forks}):\n    os.wait()\n")
+    return f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
+
+
 class MemoryCase(NamedTuple):
-    """A memory case: its job's line, and whether its worker should kill it."""
+    """A memory case: its job's line, whether its worker should kill it, and (not to be killed)
+    the least its peak should be."""
     name: str
     line: str
     killed: bool
+    holds_gb: float
 
 
 MEMORY_CASES = (
-    MemoryCase(name="over", line=_holding(MEMORY_OVER_GB), killed=True),
-    MemoryCase(name="under", line=_holding(MEMORY_UNDER_GB), killed=False),
+    MemoryCase(name="over", line=_holding(MEMORY_OVER_GB), killed=True, holds_gb=0.0),
+    MemoryCase(name="under", line=_holding(MEMORY_UNDER_GB), killed=False,
+               holds_gb=MEMORY_UNDER_GB),
     # the shell forks each (`&`) and waits: the session's sum passes the limit, no process does
     MemoryCase(name="forked", line=" ".join(f"{_holding(MEMORY_FORK_GB)} &"
                                             for _ in range(MEMORY_FORKS)) + " wait",
-               killed=True),
+               killed=True, holds_gb=0.0),
+    # a fork pool's copy-on-write pages, counted once: under the limit, untouched
+    MemoryCase(name="cow", line=_cow(MEMORY_COW_GB, MEMORY_COW_FORKS), killed=False,
+               holds_gb=MEMORY_COW_GB),
 )
 
 
 def _memory_case(tmp: Path, case: MemoryCase) -> list[str]:
     """`case`'s job, m4's under cpu-score, run by pool_worker.work with its memory the worker's
-    own RSS and MEMORY_LIMIT_GB: killed within MEMORY_KILL_WITHIN, an attempt `oom` rc -9 (its
-    peak past the limit), the job promoted (PENDING in m12) and the log naming the worker's
-    measure past its limit; or, not to be killed, done (rc 0, its peak at least its
-    allocation) and no such line."""
+    own unique memory and MEMORY_LIMIT_GB: killed within MEMORY_KILL_WITHIN, an attempt `oom`
+    rc -9 (its peak past the limit), the job promoted (PENDING in m12) and the log naming the
+    worker's measure past its limit; or, not to be killed, done (rc 0, its peak at least
+    `holds_gb`) and no such line."""
     lad = LADDERS["cpu-score"]
-    memory_gb = pw.own_rss_gb() + MEMORY_LIMIT_GB
+    memory_gb = pw.own_unique_gb() + MEMORY_LIMIT_GB
     t0 = time.monotonic()
     w = _work_with(tmp / f"{case.name}.db", _seed(lad, [_m4(1, minutes=30.0, line=case.line)]),
                    worker=WORKER, run=RUN, commit=COMMIT, minutes_left=120.0,
                    oom=Counted(count=0), after=_nothing, memory_gb=memory_gb)
     took = time.monotonic() - t0
-    said = [x for x in w.log if x.startswith("job 1: killed for memory (worker: rss ")]
+    said = [x for x in w.log if x.startswith("job 1: killed for memory (worker: unique ")]
     peak = w.attempts[0].peak_gb if len(w.attempts) == 1 else None
     if case.killed:
         notes = _state(w, 1, state=pq.JobState.PENDING, cls="m12", strikes=0)
@@ -1547,8 +1573,8 @@ def _memory_case(tmp: Path, case: MemoryCase) -> list[str]:
         notes = _state(w, 1, state=pq.JobState.DONE, cls="m4", strikes=0)
         notes += [] if _tried(w) == [(1, "done", 0)] else [f"attempts {_tried(w)}"]
         notes += [] if not said else [f"the log says it was killed: {said}"]
-        notes += [] if peak is not None and peak >= MEMORY_UNDER_GB else [
-            f"the attempt's peak {peak} GB, want at least {MEMORY_UNDER_GB:g}"]
+        notes += [] if peak is not None and peak >= case.holds_gb else [
+            f"the attempt's peak {peak} GB, want at least {case.holds_gb:g}"]
     print(f"memory {case.name}: limit {MEMORY_LIMIT_GB:g} GB, attempts {_tried(w)}, peak "
           f"{peak if peak is None else round(peak, 2)} GB, {took:.1f} s"
           + (f", {said[0].split('(', 1)[1].rstrip(')')}" if said else "") + _failing(notes),
@@ -1556,11 +1582,51 @@ def _memory_case(tmp: Path, case: MemoryCase) -> list[str]:
     return [case.name] if notes else []
 
 
+class _ScanFailed(RuntimeError):
+    """scan-error's: the scan's error."""
+
+
+def _scan_fails(session: int) -> list[int]:
+    raise _ScanFailed(MEMORY_SCAN_ERROR)
+
+
+def _scan_error(tmp: Path) -> list[str]:
+    """pool_worker.run_job of a job printing its pid and sleeping MEMORY_HOLD, its watch's scan
+    (pool_worker._session_pids, which its kill lists by too) raising: run_job raises the scan's
+    error within MEMORY_KILL_WITHIN, the job gone (killed, reaped)."""
+    log: list[str] = []
+    t0 = time.monotonic()
+    with _patched(pw, "_session_pids", _scan_fails):
+        try:
+            pw.run_job(f"echo pid $$; exec sleep {MEMORY_HOLD:g}", cwd=tmp, env=os.environ,
+                       memory_gb=pw.own_unique_gb() + MEMORY_LIMIT_GB, log=log.append,
+                       wrote=lambda: None, kept=lambda: None)
+            raised: str | None = "nothing"
+        except _ScanFailed:
+            raised = None
+        except Exception as e:      # another error than the scan's: what the guard reports
+            raised = f"{type(e).__name__}: {e}"
+    took = time.monotonic() - t0
+    pids = [int(x.split()[1]) for x in log if x.startswith("pid ")]
+    left = [p for p in pids if _running(p)]
+    for p in left:              # the guard's own: no process outlives it
+        os.kill(p, signal.SIGKILL)
+    notes = ([] if raised is None else [f"raised {raised}, want the scan's error"]) + (
+        [] if took < MEMORY_KILL_WITHIN else [f"took {took:.1f} s: the job not killed"]) + (
+        [] if len(pids) == 1 else [f"the job printed {len(pids)} pids, want one"]) + (
+        [] if not left else [f"the job {left} still ran"])
+    print(f"memory scan-error: the watch's scan raising: {raised or 'its error'} in {took:.1f} "
+          "s, the job " + ("running" if left else "gone") + _failing(notes), flush=True)
+    return ["scan-error"] if notes else []
+
+
 def memory(_args: list[str]) -> list[str]:
     bad: list[str] = []
     for case in MEMORY_CASES:
         with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
             bad += _memory_case(Path(tmp), case)
+    with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
+        bad += _scan_error(Path(tmp))
     return bad
 
 
@@ -3666,6 +3732,36 @@ def _leader_only(session: int) -> list[pw.Member]:
     return [m for m in _MEMBERS(session) if m.pid == session]
 
 
+def _rss(path: Path) -> float | None:
+    """pool_worker._unique answering a process's RSS (/proc/<pid>/stat's rss), every page it
+    maps counted whole, shared or not, file-backed or not."""
+    try:
+        text = (path / "stat").read_bytes()
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+    return int(text[text.rindex(b")") + 2:].split()[21]) * os.sysconf("SC_PAGE_SIZE") / 2 ** 30
+
+
+def _kill_then_keep(self: pw._Watch) -> None:
+    """pool_worker._Watch's thread as fdf4a4ea had it: a scan's error kills the session by
+    _kill, which scans again, before the error is kept."""
+    try:
+        while not self._stopped.wait(pw.WATCH_SECONDS):
+            gb = sum(m.unique_gb for m in pw._members(self._session))
+            self._peak_gb = max(self._peak_gb, gb)
+            if gb > self._limit_gb:
+                with self._lock:
+                    if not self._stopped.is_set():
+                        pw._kill(self._session)
+                        self._overrun = pw.Overrun(unique_gb=gb, limit_gb=self._limit_gb)
+                return
+    except Exception as e:
+        with self._lock:
+            if not self._stopped.is_set():
+                pw._kill(self._session)
+            self._error = e
+
+
 _OOM_EVIDENCE = pw.oom_evidence
 
 
@@ -3750,7 +3846,9 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "oom": {"fail-on-oom": lambda: _patched(pw, "_outcome", _oom_failed),
             "unified-first": lambda: _patched(pw, "oom_evidence", _unified_first)},
     "memory": {"no-watchdog": lambda: _patched(pw._Watch, "_run", _unwatched),
-               "leader-only": lambda: _patched(pw, "_members", _leader_only)},
+               "leader-only": lambda: _patched(pw, "_members", _leader_only),
+               "rss-sum": lambda: _patched(pw, "_unique", _rss),
+               "error-lost": lambda: _patched(pw._Watch, "_run", _kill_then_keep)},
     "identity": {"no-identity": lambda: _patched(pw, "_refused", lambda header, commit: None)},
     "worker": {"fail-worker": lambda: _patched(pw, "FAILED_IN_A_ROW", 1),
                "no-exclude": _no_exclusion,

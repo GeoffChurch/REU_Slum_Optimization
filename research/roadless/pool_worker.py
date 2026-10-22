@@ -21,28 +21,34 @@ its command line (the queue, the OOM evidence, the clock, the job's runner) and 
   the attempt as it comes (so a reaper sees what a killed job had written), and each
   row_marker.KEPT line too (a row it found standing: the attempt measures no whole job); its
   code from `os.wait4`, and its peak: the larger of wait4's `ru_maxrss` (the child's and its
-  waited descendants' maximum) and the largest session sum its watch saw. The child runs at
-  oom_score_adj 1000, set by itself before it execs (raising its own needs no privilege), so a
-  cgroup's OOM killer takes the job, not the worker (the plan's Review Focus 4); every process it
-  forks inherits it. It leads a process group of its own (a new session), so a kill on the
-  worker's error path, or for memory, takes the group: a compound line (`tar -xf ... && python
-  ...`, where bash forks) leaves no grandchild running past its attempt. The session changes no
-  cgroup: the job stays in its worker's, whose OOM count is read, and Slurm's cgroup process
-  tracking kills it with the task (ai's `scontrol show config`, 2026-10-21: ProctrackType
-  proctrack/cgroup, TaskPlugin task/cgroup,task/affinity; under proctrack/pgid a new session
-  would outlive it).
+  waited descendants' maximum) and the largest unique memory of its session its watch saw. The
+  child runs at oom_score_adj 1000, set by itself before it execs (raising its own needs no
+  privilege), so a cgroup's OOM killer takes the job, not the worker (the plan's Review Focus 4);
+  every process it forks inherits it. It leads a process group of its own (a new session), so a
+  kill on the worker's error path, or for memory, takes the group: a compound line (`tar -xf ...
+  && python ...`, where bash forks) leaves no grandchild running past its attempt. The session
+  changes no cgroup: the job stays in its worker's, whose OOM count is read, and Slurm's cgroup
+  process tracking kills it with the task (ai's `scontrol show config`, 2026-10-21:
+  ProctrackType proctrack/cgroup, TaskPlugin task/cgroup,task/affinity; under proctrack/pgid a
+  new session would outlive it).
 - **Its memory** (`_Watch`, the owner's "Worker enforces it", 2026-10-22): ai's Slurm writes no
   memory limit (jobs 81808/81809: memory.max, memory.swap.max and memory.high `max` at every
   level of a job's cgroup v2 tree, and a --mem=1G job touched 1.5 GB to rc 0, memory.events oom
   0), so no kernel ever kills a job for passing its class, and the OOM promotion would never fire
   while a job outgrowing its class risked the node's OOM killer taking other users' jobs. So a
-  thread of the worker, started after the fork, sums the RSS of every live process of the job's
-  session every WATCH_SECONDS (`_members`: the session the job leads, so a compound line's
-  grandchildren count; not the cgroup's memory.current, which counts page cache, so the NFS reads
-  of a job's inputs would trip it), and once the sum passes the job's limit, SIGKILLs the session
-  (`_kill`) and records the measure (`Overrun`). The limit is the class's memory (the GB its
-  lease's task asked: pool.py resolves it once from the class, or a long run's --mem) less the
-  worker's own RSS read as the job starts, the rest of what the task holds.
+  thread of the worker, started after the fork, sums the unique memory of every live process of
+  the job's session every WATCH_SECONDS or so (`_members`: the session the job leads, so a
+  compound line's grandchildren count), and once the sum passes the job's limit, SIGKILLs the
+  session (`_kill`) and records the measure (`Overrun`). A process's unique memory is its
+  smaps_rollup's Pss_Anon + Pss_Shmem: each anonymous or shmem page divided among the processes
+  mapping it, so a fork pool's copy-on-write pages count once (summed RSS counted a 0.5 GB parent
+  with 3 idle forks 2.03 GB, and reblock's jobs fork pools of up to 72), and file-backed pages
+  (mmapped inputs, page cache) not at all; nor is the cgroup's memory.current, which counts page
+  cache, so the NFS reads of a job's inputs would trip it. A kernel whose smaps_rollup lacks
+  those fields (before 5.7) is refused at the worker's start (pool.py): no other measure stands
+  in. The limit is the class's memory (the GB its lease's task asked: pool.py resolves it once
+  from the class, or a long run's --mem) less the worker's own unique memory, measured the same
+  way as the job starts: the rest of what the task holds.
 - **Its outcome** (`_outcome`): exit 0 is DONE; otherwise the worker's own kill for memory is
   OOM, and so is an increase of the cgroup's OOM-kill count across the child (`OomEvidence`,
   read before and after: a kernel's kill, should Slurm ever enforce the limit), either of which
@@ -69,6 +75,7 @@ smoke waves (the plan's Task 10).
 """
 from __future__ import annotations
 
+import ctypes
 import os
 import signal
 import subprocess
@@ -90,12 +97,20 @@ FAILED_IN_A_ROW = 3
 #: The child's oom_score_adj: the most, so the kernel's OOM killer takes it before its worker.
 OOM_SCORE_ADJ = 1000
 
-#: How often the worker sums its job's RSS (`_Watch`). It changes no row: a job's rows are the
-#: same whichever class runs it, and only which spikes are caught moves with it (a spike past the
-#: limit shorter than a period can be missed: `_outcome`), so it is no parameter of a run's
-#: identity. A second bounds a job's overrun to what it allocates in a second; a scan of /proc
-#: costs about 6 us a process (4 ms for 660 here), about 1% of a thread on a node of 2000.
+#: How often the worker sums its job's unique memory (`_Watch`), at most. It changes no row: a
+#: job's rows are the same whichever class runs it, and only which spikes are caught moves with it
+#: (a spike past the limit shorter than a period can be missed: `_outcome`), so it is no parameter
+#: of a run's identity. A second bounds a job's overrun to what it allocates in a second.
 WATCH_SECONDS = 1.0
+
+#: The most of a thread the watch spends scanning: after a scan of s seconds it pauses at least
+#: s (1 - share) / share. Cost only, as WATCH_SECONDS. A scan lists /proc (about 6 us a process:
+#: 9 ms for 807 here) and walks each member's page tables for its smaps_rollup, whose cost is
+#: the pages the members map: 261 ms for a fork pool of 72 children of a 0.5 GB parent, each
+#: holding 20 MB of its own (2026-10-22, here), about 7 ms a GB mapped, so a pool of 72 forks of
+#: a 5 GB parent would take seconds a scan, and is watched every 10 or so instead of saturating
+#: the worker's thread on its job's core.
+WATCH_SHARE = 0.1
 
 #: The most the worker waits for its watch to end once its job has (s): the watch's one blocking
 #: step is a scan of /proc (milliseconds). A watch still running then can kill nothing (`_Watch`).
@@ -103,7 +118,10 @@ WATCH_STOP_SECONDS = 10.0
 
 #: Where the job's processes are listed and read.
 PROC = Path("/proc")
-PAGE_BYTES = os.sysconf("SC_PAGE_SIZE")
+
+#: A process's unique memory: these smaps_rollup fields (kB) summed, its anonymous and shmem pages
+#: each divided among the processes mapping it (proportional set size), file-backed ones left out.
+UNIQUE_FIELDS = (b"Pss_Anon:", b"Pss_Shmem:")
 
 
 class Exit(IntEnum):
@@ -223,22 +241,22 @@ def oom_evidence(proc_self_cgroup: str, root: Path) -> OomEvidence:
 # ---- a job ------------------------------------------------------------------------------------
 
 class Overrun(NamedTuple):
-    """The worker's kill of a job for memory: its session's summed RSS when it passed its limit
-    (GB of 2**30 bytes)."""
+    """The worker's kill of a job for memory: its session's unique memory (`_members`) when it
+    passed its limit (GB of 2**30 bytes)."""
 
-    rss_gb: float
+    unique_gb: float
     limit_gb: float
 
     @property
     def evidence(self) -> str:
-        return f"worker: rss {self.rss_gb:.2f} GB > limit {self.limit_gb:.2f} GB"
+        return f"worker: unique {self.unique_gb:.2f} GB > limit {self.limit_gb:.2f} GB"
 
 
 class Ran(NamedTuple):
     """A job's run. Its peak is the larger of the child's and its waited descendants' maximum RSS
     (`ru_maxrss`: a maximum over processes, at least the worker's own RSS when it forked, as the
     kernel counts the forked image's before the exec, a floor of about 0.1 GB, far below a rung)
-    and the largest sum over its session's processes the watch saw (`_Watch`: the measure a class
+    and the largest unique memory of its session the watch saw (`_Watch`: the measure a class
     bounds, which outlives a shell killed before it waited for its children), GB of 2**30 bytes as
     gap_calib.peak_gb's."""
 
@@ -257,79 +275,148 @@ def _last_for_the_oom_killer() -> None:
         f.write(str(OOM_SCORE_ADJ))
 
 
+class Unmeasurable(RuntimeError):
+    """A process's smaps_rollup lacks UNIQUE_FIELDS (a kernel before 5.7): no measure to enforce a
+    class by, and no other taken in its place."""
+
+
 class Member(NamedTuple):
-    """A live process of a job's session."""
+    """A live process of a job's session, and its unique memory (`_unique`)."""
 
     pid: int
-    rss_gb: float
+    unique_gb: float
 
 
-def _stat(text: bytes) -> tuple[int, float]:
-    """The session and RSS (GB) of a /proc/<pid>/stat: its fields after the command's closing
-    parenthesis (a command may hold any byte, `)` and spaces among them), the 6th (session) and
-    24th (rss, pages: the counter /proc/<pid>/status shows as VmRSS, anonymous, file and shmem
-    pages resident)."""
-    fields = text[text.rindex(b")") + 2:].split()
-    return int(fields[3]), int(fields[21]) * PAGE_BYTES / 2 ** 30
+def _session(text: bytes) -> int:
+    """The session of a /proc/<pid>/stat: its 6th field, counted after the command's closing
+    parenthesis (a command may hold any byte, `)` and spaces among them)."""
+    return int(text[text.rindex(b")") + 2:].split()[3])
 
 
-def own_rss_gb() -> float:
-    """The worker's own RSS (GB)."""
-    return _stat((PROC / "self" / "stat").read_bytes())[1]
+def _session_of(pid: int) -> int | None:
+    """Process `pid`'s session; None when it is gone."""
+    try:
+        with open(PROC / str(pid) / "stat", "rb") as f:
+            return _session(f.read())
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+
+
+def _unique(path: Path) -> float | None:
+    """The unique memory (GB) of the process whose /proc directory is `path`: the sum of its
+    smaps_rollup's UNIQUE_FIELDS, its anonymous and shmem pages each divided among the processes
+    sharing it (so a fork's copy-on-write pages are counted once over its pool, and file-backed
+    pages, mmapped inputs among them, are not counted at all); None when it is gone (a zombie's
+    reads ESRCH). Unmeasurable when the fields are not there."""
+    try:
+        with open(path / "smaps_rollup", "rb") as f:
+            text = f.read()
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+    kb: dict[bytes, int] = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[0] in UNIQUE_FIELDS:
+            kb[parts[0]] = int(parts[1])
+    missing = [f.decode() for f in UNIQUE_FIELDS if f not in kb]
+    if missing:
+        raise Unmeasurable(f"{path / 'smaps_rollup'} has no {', '.join(missing)} (kernel 5.7 on "
+                           "has them): no measure of a job's memory, so no class to enforce")
+    return sum(kb.values()) * 1024 / 2 ** 30
+
+
+def own_unique_gb() -> float:
+    """The worker's own unique memory (GB), as its jobs' is measured; Unmeasurable when this
+    kernel's smaps_rollup does not give it (pool.py refuses to start then)."""
+    gb = _unique(PROC / "self")
+    if gb is None:
+        raise RuntimeError("/proc/self/smaps_rollup is gone")
+    return gb
+
+
+def _session_pids(session: int) -> list[int]:
+    """The pids of session `session`'s live processes, each from one read of its /proc/<pid>/stat;
+    a process gone between the listing and its read is skipped. A process that left the session
+    (setsid) is not listed: no job of reblock's does."""
+    found: list[int] = []
+    for name in os.listdir(PROC):
+        if name.isdigit() and _session_of(int(name)) == session:
+            found.append(int(name))
+    return found
 
 
 def _members(session: int) -> list[Member]:
-    """Every live process of session `session` with its RSS, each from one read of its
-    /proc/<pid>/stat (its session and RSS of one instant, never of a pid reused between two
-    reads); a process gone between the listing and its read is skipped. A process that left the
-    session (setsid) is not counted: no job of reblock's does."""
-    found: list[Member] = []
-    for name in os.listdir(PROC):
-        if not name.isdigit():
-            continue
-        try:
-            with open(PROC / name / "stat", "rb") as f:
-                text = f.read()
-        except OSError:         # gone since the listing
-            continue
-        sid, rss_gb = _stat(text)
-        if sid == session:
-            found.append(Member(pid=int(name), rss_gb=rss_gb))
-    return found
+    """Every live process of session `session` with its unique memory; one gone before its
+    smaps_rollup is read is skipped."""
+    return [Member(pid=pid, unique_gb=gb) for pid in _session_pids(session)
+            for gb in [_unique(PROC / str(pid))] if gb is not None]
+
+
+#: pidfd_open and pidfd_send_signal by number (the generic syscall table's, alike on x86_64 and
+#: aarch64; Linux 5.3 on, below the 5.7 that UNIQUE_FIELDS needs already): the uv Python's
+#: os.pidfd_open and signal.pidfd_send_signal are not built (3.12.13, 2026-10-22).
+SYS_PIDFD_SEND_SIGNAL = 424
+SYS_PIDFD_OPEN = 434
+_LIBC = ctypes.CDLL(None, use_errno=True)
+_LIBC.syscall.restype = ctypes.c_long
+
+
+def _syscall(number: int, *args: int | None) -> int:
+    """syscall(2) `number` with `args` (int or a NULL pointer); its result, else the OSError
+    of its errno (ProcessLookupError for ESRCH)."""
+    got = int(_LIBC.syscall(ctypes.c_long(number), *(
+        ctypes.c_void_p(None) if a is None else ctypes.c_long(a) for a in args)))
+    if got < 0:
+        err = ctypes.get_errno()
+        raise OSError(err, os.strerror(err))
+    return got
 
 
 def _kill(leader: int) -> None:
     """SIGKILL the job led by `leader`: its process group (its shell and every process the shell
     forked), then any other process of its session (one that left the group). The group is there
-    while its leader is unreaped, which it is until `run_job` waits for it; a process gone
-    meanwhile is no error."""
+    while its leader is unreaped, which it is until `run_job` waits for it; each other member is
+    signalled through a pidfd opened before its session is read again, so a pid reused since the
+    listing is never signalled (the pidfd names the process opened, and the session read after
+    is that process's, or it has gone and the signal finds none). A process gone meanwhile is no
+    error."""
     try:
         os.killpg(leader, signal.SIGKILL)
     except ProcessLookupError:
         pass
-    for m in _members(leader):
+    for pid in _session_pids(leader):
         try:
-            os.kill(m.pid, signal.SIGKILL)
+            fd = _syscall(SYS_PIDFD_OPEN, pid, 0)
+        except ProcessLookupError:
+            continue
+        try:
+            if _session_of(pid) == leader:
+                _syscall(SYS_PIDFD_SEND_SIGNAL, fd, int(signal.SIGKILL), None, 0)
         except ProcessLookupError:
             pass
+        finally:
+            os.close(fd)
 
 
 class Watched(NamedTuple):
-    """What a job's watch saw: the largest sum of its session's RSS (GB), its kill, and the error
-    it stopped on (the job killed then: never left to run unwatched)."""
+    """What a job's watch saw: the largest unique memory of its session (GB), its kill, the error
+    it stopped on (the job killed then: never left to run unwatched), and whether it outlived its
+    stop."""
 
     peak_gb: float
     overrun: Overrun | None
     error: BaseException | None
+    stalled: bool
 
 
 class _Watch:
-    """A thread summing the RSS of session `session`'s processes every WATCH_SECONDS (the first
-    a period after the job's start), which kills the session (`_kill`) once the sum passes
-    `limit_gb` and stops; `stop` ends it, after which it kills nothing (the kill and the stop
-    take one lock, so a stop returning means no kill can follow: the leader is unreaped until
-    then, so no pid it kills is another's). It is started after the fork, so the child's
-    preexec_fn ran beside no thread."""
+    """A thread summing the unique memory of session `session`'s processes (`_members`) every
+    WATCH_SECONDS (the first a period after the job's start), which kills the session (`_kill`)
+    once the sum passes `limit_gb` and stops; `stop` ends it, after which it kills nothing (the
+    kill and the stop take one lock, so a stop returning means no kill can follow). It is started
+    after the fork, so the child's preexec_fn ran beside no thread. A scan that raises is kept
+    first, then the job's group killed by os.killpg alone (the scan that raised is not tried
+    again), and run_job raises it once the job is reaped."""
 
     def __init__(self, *, session: int, limit_gb: float) -> None:
         self._session, self._limit_gb = session, limit_gb
@@ -344,21 +431,28 @@ class _Watch:
         self._thread.start()
 
     def _run(self) -> None:
+        pause = WATCH_SECONDS
         try:
-            while not self._stopped.wait(WATCH_SECONDS):
-                gb = sum(m.rss_gb for m in _members(self._session))
+            while not self._stopped.wait(pause):
+                t0 = time.monotonic()
+                gb = sum(m.unique_gb for m in _members(self._session))
+                scan = time.monotonic() - t0
+                pause = max(WATCH_SECONDS, scan * (1 - WATCH_SHARE) / WATCH_SHARE)
                 self._peak_gb = max(self._peak_gb, gb)
                 if gb > self._limit_gb:
                     with self._lock:
                         if not self._stopped.is_set():
                             _kill(self._session)
-                            self._overrun = Overrun(rss_gb=gb, limit_gb=self._limit_gb)
+                            self._overrun = Overrun(unique_gb=gb, limit_gb=self._limit_gb)
                     return
         except Exception as e:      # the worker raises it once the job is reaped
             with self._lock:
-                if not self._stopped.is_set():
-                    _kill(self._session)
                 self._error = e
+                if not self._stopped.is_set():
+                    try:
+                        os.killpg(self._session, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
     def stop(self) -> Watched:
         """Stop watching (never waiting past WATCH_STOP_SECONDS): what it saw."""
@@ -366,7 +460,14 @@ class _Watch:
             self._stopped.set()
         self._thread.join(WATCH_STOP_SECONDS)
         with self._lock:
-            return Watched(peak_gb=self._peak_gb, overrun=self._overrun, error=self._error)
+            return Watched(peak_gb=self._peak_gb, overrun=self._overrun, error=self._error,
+                           stalled=self._thread.is_alive())
+
+
+class WatchStalled(RuntimeError):
+    """A job's watch outlived its stop: the worker forks no further job beside it (the next
+    preexec_fn would run beside a live thread), so it raises out of its attempt and exits 1, its
+    own fault, the job back as if never claimed (its rows standing for the next attempt)."""
 
 
 def run_job(line: str, *, cwd: Path, env: Mapping[str, str], memory_gb: float,
@@ -376,18 +477,20 @@ def run_job(line: str, *, cwd: Path, env: Mapping[str, str], memory_gb: float,
     and process group of its own, its output (stdout and stderr merged, undecodable bytes
     replaced) given to `log` line by line as it comes, `wrote()` called for each line starting
     with row_marker.ROW_WRITTEN and `kept()` for each starting with row_marker.KEPT; watched
-    (`_Watch`) against `memory_gb` (its class's memory) less the worker's own RSS now; its code
-    from `os.wait4` once it has exited, and its peak (Ran's). If reading it raises, its session
-    is killed and the child reaped before the error goes on, so no process of the job outlives
-    its worker's attempt; an error of the watch's is raised once the job is reaped."""
-    own_gb = own_rss_gb()
+    (`_Watch`) against `memory_gb` (its class's memory) less the worker's own unique memory now;
+    its code from `os.wait4` once it has exited, and its peak (Ran's). If reading it raises, its
+    session is killed and the child reaped before the error goes on, so no process of the job
+    outlives its worker's attempt; an error of the watch's, or a watch outliving its stop
+    (WatchStalled), is raised once the job is reaped."""
+    own_gb = own_unique_gb()
     limit_gb = memory_gb - own_gb
     if limit_gb <= 0:
         raise ValueError(f"a class of {memory_gb:g} GB holds no job beside its worker's own "
                          f"{own_gb:.2f} GB")
     start = time.monotonic()
     # preexec_fn runs between fork and exec, unsafe only beside other threads: the worker has
-    # none at the fork (its watch starts after); start_new_session's setsid runs before it, so
+    # none at the fork (its watch starts after, and an earlier job's watch that outlived its
+    # stop raised WatchStalled before this fork); start_new_session's setsid runs before it, so
     # the job leads its group and session from its exec
     proc = subprocess.Popen(["bash", "-c", line], cwd=cwd, env=dict(env), stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True, encoding="utf-8",
@@ -423,6 +526,8 @@ def run_job(line: str, *, cwd: Path, env: Mapping[str, str], memory_gb: float,
     proc.returncode = os.waitstatus_to_exitcode(status)     # so Popen never waits again
     if watched.error is not None:
         raise watched.error
+    if watched.stalled:
+        raise WatchStalled(f"job {line!r}'s watch outlived its stop by {WATCH_STOP_SECONDS:g} s")
     return Ran(rc=proc.returncode, peak_gb=max(usage.ru_maxrss / 2 ** 20, watched.peak_gb),
                minutes=(time.monotonic() - start) / 60, rows=rows, kept=held,
                overrun=watched.overrun)
