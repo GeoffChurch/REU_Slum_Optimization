@@ -20,7 +20,7 @@ code as it is and must fail under each of its faults.
     uv run python $S aside [--fault <name>]         # faults: whole-yields, stale-kept,
                                                     # unread-fatal
     uv run python $S end [--fault <name>]           # faults: early-end, claimed-runs-on,
-                                                    # open-ended, request-fatal
+                                                    # open-ended, request-fatal, open-fixed
     uv run python $S both-ways <guards,> [args ...]   # each guard, then under each of its faults
 
 A guard runs as `<guard> [--fault <name>] [args ...]`: the fault is named by its flag, so a
@@ -228,14 +228,17 @@ the steward's own STEWARD_TASK among them, or a failure), no allocation unless a
   `long`, a done job and a LONG one waiting: exit 75, no final.db, the bank kept, the summary
   CLOSED listing the long job; `open`, a wave whose one job is done but whose queue is open (a
   feed that never closes it, as Screened's would between grants): exit 75, no final.db, the
-  summary OPEN; `command`, pool.py `steward` run in this process as a
-  cluster_submit task would be (HOME, the Slurm array ids and end time, USER; a relative --board
-  with no allocation) on a shipped wave whose one job is done: metrics.RUNTIME named in the
-  queue's header, exit 0, the summary FINISHED naming it, final.db, the bank deleted. Faults:
-  `early-end` (a job waiting for the long lane counted as ended: long ends),
+  summary OPEN; `fixed-open`, a fixed feed's seed leaving its queue open (nothing would close it):
+  refused by Seed and by read_seed of a jobs.json edited so, each naming the wave; `command`,
+  pool.py `steward` run in this process as a cluster_submit task would be (HOME, the Slurm array
+  ids and end time, USER; a relative --board with no allocation) on a shipped wave whose one job
+  is done: metrics.RUNTIME named in the queue's header, exit 0, the summary FINISHED naming it,
+  final.db, the bank deleted. Faults: `early-end` (a job waiting for the long lane counted as
+  ended: long ends),
   `claimed-runs-on` (transitions': cancel leaves the claimed job running, so the wave never
   ends), `open-ended` (an open queue's wave ended once its jobs have: open ends) and
-  `request-fatal` (a request that does not read, or that the queue refuses, stops the round).
+  `request-fatal` (a request that does not read, or that the queue refuses, stops the round)
+  and `open-fixed` (pool_queue._open_fixed answering no: an open fixed seed accepted).
 """
 from __future__ import annotations
 
@@ -298,13 +301,16 @@ CLAIM_WORKERS = 4        # ... processes, each one worker
 CLAIM_SLEEP = 0.010      # ... the most it sleeps between operations (s)
 CLAIM_WAIT = 600.0       # ... the most the guard waits for a process (s)
 SPLIT_SLEEP = 0.005      # split-tx: between the claim's select and its update (s)
+# An open queue's feed (Screened's, decision 7: not built yet, so no steward resolves it; the
+# cases of an open queue inject _Unclosed in its place): a fixed feed's seed is closed.
+OPEN_FEED = "screened"
 
 
 # ---- the queues the guards make, as a wave's plan makes them --------------------------------
 
 def _header(ladder: Ladder) -> pq.Header:
     return pq.Header(wave="pool-check", commit=COMMIT, family="pool-check", ladder=ladder,
-                     created=datetime.now(UTC).strftime(STAMP), feed="fixed")
+                     created=datetime.now(UTC).strftime(STAMP), feed=pq.FIXED)
 
 
 def _seed_job(i: int, *, minutes: float, peak_gb: float, ladder: Ladder) -> pq.JobSeed:
@@ -1554,7 +1560,7 @@ def _idle(tmp: Path) -> list[str]:
     polls = math.ceil(60 * lad.idle_minutes / lad.poll_seconds)
     bad: list[str] = []
     for name, left, want in (("idle", 120.0, polls), ("idle-at-end", lad.margin_minutes / 2, 0)):
-        seed = pq.Seed(header=_header(lad), jobs=(), closed=False)
+        seed = pq.Seed(header=replace(_header(lad), feed=OPEN_FEED), jobs=(), closed=False)
         w = _work(tmp / f"{name}.db", seed, worker=WORKER, run=RUN, commit=COMMIT,
                   minutes_left=left,
                   oom=Counted(count=0), after=_nothing)
@@ -2215,7 +2221,7 @@ def _end_open(tmp: Path) -> list[str]:
     waves = tmp / "waves"
     d = waves / "pool-check"
     s = _small(lad)
-    seed = pq.Seed(header=_header(lad), jobs=(s,), closed=False)
+    seed = pq.Seed(header=replace(_header(lad), feed=OPEN_FEED), jobs=(s,), closed=False)
     q = pq.SqliteQueue.open(d / "queue.db", seed)
     _inputs(d, seed)
     q.register(worker="w1", run=RUN, node=NODE, cls="m4", ends_at=time.time() + 7200.0,
@@ -2339,9 +2345,34 @@ def _end_command(tmp: Path) -> list[str]:
     return ["command"] if notes else []
 
 
+def _end_fixed_open(tmp: Path) -> list[str]:
+    """A fixed wave's seed that leaves its queue open (nothing would close it, so its wave would
+    never end): refused by Seed (ValueError naming the wave) and by read_seed of a jobs.json
+    edited so (its `closed` false)."""
+    lad = LADDERS["cpu-score"]
+    notes: list[str] = []
+    try:
+        pq.Seed(header=_header(lad), jobs=(_small(lad),), closed=False)
+        notes.append("Seed accepted it")
+    except ValueError as e:
+        notes += [] if "pool-check" in str(e) else [f"Seed refused it without naming the wave: {e}"]
+    edited = json.loads(pq.seed_json(_seed(lad, [_small(lad)])))
+    edited["closed"] = False
+    try:
+        pq.read_seed(json.dumps(edited), "jobs.json")
+        notes.append("read_seed accepted it")
+    except ValueError as e:
+        notes += [] if "pool-check" in str(e) else [f"read_seed refused it without naming the "
+                                                    f"wave: {e}"]
+    print("end fixed-open: a fixed feed's seed with its queue open, refused by Seed and "
+          "read_seed" + _failing(notes), flush=True)
+    return ["fixed-open"] if notes else []
+
+
 def end(_args: list[str]) -> list[str]:
     bad: list[str] = []
-    for case in (_end_finish, _end_retry, _end_cancel, _end_long, _end_open, _end_command):
+    for case in (_end_finish, _end_retry, _end_cancel, _end_long, _end_open, _end_fixed_open,
+                 _end_command):
         with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
             bad += case(Path(tmp))
     return bad
@@ -2586,7 +2617,8 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "end": {"early-end": lambda: _patched(ps, "_ended", _ended_with_long),
             "claimed-runs-on": lambda: _patched(pq.SqliteQueue, "cancel", _cancel_waiting),
             "open-ended": lambda: _patched(ps, "_ended", _ended_open),
-            "request-fatal": lambda: _patched(ps, "_requests", _requests_fatal)},
+            "request-fatal": lambda: _patched(ps, "_requests", _requests_fatal),
+            "open-fixed": lambda: _patched(pq, "_open_fixed", lambda header, *, closed: False)},
 }
 
 

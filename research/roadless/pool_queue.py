@@ -98,11 +98,16 @@ def fresh_minutes(ladder: Ladder) -> float:
     return ladder.lease_minutes - ladder.margin_minutes - ladder.startup_minutes
 
 
+#: The feed of a wave whose jobs are all granted at submit (pool_steward.Fixed, by this name): its
+#: seed closes the queue it makes.
+FIXED = "fixed"
+
+
 @dataclass(frozen=True, kw_only=True)
 class Header:
     """A wave's: its name, the commit every run of it is at, the family of its work (the
     estimators'), its ladder (recorded whole), when it was planned (cluster_submit's STAMP) and its
-    feed (`fixed`: the jobs granted at submit)."""
+    feed (FIXED: the jobs granted at submit)."""
 
     wave: str
     commit: str
@@ -135,9 +140,10 @@ class JobSeed:
 @dataclass(frozen=True, kw_only=True)
 class Seed:
     """A wave's jobs.json: its header, its jobs, and whether the queue is closed from the start
-    (a fixed wave's is). Its jobs' ids and (block, item)s are each unique, and a pool's job is of
-    a class of the header's ladder and fits a fresh lease (`fresh_minutes`): one that did not
-    would wait forever, no worker able to claim it, its count in the demand all the while."""
+    (a fixed wave's is, and must be: `_open_fixed`). Its jobs' ids and (block, item)s are each
+    unique, and a pool's job is of a class of the header's ladder and fits a fresh lease
+    (`fresh_minutes`): one that did not would wait forever, no worker able to claim it, its count
+    in the demand all the while."""
 
     header: Header
     jobs: tuple[JobSeed, ...]
@@ -148,6 +154,10 @@ class Seed:
         work = [(j.block, j.item) for j in self.jobs]
         if len(set(ids)) != len(ids) or len(set(work)) != len(work):
             raise ValueError(f"wave {self.header.wave}: a job id or (block, item) twice")
+        if _open_fixed(self.header, closed=self.closed):
+            raise ValueError(f"wave {self.header.wave}: its feed is {FIXED} (every job granted "
+                             "at submit) and its seed leaves the queue open: nothing would ever "
+                             "close it, and its steward ends a wave only once its queue is closed")
         lad = self.header.ladder
         classes = {class_name(lad.cards, r) for r in lad.rungs}
         odd = [j.id for j in self.jobs if j.lane == Lane.POOL and j.cls not in classes]
@@ -158,6 +168,12 @@ class Seed:
         if slow:
             raise ValueError(f"wave {self.header.wave}: pool jobs {slow[:5]} estimated past a "
                              f"fresh lease's {fresh_minutes(lad):g} minutes (the long lane's)")
+
+
+def _open_fixed(header: Header, *, closed: bool) -> bool:
+    """Whether a seed of `header` that is `closed` or not is a fixed feed's left open: its feed
+    grants nothing after submit, so it never closes the queue, and the wave would never end."""
+    return header.feed == FIXED and not closed
 
 
 class Job(NamedTuple):

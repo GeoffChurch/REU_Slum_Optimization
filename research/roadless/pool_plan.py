@@ -607,5 +607,5 @@ def plan_wave(*, wave: str, commit: str, family: str, ladder: Ladder, estimator:
             id=k, block=b, item=i, group=b, line=line(b, i), node=node_of[b], cls=s.cls, gb=s.gb,
             minutes=e.needed_minutes(), peak_gb=e.peak_gb, source=e.source, lane=s.lane))
     header = pq.Header(wave=wave, commit=commit, family=family, ladder=ladder, created=created,
-                       feed="fixed")
+                       feed=pq.FIXED)
     return pq.Seed(header=header, jobs=tuple(jobs), closed=True)

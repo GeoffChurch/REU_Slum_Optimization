@@ -49,7 +49,7 @@ from cluster_submit import Bundle
 from cluster_submit.context import STAMP, stamped
 from cluster_submit.gpu import ALLOCATION, GPU, Allocation, mode_named, read_allocation
 from pool_ladder import class_name
-from pool_queue import Job, JobState, Obj, Queue, Reaped
+from pool_queue import FIXED, Job, JobState, Obj, Queue, Reaped
 from pool_worker import Exit
 
 #: The one campaign, as the market's allocation names it ("<project>/<campaign>": Ruling 1).
@@ -133,7 +133,7 @@ class Fixed:
 
 
 #: The feeds, by the name the queue's header records (`Header.feed`): resolved once, no default.
-FEEDS: dict[str, Callable[[], Feed]] = {"fixed": Fixed}
+FEEDS: dict[str, Callable[[], Feed]] = {FIXED: Fixed}
 
 
 # ---- requests ---------------------------------------------------------------------------------
