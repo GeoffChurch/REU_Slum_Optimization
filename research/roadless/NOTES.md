@@ -8773,3 +8773,101 @@ code that is gone.
 **Compute.** Here, single-threaded: the acceptance runs 13.0 worker-hours over 8.5 h (112 jobs, 63
 on 1 worker, 49 on 4; the fourth replay's same work about 12.7); the guards after the deletion 1.6
 process-hours (`acceptance` 43 minutes, the others 51).
+
+### The lease pool (2026-10-22)
+
+**What a wave is now** (spec docs/superpowers/specs/2026-10-21-lease-pool-design.md, plan Tasks
+1-10). `cluster.py wave submit <w> --preset <p> --family <f> --nodes <n,...> [--items ...] <ids> --
+<script> {id} {item}` plans one job per (block, item) and seeds a SQLite queue on ai's home
+(`~/reblock-waves/<w>/queue.db`). Pools of identical short workers work it, one pool per (node,
+memory class), each a chain of leases the GPU market starts and widens; `wave submit` submits only
+the steward. The steward (one lease per wave on orion, 2 CPUs and 3 GB) runs a round a minute: it
+reaps dead claims from squeue, asks workers to step aside by the allocation's yields, applies
+`retry` and `cancel` requests and writes summary.json; at the end it writes the final queue
+(research/roadless/waves/<w>/final.db here, git-ignored, which the next wave's estimators read) and
+deletes the bank. A job's class is the smallest rung holding its estimated peak (its own stored
+peak x 1.2, an earlier wave's measure, or its family's worst-rate area fit x 1.5). A worker claims
+the longest pending job of its node and class that fits its walltime left less the margin, runs it
+as a child and records it done; failed (a strike when no row was written: three, and it waits for
+`wave <w> retry`); killed for memory (promoted a rung, past the top to the long lane); or killed at
+its walltime (reaped, its estimate raised to what it ran). The long lane is a run per job (`wave
+<w> long`: --mem 1.5 x its peak, --time 1.5 x its estimate, on its block's node). Every pooled
+command takes `--keep-standing`: a row that stands is that identity done, so a job run again after
+a double claim or a kill writes only what is missing. `wave <w> status | pools | long | retry |
+cancel` read and steer a wave. Presets (pool_ladder): cpu-score (2 CPUs; 4, 12, 24, 56, 88 GB; 2-h
+leases), gpu-presets (a card and 4 CPUs; 16, 32, 64, 96 GB), smoke (2 CPUs; 2, 4 GB; 20-minute
+leases).
+
+**Where it departs from the spec, and why** (the plan's rulings):
+- One campaign, `reblock`, whose demand file has one writer, this machine's demand step (after
+  every sync): the stewards publish their lines in summary.json, which the step reads. Two writers
+  would each rewrite what the other cannot see; the steward still keeps the watch timer syncing
+  while a wave is live, so the demand stays fresh.
+- A CPU class holds a whole core, 2 CPUs: ai's CR_CORE_MEMORY held g3a and g3b, submitted with 1
+  CPU, at 2, so a 1-CPU class's line would never match what its workers hold and the market's
+  `held` and step-aside would miss them. Jobs stay single-threaded.
+- Every pool lease is started by the market from the campaign's template: the live wave with the
+  most pending jobs of that class on that node, at its commit; a class reached by promotion starts
+  with nothing submitted by hand.
+- Strikes count reaped attempts too (reaped before the walltime with no row written), so a job that
+  kills its worker fails for a person after three tries instead of looping.
+- The worker, not Slurm, enforces a class's memory (below).
+
+**ai sets no memory limit; the worker enforces it.** The first smoke-cases wave's `oom` jobs
+touched 3 GB under --mem=2G in m2 and finished DONE (peak 3.16 GB, all three at once on quadro2);
+the wave was cancelled. Two diagnostic jobs (81808 on quadro2, 81809 on orion) found cgroup v2 with
+the memory controller delegated to the task's leaf, but memory.max, memory.swap.max and memory.high
+`max` at every level, job_<id> included, under --mem=1G and ConstrainRAMSpace=yes: a 1.5-GB touch
+ran rc 0, memory.events oom 0, memory.peak 1.62 GB. So no OOM can come from Slurm on ai (owner:
+"Worker enforces it"). About every second the worker sums its job's session's unique memory
+(smaps_rollup Pss_Anon + Pss_Shmem, so a fork pool's copy-on-write pages count once: 72 forks of a
+0.5-GB parent read 1.92 GB, against 38.4 GB of summed RSS), and past its class's GB less its own
+share it kills the session and records OOM. The cgroup's memory.events stays a second source; a
+long run's limit is its --mem.
+
+**The smoke waves on ai** (2026-10-22):
+- smoke-claim (200 `quick` jobs of 20 s, m2 on orion and quadro2, at ccd619d0): 200 jobs DONE in
+  200 attempts, one each, no two overlapping, 0 strikes: the claim guard on ai's home across two
+  nodes. 45 workers from one start a node (orion 22 wide, quadro2 23: the free capacity in 2-CPU
+  slots), 4 or 5 jobs a worker, 100 attempts a node, 2.0 minutes from the first claim to the last;
+  every worker drained (exit 0), so no lease was continued. The start on (quadro2, m2), which the
+  first smoke-cases also wanted, went to smoke-claim (100 pending to 6).
+- smoke-gpu (2 `gpu` jobs, g16 on quadro1): both DONE at the first attempt on a Quadro RTX 8000
+  (0.5 minutes, peak 0.61 GB), the lease a GPU array (cluster_submit records card_gb 48, the node's
+  card; the task asks 8).
+- smoke-cases2 (3 blocks x `big`, `oom`, `slow` on quadro2, at 25fe0bd4): `big` 3 DONE in m4 at the
+  first attempt (peak 3.16 GB). `oom` 3 killed in m2 by the worker 4 to 20 s in ("job 2: killed for
+  memory (worker: unique 2.45 GB > limit 1.98 GB)"; 2.81 and 2.69 GB for the others), promoted, and
+  DONE in a second m4 lease the market started 6 minutes later. `slow` (25 minutes, estimated 3): 3
+  killed at the 20-minute walltime, reaped "holding a job, at its walltime", estimates raised to 20
+  minutes (past the 13 a lease can use), LONG, the m2 lease not continued; `wave smoke-cases2 long`
+  ran each as its own run (2 CPUs, 1 GB, 30 minutes) to DONE in 25.1 minutes.
+- The step-aside, in smoke-aside (20 `steady` jobs of 2 minutes on quadro2, on 15 workers, the
+  node's free 30 CPUs): a hand-made allocation on the wave's own board (the market's, its `at` now,
+  quadro2's reblock 0/2/2 yielding 1) asked one worker in the first round that read it (the round
+  before missed the new directory: NFS's negative lookup cache) and no other after. That worker
+  finished its job (2.07 minutes), logged "asked to step aside: retired (75)" and exited 75; the
+  lease was not continued, its class's jobs all claimed or done by then.
+- `held`: the market's allocation at 15:42:07Z shows quadro2's reblock 0/2/2 held 15 with
+  smoke-aside's 15 workers running, so the class's bundle is what Slurm holds. The shorter waves
+  ran between two allocations.
+- Each steward peaked at 0.21 GB (sacct MaxRSS 207-213 MiB) of its 3 GB. Once a wave's runs ended,
+  reblock's demand held none of its lines.
+- On ai: pure cgroup v2, a task at
+  system.slice/<node>_slurmstepd.scope/job_<id>/step_batch/user/task_0 (the task's raw job id, not
+  its array id); SLURM_JOB_END_TIME set for array tasks; the steward's `squeue -r -o %i` lists its
+  own task, and it reaped exactly the cancelled and walltime-killed workers. SLURM_RESTART_COUNT
+  was not exercised (nothing was requeued).
+
+**The guards**, each passing and failing under each of its faults (research/roadless/pool_check.py;
+their docstring has every case): claim (split-tx), transitions (late-finish, drop-on-top,
+any-worker, second-claim, no-exclude, claimed-runs-on), class (median-rate, no-fit-margin,
+family-rate, all-long, no-capacity, with-proposed, one-run), walltime (no-fit, left-once), oom
+(fail-on-oom, unified-first), memory (no-watchdog, leader-only, rss-sum, error-lost), identity
+(no-identity), worker (fail-worker, no-exclude, no-retire, no-kill, pid-only, no-rebirth,
+no-checks), dead-claim (by-age, blind), aside (whole-yields, stale-kept, unread-fatal), end
+(early-end, claimed-runs-on, open-ended, request-fatal, open-fixed, cancel-open, round-fatal,
+unbounded), keep (refuse, redo-all), double-claim (refuse), history (kept-measured); and
+cluster_check.py's template, demand, wave, kinds and more. The smoke waves are their live halves:
+the claim on ai's home, the worker's OOM promotion, the walltime kill to the long lane and the
+step-aside.
