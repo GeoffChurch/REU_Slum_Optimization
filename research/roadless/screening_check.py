@@ -5,6 +5,7 @@ passes on the code as it is and must fail under each of its faults.
     S=research/roadless/screening_check.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S target [fault]            # faults: dropped-uses, unstaked
     uv run python $S records [fault]           # fault: array-rates
+    uv run python $S adapter [fault]           # faults: misaligned, gross-extra
     uv run python $S both-ways <guards,>       # each guard, then under each of its faults
     uv run python $S runs <workers>            # the acceptance runs -> screen_acceptance.csv
     uv run python $S equivalent <old.csv> <new.csv>   # two sets of acceptance runs compared
@@ -29,6 +30,20 @@ price a decision used is read off its reading: the target's, under the policy's 
 target's type (realized-loss epistemetry.SameTarget, fewest-wrong reblock.OwnStake). Fault
 `array-rates` (consolidated.SCREEN_RATES the array np.geomspace returns, not a tuple of floats,
 the slip seqscreen's arrays invite: the record refuses it, which the guard reports).
+`adapter`: a live screen fed through screening.arrived_of is epistemetry's replay. Under
+realized-loss, on r2/base (a near-tie ask), x2/p64 (an ask) and pPg/p256 (a keep) without the
+veto, C1m4/p64 (a collapse, 12 blocks) in both settings, and p64/base with every gain 0 without
+the veto, each on its orders 0-2 (18 cases): `advance` on the order's rows (the order's seed, the
+setting's drop rule) is the replay's run of that order decision for decision, with its prefixes,
+calls and drops, on all the blocks (most orders run past the stop: surplus blocks change
+nothing); cut one block short of its stop (where it used more than one and no collapse stopped
+it) it is `Running`, its decisions the replay's so far, waiting for the block the replay took
+next. Beside the replay: the zero-gain design stops at the floor, keeping the default, "settled",
+in every order; C1m4/p64 under the veto at its first block below -COLLAPSE, vetoed to KEEP,
+"collapse"; without it, "ran out" at 12 (screening.why_of). Faults: `misaligned` (arrived_of
+passes the covariate in the fixture's own block order, not the screen's: ProportionalTo prices
+each block to come by another block's base time), `gross-extra` (b's gross GPU-seconds in the
+extra column, not seconds - base_seconds: the targets read the wrong cost).
 
 THE ACCEPTANCE RUNS (`runs`, screen_acceptance.csv, committed): each preset replayed with
 epistemetry's `replay` on every pairwise design's 100 orders without the collapse veto, and with
@@ -47,10 +62,11 @@ import os
 import sys
 import time
 import tomllib
+import traceback
 from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cache
 from multiprocessing import Pool
 from pathlib import Path
@@ -71,14 +87,18 @@ from epistemetry.design.decide import (
 )
 from epistemetry.design.replay import AsksApart, Design, Order, Run, Truth, replay
 from epistemetry.design.screen import (
+    Arrived,
     Bootstrap,
     DropRule,
     NoVeto,
+    Running,
     SameTarget,
     Screen,
     Seen,
+    Stopped,
     TargetOf,
     ValueOfMoreUnits,
+    advance,
 )
 from epistemetry.stats.records import revive
 
@@ -320,7 +340,143 @@ def records() -> list[str]:
     return bad
 
 
-GUARDS: dict[str, Callable[[], list[str]]] = {"target": target, "records": records}
+ADAPTER_PRESET = "realized-loss"   # adapter: the preset its live screens run
+ADAPTER_ORDERS = 3                 # adapter: each case on its design's orders 0 .. 2
+
+
+class Expected(NamedTuple):
+    """What a case's live screen must show on its own, beside the replay: each arm's prefix at the
+    stop, why the arm stopped (`screening.why_of`), the arms the drop rule dropped with its call,
+    and the calls (None: whatever the replay's)."""
+    arm_units: tuple[int, ...]
+    why: screening.Why
+    vetoed: Mapping[int, int]
+    calls: tuple[tuple[int, ...], ...] | None
+
+
+class AdapterCase(NamedTuple):
+    """A design the adapter guard screens live, with the collapse veto or without it, and what a
+    screen of it must show on its own given an order's blocks (None: nothing beyond the replay)."""
+    fixture: Fixture
+    veto: bool
+    expected: Callable[[np.ndarray], Expected | None]
+
+
+def adapter_cases() -> list[AdapterCase]:
+    """r2/base (a near-tie ask), x2/p64 (an ask) and pPg/p256 (a keep) without the veto; C1m4/p64
+    (a collapse, 12 blocks, fewer than the floor) in both settings; and p64/base with every gain
+    0 (a screen with nothing to learn) without the veto."""
+    d = designs()
+    c1m4 = d["C1m4/p64"]
+    zero = d["p64/base"]._replace(name="p64/base, every gain 0",
+                                  gain=np.zeros_like(d["p64/base"].gain))
+
+    def collapse(i: np.ndarray) -> Expected:
+        # Stopped at its first block below -COLLAPSE, its prefix ending there.
+        first = int(np.flatnonzero(c1m4.gain[i, 0] < -consolidated.COLLAPSE)[0])
+        return Expected(arm_units=(first + 1,), why="collapse", vetoed={0: KEEP},
+                        calls=((KEEP,),))
+
+    def ran_out(i: np.ndarray) -> Expected:
+        return Expected(arm_units=(len(c1m4.blocks),), why="ran out", vetoed={}, calls=None)
+
+    def settled(i: np.ndarray) -> Expected:
+        return Expected(arm_units=(consolidated.SCREEN_FLOOR,), why="settled", vetoed={},
+                        calls=((KEEP,),))
+
+    def beside(i: np.ndarray) -> None:
+        return None
+
+    return [AdapterCase(fixture=d["r2/base"], veto=False, expected=beside),
+            AdapterCase(fixture=d["x2/p64"], veto=False, expected=beside),
+            AdapterCase(fixture=d["pPg/p256"], veto=False, expected=beside),
+            AdapterCase(fixture=c1m4, veto=False, expected=ran_out),
+            AdapterCase(fixture=c1m4, veto=True, expected=collapse),
+            AdapterCase(fixture=zero, veto=False, expected=settled)]
+
+
+class Live(NamedTuple):
+    """A case's live screen at its stop, the replay's run of the order, and the blocks the cut
+    screen was given (None: not cut)."""
+    stopped: Stopped
+    run: Run
+    cut: int | None
+
+
+def _live(preset: Screen, f: Fixture, *, veto: bool, o: int) -> Live:
+    """`preset` live on `f`'s order `o`, its rows fed through screening.arrived_of, against
+    epistemetry's replay of the order, by the plan's checks as written (an AssertionError is the
+    first that fails): on all the blocks it is the replay decision for decision, with its
+    prefixes, calls and drops; cut one block short of its stop (where it used more than one and no
+    collapse stopped it), it is the replay's decisions so far, waiting for the replay's next
+    block."""
+    design = f.design()
+    drop: DropRule = preset.drop if veto else NoVeto()
+    i = f.orders[o]
+    order = Order(units=tuple(int(x) for x in i), seed=(ACCEPTANCE_SEED, o))
+    run = replay(design, preset.policy, orders=[order],
+                 truth=Truth.of(design, preset.policy, seed=TRUTH_SEED, drop=drop),
+                 scoring=AsksApart(ask=ASK)).runs[0]
+    live = replace(preset, drop=drop, seed=order.seed)
+    s = advance(live, ledger=(), arrived=screening.arrived_of(gain=f.gain[i, 0],
+                                                              seconds=f.seconds[i, 0],
+                                                              base_seconds=f.base_seconds[i]))
+    assert isinstance(s, Stopped) and s.decisions == run.decisions and s.arm_units == run.arm_units
+    assert np.array_equal(np.array(s.calls), run.calls) and frozenset(s.vetoed) == run.vetoed
+    if run.units <= 1 or run.vetoed:
+        return Live(stopped=s, run=run, cut=None)
+    # the same screen cut short of its stop waits for exactly the blocks the replay took next
+    m = run.units - 1
+    cut = advance(live, ledger=(), arrived=screening.arrived_of(gain=f.gain[i[:m], 0],
+                                                                seconds=f.seconds[i[:m], 0],
+                                                                base_seconds=f.base_seconds[i]))
+    assert isinstance(cut, Running) and cut.decisions == run.decisions[:len(cut.decisions)]
+    assert cut.want[0][0] == m
+    return Live(stopped=s, run=run, cut=m)
+
+
+def adapter() -> list[str]:
+    if not __debug__:
+        return ["the adapter's checks are asserts, and python -O strips them"]
+    preset = consolidated.screen_presets()[ADAPTER_PRESET]
+    bad: list[str] = []
+    cases = cut = 0
+    for case in adapter_cases():
+        f, u = case.fixture, len(case.fixture.blocks)
+        for o in range(ADAPTER_ORDERS):
+            where = f"{f.name} {setting(case.veto)} order {o}"
+            cases += 1
+            try:
+                live = _live(preset, f, veto=case.veto, o=o)
+            except AssertionError as err:
+                failed = traceback.extract_tb(err.__traceback__)[-1].line
+                print(f"{where}: FAILS on `{failed}`", flush=True)
+                bad.append(f"{where} (`{failed}`)")
+                continue
+            s = live.stopped
+            why = screening.why_of(s, arm=0, units=u)
+            e = case.expected(f.orders[o])
+            ok = e is None or (s.arm_units == e.arm_units and why == e.why
+                               and dict(s.vetoed) == dict(e.vetoed)
+                               and (e.calls is None or s.calls == e.calls))
+            cut += live.cut is not None
+            print(f"{where}: stops at {s.arm_units[0]} of {u} blocks, "
+                  f"{screening.CALLS[s.calls[0][0]]} ({why}), {len(s.decisions)} decisions as the "
+                  f"replay's; " + ("not cut" if live.cut is None
+                                   else f"cut to {live.cut} blocks, it waits for the next "
+                                        f"(position {live.cut})")
+                  + ("" if e is None else f"; want {e.arm_units[0]} blocks, {e.why}")
+                  + (" -> ok" if ok else " -> FAILS"), flush=True)
+            if not ok:
+                bad.append(f"{where} (stops at {s.arm_units}, {why}, vetoed {dict(s.vetoed)}, "
+                           f"calls {s.calls}; want {e})")
+    print(f"adapter: {cases} live screens against their replays, {cut} of them cut short",
+          flush=True)
+    return bad
+
+
+GUARDS: dict[str, Callable[[], list[str]]] = {"target": target, "records": records,
+                                              "adapter": adapter}
 
 
 # ---- faults ---------------------------------------------------------------------------------
@@ -352,11 +508,48 @@ def _array_rates() -> AbstractContextManager[None]:
                     np.geomspace(*consolidated.RATES_PER_GPU_SECOND, consolidated.RATE_POINTS))
 
 
+def _own_order(base_seconds: np.ndarray) -> np.ndarray:
+    """The base's GPU-seconds as their design lists its blocks (DESIGNS's order, not a screen's),
+    the design found by the values: every design on one base lists its blocks in one order,
+    refused otherwise."""
+    key = sorted(base_seconds.tolist())
+    own = [f.base_seconds for f in designs().values() if sorted(f.base_seconds.tolist()) == key]
+    if not own or any(not np.array_equal(b, own[0]) for b in own):
+        raise ValueError(f"no one design's block order holds these {len(key)} base times")
+    return own[0]
+
+
+def _misaligned() -> AbstractContextManager[None]:
+    """screening.arrived_of passing the covariate in the fixture's own block order, not the
+    screen's: ProportionalTo prices each block to come by another block's base time."""
+    original = screening.arrived_of
+
+    def arrived_of(*, gain: np.ndarray, seconds: np.ndarray, base_seconds: np.ndarray) -> Arrived:
+        a = original(gain=gain, seconds=seconds, base_seconds=base_seconds)
+        return replace(a, covariates={screening.BASE_SECONDS: _own_order(base_seconds)})
+
+    return _patched(screening, "arrived_of", arrived_of)
+
+
+def _gross_extra() -> AbstractContextManager[None]:
+    """screening.arrived_of putting b's gross GPU-seconds in the extra column, not its seconds over
+    the base's: the targets read the wrong cost."""
+    original = screening.arrived_of
+
+    def arrived_of(*, gain: np.ndarray, seconds: np.ndarray, base_seconds: np.ndarray) -> Arrived:
+        a = original(gain=gain, seconds=seconds, base_seconds=base_seconds)
+        (arm,) = a.arms
+        return replace(a, arms=(replace(arm, outcomes=np.column_stack([gain, seconds])),))
+
+    return _patched(screening, "arrived_of", arrived_of)
+
+
 FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "target": {"dropped-uses": lambda: _patched(screening.RealizedLoss, "target_of",
                                                 _over_one_use),
                "unstaked": lambda: _patched(screening.OwnStake, "of", _unstaked)},
     "records": {"array-rates": _array_rates},
+    "adapter": {"misaligned": _misaligned, "gross-extra": _gross_extra},
 }
 
 
