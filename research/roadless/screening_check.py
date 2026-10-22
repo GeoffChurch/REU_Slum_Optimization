@@ -5,10 +5,14 @@ passes on the code as it is and must fail under each of its faults.
     S=research/roadless/screening_check.py     # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S target [fault]            # faults: dropped-uses, unstaked
     uv run python $S records [fault]           # fault: array-rates
-    uv run python $S adapter [fault]           # faults: misaligned, gross-extra
-    uv run python $S both-ways <guards,>       # each guard, then under each of its faults
+    uv run python $S adapter [fault]           # faults: misaligned, gross-extra, ran-out-first
+    uv run python $S acceptance [fault] [--workers W]   # fault: dropped-uses
+    uv run python $S both-ways <guards,> [--workers W]  # each guard, then under each of its faults
     uv run python $S runs <workers>            # the acceptance runs -> screen_acceptance.csv
     uv run python $S equivalent <old.csv> <new.csv>   # two sets of acceptance runs compared
+
+`--workers W` is the processes the acceptance guard replays on, 1 when not given (exempt from the
+required-parameter rule: a count that changes no result, each run drawing from its own seed).
 
 THE FIXTURE is DESIGNS (screen_designs.json, committed: the replays' frozen designs, reblock's
 real-data acceptance fixture), read at one boundary (`designs`): per design its block ids, each
@@ -40,10 +44,22 @@ nothing); cut one block short of its stop (where it used more than one and no co
 it) it is `Running`, its decisions the replay's so far, waiting for the block the replay took
 next. Beside the replay: the zero-gain design stops at the floor, keeping the default, "settled",
 in every order; C1m4/p64 under the veto at its first block below -COLLAPSE, vetoed to KEEP,
-"collapse"; without it, "ran out" at 12 (screening.why_of). Faults: `misaligned` (arrived_of
-passes the covariate in the fixture's own block order, not the screen's: ProportionalTo prices
-each block to come by another block's base time), `gross-extra` (b's gross GPU-seconds in the
-extra column, not seconds - base_seconds: the targets read the wrong cost).
+"collapse"; without it, "ran out" at 12 (screening.why_of). And why_of's precedence, on a screen
+`advance` stops so: C1m4/p64 under the veto, its gains clipped at 0 but on order 0's last block,
+set below -COLLAPSE, is vetoed on the screen's last block, its prefix the whole order: "collapse",
+not "ran out". Faults: `misaligned` (arrived_of passes the covariate in the fixture's own block
+order, not the screen's: ProportionalTo prices each block to come by another block's base time),
+`gross-extra` (b's gross GPU-seconds in the extra column, not seconds - base_seconds: the targets
+read the wrong cost), `ran-out-first` (why_of asks whether the prefix is the whole order before
+whether the arm was vetoed: the last-block collapse reads "ran out").
+`acceptance`: reblock's real-data acceptance test for epistemetry's pin (its spec, owner
+2026-10-16). realized-loss, as the presets build it now, replays ACCEPTANCE's runs of it on orders
+0-9 (13 pairwise designs without the veto, C1m4/p64 with it too: 140 runs, each order's draws
+from the row's seed), a design and setting at a time in the file's order, on a pool of W
+processes: each run's units, call, wrong, asks and truth equal the row's exactly, its cost to
+1e-12 relative (a sum's rounding). It returns at the first design that differs. Fault
+`dropped-uses` (as `target`'s). A pin move whose streams differ fails it: the runs are then
+regenerated (`runs`) and pass `equivalent` against the committed ones first (screening.py).
 
 THE ACCEPTANCE RUNS (`runs`, screen_acceptance.csv, committed): each preset replayed with
 epistemetry's `replay` on every pairwise design's 100 orders without the collapse veto, and with
@@ -51,8 +67,9 @@ it where it fires (C1m4/p64; elsewhere a design's veto runs equal its no-veto ru
 sample counted once), order o's draws keyed by (ACCEPTANCE_SEED, o): 1,400 runs a preset. One job
 a (preset, design, setting, CHUNK orders), a parquet each under screen_acceptance_jobs/<rev7>
 (git-ignored), resumable. `equivalent` compares two sets of them run against run on the same
-order, by the test pre-registered 2026-10-18 (its docstring): where every draw is keyed by a seed
-and its place, a pin whose streams differ cannot reproduce a run bit for bit, only its law.
+order, by the test pre-registered 2026-10-18 (its docstring), its margins half the two presets'
+gap on the old runs (`deltas_of`): where every draw is keyed by a seed and its place, a pin whose
+streams differ cannot reproduce a run bit for bit, only its law.
 """
 from __future__ import annotations
 
@@ -64,11 +81,11 @@ import time
 import tomllib
 import traceback
 from collections import Counter
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Hashable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, replace
-from functools import cache
-from multiprocessing import Pool
+from functools import cache, partial
+from multiprocessing import Pool, get_context
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -85,7 +102,7 @@ from epistemetry.design.decide import (
     StandardErrors,
     ValueOfInformation,
 )
-from epistemetry.design.replay import AsksApart, Design, Order, Run, Truth, replay
+from epistemetry.design.replay import AsksApart, Design, Order, Replay, Run, Truth, replay
 from epistemetry.design.screen import (
     Arrived,
     Bootstrap,
@@ -396,10 +413,9 @@ def adapter_cases() -> list[AdapterCase]:
 
 
 class Live(NamedTuple):
-    """A case's live screen at its stop, the replay's run of the order, and the blocks the cut
-    screen was given (None: not cut)."""
+    """A case's live screen at its stop, and the blocks the cut screen was given (None: not
+    cut)."""
     stopped: Stopped
-    run: Run
     cut: int | None
 
 
@@ -424,7 +440,7 @@ def _live(preset: Screen, f: Fixture, *, veto: bool, o: int) -> Live:
     assert isinstance(s, Stopped) and s.decisions == run.decisions and s.arm_units == run.arm_units
     assert np.array_equal(np.array(s.calls), run.calls) and frozenset(s.vetoed) == run.vetoed
     if run.units <= 1 or run.vetoed:
-        return Live(stopped=s, run=run, cut=None)
+        return Live(stopped=s, cut=None)
     # the same screen cut short of its stop waits for exactly the blocks the replay took next
     m = run.units - 1
     cut = advance(live, ledger=(), arrived=screening.arrived_of(gain=f.gain[i[:m], 0],
@@ -432,14 +448,41 @@ def _live(preset: Screen, f: Fixture, *, veto: bool, o: int) -> Live:
                                                                 base_seconds=f.base_seconds[i]))
     assert isinstance(cut, Running) and cut.decisions == run.decisions[:len(cut.decisions)]
     assert cut.want[0][0] == m
-    return Live(stopped=s, run=run, cut=m)
+    return Live(stopped=s, cut=m)
+
+
+LAST_COLLAPSE = "C1m4/p64"   # adapter: the design whose screen it collapses on its last block
+
+
+def last_block_collapse(preset: Screen) -> list[str]:
+    """why_of's precedence, on a screen `advance` stops so: LAST_COLLAPSE (fewer blocks than the
+    floor, so the floor's first step runs them all) under `preset`'s veto, its gains clipped at 0
+    but on order 0's last block, set below -COLLAPSE. The arm is vetoed on the screen's last block,
+    so its prefix is the whole order, and why_of must read "collapse", not "ran out"."""
+    f = designs()[LAST_COLLAPSE]
+    i, u = f.orders[0], len(f.blocks)
+    gain = np.maximum(f.gain[:, 0], 0.0)
+    gain[i[-1]] = -2 * consolidated.COLLAPSE
+    arrived = screening.arrived_of(gain=gain[i], seconds=f.seconds[i, 0],
+                                   base_seconds=f.base_seconds[i])
+    s = advance(preset, ledger=(), arrived=arrived)
+    where = f"{LAST_COLLAPSE} under the veto, only order 0's last block below -COLLAPSE"
+    if not isinstance(s, Stopped):
+        print(f"{where}: {type(s).__name__}, not Stopped -> FAILS", flush=True)
+        return [f"{where} ({type(s).__name__})"]
+    why = screening.why_of(s, arm=0, units=u)
+    ok = s.arm_units == (u,) and dict(s.vetoed) == {0: KEEP} and why == "collapse"
+    print(f"{where}: stops at {s.arm_units[0]} of {u} blocks, vetoed {dict(s.vetoed)}, {why}; "
+          f"want {u} blocks, vetoed {{0: {KEEP}}}, collapse" + (" -> ok" if ok else " -> FAILS"),
+          flush=True)
+    return [] if ok else [f"{where} (stops at {s.arm_units}, vetoed {dict(s.vetoed)}, {why})"]
 
 
 def adapter() -> list[str]:
     if not __debug__:
         return ["the adapter's checks are asserts, and python -O strips them"]
     preset = consolidated.screen_presets()[ADAPTER_PRESET]
-    bad: list[str] = []
+    bad = last_block_collapse(preset)
     cases = cut = 0
     for case in adapter_cases():
         f, u = case.fixture, len(case.fixture.blocks)
@@ -470,13 +513,9 @@ def adapter() -> list[str]:
             if not ok:
                 bad.append(f"{where} (stops at {s.arm_units}, {why}, vetoed {dict(s.vetoed)}, "
                            f"calls {s.calls}; want {e})")
-    print(f"adapter: {cases} live screens against their replays, {cut} of them cut short",
-          flush=True)
+    print(f"adapter: {cases} live screens against their replays, {cut} of them cut short, and "
+          f"the last-block collapse", flush=True)
     return bad
-
-
-GUARDS: dict[str, Callable[[], list[str]]] = {"target": target, "records": records,
-                                              "adapter": adapter}
 
 
 # ---- faults ---------------------------------------------------------------------------------
@@ -494,6 +533,11 @@ def _patched(owner: object, name: str, value: object) -> Iterator[None]:
 def _over_one_use(self: screening.RealizedLoss) -> TargetOf:
     """RealizedLoss's target over 1 use, not `uses`: its risk and its value FUTURE times small."""
     return SameTarget(target=AdoptKeepAskByStake(rates=self.rates, weights=self.weights, uses=1.0))
+
+
+def _dropped_uses() -> AbstractContextManager[None]:
+    """RealizedLoss building its target over 1 use (`_over_one_use`)."""
+    return _patched(screening.RealizedLoss, "target_of", _over_one_use)
 
 
 def _unstaked(self: screening.OwnStake, seen: Seen, *, arm: int) -> Priced:
@@ -544,12 +588,24 @@ def _gross_extra() -> AbstractContextManager[None]:
     return _patched(screening, "arrived_of", arrived_of)
 
 
+def _ran_out_first(s: Stopped, *, arm: int, units: int) -> screening.Why:
+    """why_of with its first two branches swapped: a prefix the whole order reads "ran out" before
+    the veto is looked at."""
+    if s.arm_units[arm] == units:
+        return "ran out"
+    if arm in s.vetoed:
+        return "collapse"
+    return "settled"
+
+
+#: Each guard's faults by name (and so every guard's name: each has at least one).
 FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
-    "target": {"dropped-uses": lambda: _patched(screening.RealizedLoss, "target_of",
-                                                _over_one_use),
+    "target": {"dropped-uses": _dropped_uses,
                "unstaked": lambda: _patched(screening.OwnStake, "of", _unstaked)},
     "records": {"array-rates": _array_rates},
-    "adapter": {"misaligned": _misaligned, "gross-extra": _gross_extra},
+    "adapter": {"misaligned": _misaligned, "gross-extra": _gross_extra,
+                "ran-out-first": lambda: _patched(screening, "why_of", _ran_out_first)},
+    "acceptance": {"dropped-uses": _dropped_uses},
 }
 
 
@@ -664,25 +720,30 @@ def wave_cost(design: Design, run: Run) -> float:
             + float(design.base_costs[order[:max(reach)]].sum()))
 
 
+def replayed(screen: Screen, f: Fixture, *, veto: bool, orders: Sequence[Order]) -> Replay:
+    """`screen`'s policy replayed on `f`'s `orders` with the screen's collapse veto or without it,
+    scored by AsksApart against the policy's own calls on the whole design (`Truth.of`,
+    TRUTH_SEED) under the same drop rule."""
+    design = f.design()
+    drop: DropRule = screen.drop if veto else NoVeto()
+    truth = Truth.of(design, screen.policy, seed=TRUTH_SEED, drop=drop)
+    return replay(design, screen.policy, orders=orders, truth=truth, scoring=AsksApart(ask=ASK))
+
+
 def acceptance_rows(job: Job) -> pd.DataFrame:
-    """`job`'s runs: its preset's policy replayed on its orders under the cell's drop rule, each
-    order's draws keyed by (ACCEPTANCE_SEED, o), scored by AsksApart against the policy's own
-    calls on the whole design (`Truth.of`); each row with the screen's record (`_record`), so a
-    job made under another screen is not gathered."""
+    """`job`'s runs (`replayed`), each order's draws keyed by (ACCEPTANCE_SEED, o); each row with
+    the screen's record (`_record`), so a job made under another screen is not gathered."""
     screen = consolidated.screen_presets()[job.preset]
     f = designs()[job.plan]
-    design = f.design()
-    drop: DropRule = screen.drop if job.veto else NoVeto()
-    truth = Truth.of(design, screen.policy, seed=TRUTH_SEED, drop=drop)
     numbers = range(job.first, job.first + CHUNK)
     orders = [Order(units=tuple(int(x) for x in f.orders[o]), seed=(ACCEPTANCE_SEED, o))
               for o in numbers]
-    rep = replay(design, screen.policy, orders=orders, truth=truth, scoring=AsksApart(ask=ASK))
-    record = _record(screen)
+    rep = replayed(screen, f, veto=job.veto, orders=orders)
+    design, record = f.design(), _record(screen)
     return pd.DataFrame([{"preset": job.preset, "plan": job.plan, "veto": job.veto, "order": o,
                           "seed": json.dumps(list(run.order.seed)), "units": run.units,
                           "call": _only(run.calls), "cost": run.cost, "wrong": run.wrong,
-                          "asks": run.asks, "truth": _only(truth.calls),
+                          "asks": run.asks, "truth": _only(rep.truth.calls),
                           "wave_cost": wave_cost(design, run), "screen": record}
                          for o, run in zip(numbers, rep.runs, strict=True)])
 
@@ -710,14 +771,25 @@ def in_order(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def gather(every: Sequence[Job]) -> pd.DataFrame:
-    """Every job's rows, each job checked whole and made under its preset's screen as it is now."""
+    """Every job's rows, each job checked whole, made under its preset's screen as it is now, and
+    its own: its preset's, design's and setting's runs on its orders in turn, each order o's seed
+    (ACCEPTANCE_SEED, o)."""
     presets = consolidated.screen_presets()
     frames = []
     for job in every:
-        rows = pd.read_parquet(job_file(job))
+        f = job_file(job)
+        rows = pd.read_parquet(f)
         if len(rows) != CHUNK or set(rows["screen"]) != {_record(presets[job.preset])}:
-            raise SystemExit(f"{job_file(job)}: not {CHUNK} runs under {job.preset}'s screen as "
-                             f"it is now; delete it and run again")
+            raise SystemExit(f"{f}: not {CHUNK} runs under {job.preset}'s screen as it is now; "
+                             f"delete it and run again")
+        numbers = list(range(job.first, job.first + CHUNK))
+        if not (set(rows["preset"]) == {job.preset} and set(rows["plan"]) == {job.plan}
+                and set(rows["veto"]) == {job.veto} and rows["order"].tolist() == numbers
+                and [json.loads(s) for s in rows["seed"]]
+                == [[ACCEPTANCE_SEED, o] for o in numbers]):
+            raise SystemExit(f"{f}: its rows are not those of {job.preset} on {job.plan} "
+                             f"{setting(job.veto)}, orders {numbers[0]}-{numbers[-1]} in turn, "
+                             f"each order o's seed [{ACCEPTANCE_SEED}, o]; delete it and run again")
         frames.append(rows.drop(columns="screen"))
     every_run = in_order(pd.concat(frames, ignore_index=True))
     return pd.DataFrame({c: every_run[c] for c in COLUMNS})
@@ -743,6 +815,132 @@ def runs(*, workers: int) -> pd.DataFrame:
     return frame
 
 
+# ---- the acceptance guard -------------------------------------------------------------------
+
+ACCEPT_PRESET = "realized-loss"   # acceptance: the preset whose runs it replays (the default)
+ACCEPT_ORDERS = 10                # acceptance: each design and setting on orders 0 .. 9
+
+
+class Outcome(NamedTuple):
+    """What the acceptance guard checks of a run: the blocks the stop used, the call, the cost,
+    whether the call is wrong and whether it asks (0 or 1 each), and the truth it was scored
+    against."""
+    units: int
+    call: int
+    cost: float
+    wrong: int
+    asks: int
+    truth: int
+
+
+def differences(new: Outcome, stored: Outcome) -> list[str]:
+    """Each field in which `new` is not `stored`: exactly, but the cost to 1e-12 relative (a
+    sum's rounding)."""
+    differ = [f"{q} {getattr(new, q)} against {getattr(stored, q)}" for q in Outcome._fields
+              if q != "cost" and getattr(new, q) != getattr(stored, q)]
+    if not math.isclose(new.cost, stored.cost, rel_tol=1e-12):
+        differ.append(f"cost {new.cost!r} against {stored.cost!r}")
+    return differ
+
+
+class Stored(NamedTuple):
+    """A design and setting's acceptance runs as ACCEPTANCE holds them, in its order: each run's
+    order, the seed its draws are keyed by, and its Outcome."""
+    cell: Cell
+    orders: tuple[int, ...]
+    seeds: tuple[tuple[int, ...], ...]
+    outcomes: tuple[Outcome, ...]
+
+
+def _seed(text: str) -> tuple[int, ...]:
+    """A row's seed, a JSON list of one or more non-negative integers."""
+    seed = json.loads(text)
+    if not (isinstance(seed, list) and seed
+            and all(isinstance(w, int) and not isinstance(w, bool) and w >= 0 for w in seed)):
+        raise ValueError(f"a seed is a JSON list of non-negative integers, got {text!r}")
+    return tuple(seed)
+
+
+#: ACCEPTANCE's columns the guard reads, each read as this type (the CSV's one boundary).
+STORED_TYPES = {"preset": str, "plan": str, "veto": bool, "order": int, "seed": str, "units": int,
+                "call": int, "cost": float, "wrong": int, "asks": int, "truth": int}
+
+
+def stored_acceptance(screen: Screen) -> list[Stored]:
+    """ACCEPT_PRESET's runs in ACCEPTANCE on orders 0 .. ACCEPT_ORDERS - 1, one Stored a design
+    and setting, in the file's order; refused unless they are each design and setting of
+    `screen`'s `comparison` on each of those orders once, in turn."""
+    frame = pd.read_csv(ACCEPTANCE, usecols=list(STORED_TYPES), dtype=STORED_TYPES)
+    mine: pd.DataFrame = frame[((frame["preset"] == ACCEPT_PRESET)
+                                & (frame["order"] < ACCEPT_ORDERS)).to_numpy()]
+    by_cell: dict[Cell, list[Mapping[Hashable, Any]]] = {}
+    for r in mine.to_dict("records"):
+        by_cell.setdefault(Cell(plan=str(r["plan"]), veto=bool(r["veto"])), []).append(r)
+    stored = [Stored(cell=cell, orders=tuple(int(r["order"]) for r in rs),
+                     seeds=tuple(_seed(str(r["seed"])) for r in rs),
+                     outcomes=tuple(Outcome(units=int(r["units"]), call=int(r["call"]),
+                                            cost=float(r["cost"]), wrong=int(r["wrong"]),
+                                            asks=int(r["asks"]), truth=int(r["truth"]))
+                                    for r in rs))
+              for cell, rs in by_cell.items()]
+    want, got = comparison(screen), [s.cell for s in stored]
+    if sorted(got) != sorted(want) or any(s.orders != tuple(range(ACCEPT_ORDERS)) for s in stored):
+        raise SystemExit(f"{ACCEPTANCE.name}: {ACCEPT_PRESET}'s runs on orders 0-"
+                         f"{ACCEPT_ORDERS - 1} are not those of {len(want)} designs and settings "
+                         f"({', '.join(f'{c.plan} {setting(c.veto)}' for c in want)}), each on "
+                         f"each order once, in turn")
+    return stored
+
+
+class Reproduced(NamedTuple):
+    """A design and setting's acceptance runs replayed now, in the stored order, and the minutes
+    they took."""
+    outcomes: tuple[Outcome, ...]
+    minutes: float
+
+
+def _reproduced(s: Stored) -> Reproduced:
+    """`s`'s runs replayed under ACCEPT_PRESET as the presets build it now (`replayed`), each
+    order's draws from its stored seed. Built in the worker: a fault is a patch in the guard's
+    process, which a forked worker inherits."""
+    start = time.monotonic()
+    f = designs()[s.cell.plan]
+    rep = replayed(consolidated.screen_presets()[ACCEPT_PRESET], f, veto=s.cell.veto,
+                   orders=[Order(units=tuple(int(x) for x in f.orders[o]), seed=seed)
+                           for o, seed in zip(s.orders, s.seeds, strict=True)])
+    truth = _only(rep.truth.calls)
+    return Reproduced(outcomes=tuple(Outcome(units=r.units, call=_only(r.calls), cost=r.cost,
+                                             wrong=r.wrong, asks=r.asks, truth=truth)
+                                     for r in rep.runs),
+                      minutes=(time.monotonic() - start) / 60)
+
+
+def acceptance(*, workers: int) -> list[str]:
+    stored = stored_acceptance(consolidated.screen_presets()[ACCEPT_PRESET])
+    total = sum(len(s.orders) for s in stored)
+    print(f"acceptance: {ACCEPT_PRESET} at epistemetry {pinned_rev()[:7]} against "
+          f"{ACCEPTANCE.name}'s {total} runs of it on orders 0-{ACCEPT_ORDERS - 1} "
+          f"({len(stored)} designs and settings), on {workers} "
+          f"process{'' if workers == 1 else 'es'}", flush=True)
+    equal = 0
+    # Forked, so the workers run under any fault patched in this process.
+    with get_context("fork").Pool(workers) as pool:
+        for s, r in zip(stored, pool.imap(_reproduced, stored), strict=True):
+            where = f"{s.cell.plan} {setting(s.cell.veto)}"
+            differ = {o: d for o, new, old in zip(s.orders, r.outcomes, s.outcomes, strict=True)
+                      if (d := differences(new, old))}
+            equal += len(s.orders) - len(differ)
+            first = next((f"first order {o}: {', '.join(d)}" for o, d in differ.items()), "")
+            print(f"{where}: {len(s.orders) - len(differ)} of {len(s.orders)} runs equal "
+                  f"({r.minutes:.1f} min)" + (" -> ok" if not differ else f" -> FAILS, {first}"),
+                  flush=True)
+            if differ:
+                # the first design that differs ends the guard (leaving the pool terminates it)
+                return [f"{where} ({len(differ)} of {len(s.orders)} runs differ; {first})"]
+    print(f"acceptance: {equal} of {total} runs equal", flush=True)
+    return []
+
+
 # ---- the comparison of two sets of acceptance runs ------------------------------------------
 
 RESAMPLES = 10_000      # the bootstrap's resamples of the pairs (pre-registered 2026-10-18)
@@ -763,12 +961,6 @@ class Quantities(NamedTuple):
     asks: float
 
 
-#: The equivalence margins, pre-registered 2026-10-18: half the distance between the two presets'
-#: means on the fourth replay's runs of the comparison set (realized-loss 15.03 blocks, 0.443,
-#: 0.0479, 0.203; fewest-wrong 16.25, 0.473, 0.0264, 0.227).
-DELTAS = Quantities(units=0.609, cost_fraction=0.0150, wrong=0.0107, asks=0.0121)
-
-
 def quantities(runs: pd.DataFrame, *, fixtures: Mapping[str, Fixture]) -> pd.DataFrame:
     """Each run's Quantities, one column each, in their order."""
     whole = np.array([float(fixtures[p].seconds.sum()) for p in runs["plan"]])
@@ -776,6 +968,18 @@ def quantities(runs: pd.DataFrame, *, fixtures: Mapping[str, Fixture]) -> pd.Dat
                          "cost_fraction": runs["cost"].to_numpy(dtype=float) / whole,
                          "wrong": runs["wrong"].to_numpy(dtype=float),
                          "asks": runs["asks"].to_numpy(dtype=float)})
+
+
+def deltas_of(old: pd.DataFrame, *, fixtures: Mapping[str, Fixture]) -> Quantities:
+    """The equivalence margins by the rule pre-registered 2026-10-18: in each quantity, half the
+    gap between the two presets' means on the old runs (`old`, exactly two presets' runs: refused
+    otherwise), so a change smaller than what tells the presets apart."""
+    presets = list(pd.unique(old["preset"]))
+    if len(presets) != 2:
+        raise ValueError(f"two presets give the margins, the old runs hold {presets}")
+    q = quantities(old, fixtures=fixtures)
+    one, other = (q[(old["preset"] == p).to_numpy()].mean() for p in presets)
+    return Quantities(**{f: abs(float(one[f] - other[f])) / 2 for f in Quantities._fields})
 
 
 def sign_flip(d: np.ndarray, *, flips: int, rng: np.random.Generator) -> float:
@@ -811,16 +1015,47 @@ def holm(ps: Sequence[float]) -> list[float]:
     return adjusted
 
 
-def _three(x: float) -> float:
-    """x to three significant figures."""
-    return float(f"{x:.3g}")
-
-
 class _Test(NamedTuple):
     """One sign-flip test of the Holm family: whose, of what, and its p."""
     preset: str
     what: str
     p: float
+
+
+class _Exact(NamedTuple):
+    """A preset's exact check: its (design, setting)s' truths equal, of those compared, and its
+    runs of the floor's designs equal, of those compared."""
+    truths_equal: int
+    truths: int
+    runs_equal: int
+    runs: int
+
+
+class _QuantityRow(NamedTuple):
+    """A quantity's line of a preset's table: its old and new means, mean(d), the bootstrap
+    interval of mean(d), the sign-flip p, and McNemar's exact p (nan for a quantity not 0-1)."""
+    quantity: str
+    old: float
+    new: float
+    mean_d: float
+    low: float
+    high: float
+    p: float
+    mcnemar: float
+
+
+class _DesignRow(NamedTuple):
+    """A design's line of a preset's table: its pairs, its old and new mean units, the sign-flip p
+    of their difference, and its wrong calls and asks, old and new."""
+    plan: str
+    pairs: int
+    units_old: float
+    units_new: float
+    p: float
+    wrong_old: int
+    wrong_new: int
+    asks_old: int
+    asks_new: int
 
 
 def equivalent(old: pd.DataFrame, new: pd.DataFrame, *, fixtures: Mapping[str, Fixture],
@@ -830,16 +1065,17 @@ def equivalent(old: pd.DataFrame, new: pd.DataFrame, *, fixtures: Mapping[str, F
     plan, Task 4), reading only READ; its failures, none when they are one policy's runs under
     two streams. Per preset and quantity (`Quantities`), d = new - old over the pairs:
     1. exact, where nothing is drawn: every (preset, design, setting)'s truth equal, and every run
-       of a design no longer than the screens' floor (C1m4/p64) equal in units, call, cost (to
-       1e-12 relative, a sum's rounding), wrong and asks;
+       of a pairwise design no longer than the screens' floor (C1m4/p64) equal in units, call,
+       cost (to 1e-12 relative, a sum's rounding), wrong and asks, failing a preset with no such
+       run to compare;
     2. equivalence: the 95% percentile bootstrap interval of mean(d) (`resamples` resamples of a
-       preset's pairs, np.random.default_rng(0)) inside +/- DELTAS, refusing to judge unless the
-       old runs give DELTAS (half the two presets' gap) to three significant figures;
+       preset's pairs, np.random.default_rng(0)) inside +/- the margin, half the two presets'
+       gap in the quantity on the old runs (`deltas_of`);
     3. no detectable shift: the sign-flip p of mean(d) (`flips` flips, np.random.default_rng(1)
        afresh for each test) for each preset's four quantities, and for the units of each
        (preset, design), Holm-corrected together at family-wise ALPHA, rejecting nothing.
-    Prints, per preset, each quantity's means, mean(d), interval, delta and p (McNemar's exact p
-    beside a 0-1 quantity's), the per-design table and the Holm verdicts."""
+    Prints the margins, then per preset each quantity's means, mean(d), interval, margin and p
+    (McNemar's exact p beside a 0-1 quantity's), the per-design table and the Holm verdicts."""
     a, b = (pd.DataFrame({c: frame[c] for c in READ}) for frame in (old, new))
     if a.duplicated(KEY).any() or b.duplicated(KEY).any():
         return ["pairs: a run appears twice in the old or the new runs"]
@@ -854,17 +1090,17 @@ def equivalent(old: pd.DataFrame, new: pd.DataFrame, *, fixtures: Mapping[str, F
     presets = list(pd.unique(m["preset"]))
     q_old = quantities(m.rename(columns=lambda c: c.removesuffix("_old")), fixtures=fixtures)
     q_new = quantities(m.rename(columns=lambda c: c.removesuffix("_new")), fixtures=fixtures)
-    if len(presets) != 2:
-        return [f"deltas: two presets give the margins, the runs hold {presets}"]
-    means = [q_old[(m["preset"] == p).to_numpy()].mean() for p in presets]
-    deltas = Quantities(*(abs(float(means[0][q] - means[1][q])) / 2 for q in Quantities._fields))
-    if Quantities(*map(_three, deltas)) != DELTAS:
-        return [f"deltas: the old runs give {Quantities(*map(_three, deltas))}, pre-registered "
-                f"{DELTAS}: not the runs the margins were registered on"]
+    try:
+        deltas = deltas_of(a, fixtures=fixtures)
+    except ValueError as err:
+        return [f"deltas: {err}"]
+    print("margins, half the two presets' gap on the old runs: "
+          + ", ".join(f"{q} {getattr(deltas, q):.4g}" for q in Quantities._fields), flush=True)
 
     bad: list[str] = []
-    floor = {name for name, f in fixtures.items() if len(f.blocks) <= consolidated.SCREEN_FLOOR}
-    exact: dict[str, tuple[int, int, int, int]] = {}
+    floor = {name for name, f in fixtures.items()
+             if not f.many and len(f.blocks) <= consolidated.SCREEN_FLOOR}
+    exact: dict[str, _Exact] = {}
     for p in presets:
         g = m[m["preset"] == p]
         truths = equal_truths = 0
@@ -890,10 +1126,15 @@ def equivalent(old: pd.DataFrame, new: pd.DataFrame, *, fixtures: Mapping[str, F
                                for c in differ))
             else:
                 equal_runs += 1
-        exact[p] = (equal_truths, truths, equal_runs, len(fixed))
+        if not len(fixed):
+            bad.append(f"exact: {p} compares no run of a pairwise design no longer than the "
+                       f"floor ({consolidated.SCREEN_FLOOR} blocks): the check of the draw-free "
+                       f"runs would check nothing")
+        exact[p] = _Exact(truths_equal=equal_truths, truths=truths, runs_equal=equal_runs,
+                          runs=len(fixed))
 
     tests: list[_Test] = []
-    rows: dict[str, list[tuple[str, float, float, float, float, float, tuple[float, float]]]] = {}
+    rows: dict[str, list[_QuantityRow]] = {}
     for p in presets:
         at = (m["preset"] == p).to_numpy()
         n = int(at.sum())
@@ -903,17 +1144,18 @@ def equivalent(old: pd.DataFrame, new: pd.DataFrame, *, fixtures: Mapping[str, F
             o, w = q_old[q].to_numpy()[at], q_new[q].to_numpy()[at]
             d = w - o
             lo, hi = (float(x) for x in np.percentile(d[idx].mean(axis=1), [2.5, 97.5]))
-            delta = float(getattr(DELTAS, q))
+            delta = float(getattr(deltas, q))
             if not (-delta < lo and hi < delta):
                 bad.append(f"interval: {p} {q} [{lo:+.4f}, {hi:+.4f}] not inside "
-                           f"+/-{delta}")
+                           f"+/-{delta:.4g}")
             pv = sign_flip(d, flips=flips, rng=np.random.default_rng(1))
             binary = bool(np.isin(o, (0.0, 1.0)).all() and np.isin(w, (0.0, 1.0)).all())
             mc = mcnemar(d) if binary else math.nan
             tests.append(_Test(preset=p, what=q, p=pv))
-            rows[p].append((q, float(o.mean()), float(w.mean()), float(d.mean()), pv, mc,
-                            (lo, hi)))
-    per_design: dict[str, list[tuple[str, int, float, float, float, int, int, int, int]]] = {}
+            rows[p].append(_QuantityRow(quantity=q, old=float(o.mean()), new=float(w.mean()),
+                                        mean_d=float(d.mean()), low=lo, high=hi, p=pv,
+                                        mcnemar=mc))
+    per_design: dict[str, list[_DesignRow]] = {}
     for p in presets:
         per_design[p] = []
         for plan in pd.unique(m.loc[m["preset"] == p, "plan"]):
@@ -922,11 +1164,12 @@ def equivalent(old: pd.DataFrame, new: pd.DataFrame, *, fixtures: Mapping[str, F
             pv = sign_flip(d, flips=flips, rng=np.random.default_rng(1))
             tests.append(_Test(preset=p, what=f"units on {plan}", p=pv))
             cell = m[at]
-            per_design[p].append((str(plan), int(at.sum()),
-                                  float(q_old["units"].to_numpy()[at].mean()),
-                                  float(q_new["units"].to_numpy()[at].mean()), pv,
-                                  int(cell["wrong_old"].sum()), int(cell["wrong_new"].sum()),
-                                  int(cell["asks_old"].sum()), int(cell["asks_new"].sum())))
+            per_design[p].append(_DesignRow(
+                plan=str(plan), pairs=int(at.sum()),
+                units_old=float(q_old["units"].to_numpy()[at].mean()),
+                units_new=float(q_new["units"].to_numpy()[at].mean()), p=pv,
+                wrong_old=int(cell["wrong_old"].sum()), wrong_new=int(cell["wrong_new"].sum()),
+                asks_old=int(cell["asks_old"].sum()), asks_new=int(cell["asks_new"].sum())))
     adjusted = dict(zip(tests, holm([t.p for t in tests]), strict=True))
     for t, ap in adjusted.items():
         if ap <= ALPHA:
@@ -937,22 +1180,26 @@ def equivalent(old: pd.DataFrame, new: pd.DataFrame, *, fixtures: Mapping[str, F
 
     by = {(t.preset, t.what): t for t in tests}
     for p in presets:
-        et, nt, er, nr = exact[p]
-        print(f"{p}: {int((m['preset'] == p).sum())} pairs; exact: {et} of {nt} truths equal, "
-              f"{er} of {nr} runs of {', '.join(sorted(floor))} equal", flush=True)
+        e = exact[p]
+        print(f"{p}: {int((m['preset'] == p).sum())} pairs; exact: {e.truths_equal} of "
+              f"{e.truths} truths equal, {e.runs_equal} of {e.runs} runs of "
+              f"{', '.join(sorted(floor))} equal", flush=True)
         print(f"  {'quantity':<14}{'old':>9}{'new':>9}{'mean(d)':>10}  {'95% interval':<21}"
-              f"{'delta':>7}{'p (flips)':>11}{'McNemar':>9}  Holm", flush=True)
-        for q, mo, mw, md, pv, mc, (lo, hi) in rows[p]:
-            print(f"  {q:<14}{mo:>9.4f}{mw:>9.4f}{md:>+10.4f}  [{lo:+.4f}, {hi:+.4f}]  "
-                  f"{float(getattr(DELTAS, q)):>7.4g}{pv:>11.2g}"
-                  f"{'' if math.isnan(mc) else f'{mc:.2g}':>9}  {verdict(by[p, q])}", flush=True)
+              f"{'margin':>7}{'p (flips)':>11}{'McNemar':>9}  Holm", flush=True)
+        for r in rows[p]:
+            print(f"  {r.quantity:<14}{r.old:>9.4f}{r.new:>9.4f}{r.mean_d:>+10.4f}  "
+                  f"[{r.low:+.4f}, {r.high:+.4f}]  {float(getattr(deltas, r.quantity)):>7.4g}"
+                  f"{r.p:>11.2g}{'' if math.isnan(r.mcnemar) else f'{r.mcnemar:.2g}':>9}  "
+                  f"{verdict(by[p, r.quantity])}", flush=True)
         print(f"  {'design':<15}{'pairs':>6}{'units old':>10}{'new':>8}{'mean(d)':>9}"
               f"{'p (flips)':>11}  {'Holm':<15}{'wrong old/new':>14}{'asks old/new':>13}",
               flush=True)
-        for plan, n, uo, un, pv, wo, wn, ao, an in per_design[p]:
-            print(f"  {plan:<15}{n:>6}{uo:>10.2f}{un:>8.2f}{un - uo:>+9.2f}{pv:>11.2g}  "
-                  f"{verdict(by[p, f'units on {plan}']):<15}{f'{wo}/{wn}':>14}"
-                  f"{f'{ao}/{an}':>13}", flush=True)
+        for dr in per_design[p]:
+            print(f"  {dr.plan:<15}{dr.pairs:>6}{dr.units_old:>10.2f}{dr.units_new:>8.2f}"
+                  f"{dr.units_new - dr.units_old:>+9.2f}{dr.p:>11.2g}  "
+                  f"{verdict(by[p, f'units on {dr.plan}']):<15}"
+                  f"{f'{dr.wrong_old}/{dr.wrong_new}':>14}{f'{dr.asks_old}/{dr.asks_new}':>13}",
+                  flush=True)
     rejected = [t for t, ap in adjusted.items() if ap <= ALPHA]
     print(f"Holm over {len(tests)} tests at family-wise {ALPHA}: "
           + ("no rejection" if not rejected else "rejects " + ", ".join(
@@ -962,12 +1209,19 @@ def equivalent(old: pd.DataFrame, new: pd.DataFrame, *, fixtures: Mapping[str, F
 
 # ---- the command line -----------------------------------------------------------------------
 
-def main(guard: str, fault: str | None) -> None:
+def guards(*, workers: int) -> dict[str, Callable[[], list[str]]]:
+    """Every guard by name (FAULTS' names), `acceptance` on a pool of `workers` processes."""
+    return {"target": target, "records": records, "adapter": adapter,
+            "acceptance": partial(acceptance, workers=workers)}
+
+
+def main(guard: str, fault: str | None, *, workers: int) -> None:
+    run = guards(workers=workers)[guard]
     if fault is None:
-        bad = GUARDS[guard]()
+        bad = run()
     else:
         with FAULTS[guard][fault]():
-            bad = GUARDS[guard]()
+            bad = run()
     verdict = "FAILS on " + ", ".join(bad) if bad else "passes"
     print(f"{guard}{'' if fault is None else f' under the fault {fault}'}: {verdict}", flush=True)
     if bad and fault is None:
@@ -976,17 +1230,17 @@ def main(guard: str, fault: str | None) -> None:
         raise SystemExit(f"the fault {fault} went unseen: the guard guards nothing")
 
 
-def both_ways(guards: list[str]) -> None:
+def both_ways(names: list[str], *, workers: int) -> None:
     """Each guard as it is, then under each of its faults (FAULTS), one after another in this
     process. Raises naming every run not as `main` expects."""
     wrong = []
-    for guard in guards:
+    for guard in names:
         for fault in (None, *FAULTS[guard]):
             try:
-                main(guard, fault)
+                main(guard, fault, workers=workers)
             except SystemExit as e:
                 wrong.append(f"{guard}{'' if fault is None else f' under {fault}'}: {e.code}")
-    print(f"both ways, {', '.join(guards)}: "
+    print(f"both ways, {', '.join(names)}: "
           + ("as expected" if not wrong else "NOT as expected: " + "; ".join(wrong)), flush=True)
     if wrong:
         raise SystemExit(1)
@@ -994,8 +1248,13 @@ def both_ways(guards: list[str]) -> None:
 
 if __name__ == "__main__":
     a = sys.argv[1:]
-    if len(a) == 2 and a[0] == "both-ways" and set(a[1].split(",")) <= set(GUARDS):
-        both_ways(a[1].split(","))
+    workers = 1   # exempt: the acceptance guard's processes, a count that changes no result
+    if a[-2:-1] == ["--workers"]:
+        if not (a[-1].isdigit() and int(a[-1]) >= 1):
+            raise SystemExit(__doc__)
+        workers, a = int(a[-1]), a[:-2]
+    if len(a) == 2 and a[0] == "both-ways" and set(a[1].split(",")) <= set(FAULTS):
+        both_ways(a[1].split(","), workers=workers)
         raise SystemExit(0)
     if len(a) == 2 and a[0] == "runs" and a[1].isdigit() and int(a[1]) >= 1:
         runs(workers=int(a[1]))
@@ -1005,6 +1264,6 @@ if __name__ == "__main__":
                               resamples=RESAMPLES, flips=FLIPS)
         print("pass" if not failures else "FAILS on " + "; ".join(failures), flush=True)
         raise SystemExit(1 if failures else 0)
-    if len(a) not in (1, 2) or a[0] not in GUARDS or (len(a) == 2 and a[1] not in FAULTS[a[0]]):
+    if len(a) not in (1, 2) or a[0] not in FAULTS or (len(a) == 2 and a[1] not in FAULTS[a[0]]):
         raise SystemExit(__doc__)
-    main(a[0], a[1] if len(a) == 2 else None)
+    main(a[0], a[1] if len(a) == 2 else None, workers=workers)

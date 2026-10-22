@@ -19,6 +19,7 @@ from __future__ import annotations
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -116,38 +117,66 @@ def main() -> None:
         raise SystemExit(1)
 
 
+class Case(NamedTuple):
+    """A self-check case: what it changes, the old and the new runs it compares, and whether
+    `equivalent`'s failures on them are the ones expected."""
+    what: str
+    old: pd.DataFrame
+    new: pd.DataFrame
+    expected: Callable[[list[str]], bool]
+
+
 def self_check() -> None:
     """The comparison on the stored runs alone, against themselves (no failure), with SHIFTED's
     runs one block longer in both presets (a shift inside the margins, which the sign-flip test
-    must find: Holm rejections and nothing else, SHIFTED's among them) and with FLIPPED_IN's wrong
+    must find: Holm rejections and nothing else, SHIFTED's among them), with FLIPPED_IN's wrong
     call flipped 0 -> 1 on its first FLIPPED runs of a design longer than the floor (outside the
-    margin: FLIPPED_IN's wrong interval among the failures)."""
-    if FLIPPED_IN not in consolidated.screen_presets():
+    margin: FLIPPED_IN's wrong interval among the failures), with FLIPPED_IN's first run of a
+    design no longer than the floor costing 1e-9 more (a draw-free run changed: that run's exact
+    failure and nothing else), and with every run of such a design left out of both sides (the
+    exact check comparing no run: each preset's refusal and nothing else)."""
+    presets = consolidated.screen_presets()
+    if FLIPPED_IN not in presets:
         raise SystemExit(f"{FLIPPED_IN} is no preset")
     old = old_runs()
+    short = old["plan"].map(lambda p: len(designs()[p].blocks) <= consolidated.SCREEN_FLOOR)
     shifted = old.assign(units=old["units"] + (old["plan"] == SHIFTED))
-    pick = old.index[(old["preset"] == FLIPPED_IN) & (old["wrong"] == 0)
-                     & (old["plan"].map(lambda p: len(designs()[p].blocks))
-                        > consolidated.SCREEN_FLOOR)][:FLIPPED]
+    pick = old.index[(old["preset"] == FLIPPED_IN) & (old["wrong"] == 0) & ~short][:FLIPPED]
     flipped = old.copy()
     flipped.loc[pick, "wrong"] = 1
-    cases: list[tuple[str, pd.DataFrame, Callable[[list[str]], bool]]] = [
-        ("the stored runs against themselves", old, lambda bad: not bad),
-        (f"units + 1 on every run of {SHIFTED}", shifted,
-         lambda bad: (bool(bad) and all(b.startswith("holm: ") for b in bad)
-                      and all(any(b.startswith(f"holm: {p} units on {SHIFTED} ") for b in bad)
-                              for p in consolidated.screen_presets()))),
-        (f"{FLIPPED_IN}'s wrong flipped on {FLIPPED} runs", flipped,
-         lambda bad: any(b.startswith(f"interval: {FLIPPED_IN} wrong ") for b in bad)),
+    (one,) = old.index[(old["preset"] == FLIPPED_IN) & short][:1]
+    costed = old.copy()
+    costed.loc[one, "cost"] *= 1 + 1e-9
+    at = f"exact: {FLIPPED_IN} {old.loc[one, 'plan']} "
+    floorless: pd.DataFrame = old[(~short).to_numpy()].reset_index(drop=True)
+    cases = [
+        Case(what="the stored runs against themselves", old=old, new=old,
+             expected=lambda bad: not bad),
+        Case(what=f"units + 1 on every run of {SHIFTED}", old=old, new=shifted,
+             expected=lambda bad: (
+                 bool(bad) and all(b.startswith("holm: ") for b in bad)
+                 and all(any(b.startswith(f"holm: {p} units on {SHIFTED} ") for b in bad)
+                         for p in presets))),
+        Case(what=f"{FLIPPED_IN}'s wrong flipped on {FLIPPED} runs", old=old, new=flipped,
+             expected=lambda bad: any(b.startswith(f"interval: {FLIPPED_IN} wrong ")
+                                      for b in bad)),
+        Case(what=f"{FLIPPED_IN}'s first run of a design no longer than the floor costing 1e-9 "
+                  f"more", old=old, new=costed,
+             expected=lambda bad: len(bad) == 1 and bad[0].startswith(at) and "cost" in bad[0]),
+        Case(what="no run of a design no longer than the floor", old=floorless, new=floorless,
+             expected=lambda bad: (
+                 len(bad) == len(presets)
+                 and all(any(b.startswith(f"exact: {p} compares no run") for b in bad)
+                         for p in presets))),
     ]
     wrong = []
-    for what, new, expected in cases:
-        print(f"---- {what}", flush=True)
-        bad = equivalent(old, new, fixtures=designs(), resamples=RESAMPLES, flips=FLIPS)
-        print(f"{what}: " + ("no failure" if not bad else "fails on " + "; ".join(bad)),
+    for case in cases:
+        print(f"---- {case.what}", flush=True)
+        bad = equivalent(case.old, case.new, fixtures=designs(), resamples=RESAMPLES, flips=FLIPS)
+        print(f"{case.what}: " + ("no failure" if not bad else "fails on " + "; ".join(bad)),
               flush=True)
-        if not expected(bad):
-            wrong.append(what)
+        if not case.expected(bad):
+            wrong.append(case.what)
     print("self-check: " + ("as expected" if not wrong else "NOT as expected: " + "; ".join(wrong)),
           flush=True)
     if wrong:
