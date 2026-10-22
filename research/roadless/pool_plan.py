@@ -485,7 +485,10 @@ class _Wave(NamedTuple):
 
 #: An attempt that measured its whole job: it kept no row (row_marker.KEPT, counted by the worker:
 #: under --keep-standing a double claim's second run, a run after a kill or a resubmitted wave's
-#: may have run part of its job, or none of it), as history_of's SQL reads it.
+#: may have run part of its job, or none of it), as history_of's SQL reads it. So a family whose
+#: rows stand before its jobs run gets no measure from an earlier wave and falls back to its
+#: stored rows: uniform's T arm (its row consolidated presets' default's path) or a lineup-one
+#: whose proposal stands keeps a row in every attempt.
 WHOLE_RUN = "kept = 0"
 
 

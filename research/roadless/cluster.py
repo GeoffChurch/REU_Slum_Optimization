@@ -80,14 +80,15 @@ commit:
   ledger and final queue into research/roadless/waves/<w>/ (git-ignored, as rows are).
 - `long`: one job no lease can hold, run alone and sized for it (`pool.py work --job`).
 
-A steward that died (its lease failed: an error its rounds do not survive,
-pool_steward.SURVIVABLE) leaves its wave without summaries, so no lease is continued or started
-and the demand states its running workers alone. A person restarts it by hand at the wave's
-commit (its queue's, summary.json's `commit`): `submit steward <w>-steward-r<N> --at <commit>
---wave <w> --board <board>`; it opens the wave's queue as it stands and goes on. A (wave, node,
-class) whose newest pool run ended on its own fault (exit 1, or no exit and no walltime kill:
-`own_fault`) gets no lease from the market and no line in the demand (`stopped_classes`) until a
-person, having looked, submits a pool run of it by hand (`submit pool <w>-<node>-<class>-s<N>`).
+A steward that died (its lease failed: an error its rounds do not survive, or one of
+pool_steward.SURVIVABLE in FAILED_ROUNDS rounds in a row) leaves its wave without summaries, so no
+lease is continued or started and the demand states its running workers alone. A person restarts it
+by hand at the wave's commit (its queue's, summary.json's `commit`): `submit steward
+<w>-steward-r<N> --at <commit> --wave <w> --board <board>`; it opens the wave's queue as it stands
+and goes on. A (wave, node, class) whose newest pool run ended on its own fault (exit 1, or no exit
+and no walltime kill: `own_fault`) gets no lease from the market and no line in the demand
+(`stopped_classes`) until a person, having looked, submits a pool run of it by hand (`submit pool
+<w>-<node>-<class>-s<N>`).
 
 The `wave` verb (cluster_wave.py) submits a wave whole (its steward and long runs: the market
 starts its pools) and reads and steers it. A wave's state lives on the cluster, in
@@ -110,7 +111,7 @@ import argparse
 import math
 import shlex
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from pathlib import Path
@@ -729,17 +730,33 @@ def own_fault(registry: Registry, rec: cs.RunRecord) -> str | None:
 PoolKey = tuple[str, str, str]
 
 
-def stopped_classes(registry: Registry, recs: Sequence[cs.RunRecord],
-                    args: Args) -> dict[PoolKey, str]:
-    """Each (wave, node, class) whose newest pool run among `recs` (its arguments read by `args`)
-    has finished on a fault of its own (`own_fault`), with why: the market starts no lease there
-    (Waves.template answers Done) and the demand states no line there (`demand_waves`), so a bad
-    node or a startup that always fails is not restarted every sync, each start striking a job,
-    until a person looks (the spec's 3.5) and submits a pool run of it by hand (`submit pool`:
-    then the newest)."""
+def _wave_of(rec: cs.RunRecord) -> str | None:
+    """The --wave of run `rec`'s submit arguments, read alone (None without one): a record of a
+    preset since renamed, which the project's parser refuses whole, still names its wave."""
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--wave")
+    wave: str | None = p.parse_known_args(list(rec.argv))[0].wave
+    return wave
+
+
+def _of_live(rec: cs.RunRecord, live: Collection[str]) -> bool:
+    """Whether pool run `rec` is of one of the `live` waves."""
+    return _wave_of(rec) in live
+
+
+def stopped_classes(registry: Registry, recs: Sequence[cs.RunRecord], args: Args, *,
+                    live: Collection[str]) -> dict[PoolKey, str]:
+    """Each (wave, node, class) of the `live` waves whose newest pool run among `recs` (its
+    arguments read by `args`) has finished on a fault of its own (`own_fault`), with why: the
+    market starts no lease there (Waves.template answers Done) and the demand states no line there
+    (`demand_waves`), so a bad node or a startup that always fails is not restarted every sync,
+    each start striking a job, until a person looks (the spec's 3.5) and submits a pool run of it
+    by hand (`submit pool`: then the newest). Only the live waves' pool runs are read
+    (`_of_live`): a stop matters only against a live summary's line, and the registry's history
+    (a pool of a preset since renamed) would otherwise refuse every sync."""
     newest: dict[PoolKey, cs.RunRecord] = {}
     for r in recs:
-        if r.kind != Pool.name:
+        if r.kind != Pool.name or not _of_live(r, live):
             continue
         a = args(r)
         key = (a.wave, a.node, class_name(LADDERS[a.preset].cards, a.mem))
@@ -866,7 +883,7 @@ class Waves:
             unread = "; ".join(f"wave {w}'s: {why}" for w, why in sorted(left_out.items()))
             raise SystemExit(f"no live wave's summary reads ({unread}): the next sync asks again")
         stopped = stopped_classes(ctx.registry, ctx.registry.all()[0],
-                                  lambda r: ctx.parse(r.argv))
+                                  lambda r: ctx.parse(r.argv), live=live)
         choices: list[_Choice] = []
         halted: list[str] = []
         for w, s in sorted(usable.items()):
@@ -968,7 +985,7 @@ def demand_waves(recs: Sequence[cs.RunRecord], login: Login,
     campaign, a wave's or not, without a demand."""
     live = _live_stewards(recs, _submitted)
     pools = pool_runs(recs)
-    stopped = stopped_classes(registry, recs, _submitted)
+    stopped = stopped_classes(registry, recs, _submitted, live=live.stewards)
     whys: dict[str, list[str]] = {}
     for got in (live.split, pools.unread):
         for w, why in got.items():

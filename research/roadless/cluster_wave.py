@@ -264,14 +264,13 @@ def _long_held(ctx: Context, runs: Iterable[RunRecord]) -> set[int]:
             if r.kind == cluster.Long.name and not cluster_demand.finished(r)}
 
 
-def _live_commit(ctx: Context, wave: str) -> str:
-    """`wave`'s commit, its live steward's (cluster.live_stewards), or a SystemExit: a wave whose
-    steward is not live here has ended here, and nothing of it is started or requested."""
-    live = cluster.live_stewards(ctx)
-    if wave not in live:
+def _live(ctx: Context, wave: str) -> None:
+    """A SystemExit unless `wave` has a live steward here (cluster.live_stewards): a wave whose
+    steward is not live here has ended here, and nothing of it is started or requested. (What is
+    started of it is at its queue's commit, its summary's, as Waves.template starts it.)"""
+    if wave not in cluster.live_stewards(ctx):
         raise SystemExit(f"wave {wave} is not live in this registry (no live steward of it): its "
                          "steward starts, applies and ends nothing more")
-    return live[wave].commit
 
 
 def _ladder_of(s: psum.Summary) -> Ladder:
@@ -642,7 +641,15 @@ def _status(edge: Edge, wave: str) -> Ran:
                 print(f"  long, no run: job {j.job} ({j.block}{' ' + j.item if j.item else ''}) "
                       f"on {j.node}, {j.mem_gb} GB, {j.minutes:.0f} min: `cluster.py wave "
                       f"{wave} long`")
+        stopped = cluster.stopped_classes(ctx.registry, ctx.registry.all()[0],
+                                          lambda r: ctx.parse(r.argv),
+                                          live=cluster.live_stewards(ctx))
         for x in _wanting_pools(s, _pools_held(ctx, runs)):
+            if (wave, x.node, x.cls) in stopped:
+                print(f"  stopped: {x.node} {x.cls}, {x.pending} pending: "
+                      f"{stopped[(wave, x.node, x.cls)]}; no lease is started there, nor "
+                      "demanded, until a person, having looked, submits a pool run of it")
+                continue
             print(f"  no pool: {x.node} {x.cls}, {x.pending} pending: the market starts one as "
                   f"the allocation gives it units (in shadow mode: `cluster.py wave {wave} "
                   "pools`)")
@@ -662,8 +669,9 @@ def _pools(edge: Edge, wave: str) -> Ran:
     if mode.name != SHADOW.name:
         raise SystemExit(f"the GPU market is in {mode.name} mode: it starts wave {wave}'s pools "
                          f"from Waves.template (Ruling 4); `wave {wave} pools` is shadow mode's")
-    commit = _live_commit(ctx, wave)
+    _live(ctx, wave)
     s = cluster.wave_summary(ctx, wave)
+    commit = s.commit
     ladder = _ladder_of(s)
     calls = []
     for x in _wanting_pools(s, _pools_held(ctx, _wave_runs(ctx, wave))):
@@ -680,8 +688,9 @@ def _pools(edge: Edge, wave: str) -> Ran:
 
 def _long(edge: Edge, wave: str) -> Ran:
     ctx = edge.ctx
-    commit = _live_commit(ctx, wave)
+    _live(ctx, wave)
     s = cluster.wave_summary(ctx, wave)
+    commit = s.commit
     ladder = _ladder_of(s)
     held = _long_held(ctx, _wave_runs(ctx, wave))
     calls = []
@@ -748,7 +757,7 @@ def _seed_ids(ctx: Context, wave: str) -> list[int]:
 
 def _retry(edge: Edge, wave: str, jobs: str) -> Ran:
     ctx = edge.ctx
-    _live_commit(ctx, wave)
+    _live(ctx, wave)
     seed = _seed_ids(ctx, wave)
     if jobs == "failed":
         ids = seed

@@ -16,7 +16,7 @@ stages), and checks what a task would get.
                                             # split-quiet
     uv run python $C template [fault]       # faults: other-mem, other-node, continuation-name,
                                             # reused-name, with-at, first-wave, market-always,
-                                            # restart-own-fault
+                                            # restart-own-fault, reads-all
     uv run python $C wave [fault]           # faults: no-keep, block-names, no-script-check,
                                             # no-check, fit-capped, uncapped, any-node,
                                             # pools-only, fit-margin, unfinished-only,
@@ -171,7 +171,12 @@ and another campaign's. A registry whose only live wave is `c`: raises; whose on
 a-quadro2-m12-s1 finished with a task exiting 1 (the other killed at its walltime): the template
 there Done, naming the run and its exit; the demand's summaries (cluster.demand_waves) without
 a's quadro2 m12 line, its orion m4 line kept; then a newer pool run there, a-quadro2-m12-s2,
-finished routinely (75, and its walltime): the template a-quadro2-m12-s3.
+finished routinely (75, and its walltime): the template a-quadro2-m12-s3. Beside it, a-orion-m4-s1
+finished with a task that has no exit, sacct's OUT_OF_MEMORY (a cgroup that took the worker): the
+template on orion's m4 Done, naming it; a-orion-m24-s1 cancelled, a task having exited 1: no stop,
+the template a-orion-m24-s2; the demand states a's orion m24 and m56 lines alone; and a pool
+record of a long-ended wave of a removed preset (HISTORIC, which the project's parser refuses
+whole) is never read.
 `Waves.starts(market)` is the market's starts while a wave is live, and () with none, the market
 not asked. Faults, one per refusal the template must not trip, one for its choice and one for
 its starts: `other-mem` (its `--mem` the next rung: line_checked refuses the bundle),
@@ -180,7 +185,8 @@ its starts: `other-mem` (its `--mem` the next rung: line_checked refuses the bun
 reads another commit than the template's), `first-wave` (the first live wave by name, whatever
 its pending jobs), `market-always` (Waves.starts asking the market with no wave live) and
 `restart-own-fault` (cluster.own_fault finding none: own-fault's template starts a-quadro2-m12-s2,
-and the demand keeps the line).
+and the demand keeps the line) and `reads-all` (cluster._of_live true of every pool record: the
+historic one read, and the template refused).
 
 `wave` (the spec's 3.8 and 3.9, cluster_wave.py): `cluster.py wave submit ... --dry` command lines
 at HEAD through cluster.main, cluster_wave's edge a registry in a temporary directory, a runner
@@ -1323,51 +1329,82 @@ def _exited(ctx: Context, rec: RunRecord, *, rc: str) -> None:
             (work / "rc" / f"{a.job_id}_{i}").write_text(f"{rc}\n")
 
 
-def _ended(ctx: Context, rec: RunRecord, *, rc: str, submitted_at: str) -> RunRecord:
-    """Pool run `rec` (job 500, two tasks) finished: task 0 exiting `rc`, task 1 killed at its
-    walltime (sacct's TIMEOUT), as its run directory holds them; written to the registry,
-    submitted at `submitted_at`."""
+def _ended(ctx: Context, rec: RunRecord, *, rc: str | None, submitted_at: str) -> RunRecord:
+    """Pool run `rec` (job 500, two tasks) finished: task 0 exiting `rc` (None: no exit, sacct's
+    OUT_OF_MEMORY: a cgroup that took the worker too), task 1 killed at its walltime (TIMEOUT),
+    as its run directory holds them; written to the registry, submitted at `submitted_at`."""
     work = ctx.registry.workdir(rec.name)
     (work / "rc").mkdir(parents=True, exist_ok=True)
-    (work / "rc" / "500_0").write_text(f"{rc}\n")
-    (work / "sacct.txt").write_text("500_1|TIMEOUT|0:0|02:00:00|quadro2\n")
+    if rc is not None:
+        (work / "rc" / "500_0").write_text(f"{rc}\n")
+    (work / "sacct.txt").write_text(
+        ("" if rc is not None else "500_0|OUT_OF_MEMORY|0:125|00:10:00|orion\n")
+        + "500_1|TIMEOUT|0:0|02:00:00|quadro2\n")
     rec = replace(rec, submitted_at=submitted_at)
     ctx.registry.write(rec)
     return rec
 
 
+#: own-fault: a pool record of a wave long ended, of a preset since removed (the project's parser
+#: refuses it whole)
+HISTORIC = ("old-orion-m4-s1", ("--wave", "old", "--preset", "removed-preset", "--node", "orion",
+                                "--mem", "4", "--gpus", "72"))
+
+
 def _own_fault(m12: Bundle, after: str, got: list[str]) -> list[str]:
     """`template`'s case `own-fault` (the module's docstring): its problems."""
     bad: list[str] = []
+    m4, m24 = Bundle(0, 2, 4), Bundle(0, 2, 24)
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
         home = tmp / "home"
         ctx = _context(tmp / "repo", home)
         waves = cluster.Waves(registry=ctx.registry)
         ctx.registry.write(_steward_run("a", commit=SHA, finished=False, settled=False))
+        ctx.registry.write(_run(HISTORIC[0], "pool", HISTORIC[1], commit=SHA, width=2,
+                                finished=True, settled=True))
         _put(home, "a", _summary("a", at=after, state=psum.WaveState.CLOSED, ladder="cpu-score",
                                  commit=SHA, lines=(_line("quadro2", 12, pending=5, claimed=0),
-                                                    _line("orion", 4, pending=2, claimed=0)),
+                                                    _line("orion", 4, pending=2, claimed=0),
+                                                    _line("orion", 24, pending=1, claimed=0),
+                                                    _line("orion", 56, pending=1, claimed=0)),
                                  reaped=(), registered=()))
         first = _ended(ctx, _pool_run("a-quadro2-m12-s1", "a", node="quadro2", mem=12,
                                       finished=True), rc="1", submitted_at="2026-10-21T09:00:00Z")
-        t = waves.template(ctx, "reblock", "quadro2", m12)
-        if not isinstance(t, cs.Done) or first.name not in t.why or "exited 1" not in t.why:
-            bad.append(f"own-fault: the template after {first.name} exited 1: {t}, want Done "
-                       "naming it")
-        got.append(f"own-fault: {type(t).__name__}")
-        recs = ctx.registry.all()[0]
-        lines = cluster.demand_waves(recs, ctx.remote(), ctx.registry).summaries().read["a"].lines
-        stated = sorted((x.node, x.cls) for x in lines)
-        if stated != [("orion", "m4")]:
-            bad.append(f"own-fault: the demand states a's lines {stated}, want orion's m4 alone")
-        _ended(ctx, _pool_run("a-quadro2-m12-s2", "a", node="quadro2", mem=12, finished=True),
-               rc="75", submitted_at="2026-10-21T11:00:00Z")
-        t = waves.template(ctx, "reblock", "quadro2", m12)
-        if not isinstance(t, cs.Template) or t.run != "a-quadro2-m12-s3":
-            bad.append(f"own-fault: the template after a newer lease retired (75) and walltime: "
-                       f"{t}, want a-quadro2-m12-s3")
-        got.append(f"after a routine lease: {type(t).__name__}")
+        oom = _ended(ctx, _pool_run("a-orion-m4-s1", "a", node="orion", mem=4, finished=True),
+                     rc=None, submitted_at="2026-10-21T09:00:00Z")
+        _ended(ctx, replace(_pool_run("a-orion-m24-s1", "a", node="orion", mem=24,
+                                      finished=True), cancelled_at=GONE_AT),
+               rc="1", submitted_at="2026-10-21T09:00:00Z")
+        try:
+            for bundle, node, says, want in ((m12, "quadro2", (first.name, "exited 1"), None),
+                                             (m4, "orion", (oom.name, "OUT_OF_MEMORY"), None),
+                                             (m24, "orion", (), "a-orion-m24-s2")):
+                t = waves.template(ctx, "reblock", node, bundle)
+                if want is None and (not isinstance(t, cs.Done)
+                                     or not all(w in t.why for w in says)):
+                    bad.append(f"own-fault: the template on {node} of {bundle.text()}: {t}, want "
+                               f"Done saying {says}")
+                if want is not None and (not isinstance(t, cs.Template) or t.run != want):
+                    bad.append(f"own-fault: the template on {node} of {bundle.text()} after a "
+                               f"cancelled lease: {t}, want {want}")
+                got.append(f"own-fault {node} {bundle.text()}: {type(t).__name__}")
+            recs = ctx.registry.all()[0]
+            lines = cluster.demand_waves(recs, ctx.remote(),
+                                         ctx.registry).summaries().read["a"].lines
+            stated = sorted((x.node, x.cls) for x in lines)
+            if stated != [("orion", "m24"), ("orion", "m56")]:
+                bad.append(f"own-fault: the demand states a's lines {stated}, want orion's m24 "
+                           "and m56 alone")
+            _ended(ctx, _pool_run("a-quadro2-m12-s2", "a", node="quadro2", mem=12,
+                                  finished=True), rc="75", submitted_at="2026-10-21T11:00:00Z")
+            t = waves.template(ctx, "reblock", "quadro2", m12)
+            if not isinstance(t, cs.Template) or t.run != "a-quadro2-m12-s3":
+                bad.append(f"own-fault: the template after a newer lease retired (75) and "
+                           f"walltime: {t}, want a-quadro2-m12-s3")
+            got.append(f"after a routine lease: {type(t).__name__}")
+        except SystemExit as e:
+            bad.append(f"own-fault: refused, the historic {HISTORIC[0]} read: {e}")
     return bad
 
 
@@ -1904,7 +1941,8 @@ FAULTS: dict[str, dict[str, Callable[[], contextlib.AbstractContextManager[None]
                                        lambda choices: min(choices, key=lambda c: c.wave)),
         "market-always": lambda: _patched(cluster.Waves, "starts",
                                           lambda self, market: tuple(market())),
-        "restart-own-fault": lambda: _patched(cluster, "own_fault", lambda registry, rec: None)},
+        "restart-own-fault": lambda: _patched(cluster, "own_fault", lambda registry, rec: None),
+        "reads-all": lambda: _patched(cluster, "_of_live", lambda rec, live: True)},
     "wave": {
         "no-keep": lambda: _patched(cluster_wave, "job_line", _no_keep),
         "keeps-unchecked": lambda: _patched(cluster_wave, "_keeps_standing",

@@ -21,7 +21,7 @@ code as it is and must fail under each of its faults.
                                                     # unread-fatal
     uv run python $S end [--fault <name>]           # faults: early-end, claimed-runs-on,
                                                     # open-ended, request-fatal, open-fixed,
-                                                    # cancel-open, round-fatal
+                                                    # cancel-open, round-fatal, unbounded
     uv run python $S keep [--fault <name>]          # faults: refuse, redo-all
     uv run python $S double-claim [--fault <name>]  # fault: refuse
     uv run python $S history [--fault <name>]       # fault: kept-measured
@@ -250,7 +250,9 @@ the steward's own STEWARD_TASK among them, or a failure), no allocation unless a
   `cancel-open`: SqliteQueue.cancel leaving the queue open, so the wave never ends); and `locked`,
   a wave whose job is done, its steward's first round failing as a locked queue does
   (sqlite3.OperationalError): said, and the next round ends it, exit 0 (fault `round-fatal`:
-  pool_steward.SURVIVABLE empty, so the steward dies of it).
+  pool_steward.SURVIVABLE empty, so the steward dies of it); and `persistent`, every round
+  failing so (a full disk): exit 1 after pool_steward.FAILED_ROUNDS rounds, inside its lease
+  (fault `unbounded`: FAILED_ROUNDS past reach, so it loops to its lease's end, 75).
 
 Every pooled command keeps what stands (the spec's 3.3 and its guard 2, decision 4; the plan's
 Rulings 6 and 8):
@@ -2291,6 +2293,44 @@ def _end_locked(tmp: Path) -> list[str]:
     return ["locked"] if notes else []
 
 
+PERSISTENT_POLLS = 10    # end persistent: the steward's lease in polls (past FAILED_ROUNDS)
+
+
+def _end_persistent(tmp: Path) -> list[str]:
+    """A wave whose every round fails as a full disk does (sqlite3.OperationalError, again and
+    again): the steward exits 1 after pool_steward.FAILED_ROUNDS of them, well inside its lease
+    of PERSISTENT_POLLS polls, never looping to its end."""
+    lad = LADDERS["cpu-score"]
+    waves = tmp / "waves"
+    d = waves / "pool-check"
+    d.mkdir(parents=True)
+    c = Case(d / "queue.db", lad, [_small(lad)])
+    _inputs(d, _seed(lad, [_small(lad)]))
+    rounds: list[int] = []
+
+    def full(**kwargs: Any) -> psum.Summary:
+        rounds.append(1)
+        raise sqlite3.OperationalError("database or disk is full")
+    log: list[str] = []
+    try:
+        with _patched(ps, "round_", full):
+            ex = ps.steward(queue=c.q, wave_dir=d, waves=waves,
+                            liveness=_liveness(_squeue(STEWARD_TASK)), feed=ps.Fixed(),
+                            allocation=lambda: None, stale_after=STALE_AFTER,
+                            now=lambda: datetime.now(UTC), log=log.append,
+                            ends_at=time.time() + PERSISTENT_POLLS * END_POLL,
+                            poll_seconds=END_POLL)
+    except sqlite3.OperationalError as err:
+        print(f"end persistent: the steward died of its round's {err!r} -> FAILS", flush=True)
+        return ["persistent"]
+    notes = c.notes + ([] if int(ex) == pw.Exit.OWN_FAULT else [f"exit {int(ex)}, want 1"]) + (
+        [] if len(rounds) == ps.FAILED_ROUNDS else
+        [f"{len(rounds)} rounds tried, want {ps.FAILED_ROUNDS}"])
+    print(f"end persistent: every round failing (disk full): exit {int(ex)} after {len(rounds)} "
+          f"rounds" + _failing(notes), flush=True)
+    return ["persistent"] if notes else []
+
+
 def _end_retry(tmp: Path) -> list[str]:
     """A retry request of a FAILED job, one of a job the wave lacks, and a malformed one (not
     JSON)."""
@@ -2518,8 +2558,8 @@ def _end_fixed_open(tmp: Path) -> list[str]:
 
 def end(_args: list[str]) -> list[str]:
     bad: list[str] = []
-    for case in (_end_finish, _end_locked, _end_retry, _end_cancel, _end_cancel_open, _end_long,
-                 _end_open, _end_fixed_open, _end_command):
+    for case in (_end_finish, _end_locked, _end_persistent, _end_retry, _end_cancel,
+                 _end_cancel_open, _end_long, _end_open, _end_fixed_open, _end_command):
         with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:
             bad += case(Path(tmp))
     return bad
@@ -3607,7 +3647,8 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
             "request-fatal": lambda: _patched(ps, "_requests", _requests_fatal),
             "open-fixed": lambda: _patched(pq, "_open_fixed", lambda header, *, closed: False),
             "cancel-open": lambda: _patched(pq.SqliteQueue, "cancel", _cancel_open),
-            "round-fatal": lambda: _patched(ps, "SURVIVABLE", ())},
+            "round-fatal": lambda: _patched(ps, "SURVIVABLE", ()),
+            "unbounded": lambda: _patched(ps, "FAILED_ROUNDS", 10 ** 9)},
     "keep": {"refuse": _refusing, "redo-all": _redo_all},
     "double-claim": {"refuse": _refusing},
     "history": {"kept-measured": lambda: _patched(pp, "WHOLE_RUN", "1")},

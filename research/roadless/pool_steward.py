@@ -59,12 +59,17 @@ CAMPAIGN = "reblock/reblock"
 SUMMARY = "summary.json"
 LEDGER = "ledger.jsonl"
 FINAL = "final.db"
-#: The errors a round may fail with and the steward outlive (the next round tries again): the
-#: queue's SQLite busy past its timeout ("database is locked") or its disk failing a read, the
-#: shared home's I/O (a request, the summary, the ledger). Anything else ends the steward (exit 1,
-#: its lease failed): a person restarts it by hand (cluster.py's docstring, "A steward that
-#: died").
+#: The errors a round may fail with and the steward outlive for a while: the queue's SQLite busy
+#: past its timeout ("database is locked") or the shared home's I/O hiccuping (a request, the
+#: summary, the ledger). Anything else ends the steward at once (exit 1, its lease failed): a
+#: person restarts it by hand (cluster.py's docstring, "A steward that died").
 SURVIVABLE: tuple[type[Exception], ...] = (sqlite3.OperationalError, OSError)
+#: Rounds failing so in a row after which the steward exits 1 all the same: five, five minutes at
+#: the 60-s poll. A lock is a worker's transaction (milliseconds) or a reader's backup, gone by the
+#: next round; five in a row is a fault that stays (a full disk, the wave's directory deleted, a
+#: queue of another schema), which would otherwise loop silently while its stale summary keeps
+#: leases churning: the steward's failed lease is no continuation, and a person looks.
+FAILED_ROUNDS = 5
 REQUESTS = "requests"
 INPUTS = "inputs"
 SEED = "jobs.json"          # the wave's seed, in its inputs: any process of it makes the queue
@@ -417,10 +422,11 @@ def steward(*, queue: Queue, wave_dir: Path, waves: Path, liveness: Liveness, fe
     """The wave's steward (the module's doc): a round every `poll_seconds` until its queue is
     closed and every job has ended (its end: 0) or two rounds no longer fit before `ends_at`
     (epoch seconds on `now`'s clock: 75). A round that fails with an error of SURVIVABLE is said
-    and the next tried; any other ends it."""
+    and the next tried, up to FAILED_ROUNDS in a row (then 1); any other error ends it."""
     h = queue.header()
     log(f"=== steward of wave {h.wave} at {h.commit}: a round every {poll_seconds:g} s, "
         f"{(ends_at - now().timestamp()) / 60:.1f} minutes of its lease left")
+    failed = 0          # rounds failed in a row
     while True:
         started = time.monotonic()
         try:
@@ -428,7 +434,13 @@ def steward(*, queue: Queue, wave_dir: Path, waves: Path, liveness: Liveness, fe
                        allocation=allocation, stale_after=stale_after, now=now, log=log)
             if _ended(queue.jobs(), closed=queue.closed()):
                 return _end(queue, wave_dir=wave_dir, round_no=s.round, now=now, log=log)
+            failed = 0
         except SURVIVABLE as e:
+            failed += 1
+            if failed >= FAILED_ROUNDS:
+                log(f"the round failed ({type(e).__name__}: {e}), {failed} in a row: a fault "
+                    "that stays, exit 1")
+                return Exit.OWN_FAULT
             log(f"the round failed ({type(e).__name__}: {e}): the next round tries again")
         if ends_at - now().timestamp() < 2 * poll_seconds:
             log("two rounds no longer fit before the lease's end: retired (75)")
