@@ -16,10 +16,11 @@ Wk1l1000 and B diode B (Wk1o10i3000n64, on B_N of the walled-in blocks: `pick`),
   relaxation is W itself at every 0/1 clearing), its polish scored exactly (`E`) on a core as T's
   was, `.f0`; PENALTY_PLAN the same with a steeper penalty (q to 5: stage 3's ruling).
 - `Greedy`: walls_greedy's greedy over W's exact gains (`Gx` every candidate re-scored each step,
-  `GxL` lazily).
+  `GxL` lazily, `GxLr<radius_m>` lazily with its neighbours re-scored after each step).
 The arms by label (ARMS): stage 2's S10 and B (SIMP's default); stage 3's pilot S10p (the
-steeper penalty), S10g (GxL), S10G (Gx, on the pilot's blocks of at most PILOT_FULL_N buildings: lazy
-against full), and its fit arms S10x and Bx (FIT, the pilot's pick). A study (STUDIES: stage2,
+steeper penalty), S10g (GxL), S10l (GxLr10), S10G (Gx, on the pilot's blocks of at most
+PILOT_FULL_N buildings: lazy against full), and its fit arms S10x and Bx (FIT, the pilot's
+pick). A study (STUDIES: stage2,
 pilot, fit) is the arms it scores and the pairs it reports, its rows in its own directory.
 
     S=research/roadless/leaky_simp.py      # from the repo root, PYTHONPATH=., single-threaded
@@ -118,10 +119,11 @@ W_PLAN = "fw0.q3.i10.k1.p256w8x2E.f0"
 # ... with a steeper penalty, SIMP's continuation to q 5 (stage 3's ruling on TUNING: as default's
 # W L_P, half its grey; relax's Heaviside projection .b1-64 near-binary but 0.007 below: NOTES)
 PENALTY_PLAN = "fw0.q5.i10.k1.p256w8x2E.f0"
-FIT = "GxL"                          # stage 3's pick on the pilot (NOTES)
+FIT = "GxLr10"                       # stage 3's pick on the pilot (NOTES)
 # the walls arms by label: (walls, optimizer's name)
 ARMS = {"S10": ("S10", W_PLAN), "B": ("B", W_PLAN), "S10p": ("S10", PENALTY_PLAN),
-        "S10g": ("S10", "GxL"), "S10G": ("S10", "Gx"), "S10x": ("S10", FIT), "Bx": ("B", FIT)}
+        "S10g": ("S10", "GxL"), "S10l": ("S10", "GxLr10"), "S10G": ("S10", "Gx"),
+        "S10x": ("S10", FIT), "Bx": ("B", FIT)}
 
 
 # ------------------------------------------------------------------ the optimizers
@@ -149,7 +151,7 @@ class Simp:
 class Greedy:
     """A greedy over W's exact gains (walls_greedy): its row the steps', its clearing `cleared`
     in pick order."""
-    rule: wg.Full | wg.Lazy
+    rule: wg.Full | wg.Lazy | wg.LazyLocal
 
     @property
     def name(self) -> str:
@@ -182,8 +184,8 @@ class Greedy:
 
 
 def optimizer_of(name: str) -> Simp | Greedy:
-    """The optimizer a name spells: a greedy's (walls_greedy: Gx, GxL) or a relax plan's."""
-    if name in (wg.Full().name, wg.Lazy().name):
+    """The optimizer a name spells: a greedy's (walls_greedy's, Gx...) or a relax plan's."""
+    if name.startswith("Gx"):
         return Greedy(wg.greedy_of(name))
     plan = relax.plan_of(name)
     if plan.name != name:
@@ -246,9 +248,10 @@ class Study(NamedTuple):
 STUDIES = {
     "stage2": Study(rows=ROWS, labels=("T", "S10", "B"),
                     pairs=(("S10", "T"), ("B", "T"), ("S10", "B"))),
-    "pilot": Study(rows=ROWS / "pilot", labels=("T", "S10", "S10p", "S10g", "S10G"),
+    "pilot": Study(rows=ROWS / "pilot", labels=("T", "S10", "S10p", "S10g", "S10l", "S10G"),
                    pairs=(("S10p", "S10"), ("S10g", "S10"), ("S10g", "S10p"), ("S10g", "S10G"),
-                          ("S10g", "T"))),
+                          ("S10l", "S10G"), ("S10l", "S10g"), ("S10l", "S10"), ("S10g", "T"),
+                          ("S10l", "T"))),
     "fit": Study(rows=ROWS / "fit", labels=("T", "S10", "B", "S10x", "Bx"),
                  pairs=(("S10x", "Bx"), ("S10x", "T"), ("Bx", "T"), ("S10x", "S10"),
                         ("Bx", "B"))),

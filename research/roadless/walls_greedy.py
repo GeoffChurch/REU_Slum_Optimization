@@ -5,14 +5,16 @@ per unit of its cost (the area population's share: the destroyed area's D) among
 fit the budget, each gain scored by W's discrete scorer (gap_walls.WallModel: the clearing's state,
 its solve, J of the homes' escape times), until none fits.
 
-Two Strategies, each in the run's identity (its rows' directory beside a SIMP plan's,
+Three Strategies, each in the run's identity (its rows' directory beside a SIMP plan's,
 relax_rows/<metric>/<name>/D<budget>/):
 - `Full` (`Gx`): every candidate re-scored at every step.
 - `Lazy` (`GxL`, CELF): each candidate keeps its gain from the clearing it was last scored at; the
   top one by gain per unit cost is re-scored at the current clearing and taken once it is on top
   with a current gain. Where gains only fall as the clearing grows it takes Full's choices; where
-  they can rise (two neighbours opening a way together) it may not, so it is checked against Full
-  on the pilot blocks (NOTES).
+  they can rise (two neighbours opening a way together) it may not: on the pilot's seven small
+  blocks it parted from Full on every one, from its second to its ninth step (NOTES).
+- `LazyLocal` (`GxLr<radius_m>`): Lazy, and after each building taken its neighbours (footprints
+  within radius_m) re-scored at once, so a gain a neighbour's clearing raised is seen.
 Every score solves from the current clearing's sides (a diode's loop warm from the last state taken;
 the symmetric walls one factorization a score). Ties in gain per unit cost go to the lowest index.
 
@@ -24,11 +26,13 @@ Typed as `search.py`'s docstring says:
 from __future__ import annotations
 
 import heapq
+import re
 from dataclasses import dataclass
 from typing import NamedTuple, Protocol
 
 import gap_walls as gw
 import numpy as np
+import shapely
 from numpy.typing import NDArray
 
 
@@ -177,14 +181,79 @@ class Lazy:
         return Result(J0=J0, steps=steps, scores=sc.scores)
 
 
-def greedy_of(name: str) -> Full | Lazy:
-    """The greedy a name spells (`Gx`, `GxL`), resolved where a run is configured."""
+@dataclass(frozen=True)
+class LazyLocal:
+    """CELF with a local refresh (`GxLr<radius_m>`): as Lazy, and after each building taken every
+    candidate whose footprint lies within `radius_m` of its footprint re-scored at once (a gain
+    rises where a neighbour's clearing opens a way, which Lazy's stale bound can hide: on the pilot
+    the gains Lazy missed were of buildings 0 -- 7.4 m from one already taken; NOTES)."""
+    radius_m: float
+
+    def __post_init__(self) -> None:
+        if not self.radius_m > 0.0:
+            raise ValueError(f"a refresh radius is positive: {self.radius_m}")
+
+    @property
+    def name(self) -> str:
+        return f"GxLr{self.radius_m:g}"
+
+    def stale(self, scored_at: int, step: int) -> bool:
+        """Whether a gain scored at step `scored_at` must be re-scored at step `step`."""
+        return scored_at != step
+
+    def run(self, sc: Scorer, *, budget: float) -> Result:
+        cost = sc.wm.cost
+        polys = sc.wm.base.polys
+        near = shapely.STRtree(polys)
+        J0, left, steps = sc.J, budget + 1e-12, []
+        heap: list[tuple[float, int, int, float]] = []
+        sides_at: dict[int, NDArray[np.int8]] = {}
+        for j in range(sc.wm.n):
+            if _fits(sc, j, left):
+                g, _sides = sc.gain(j)
+                heap.append((-g / float(cost[j]), j, 0, g))
+        heapq.heapify(heap)
+        step = 0
+        while heap:
+            key, j, at, g = heapq.heappop(heap)
+            if not _fits(sc, j, left):
+                continue
+            if self.stale(at, step):
+                g, sides = sc.gain(j)
+                sides_at[j] = sides
+                heapq.heappush(heap, (-g / float(cost[j]), j, step, g))
+                continue
+            sc.take(j, g, sides_at[j] if j in sides_at else None)
+            left -= float(cost[j])
+            step += 1
+            sides_at = {}
+            steps.append(Step(building=j, gain=g, ratio=-key, J=sc.J, D=sc.D, scores=sc.scores))
+            # the neighbours re-scored at the new clearing (their older entries stay in the heap,
+            # stale, and are re-scored or dropped when popped)
+            for k in near.query(polys[j], predicate="dwithin", distance=self.radius_m):
+                k = int(k)
+                if _fits(sc, k, left):
+                    gk, sk = sc.gain(k)
+                    sides_at[k] = sk
+                    heapq.heappush(heap, (-gk / float(cost[k]), k, step, gk))
+        return Result(J0=J0, steps=steps, scores=sc.scores)
+
+
+def greedy_of(name: str) -> Full | Lazy | LazyLocal:
+    """The greedy a name spells (`Gx`, `GxL`, `GxLr<radius_m>`), resolved where a run is
+    configured."""
     for g in (Full(), Lazy()):
         if g.name == name:
             return g
-    raise ValueError(f"unknown greedy {name!r}: Gx or GxL")
+    m = re.fullmatch(r"GxLr([0-9]+(?:\.[0-9]+)?)", name)
+    if m is not None:
+        g2 = LazyLocal(radius_m=float(m.group(1)))
+        if g2.name == name:
+            return g2
+    raise ValueError(f"unknown greedy {name!r}: Gx, GxL or GxLr<radius_m>")
 
 
-def run(wm: gw.WallModel, rule: Full | Lazy, *, budget: float, power: float) -> Result:
+def run(wm: gw.WallModel, rule: Full | Lazy | LazyLocal, *, budget: float,
+        power: float) -> Result:
     """The greedy `rule` on W's model `wm` within `budget`, J_power its objective."""
     return rule.run(Scorer(wm, power=power), budget=budget)
