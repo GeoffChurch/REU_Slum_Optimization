@@ -17,7 +17,7 @@ stages), and checks what a task would get.
                                             # no-check, fit-capped, uncapped, any-node,
                                             # pools-only, fit-margin, unfinished-only,
                                             # first-cancel-stops, record-reused, no-bank-code,
-                                            # common-only, clean-always
+                                            # common-only, drop-regions, clean-always
     uv run python $C both-ways <guards,>    # each guard, then under each of its faults
 
 Each guard but `cpu` has its faults (FAULTS: a patch in this process, no file edited, as
@@ -133,48 +133,51 @@ its starts: `other-mem` (its `--mem` the next rung: line_checked refuses the bun
 reads another commit than the template's), `first-wave` (the first live wave by name, whatever
 its pending jobs) and `market-always` (Waves.starts asking the market with no wave live).
 
-`wave` (the spec's 3.8 and 3.9, cluster_wave.py): `cluster.py wave submit ... --dry` command
-lines at HEAD through cluster.main, cluster_wave's edge a registry in a temporary directory, a
-runner that records any call to the cluster (none is made), each run's dry submit planned as
-`kinds` plans one, and a rows root of stored lineup-score rows made here (WAVE_ROWS: no stored row
-of this checkout's is read): `wave submit g-1 --preset cpu-score --family lineup-score --nodes
+`wave` (the spec's 3.8 and 3.9, cluster_wave.py): `cluster.py wave submit ... --dry` command lines
+at HEAD through cluster.main, cluster_wave's edge a registry in a temporary directory, a runner
+that records any call to the cluster (none is made), each run's dry submit planned as `kinds` plans
+one, and a rows root of stored lineup-score rows made here (WAVE_ROWS: no stored row of this
+checkout's is read): `wave submit g-1 --preset cpu-score --family lineup-score --nodes
 orion,quadro2 --items clearance,resistance_lp --unpack <tars>/{id}.tar <WAVE_BLOCKS> --
 road_rescore.py lineup-score <scratch> {id} {item}` writes a seed of one job per (block, item) in
 order, each block's on one node, each line unpacking its block's tar through cluster_unpack.py and
-ending `--keep-standing`; prints each node's classes; plans no pool, its steward `--at` HEAD on
-the default board, and one long run, of the job whose stored wall (100 minutes, 125 with its
-margin) passes a fresh lease's 105: `--mem` 45, 1.5 times its stored peak of 30 GB, and
-`--minutes` 188 (1.5 times 125, rounded up), every planned run's name a run name's. Refused: the
-misspelt id of `ids` (MISTYPED), by the bank's writer, before anything is planned; a script the
-commit lacks (GONE), naming the commit; `{item}` without --items, and --items without `{item}`; a
-tar whose name does not end in `.tar`; gpu-presets on orion (its cards unusable); the Ruling's
-fitted long jobs whose estimate passes 7 days (cycle_desire on both blocks, no stored row: the
-family's longest wall under 1 km2, 11000 minutes), naming them; a wave with a local record
-(`waves/g-10` here); and, cluster_wave._uncommitted answering it changed, an uncommitted
-common.py and src/reblock, naming them (the other cases read this checkout's bank code as
-committed, whatever it is where the guard runs). Planned with long runs capped at `--minutes` 10080 (7 days): a stored
-long job (slow_stored: 7500 minutes with its margin), and fitted ones whose estimate fits inside 7
-days, 1.5 times it past them (fitted_slow on both blocks: its own fit over its five blocks,
-7000 minutes). cluster_wave._uncommitted on a git repo made here lists common.py and a file
-below src/reblock once they are changed (and no other file), and nothing while they are
-committed. Then the requests, on a registry with wave `w` live
-(its steward, a pool lease running, one finished with its continuation undecided, one finished and
-settled, a long run running, another wave's pool) and its seed of three jobs on the cluster:
-`wave w retry 2`, `wave w retry failed` and `wave w cancel` leave in `reblock-waves/w/requests/`
-exactly three files, reading as Retry((2,)), Retry((1, 2, 3)) and Cancel(); `retry 9` is refused
-naming 9; `cancel` cancels the running pool lease, the undecided one and the long run, every one
-though the first cancel fails (exit 1), and neither the settled lease, the steward nor the other
-wave's pool. Faults: `no-keep` (the job lines without `--keep-standing`), `block-names` (long
-runs named `<w>-long-<block>`: no run name), `no-script-check` and `no-check` (as `script`'s and
-`ids`'), `fit-capped` (the Ruling's refusal gone: fitted jobs past 7 days capped), `fit-margin`
-(the Ruling as first written, 1.5 times the estimate past 7 days: fitted_slow refused), `uncapped`
-(long runs at 1.5 times their estimate, uncapped: the long kind refuses slow_stored's),
-`any-node` (cluster_wave._servable a no-op: gpu-presets planned on orion), `pools-only` (cancel
-leaving the long runs), `unfinished-only` (cluster_wave._undone as unfinished alone: the undecided
-lease left), `first-cancel-stops` (cancel stopping at its first failure), `record-reused`
-(cluster_wave._recorded a no-op), `no-bank-code` (BANK_CODE empty), `common-only` (BANK_CODE
-common.py alone: the Block producers' change unseen) and `clean-always` (cluster_wave._uncommitted
-answering none).
+ending `--keep-standing`; prints each node's classes; plans no pool, its steward `--at` HEAD on the
+default board, and one long run, of the job whose stored wall (100 minutes, 125 with its margin)
+passes a fresh lease's 105: `--mem` 45, 1.5 times its stored peak of 30 GB, and `--minutes` 188
+(1.5 times 125, rounded up), every planned run's name a run name's. Refused: the misspelt id of
+`ids` (MISTYPED), by the bank's writer, before anything is planned; a script the commit lacks
+(GONE), naming the commit; `{item}` without --items, and --items without `{item}`; a tar whose name
+does not end in `.tar`; gpu-presets on orion (its cards unusable); the Ruling's fitted long jobs
+whose estimate passes 7 days (cycle_desire on both blocks, no stored row: the family's longest wall
+under 1 km2, 11000 minutes), naming them; a wave with a local record (`waves/g-10` here); and,
+cluster_wave._uncommitted answering every path changed, an uncommitted bank code, naming BANK_FILES
+(BANK_CODE's paths, spelt here: the other cases read this checkout's bank code as committed,
+whatever it is where the guard runs). Planned with long runs capped at `--minutes` 10080 (7 days):
+a stored long job (slow_stored: 7500 minutes with its margin), and fitted ones whose estimate fits
+inside 7 days, 1.5 times it past them (fitted_slow on both blocks: its own fit over its five
+blocks, 7000 minutes). cluster_wave._uncommitted on a git repo made here lists common.py, a file
+below src/reblock and one below conf once they are changed (and no other file), and nothing while
+they are committed. A bank of one block written by common.write_bank in a subprocess (BANK_PROBE)
+loads its modules of this repo (not of its .venv) from below BANK_CODE's paths alone, common.py
+among them (conf is read, not imported: BANK_CODE lists it whole). Then the requests, on a registry
+with wave `w` live (its steward, a pool lease running, one finished with its continuation
+undecided, one finished and settled, a long run running, another wave's pool) and its seed of three
+jobs on the cluster: `wave w retry 2`, `wave w retry failed` and `wave w cancel` leave in
+`reblock-waves/w/requests/` exactly three files, reading as Retry((2,)), Retry((1, 2, 3)) and
+Cancel(); `retry 9` is refused naming 9; `cancel` cancels the running pool lease, the undecided one
+and the long run, every one though the first cancel fails (exit 1), and neither the settled lease,
+the steward nor the other wave's pool. Faults: `no-keep` (the job lines without `--keep-standing`),
+`block-names` (long runs named `<w>-long-<block>`: no run name), `no-script-check` and `no-check`
+(as `script`'s and `ids`'), `fit-capped` (the Ruling's refusal gone: fitted jobs past 7 days
+capped), `fit-margin` (the Ruling as first written, 1.5 times the estimate past 7 days: fitted_slow
+refused), `uncapped` (long runs at 1.5 times their estimate, uncapped: the long kind refuses
+slow_stored's), `any-node` (cluster_wave._servable a no-op: gpu-presets planned on orion),
+`pools-only` (cancel leaving the long runs), `unfinished-only` (cluster_wave._undone as unfinished
+alone: the undecided lease left), `first-cancel-stops` (cancel stopping at its first failure),
+`record-reused` (cluster_wave._recorded a no-op), `no-bank-code` (BANK_CODE empty), `common-only`
+(BANK_CODE common.py alone: the Block producers' change unseen), `drop-regions` (BANK_CODE without
+regions.py: the probe's imports name it) and `clean-always` (cluster_wave._uncommitted answering
+none).
 
 (`gpu`, the retired raster's sizing checked against its scorer's measured peaks, went with it:
 NOTES, "The complex as the runtime: the raster retired".)
@@ -1010,8 +1013,13 @@ FIT_BLOCK = "guard.fit"         # wave: a stored run's block beside them, under 
 #: so its fit is its own
 FITTED = tuple(f"guard.fitted{k}" for k in range(1, 6))
 SCORE = "research/roadless/road_rescore.py"
-COMMON = "research/roadless/common.py"     # wave: the bank's code (cluster_wave.BANK_CODE) ...
-PRODUCER = "src/reblock/derive/guard.py"   # ... and a Block producer's file, below src/reblock
+COMMON = "research/roadless/common.py"
+#: wave: the bank's code as cluster_wave.BANK_CODE lists it, in its order
+BANK_FILES = (COMMON, "research/roadless/regions.py", "research/roadless/gap_exits.py",
+              "research/roadless/digests.py", "scripts/__init__.py",
+              "scripts/fetch_kblock_fixtures.py", "src/reblock", "conf")
+PRODUCER = "src/reblock/derive/guard.py"   # wave: a Block producer's file, below src/reblock
+CONFIG = "conf/guard.yaml"                 # wave: a config file, below conf
 
 
 class _Stored(NamedTuple):
@@ -1029,8 +1037,9 @@ WAVE_ROWS = (
     _Stored(WAVE_BLOCKS[1], "clearance", 3.0, 25.0),
     _Stored(WAVE_BLOCKS[1], "resistance_lp", 30.0, 100.0),  # 125 min with its margin: long
     _Stored(WAVE_BLOCKS[1], "slow_stored", 5.0, 6000.0),    # 7500: 1.5 times it past 7 days
-    _Stored(FIT_BLOCK, "slow", 2.0, 11000.0),     # the family's longest wall under 1 km2: past 7 days
-    *(_Stored(f, "fitted_slow", 2.0, 7000.0) for f in FITTED))  # its own fit: 7000, inside 7 days
+    _Stored(FIT_BLOCK, "slow", 2.0, 11000.0),   # the family's longest wall under 1 km2: past 7 days
+    *(_Stored(f, "fitted_slow", 2.0, 7000.0)    # its own fit: 7000 minutes, inside 7 days
+      for f in FITTED))
 
 
 def _wave_rows(root: Path) -> None:
@@ -1236,13 +1245,14 @@ def _wave_requests(tmp: Path) -> tuple[list[str], str]:
 
 def _uncommitted_check(repo: Path) -> list[str]:
     """cluster_wave._uncommitted on a git repo made in `repo`: BANK_CODE committed, none listed;
-    common.py and a file below src/reblock changed (and one outside BANK_CODE), those two."""
+    common.py, a file below src/reblock and one below conf changed (and one outside BANK_CODE),
+    those three."""
     def git(*args: str) -> None:
         subprocess.run(["git", "-C", str(repo), "-c", "core.hooksPath=/dev/null", "-c",
                         "commit.gpgsign=false", "-c", "user.name=guard", "-c",
                         "user.email=guard@localhost", *args], check=True, capture_output=True)
 
-    for f in (COMMON, PRODUCER):
+    for f in (COMMON, PRODUCER, CONFIG):
         (repo / f).parent.mkdir(parents=True)
         (repo / f).write_text("# committed\n")
     (repo / "other.py").write_text("")
@@ -1252,13 +1262,60 @@ def _uncommitted_check(repo: Path) -> list[str]:
     bad = []
     if cluster_wave._uncommitted(repo, cluster_wave.BANK_CODE):
         bad.append("a committed common.py listed as uncommitted")
-    for f in (COMMON, PRODUCER, "other.py"):
+    for f in (COMMON, PRODUCER, CONFIG, "other.py"):
         (repo / f).write_text("# changed\n")
     got = cluster_wave._uncommitted(repo, cluster_wave.BANK_CODE)
-    if sorted(got) != [COMMON, PRODUCER]:
-        bad.append(f"common.py and {PRODUCER} changed (and another file): {got} listed, want "
-                   f"those two")
+    if sorted(got) != sorted([COMMON, PRODUCER, CONFIG]):
+        bad.append(f"{COMMON}, {PRODUCER} and {CONFIG} changed (and another file): {got} "
+                   "listed, want those three")
     return bad
+
+
+#: wave: a bank written in a subprocess, which prints every file of this repo (not of its .venv)
+#: a module it imported was loaded from (each module's spec: has_location, origin), as JSON.
+BANK_PROBE = """
+import json, sys
+from pathlib import Path
+from types import ModuleType
+repo, out = Path(sys.argv[1]).resolve(), Path(sys.argv[2])
+sys.path[:0] = [str(repo / "research" / "roadless"), str(repo)]
+import common
+common.write_bank(sys.argv[3].split(","), out)
+files = set()
+for m in list(sys.modules.values()):
+    if not isinstance(m, ModuleType) or m.__spec__ is None or not m.__spec__.has_location:
+        continue
+    f = Path(m.__spec__.origin).resolve()
+    if f.is_relative_to(repo) and not f.is_relative_to(repo / ".venv"):
+        files.add(f.relative_to(repo).as_posix())
+print(json.dumps(sorted(files)))
+"""
+
+
+def _covered(path: str, code: Sequence[str]) -> bool:
+    """Whether `path` (below the repo) is a path of `code` or below one."""
+    p = Path(path)
+    return any(p == Path(c) or Path(c) in p.parents for c in code)
+
+
+def _bank_imports_check(tmp: Path) -> tuple[list[str], str]:
+    """The `wave` guard's import case: a bank of WAVE_BLOCKS[1] written by common.write_bank in a
+    subprocess; every file of this repo its modules were loaded from lies below a path of
+    cluster_wave.BANK_CODE. Its problems, and what it saw."""
+    tmp.mkdir()
+    r = subprocess.run([sys.executable, "-I", "-c", BANK_PROBE, str(PROJECT.repo),
+                        str(tmp / "bank.pkl"), WAVE_BLOCKS[1]], cwd=tmp, capture_output=True,
+                       text=True)
+    if r.returncode or not (tmp / "bank.pkl").is_file():
+        return [f"the bank's probe failed ({r.returncode}): {r.stderr.strip()[-500:]}"], "no probe"
+    files: list[str] = json.loads(r.stdout.splitlines()[-1])
+    outside = [f for f in files if not _covered(f, cluster_wave.BANK_CODE)]
+    bad = ([f"a bank's write imports {', '.join(outside)}, below no path of BANK_CODE"]
+           if outside else [])
+    if not any(f == COMMON for f in files):
+        bad.append(f"the bank's probe imported no {COMMON}: {files}")
+    return bad, (f"bank imports {len(files)} files of this repo, "
+                 + (f"{len(outside)} outside BANK_CODE" if outside else "every one in BANK_CODE"))
 
 
 def _clean(repo: Path, paths: Sequence[str]) -> list[str]:
@@ -1343,10 +1400,9 @@ def _wave_cases(edge: cluster_wave.Edge, planned: list[_Planned], *, tmp: Path, 
             "g-11", "--nodes", "orion", "--items", "clearance", preset=cpu, ids=(b,),
             command=score))
     listed = (dirty.refused or "").partition(": uncommitted changes")[0]  # the paths it names
-    if (dirty.refused is None or dirty.planned
-            or listed.split(", ") != [COMMON, "src/reblock"]):
+    if dirty.refused is None or dirty.planned or listed.split(", ") != list(BANK_FILES):
         bad.append(f"the bank's code uncommitted: {dirty.refused or 'planned'}, want refused "
-                   f"naming {COMMON} and src/reblock")
+                   f"naming {', '.join(BANK_FILES)}")
     got.append(f"dirty bank code {'refused' if dirty.refused is not None else 'planned'}")
     return bad, got
 
@@ -1371,6 +1427,9 @@ def check_wave() -> list[str]:
         if calls:
             bad.append(f"a dry wave called the cluster: {calls[:2]}")
         bad += _uncommitted_check(tmp / "git")
+        imports, saw = _bank_imports_check(tmp / "probe")
+        bad += imports
+        got.append(saw)
         more, saw = _wave_requests(tmp / "requests")
         bad += more
         got.append(saw)
@@ -1456,6 +1515,9 @@ FAULTS: dict[str, dict[str, Callable[[], contextlib.AbstractContextManager[None]
         "record-reused": lambda: _patched(cluster_wave, "_recorded", lambda records, wave: None),
         "no-bank-code": lambda: _patched(cluster_wave, "BANK_CODE", ()),
         "common-only": lambda: _patched(cluster_wave, "BANK_CODE", (COMMON,)),
+        "drop-regions": lambda: _patched(
+            cluster_wave, "BANK_CODE",
+            tuple(c for c in cluster_wave.BANK_CODE if c != "research/roadless/regions.py")),
         "clean-always": lambda: _patched(cluster_wave, "_uncommitted", _clean)}}
 
 

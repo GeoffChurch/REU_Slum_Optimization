@@ -17,9 +17,10 @@ with the plan's Rulings 4, 7 and 12): a wave submitted whole, then read and stee
    neither `reblock` (the campaign) nor `submit` (`wave submit ...` is always a submit), no record
    of the registry is a run of it, no record of it is here (`research/roadless/waves/<w>/`, whose
    final.db a reused name would overwrite), and (without --dry) the cluster has no
-   `reblock-waves/<w>`. Neither common.py nor src/reblock (the Block producers it builds
-   through) has an uncommitted change (BANK_CODE): the bank is built here by the working tree's
-   common.write_bank while every run is `--at` HEAD. The command's script
+   `reblock-waves/<w>`. Nothing of the bank's code (BANK_CODE: common.py and all
+   common.write_bank builds through, its imports from this repo and the Hydra config it composes)
+   has an uncommitted change: the bank is built here by the working tree's code while every run
+   is `--at` HEAD. The command's script
    is a file at the commit (cluster._script_at); it has `{id}`, and `{item}` exactly when
    --items is given; --unpack's tars end in `.tar` (the steward deletes the wave's inputs/*.tar
    at its end). Each of --nodes has its usable memory known (pool_plan.USABLE_GB) and
@@ -144,10 +145,15 @@ WAVE_KINDS = (cluster.Pool.name, cluster.Steward.name, cluster.Long.name)
 CANCELLED_KINDS = (cluster.Pool.name, cluster.Long.name)
 #: Where a submit writes a wave's seed and bank here, below the registry's directory.
 WORK = "waves"
-#: The code that builds a wave's bank here (common.write_bank, the working tree's, and the Block
-#: producers it builds through: src/reblock, which `git status` reads whole), which must be as the
-#: wave's commit has it: its runs are `--at` that commit.
-BANK_CODE = ("research/roadless/common.py", "src/reblock")
+#: The code that builds a wave's bank here, the working tree's, which must be as the wave's commit
+#: has it (its runs are `--at` that commit): common.write_bank and every module of this repo it
+#: imports (regions.py's extract and OSM; gap_exits.py, pickled by reference in the bank, and the
+#: digests.py it imports; scripts' fetch_kblock_fixtures.py, which src/reblock's footprints read;
+#: src/reblock's Block producers) and the Hydra config its source composes (conf/). A directory is
+#: read whole by `git status`. Guard `wave` checks the imports a bank's write makes lie below these.
+BANK_CODE = ("research/roadless/common.py", "research/roadless/regions.py",
+             "research/roadless/gap_exits.py", "research/roadless/digests.py",
+             "scripts/__init__.py", "scripts/fetch_kblock_fixtures.py", "src/reblock", "conf")
 
 
 # ---- the edge: what the verbs act on, built once where the command line is read ---------------
@@ -494,9 +500,9 @@ def _submit(edge: Edge, a: argparse.Namespace) -> Ran:
     dirty = _uncommitted(cluster.REPO, BANK_CODE)
     if dirty:
         raise SystemExit(f"{', '.join(dirty)}: uncommitted changes, and the bank is built here by "
-                         "the working tree's common.write_bank and the Block producers of "
-                         "src/reblock while every run of the wave is --at HEAD: commit or set "
-                         "them aside first")
+                         "the working tree's code (BANK_CODE: common.write_bank, what it imports "
+                         "and the config it composes) while every run of the wave is --at HEAD: "
+                         "commit or set them aside first")
     if not a.dry:
         _no_directory(ctx, wave)
     items = [] if a.items is None else cluster._listed(a.items)
