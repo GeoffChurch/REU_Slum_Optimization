@@ -250,6 +250,7 @@ import pool_plan as pp  # noqa: E402
 import pool_queue as pq  # noqa: E402
 import pool_steward  # noqa: E402
 import pool_summary as psum  # noqa: E402
+import row_marker  # noqa: E402
 from cluster_submit import Bundle, RunPlan  # noqa: E402
 from cluster_submit.arrays import Array, route, script  # noqa: E402
 from cluster_submit.cli import parser  # noqa: E402
@@ -1419,7 +1420,7 @@ def _main_wave(got: _Waved, *, work: Path, scratch: str) -> list[str]:
     lines = {j.line for j in seed.jobs
              if j.line != f'python -u research/roadless/cluster_unpack.py "$CLUSTER_SUBMIT_INPUTS/'
                           f'{j.block}.tar" && python -u {SCORE} lineup-score {scratch} {j.block} '
-                          f"{j.item} --keep-standing"}
+                          f"{j.item} {row_marker.KEEP_STANDING}"}
     if lines:
         bad.append(f"job lines {sorted(lines)[:2]}")
     printed = got.out.splitlines()
@@ -1734,7 +1735,7 @@ _JOB_LINE = cluster_wave._job_line
 def _no_keep(line: str, *, block: str, item: str, tar: Path | None) -> str:
     """A job's line without --keep-standing (fault `no-keep`)."""
     return _JOB_LINE(line, block=block, item=item, tar=tar).removesuffix(
-        f" {cluster_wave.KEEP}")
+        f" {row_marker.KEEP_STANDING}")
 
 
 def _block_names(ctx: Context, wave: str, job: psum.LongJob) -> str:

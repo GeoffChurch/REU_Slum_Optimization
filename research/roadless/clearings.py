@@ -75,6 +75,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import os
+import socket
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import astuple, dataclass, fields
 from pathlib import Path
@@ -461,10 +462,6 @@ def cleared_positions(run: str, block: BlockLike, *, step: int) -> NDArray[np.in
 
 # ------------------------------------------------------------------ the runs' rows, written once
 
-REPLACE = "--replace"                # a person naming a deliberate replacement: `Replace`
-KEEP_STANDING = "--keep-standing"    # a pool's job: a row that stands is that identity done: `Keep`
-
-
 class Standing(Protocol):
     """What a run does with a row that stands under its identity: the optimizers' no-overwrite
     guard (BACKLOG, "The stored clearings made durable"; NOTES, "The consolidated pass") and the
@@ -473,8 +470,8 @@ class Standing(Protocol):
     preset or method, the metric's name, the budget and the seed (each optimizer's rows directory
     spells them: relax.rows_of, polish_greedy.rows_of, clear.rows_dir, ...). Resolved once per
     script by `standing_of`, from its command line, and passed down: `Refuse` (a person's run),
-    `Replace` (`--replace`), `Keep` (`--keep-standing`). The guard: clearings_check.py
-    `overwrite`."""
+    `Replace` (`--replace`), `Keep` (`--keep-standing`; the flags' one spelling is row_marker's).
+    The guard: clearings_check.py `overwrite`."""
 
     def todo(self, path: Path) -> bool:
         """Whether the identity at `path` is to be run (checked before any work)."""
@@ -500,7 +497,8 @@ class Refuse:
     def todo(self, path: Path) -> bool:
         if path.exists():
             raise Exists(f"{path}: a row stands under this identity (block, preset or method, "
-                         f"metric, budget, seed); a replacement is named, never taken ({REPLACE})")
+                         "metric, budget, seed); a replacement is named, never taken "
+                         f"({row_marker.REPLACE})")
         return True
 
     def reuse(self, path: Path) -> bool:
@@ -550,12 +548,12 @@ class Keep:
 def standing_of(argv: list[str]) -> tuple[list[str], Standing]:
     """A command line less its `--replace` and `--keep-standing`, and the `Standing` they name:
     neither, `Refuse`; `--replace`, `Replace`; `--keep-standing`, `Keep`; both, a SystemExit."""
-    replace, keep = REPLACE in argv, KEEP_STANDING in argv
+    flags = (row_marker.REPLACE, row_marker.KEEP_STANDING)
+    replace, keep = row_marker.REPLACE in argv, row_marker.KEEP_STANDING in argv
     if replace and keep:
-        raise SystemExit(f"{REPLACE} and {KEEP_STANDING} answer a row that stands oppositely: "
-                         "give one")
+        raise SystemExit(f"{' and '.join(flags)} answer a row that stands oppositely: give one")
     standing: Standing = Replace() if replace else Keep() if keep else Refuse()
-    return [a for a in argv if a not in (REPLACE, KEEP_STANDING)], standing
+    return [a for a in argv if a not in flags], standing
 
 
 def _exclusive(tmp: Path, path: Path) -> None:
@@ -564,15 +562,17 @@ def _exclusive(tmp: Path, path: Path) -> None:
     try:
         os.link(tmp, path)
     except FileExistsError:
-        raise Exists(f"{path}: a row stands under this identity; not replaced ({REPLACE} names "
-                     "a replacement)") from None
+        raise Exists(f"{path}: a row stands under this identity; not replaced "
+                     f"({row_marker.REPLACE} names a replacement)") from None
 
 
 def _place(df: pd.DataFrame, path: Path, put: Callable[[Path, Path], None]) -> None:
-    """`df` to a temporary name beside `path` (no pull matches it), then `put` into place; the
-    temporary name removed whether or not `put` succeeds."""
+    """`df` to a temporary name beside `path` (no pull matches it, and no other process's: the
+    host and the pid, since two nodes' runs of one identity, a double claim's, can share a pid on
+    the shared home), then `put` into place; the temporary name removed whether or not `put`
+    succeeds."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp = path.with_name(f"{path.name}.{socket.gethostname()}.{os.getpid()}.tmp")
     df.to_parquet(tmp)
     try:
         put(tmp, path)

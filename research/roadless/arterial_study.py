@@ -172,8 +172,7 @@ def propose(rows: Path, bid: str, arm_name: str, *,
                n_roads=len(roads),
                road_m=float(roads.geometry.length.sum()), steps=len(log.rows),
                host=socket.gethostname())
-    row_path.parent.mkdir(parents=True, exist_ok=True)
-    rr.write_parquet(pd.DataFrame([row]), row_path)
+    standing.write(pd.DataFrame([row]), row_path)
     print(f"{bid} {name}: {row['commits']} commits ({row['stop']}), {len(roads)} roads, "
           f"{s.wall:.0f} s wall, peak RSS {s.peak:.2f} GB", flush=True)
     return b, name

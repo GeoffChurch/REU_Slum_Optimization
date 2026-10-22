@@ -35,9 +35,11 @@ its clearings read under a complex metric named, never under its own (`own` rais
 
 `overwrite`: the optimizers' no-overwrite guard and the pool's keeping of what stands
 (clearings.Standing; NOTES, "The consolidated pass"; the lease pool's spec, 3.3). On each block,
-in a temporary rows root, SIMP (relax.main `one`, a short plan) and the greedy and its polish
-(polish_greedy.main, a coarse picker) each run under the Standing its flags name
-(clearings.standing_of), its work (relax.one, polish_greedy.run) counted and its output read:
+in a temporary rows root, SIMP (relax.main `one`, a short plan), the greedy and its polish
+(polish_greedy.main, a coarse picker) and the arterial's proposal (arterial_study.propose, its
+`smoke` arm: its proposal row) each run under the Standing its flags name (clearings.standing_of),
+its work (relax.one, polish_greedy.run, the proposal's road_rescore.Sampler) counted and its output
+read:
 - as a person's run (`Refuse`), once: a row written, its row_marker.ROW_WRITTEN line printed;
   again: refused (clearings.Exists) before any work, the first row's bytes left;
 - with `--replace` (`Replace`): a new row in its place, its ROW_WRITTEN line printed;
@@ -67,6 +69,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import clearings  # noqa: E402
 import clearings_export as exporter  # noqa: E402
+import row_marker  # noqa: E402
 from clearings import RunInfo, Store  # noqa: E402
 
 MATCH = 1e-7        # |Lens A rescored - stored| below this is a match (pyamg's random start vectors
@@ -268,8 +271,6 @@ def _standing(what: str, opt: Optimizer) -> list[str]:
     """`overwrite`'s cases (module docstring) for one optimizer on one block: the failures."""
     import os
 
-    import row_marker
-
     row = opt.row
     wrote, kept = f"{row_marker.ROW_WRITTEN}{row}", f"[row] kept {row}"
 
@@ -292,29 +293,29 @@ def _standing(what: str, opt: Optimizer) -> list[str]:
         print(f"{what}: the second run refused before any work ({r.raised})", flush=True)
     if state() != first:
         bad.append(f"{what}: the second run replaced the first row")
-    r = _ran(opt, [clearings.REPLACE], after=nothing)                   # Replace
+    r = _ran(opt, [row_marker.REPLACE], after=nothing)                   # Replace
     if r.raised is not None or state()[1] == first[1]:
-        bad.append(f"{what}: {clearings.REPLACE} wrote no new row (raised {r.raised!r})")
+        bad.append(f"{what}: {row_marker.REPLACE} wrote no new row (raised {r.raised!r})")
     elif wrote not in r.lines:
-        bad.append(f"{what}: {clearings.REPLACE}'s row printed no {wrote!r}")
+        bad.append(f"{what}: {row_marker.REPLACE}'s row printed no {wrote!r}")
     else:
         print(f"{what}: the replacement named, a new row in its place", flush=True)
     replaced = state()
-    keep = [clearings.KEEP_STANDING]
+    keep = [row_marker.KEEP_STANDING]
     r = _ran(opt, keep, after=nothing)                                  # Keep: the row stands
     if r.raised is not None or r.calls:
-        bad.append(f"{what}: {clearings.KEEP_STANDING} ran a standing identity again (its work "
+        bad.append(f"{what}: {row_marker.KEEP_STANDING} ran a standing identity again (its work "
                    f"ran {r.calls} times; raised {r.raised!r})")
     if state() != replaced or wrote in r.lines:
-        bad.append(f"{what}: {clearings.KEEP_STANDING} did not keep the standing row's bytes, or "
+        bad.append(f"{what}: {row_marker.KEEP_STANDING} did not keep the standing row's bytes, or "
                    f"printed {wrote!r}")
     row.unlink()
     r = _ran(opt, keep, after=nothing)                                  # Keep: no row stands
     if r.raised is not None or r.calls != 1 or not row.exists() or wrote not in r.lines:
-        bad.append(f"{what}: {clearings.KEEP_STANDING} wrote no row for an identity without one "
+        bad.append(f"{what}: {row_marker.KEEP_STANDING} wrote no row for an identity without one "
                    f"(its work ran {r.calls} times; raised {r.raised!r})")
         return bad
-    print(f"{what}: {clearings.KEEP_STANDING} kept the standing row unrun and wrote the missing "
+    print(f"{what}: {row_marker.KEEP_STANDING} kept the standing row unrun and wrote the missing "
           "one", flush=True)
     other = row.read_bytes()
     row.unlink()
@@ -326,16 +327,16 @@ def _standing(what: str, opt: Optimizer) -> list[str]:
         raced.append(state())
     r = _ran(opt, keep, after=double_claim)                             # Keep: the race
     if r.raised is not None:
-        bad.append(f"{what}: {clearings.KEEP_STANDING} raised {r.raised!r} on a row written "
+        bad.append(f"{what}: {row_marker.KEEP_STANDING} raised {r.raised!r} on a row written "
                    "between its check and its write (a double claim's)")
     if raced != [state()]:
-        bad.append(f"{what}: {clearings.KEEP_STANDING} did not keep a row written between its "
+        bad.append(f"{what}: {row_marker.KEEP_STANDING} did not keep a row written between its "
                    "check and its write")
     if wrote in r.lines or kept not in r.lines:
-        bad.append(f"{what}: {clearings.KEEP_STANDING} printed {wrote!r} for a kept row, or no "
+        bad.append(f"{what}: {row_marker.KEEP_STANDING} printed {wrote!r} for a kept row, or no "
                    f"{kept!r}")
     if not bad:
-        print(f"{what}: a row written between {clearings.KEEP_STANDING}'s check and its write "
+        print(f"{what}: a row written between {row_marker.KEEP_STANDING}'s check and its write "
               "kept, nothing raised, no row counted", flush=True)
     return bad
 
@@ -344,11 +345,11 @@ def _standing_of() -> list[str]:
     """standing_of's resolution (module docstring): the failures."""
     want: dict[tuple[str, ...], tuple[list[str], clearings.Standing]] = {
         ("one", "x"): (["one", "x"], clearings.Refuse()),
-        ("one", clearings.REPLACE, "x"): (["one", "x"], clearings.Replace()),
-        (clearings.KEEP_STANDING, "one", "x"): (["one", "x"], clearings.Keep())}
+        ("one", row_marker.REPLACE, "x"): (["one", "x"], clearings.Replace()),
+        (row_marker.KEEP_STANDING, "one", "x"): (["one", "x"], clearings.Keep())}
     bad = [f"standing_of({list(argv)}) is {got}, not {w}" for argv, w in want.items()
            if (got := clearings.standing_of(list(argv))) != w]
-    both = [clearings.REPLACE, clearings.KEEP_STANDING]
+    both = [row_marker.REPLACE, row_marker.KEEP_STANDING]
     try:
         bad.append(f"standing_of({both}) took both: {clearings.standing_of(both)}")
     except SystemExit as e:
@@ -358,21 +359,30 @@ def _standing_of() -> list[str]:
 
 def overwrite(block_ids: Sequence[str]) -> list[str]:
     """`overwrite` (module docstring): the failures, one line each."""
+    import os
     import tempfile
     from unittest import mock
 
+    import arterial_study
     import metrics
     import polish_greedy
     import relax
+    import road_rescore as rr
     import search
 
     metric = metrics.metric_of(metrics.RUNTIME, device="cpu")
     plan = relax.plan_of(GUARD_PLAN)
     picker, tries, width = GUARD_GREEDY
+    arm = "smoke"                       # the arterial's runner check: 5 roads, seconds
+    name = arterial_study.network_name(arm, arterial_study.method_of(arterial_study.ARMS[arm]))
     bad = _standing_of()
+    # the arterial's proposal checks the single-threaded environment of a cluster task, which
+    # names PYTHONDONTWRITEBYTECODE too (road_rescore.SINGLE)
     with tempfile.TemporaryDirectory() as tmp, \
             mock.patch.object(relax, "OUT", Path(tmp) / "relax_rows"), \
-            mock.patch.object(polish_greedy, "HERE", Path(tmp)):
+            mock.patch.object(polish_greedy, "HERE", Path(tmp)), \
+            mock.patch.dict(os.environ, rr.SINGLE):
+        arterial_rows = Path(tmp) / "arterial"
         for bid in block_ids:
             def simp(standing: clearings.Standing, b: str = bid) -> None:
                 relax.main("one", [b], 1.0, metric, plan, 1, relax.D_LENS, standing=standing)
@@ -380,11 +390,17 @@ def overwrite(block_ids: Sequence[str]) -> list[str]:
             def greedy(standing: clearings.Standing, b: str = bid) -> None:
                 polish_greedy.main(b, 1.0, metric, picker, tries, width, relax.D_LENS, False,
                                    scoring=search.InEps(), standing=standing)
+
+            def propose(standing: clearings.Standing, b: str = bid) -> None:
+                arterial_study.propose(arterial_rows, b, arm, standing=standing)
             runs = {"simp": Optimizer(go=simp, row=relax.rows_of(plan, metric.name, relax.D_LENS)
                                       / f"{bid}_p1.parquet", module=relax, work="one"),
                     "greedy+polish": Optimizer(go=greedy, row=polish_greedy.rows_of(
                         picker, tries, width, False, search.InEps(), metric.name, relax.D_LENS)
-                        / f"{bid}_p1.parquet", module=polish_greedy, work="run")}
+                        / f"{bid}_p1.parquet", module=polish_greedy, work="run"),
+                    # its work: the proposal, timed under the Sampler it starts
+                    "arterial propose": Optimizer(go=propose, row=rr.proposal_row(
+                        arterial_rows, bid, name, False), module=rr, work="Sampler")}
             for what, opt in runs.items():
                 bad += _standing(f"{bid} {what}", opt)
     return bad
@@ -413,8 +429,6 @@ def _kept_counted() -> AbstractContextManager[Any]:
     """The fault: Keep.write prints row_marker.ROW_WRITTEN for the row it kept."""
     from unittest import mock
 
-    import row_marker
-
     def write(self: clearings.Keep, df: Any, path: Path) -> None:
         try:
             clearings.write_once(df, path)
@@ -437,8 +451,8 @@ def _both_taken() -> AbstractContextManager[Any]:
     real = clearings.standing_of
 
     def standing_of(argv: list[str]) -> tuple[list[str], clearings.Standing]:
-        if clearings.REPLACE in argv and clearings.KEEP_STANDING in argv:
-            first = min(clearings.REPLACE, clearings.KEEP_STANDING, key=argv.index)
+        if row_marker.REPLACE in argv and row_marker.KEEP_STANDING in argv:
+            first = min(row_marker.REPLACE, row_marker.KEEP_STANDING, key=argv.index)
             return real([a for a in argv if a != first])
         return real(argv)
     return mock.patch.object(clearings, "standing_of", standing_of)

@@ -14,8 +14,10 @@ complex (decision (2)).
     uv run python $S prefixes <rows> <lineup,> <scratch> <procs> <ids,>
     uv run python $S cx <rows> <scratch> <metric> <cpu|gpu> <id> <items,> [--replace]
     uv run python $S cxreport <rows> <lineup,> <metric> <cpu|gpu>
-    uv run python $S lineup-one <scratch> <id> <method> [--replace]   # propose, cut, score
-    uv run python $S lineup-score <scratch> <id> <methods,> [--replace]   # cut, score
+    uv run python $S lineup-one <scratch> <id> <method> \
+        [--replace | --keep-standing]                    # propose, cut, score
+    uv run python $S lineup-score <scratch> <id> <methods,> \
+        [--replace | --keep-standing]                    # cut, score
 
 ON THE COMPLEX (phase 2b; NOTES, "The complex as the runtime: the ports and the cross-checks"):
 `cx` scores the area prefixes on the gap complex's metric (<metric>, refused unless it is one:
@@ -920,11 +922,12 @@ if __name__ == "__main__":
            a[6].split(","), scoring=search.polish_scoring_of(polish), standing=standing)
     elif cmd == "lineup-one":
         if len(a) != 4:
-            raise SystemExit("lineup-one <scratch> <id> <method> [--replace]")
+            raise SystemExit("lineup-one <scratch> <id> <method> [--replace | --keep-standing]")
         lineup_one(Path(a[1]), common.ids_of(a[2])[0], a[3], standing=standing)
     elif cmd == "lineup-score":
         if len(a) != 4:
-            raise SystemExit("lineup-score <scratch> <id> <methods,> [--replace]")
+            raise SystemExit("lineup-score <scratch> <id> <methods,> "
+                             "[--replace | --keep-standing]")
         lineup_score(Path(a[1]), common.ids_of(a[2])[0], a[3].split(","), standing=standing)
     elif cmd == "cxreport":
         if len(a) != 5:

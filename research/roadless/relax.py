@@ -775,14 +775,27 @@ def rows_of(plan: Plan, along: str, budget: float) -> Path:
     return OUT / along / plan.name / f"D{budget:g}"
 
 
-_CFG: dict = {}
+@dataclass(frozen=True, kw_only=True)
+class _Config:
+    """main's run, which _run reads in this process or in each forked worker (set before the
+    pool forks: never pickled)."""
+    mode: str
+    power: float
+    metric: gap_clear.ComplexMetric
+    plan: Plan
+    budget: float
+    standing: clearings.Standing
+
+
+_CFG: _Config | None = None
 
 
 def _run(bid: str) -> str | None:
     """`bid` if it failed (reported, and main exits non-zero at the end). The rows (named by
     the power alone) are the population's own demand's; pweight.py runs priority-weighted P."""
-    mode, power, metric, plan, budget, standing = (_CFG[k] for k in (
-        "mode", "power", "metric", "plan", "budget", "standing"))
+    assert _CFG is not None, "relax._run runs under main, which sets its _Config"
+    mode, power, metric, plan, budget, standing = (
+        _CFG.mode, _CFG.power, _CFG.metric, _CFG.plan, _CFG.budget, _CFG.standing)
     demand = common.PopulationDemand()
     out = _target(mode, bid, power, plan, metric.name, budget)
     try:
@@ -815,8 +828,9 @@ def main(mode: str, ids: list[str], power: float, metric: gap_clear.ComplexMetri
     todo = [i for i in ids if standing.todo(_target(mode, i, power, plan, metric.name, budget))]
     if not todo:
         return
-    _CFG.update(mode=mode, power=power, metric=metric, plan=plan, budget=budget,
-                standing=standing)
+    global _CFG
+    _CFG = _Config(mode=mode, power=power, metric=metric, plan=plan, budget=budget,
+                   standing=standing)
     if workers == 1:
         failed = [f for f in map(_run, todo) if f]
     else:

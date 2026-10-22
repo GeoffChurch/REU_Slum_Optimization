@@ -113,6 +113,7 @@ import cluster_submit as cs
 import pool_plan as pp
 import pool_queue as pq
 import pool_summary as psum
+import row_marker
 from cluster_submit.arrays import route
 from cluster_submit.cli import UNITS_DIR, parser
 from cluster_submit.context import Context, Shell, utcnow
@@ -129,9 +130,6 @@ WAVES = cluster.WAVES
 #: --unpack's tars' suffix: the steward deletes the wave's inputs/*.tar at its end
 #: (pool_steward.TARS).
 TAR = ".tar"
-#: What every pooled job's line passes its script (Ruling 8's `Keep`): a row that stands is its
-#: identity done, so a double claim or a job run again after a partial write wastes a run only.
-KEEP = "--keep-standing"
 #: A long run's walltime is this many times its job's estimate (the spec's 3.8), at most
 #: LONG_MAX_MINUTES. Cost only, never a row.
 LONG_TIME = 1.5
@@ -420,9 +418,12 @@ def _servable(*, wave: str, ladder: Ladder, nodes: Sequence[str], commit: str,
 
 
 def _job_line(line: str, *, block: str, item: str, tar: Path | None) -> str:
-    """A job's line: the command for (`block`, `item`), keeping what stands (KEEP), after
+    """A job's line: the command for (`block`, `item`), keeping what stands
+    (row_marker.KEEP_STANDING, Ruling 8's `Keep`: a row that stands is its identity done, so a
+    double claim or a job run again after a partial write wastes a run only), after
     unpacking `tar` through cluster_unpack.py (a block's jobs may unpack it at once)."""
-    run = f"python -u {line.replace('{id}', block).replace('{item}', item)} {KEEP}"
+    run = (f"python -u {line.replace('{id}', block).replace('{item}', item)} "
+           f"{row_marker.KEEP_STANDING}")
     if tar is None:
         return run
     return (f'python -u research/roadless/cluster_unpack.py "$CLUSTER_SUBMIT_INPUTS/{tar.name}" '
