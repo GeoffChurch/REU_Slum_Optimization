@@ -12,7 +12,9 @@ passed to pool_worker (`work`, `work_one`):
   (the plan's Ruling 7: no worker waits for its steward's first round);
 - the worker: `$SLURM_ARRAY_JOB_ID`_`$SLURM_ARRAY_TASK_ID`, of the run `$CLUSTER_SUBMIT_RUN`, its
   walltime ending at `$SLURM_JOB_END_TIME`, its commit its checkout's (`$CLUSTER_SUBMIT_CHECKOUT`,
-  cluster_submit's manifest, key `commit`);
+  cluster_submit's manifest, key `commit`); a pool's worker's `--node` must be the node it runs
+  on (`$SLURMD_NODENAME`: a block's jobs run on its node) and its `--class` one of the wave's
+  ladder's (each a SystemExit naming what it is not);
 - the OOM evidence: resolved from /proc/self/cgroup (pool_worker.oom_evidence);
 - a job: `bash -c <its line>` in the checkout, its environment the worker's with the wave's
   inputs (`CLUSTER_SUBMIT_INPUTS=<wave>/inputs`, where cluster_submit's would name the run's own)
@@ -38,6 +40,7 @@ from pathlib import Path
 import pool_queue as pq
 import pool_worker as pw
 from cluster_submit.remote_build import MANIFEST
+from pool_ladder import class_name
 
 #: A wave's name (the spec's 3.9): its directory's, so nothing that leaves it.
 WAVE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
@@ -64,6 +67,23 @@ def checkout_commit(checkout: Path) -> str:
     return commit
 
 
+def check_node(node: str, environ: Mapping[str, str]) -> None:
+    """A pool's worker of `node` runs on it (`$SLURMD_NODENAME`), else a SystemExit naming both:
+    its jobs are its node's, whose results can differ by machine."""
+    here = _env(environ, "SLURMD_NODENAME")
+    if here != node:
+        raise SystemExit(f"pool.py work: --node {node}, but this task runs on {here}")
+
+
+def check_class(cls: str, header: pq.Header) -> None:
+    """A pool's worker's class is one of its wave's ladder's, else a SystemExit listing them."""
+    lad = header.ladder
+    classes = [class_name(lad.cards, r) for r in lad.rungs]
+    if cls not in classes:
+        raise SystemExit(f"pool.py work: --class {cls} is no class of wave {header.wave}'s ladder "
+                         f"{lad.name} ({', '.join(classes)})")
+
+
 def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="pool.py", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -86,6 +106,8 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> pw.Exit:
         ap.error("work takes --node and --class (a pool's worker), or --job alone (a long run)")
     if not WAVE_NAME.fullmatch(a.wave):
         ap.error(f"--wave {a.wave!r} is not a wave's name ({WAVE_NAME.pattern})")
+    if pooled:
+        check_node(a.node, environ)
     worker = f"{_env(environ, 'SLURM_ARRAY_JOB_ID')}_{_env(environ, 'SLURM_ARRAY_TASK_ID')}"
     run = _env(environ, "CLUSTER_SUBMIT_RUN")
     ends_at = float(_env(environ, "SLURM_JOB_END_TIME"))
@@ -109,6 +131,7 @@ def main(argv: Sequence[str], environ: Mapping[str, str]) -> pw.Exit:
     if a.job is not None:
         return pw.work_one(queue=queue, worker=worker, run=run, job=a.job, commit=commit,
                            ends_at=ends_at, now=time.time, run_line=run_line, oom=oom, log=log)
+    check_class(a.cls, queue.header())
     poll = queue.header().ladder.poll_seconds
     return pw.work(queue=queue, worker=worker, run=run, node=a.node, cls=a.cls, commit=commit,
                    ends_at=ends_at, now=time.time, wait=lambda: time.sleep(poll),

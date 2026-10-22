@@ -8,9 +8,10 @@ its command line (the queue, the OOM evidence, the clock, the job's runner) and 
 - **The loop** (`work`): refuse a queue of another commit than the worker's checkout (3.11),
   before registering; register; then, at each job boundary: asked to step aside, retire (75);
   claim the longest pending job of its node and class estimated within the walltime left less the
-  ladder's margin, never one it has attempted (a job that failed goes to another worker, so a bad
-  node spends one strike a job: the controller's ruling); none fits, or every one pending is one
-  it attempted, retire (75: mycooc's lesson 4); nothing pending, drained (0) on a closed queue,
+  ladder's margin (recomputed at each claim), never one any worker of its lease has attempted
+  (pool_queue's claim: a bad node spends one strike a job across the lease, and a job that failed
+  for its own reasons is the next lease's); none such, retire (75: mycooc's lesson 4); nothing
+  pending, drained (0) on a closed queue,
   else wait a poll, retiring (75) once it has idled the ladder's idle minutes, or at once when no
   job could start in the walltime left (an idle worker killed at its walltime is a failed task,
   which ends its lease's chain). Its every exit retires it from the queue (`finally`), so a job
@@ -221,7 +222,7 @@ def run_job(line: str, *, cwd: Path, env: Mapping[str, str], log: Callable[[str]
                 wrote()
     except BaseException:
         proc.kill()
-        proc.returncode = os.waitstatus_to_exitcode(os.wait4(proc.pid, 0)[1])
+        proc.wait()         # Popen's: an already reaped child is no new error over this one
         raise
     finally:
         proc.stdout.close()
@@ -260,6 +261,12 @@ def _attempt(c: Claim, *, queue: Queue, worker: str, run_line: Callable[[Claim],
     return outcome
 
 
+def _minutes_left(*, ends_at: float, now: float, margin_minutes: float) -> float:
+    """The minutes a worker can give a job it claims at `now`: to its walltime's end less the
+    margin."""
+    return (ends_at - now) / 60 - margin_minutes
+
+
 def _refused(header: Header, commit: str) -> str | None:
     """Why a worker at `commit` refuses the queue of `header` (another commit: the spec's 3.11),
     or None."""
@@ -276,8 +283,8 @@ def work(*, queue: Queue, worker: str, run: str, node: str, cls: str, commit: st
          run_line: Callable[[Claim], Ran], oom: OomEvidence, log: Callable[[str], None]) -> Exit:
     """`worker` (a Slurm task of `run`, on `node` in class `cls`, its checkout at `commit`, its
     walltime ending at `ends_at`, epoch seconds on `now`'s clock) claims and runs its jobs until
-    it exits (the module's doc), each by `run_line`, never one it has attempted, `wait`ing a poll
-    on an open queue with nothing pending; the queue's ladder gives its margin and idle
+    it exits (the module's doc), each by `run_line`, never one its lease has attempted, `wait`ing
+    a poll on an open queue with nothing pending; the queue's ladder gives its margin and idle
     minutes."""
     header = queue.header()
     refused = _refused(header, commit)
@@ -290,22 +297,20 @@ def work(*, queue: Queue, worker: str, run: str, node: str, cls: str, commit: st
     queue.register(worker=worker, run=run, node=node, cls=cls, ends_at=ends_at)
     try:
         failed: list[int] = []              # the jobs of the attempts failed in a row
-        attempted: set[int] = set()         # the jobs it has claimed: never claimed again
         idle_since: float | None = None
         while True:
             if queue.asked_aside(worker):
                 log("asked to step aside: retired (75)")
                 return Exit.RETIRED
-            left = (ends_at - now()) / 60 - lad.margin_minutes
-            c = queue.claim(worker=worker, minutes_left=left, exclude=attempted)
+            left = _minutes_left(ends_at=ends_at, now=now(), margin_minutes=lad.margin_minutes)
+            c = queue.claim(worker=worker, minutes_left=left)
             if c is None:
-                pending = [j.id for j in queue.jobs()
-                           if (j.node, j.cls, j.state) == (node, cls, JobState.PENDING)]
+                pending = sum(1 for j in queue.jobs()
+                              if (j.node, j.cls, j.state) == (node, cls, JobState.PENDING))
                 if pending:
-                    tried = sum(1 for i in pending if i in attempted)
-                    log(f"{len(pending)} jobs of {node} {cls} pending, {tried} of them attempted "
-                        f"by this worker, none other estimated within the {left:.1f} minutes "
-                        "left less the margin: retired (75)")
+                    log(f"{pending} jobs of {node} {cls} pending, none both unattempted by this "
+                        f"lease ({run}) and estimated within the {left:.1f} minutes left less "
+                        "the margin: retired (75)")
                     return Exit.RETIRED
                 if queue.closed():
                     log(f"the queue closed, nothing of {node} {cls} pending: drained (0)")
@@ -321,7 +326,6 @@ def work(*, queue: Queue, worker: str, run: str, node: str, cls: str, commit: st
                 wait()
                 continue
             idle_since = None
-            attempted.add(c.job.id)
             outcome = _attempt(c, queue=queue, worker=worker, run_line=run_line, oom=oom, log=log)
             failed = [*failed, c.job.id] if outcome == Outcome.FAILED else []
             if len(set(failed)) >= FAILED_IN_A_ROW:

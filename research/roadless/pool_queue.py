@@ -16,9 +16,11 @@ workers of its pools claim, run and record, each claim one attempt.
 - **A claim** takes, of the PENDING jobs of the worker's node and class whose estimate fits the
   minutes it has left, the longest (then the lowest id), so a lease's big jobs come first and
   small ones fill its tail; a LONG job is the long lane's, claimed by id (`claim_job`). A worker
-  holds one claim at a time: a second is refused where claims are made. It names the jobs it has
-  attempted (`exclude`), which it never claims again: a job that failed goes to another worker,
-  so a bad node spends one strike a job, not a job's every strike (the controller's ruling).
+  holds one claim at a time: a second is refused where claims are made. No worker claims a job
+  any worker of its run has attempted (its lease: the run's tasks, all on one node), read in the
+  claim's transaction from the attempts of the run's registered workers: a bad node spends one
+  strike a job across the whole lease, and a job that failed for its own reasons is retried by
+  the next lease (the controller's ruling, Option A).
 - **Done is recorded only by the claim's holder**, only while the claim is still its own: a
   reaped worker's late finish stays an attempt (its exit code, peak and minutes recorded, its
   outcome the reaper's) and the job stays as the reaper left it.
@@ -45,7 +47,7 @@ import os
 import sqlite3
 import tempfile
 import time
-from collections.abc import Collection, Iterator, Sequence
+from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -206,8 +208,7 @@ class Queue(Protocol):
     def name_metric(self, name: str) -> None: ...
     def register(self, *, worker: str, run: str, node: str, cls: str, ends_at: float) -> None: ...
     def retire(self, worker: str) -> int: ...
-    def claim(self, *, worker: str, minutes_left: float,
-              exclude: Collection[int]) -> Claim | None: ...
+    def claim(self, *, worker: str, minutes_left: float) -> Claim | None: ...
     def claim_job(self, *, worker: str, job: int) -> Claim | None: ...
     def wrote(self, attempt: int) -> None: ...
     def finish(self, attempt: int, *, worker: str, outcome: Outcome, peak_gb: float,
@@ -422,6 +423,13 @@ def _struck(ladder: Ladder, *, lane: Lane, strikes: int) -> Struck:
     """A strike more: FAILED at the ladder's strikes, else waiting in its lane again."""
     n = strikes + 1
     return Struck(state=JobState.FAILED if n >= ladder.strikes else _waiting(lane), strikes=n)
+
+
+def _attempted_by(db: sqlite3.Connection, run: str) -> list[int]:
+    """The jobs any worker registered in `run` (a lease) has attempted, by id."""
+    return [r["job"] for r in db.execute(
+        "SELECT DISTINCT a.job AS job FROM attempts a JOIN workers k ON k.id = a.worker"
+        " WHERE k.run = ? ORDER BY a.job", (run,))]
 
 
 def _one_claim(db: sqlite3.Connection, worker: str) -> None:
@@ -671,11 +679,11 @@ class SqliteQueue:
         return w
 
     @staticmethod
-    def _pick(db: sqlite3.Connection, w: sqlite3.Row, *, minutes_left: float,
-              exclude: Collection[int]) -> sqlite3.Row | None:
-        """The PENDING job of `w`'s node and class, none of `exclude`, with the longest estimate
-        fitting `minutes_left` (then the lowest id)."""
-        ex = sorted(set(exclude))
+    def _pick(db: sqlite3.Connection, w: sqlite3.Row, *, minutes_left: float) -> sqlite3.Row | None:
+        """The PENDING job of `w`'s node and class that no worker of `w`'s run has attempted
+        (`_attempted_by`), with the longest estimate fitting `minutes_left` (then the lowest
+        id)."""
+        ex = _attempted_by(db, w["run"])
         row: sqlite3.Row | None = db.execute(
             "SELECT * FROM jobs WHERE node = ? AND cls = ? AND state = ? AND minutes <= ?"
             f" AND id NOT IN ({', '.join('?' * len(ex))}) ORDER BY minutes DESC, id LIMIT 1",
@@ -693,16 +701,15 @@ class SqliteQueue:
         return Claim(job=_job(db.execute("SELECT * FROM jobs WHERE id = ?",
                                          (job["id"],)).fetchone()), attempt=attempt)
 
-    def claim(self, *, worker: str, minutes_left: float,
-              exclude: Collection[int]) -> Claim | None:
+    def claim(self, *, worker: str, minutes_left: float) -> Claim | None:
         """The next job for `worker` (registered, not retired and holding no claim; else
-        ValueError): of its node and class, PENDING, none of `exclude` (the jobs it has
-        attempted), estimated within `minutes_left` (its walltime left less the margin), the
-        longest first; None if none is. The exclusion is in the claim's one transaction."""
+        ValueError): of its node and class, PENDING, attempted by no worker of its run (its
+        lease), estimated within `minutes_left` (its walltime left less the margin), the longest
+        first; None if none is. The exclusion is read in the claim's one transaction."""
         with self._tx() as db:
             w = self._live(db, worker)
             _one_claim(db, worker)
-            job = self._pick(db, w, minutes_left=minutes_left, exclude=exclude)
+            job = self._pick(db, w, minutes_left=minutes_left)
             return None if job is None else self._take(db, w, job)
 
     def claim_job(self, *, worker: str, job: int) -> Claim | None:

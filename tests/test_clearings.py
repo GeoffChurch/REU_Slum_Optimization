@@ -38,8 +38,10 @@ def _load(name: str, register_as: str | None = None) -> ModuleType:
 
 
 # The exporter imports the library as `clearings` and puts research/roadless on sys.path; load the
-# library under that name first so both are one module, and put sys.path back.
+# library under that name first so both are one module, and put sys.path back. The library imports
+# row_marker (a sibling, not on sys.path here), so that is loaded first.
 _saved_path = list(sys.path)
+_load("row_marker")
 clearings: Any = _load("clearings")
 exporter: Any = _load("clearings_export")
 sys.path[:] = _saved_path
