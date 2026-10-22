@@ -17,6 +17,7 @@ itself at every 0/1 clearing), its polish scored exactly (`E`) on a core as T's 
     uv run python $S pick                        # ROWS/b_blocks.csv (before any result)
     uv run python $S arm <id> <S10|B> [--replace] # relax.one's row, with host, wall, peak memory
     uv run python $S lenses <id> [--replace]     # ROWS/{lenses,facts}/<id>.parquet
+    uv run python $S homes <id> [--replace]      # ROWS/homes/<id>.parquet
     uv run python $S report                      # ROWS/summary_{blocks,groups,pairs}.csv
 
 `pick`: diode B's blocks, chosen before any result by a stated rule: the walled-in small blocks
@@ -35,8 +36,13 @@ forms) and B (i), the homes and population share left walled in by T's street re
 is its base's, checked equal clearing by clearing); per block the D each arm used, the clearings'
 Jaccard, each arm's wall time and SIMP's own.
 
+`homes`: per home walled in at baseline, whether each arm's clearing leaves it walled in (T's
+street reach) and its situation by U's placement (leaky.py `placement`: in a pocket, or with no open
+ground within ring_m).
+
 `report`: per block (summary_blocks.csv); per group (summary_groups.csv: the walled-in blocks, the
-controls, all, and B's blocks) the people each arm leaves walled in, D, Jaccard and time; per pair
+controls, all, and B's blocks) the people each arm leaves walled in (and of them the homes with no
+open ground within ring_m), D, Jaccard, time and SIMP's last iterate's grey share; per pair
 of arms under each metric (summary_pairs.csv) each lens's paired difference with its mean, median,
 95% Bayesian-bootstrap interval (the consolidated reports': BB_DRAWS Dirichlet weights) and the
 blocks ahead and behind.
@@ -293,6 +299,31 @@ def lenses(bid: str, *, replace: bool) -> None:
         flush=True)
 
 
+def homes(bid: str, *, replace: bool) -> None:
+    """Per home walled in at baseline whether each arm's clearing leaves it walled in, by T's
+    street reach, and its situation by U's placement (module docstring)."""
+    out = ROWS / "homes" / f"{bid}.parquet"
+    clearings.check_new(out, replace=replace)
+    a = arms()
+    at = t_arm(a, str(sizes()[bid]))
+    run: dict[str, TArm | WArm] = {"T": at, "S10": a.s10,
+                                   **({"B": a.b} if bid in b_blocks() else {})}
+    n = int(pd.read_parquet(arm_path(at, bid)).iloc[0]["n"])
+    [b] = common.build_blocks([bid])
+    m = a.t_cpu.metric.clearing(b, demand=POP)
+    place = pd.read_parquet(HERE / "leaky_rows" / "placement" / f"{bid}.parquet")
+    w = m.walled0
+    df = pd.DataFrame(dict(block=bid, home=np.flatnonzero(w), share=m.cost[w],
+                           pocket_U=place.pocket_U.to_numpy()[w],
+                           noground_U=place.noground_U.to_numpy()[w]))
+    for k, arm in run.items():
+        x = _cleared(arm_path(arm, bid), n)
+        df[f"left_{k}"] = (w & ~m.live_homes_of(m.factors(m.k_of(x))))[w]
+    clearings.write_once(df, out, replace=replace)
+    print(f"{bid}: {int(w.sum())} walled in; left " + ", ".join(
+        f"{k} {int(df[f'left_{k}'].sum())}" for k in run), flush=True)
+
+
 # ------------------------------------------------------------------ the report
 
 def _read(kind: str) -> pd.DataFrame:
@@ -321,6 +352,14 @@ def report() -> None:
     blk = _read("facts").set_index("block")
     blk["size"] = blocks["size"].reindex(blk.index)
     blk["control"] = blocks["control"].reindex(blk.index)
+    # each arm's last iterate's grey share (relax.one's simp_grey: x in (0.05, 0.95))
+    a = arms()
+    for bid in blk.index:
+        run: dict[str, TArm | WArm] = {"T": t_arm(a, str(blk.at[bid, "size"])), "S10": a.s10,
+                                       **({"B": a.b} if bool(blk.at[bid, "with_b"]) else {})}
+        for k, arm in run.items():
+            blk.loc[bid, f"grey_{k}"] = float(pd.read_parquet(arm_path(arm, bid)).iloc[0][
+                "simp_grey"])
     wide = blk.copy()
     for scorer in SCORERS:
         for clearing in ("T", "S10", "B"):
@@ -345,12 +384,24 @@ def report() -> None:
                         f"wall_{k}_median": float(h[f"wall_{k}"].median()),
                         f"wall_{k}_sum_h": float(h[f"wall_{k}"].sum() / 3600.0),
                         f"t_{k}_median": float(h[f"t_{k}"].median()),
+                        f"grey_{k}_median": float(h[f"grey_{k}"].median()),
                         f"peak_rss_gb_{k}_max": float(h[f"peak_rss_gb_{k}"].max())})
         for col in [c for c in g.columns if c.startswith("jaccard_")]:
             v = g[col].dropna()
             row.update({f"{col}_median": float(v.median()) if len(v) else np.nan,
                         f"{col}_min": float(v.min()) if len(v) else np.nan})
         grows.append(row)
+    hm = _read("homes")
+    for row in grows:
+        g = dict(groups)[str(row["group"])]
+        h = hm[hm.block.isin(g.index)]
+        row.update(walled_noground=int(h.noground_U.sum()), walled_pocket=int(h.pocket_U.sum()))
+        for k in ("T", "S10", "B"):
+            hk = h[h[f"left_{k}"].notna()]
+            if len(hk):
+                left = hk[f"left_{k}"].astype(bool)
+                row.update({f"left_{k}_noground": int((left & hk.noground_U).sum()),
+                            f"left_{k}_pocket": int((left & hk.pocket_U).sum())})
     pd.DataFrame(grows).to_csv(ROWS / "summary_groups.csv", index=False)
     rng = np.random.default_rng(BB_SEED)
     prows = []
@@ -366,8 +417,8 @@ def report() -> None:
                     d = (h[f"{x}_{scorer}_{first}"] - h[f"{x}_{scorer}_{second}"]).to_numpy(
                         dtype=float)
                     lo, hi = _bb(d, rng)
-                    row.update({f"{x}_{first}_mean": float(h[f"{x}_{scorer}_{first}"].mean()),
-                                f"{x}_{second}_mean": float(h[f"{x}_{scorer}_{second}"].mean()),
+                    row.update({f"{x}_first_mean": float(h[f"{x}_{scorer}_{first}"].mean()),
+                                f"{x}_second_mean": float(h[f"{x}_{scorer}_{second}"].mean()),
                                 f"d{x}_mean": float(d.mean()), f"d{x}_median": float(np.median(d)),
                                 f"d{x}_lo": lo, f"d{x}_hi": hi,
                                 f"d{x}_ahead": int((d > 1e-9).sum()),
@@ -392,6 +443,8 @@ def main(argv: list[str]) -> None:
         run_arm(a.s10 if argv[2] == "S10" else a.b, bid, replace=replace)
     elif len(argv) == 2 and argv[0] == "lenses":
         lenses(argv[1], replace=replace)
+    elif len(argv) == 2 and argv[0] == "homes":
+        homes(argv[1], replace=replace)
     elif argv == ["report"]:
         report()
     else:

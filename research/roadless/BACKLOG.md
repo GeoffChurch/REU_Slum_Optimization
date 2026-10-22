@@ -662,7 +662,7 @@ Open:
     open"), not when a neighbour cleared within 1 m does; free first frees by the same test. Open:
     T or U (the owner asked what U's two fixes are, and whether a home's source belongs inside its
     footprint rather than on its outline's ring).
-- **Walls that leak** (running, one setting at a time; owner 2026-10-21: "can't they go through
+- **Walls that leak** (stage 2 measured, the owner's call; owner 2026-10-21: "can't they go through
   other buildings, just slowly?", "everyone would pay to get out of their own home", "walls be
   (imperfect/leaky) diodes", "launch these one at a time so we can be adaptive"; NOTES, "Walls that
   leak: every home's source inside it, each wall priced as a length"; built on
@@ -696,9 +696,21 @@ Open:
   left walled in, B 33, C 31) and is not shown worse on regret (its clearing loses 0.7% under C's
   metric, 5.6% under B's; theirs 0.7% and -0.5% under its), at a fifth of B's scoring time; it
   gives up B's walled-in toll (3.9x the block median against 27x) and B's ranking of the others'
-  gains (Spearman 0.76). The default the owner picks. Next: the controller's and owner's pick.
-  Stage 2 (SIMP's interpolation of a partly cleared building's walls) after a setting is picked; a
-  leaks-in-interiors variant later.
+  gains (Spearman 0.76). The owner's default: symmetric 1,000 m. Stage 2, SIMP under the walls
+  (gap_walls.WallRelaxation: every element's W values multilinear in its owners' cleared densities,
+  the conductance linear as SIMP's own form, W bit for bit at 0/1; an obtuse exit's resistance so;
+  the adjoint gradient; the diode warm from the last design; leaky_simp.py, leaky_check's relax-*
+  guards): SIMP's default `.f0` under Wk1l1000 (S10) on the 82 blocks and under diode B on 20,
+  against T's stored arm. On the 20 S10 and B are different, not worse: each clearing gives up
+  about a tenth of the other's gain under the other's metric (S10 under B's L_P -0.032 [-0.039,
+  -0.024], B under S10's -0.024 [-0.037, -0.015]), and S10 leaves fewer walled in (11 homes against
+  15; T 0). On the 82 S10's clearing loses 0.075 L_P under T's metric (behind on 77) and leads by
+  0.022 under its own (ahead on 70); it leaves 48 of 327 walled-in homes on 17 blocks (T none: free
+  first). SIMP is weak under W (its last iterate grey, median 0.34 under S10; the polish keeps no
+  move on 58 of 82; T's clearing beats S10's own under S10's metric on 12 blocks): an optimizer
+  under W (a steeper penalty on the walls, a projection, or a greedy over W's exact gains) before W
+  replaces T; then the optimizer's re-run under the owner's pick, and a leaks-in-interiors variant
+  later.
 - **The rate bracket** (seqscreen.RATES, 2e-6 -- 1.9e-5 Lens A per GPU-second). A screen whose
   call turns on the rate prints an "ask" (this much Lens A for this much more time?); the
   owner's answer moves an end of the bracket to that screen's break-even rate. One is live,

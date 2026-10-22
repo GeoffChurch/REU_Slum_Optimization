@@ -8947,3 +8947,145 @@ home's residents their own walls (B's -1%), and B's ranking of the others' gains
 
 **Compute** (here, 2 processes): S5, S10, S15's decompositions 0.9 process-h, the regret re-run
 0.25.
+
+**Stage 2: SIMP under the walls, against today's rule** (the owner 2026-10-21: the default walls
+the symmetric 1,000 m, "They could both exist as options but we would hopefully be able to default
+to the symmetric case if it's not worse"; the test "1,000 m on all, diode B on 20"; the brief
+.superpowers/sdd/2026-10-21-leaky-walls/brief-stage2.md, its rulings in progress.md there).
+
+**The relaxation** (gap_walls.WallRelaxation and Interp; relax.one runs it as it runs T's, from a
+WallMetric: leaky_simp.py). Every element a clearing re-weights (a static passage each way, a
+finite street face, a cell's obtuse exits) depends only on its owners, the buildings whose grown
+footprint holds one of its triangles (19570: of 495,812 passages 96,451 have none, 284,623 one,
+105,500 two, 8,589 three, 649 four). Its values at every 0/1 clearing of its owners are computed
+once by WallModel.state's own arithmetic; at a design x, with each building's cleared density rho =
+proj(x)^q (relax.project; q and beta SIMP's continuation's), the element's value is their
+multilinear extension in its owners' densities. Rulings:
+
+- The conductance, not the wall's length, moves linearly: with one owner v_s + (v_c - v_s) rho,
+  SIMP's own eps + (1 - eps) proj(x)^q with eps the standing conductance's share of the cleared one
+  (a wall fades from ell to none and the interior goes from k_in to the open ground's factor as the
+  conductance they give rises linearly). So the relaxation is W bit for bit at every 0/1 clearing
+  (no eps world: a standing building conducts by its walls) and monotone (W's every value only
+  rises as a building clears, and a monotone function's multilinear extension on the cube is
+  monotone). Rejected: the length linear in rho (the conductance's slope at standing is d_e / ell
+  of the clearing's gain, 5e-4 at 1,000 m: the gradient would not see walls); T's least-k over a
+  triangle's zone (not exact at a partial 0/1 clearing of a shared zone, whose walls depend on
+  which building stands).
+
+- An obtuse exit's cleared value is ground (an infinite conductance), so its resistance is
+  interpolated: ell_out / (sigma |f|) times 1 - prod rho (the multilinear extension of "an owner
+  stands"), the cell ground once every owner is cleared. Its gradient there is the limit: the
+  currents that drain into the cell under u and under the adjoint, over the exits' standing
+  conductance. The ground turns on over 1 - x ~ Gs / K (the exits' standing conductance over the
+  cell's others'): on 19570 at 200 m the slope is -45.08 at x 1, -42.7 at 1 - 1e-4 and -45.06 at 1
+  - 1e-6, so SIMP's gradient there is steep but continuous.
+
+- The gradient by the adjoint through each element's slopes in its owners' densities (a diode's at
+  its settled sides: P is twice the minimum energy, its envelope the settled sides' conductances).
+  A diode's loop at each design starts from the previous design's sides (the relaxation's own
+  state; W's exact scores keep WarmStart), in no name: the loop settles on the design's one
+  solution from any start.
+
+- Under W SIMP's eps worlds have no counterpart, so the W arms' plan is SIMP's default without
+  `.e0.0001` and `s1e-06`: `fw0.q3.i10.k1.p256w8x2E.f0` (every iterate's rounding scored by W, the
+  polish ranked by W's relaxation's gradient at q 1 and scored exactly, as T's on a core; no free
+  first). WallModel.relaxation refuses a named eps and WallRelaxation.scorer a scoring eps;
+  relax.Incumbent takes its scorer from the relaxation (gap_clear.Relaxation.scorer: T unchanged).
+  No constant changed (CODE 34d40e8a).
+
+**Guards** (leaky_check.py, each both ways on 19570 under the guards' SYM, 200 m, and DIODE, out 50
+m, in 300 m). `relax-gradient`: the gradient against central differences (extrapolated, the closest
+of steps 1e-3 and 1e-4) on six buildings (the largest |gradient|, owners of shared zones and of
+inside street faces) at SIMP's start and a random design, q 1 and 3: 4e-7 -- 2.5e-5 of the largest
+(tolerance 1e-4); at a grounded exit's owner (x 1) the limit against the gradient just below it
+extrapolated: 1.2e-7 and 7e-9 (differences of J reach the limit only at steps whose roundoff swamps
+them); faults `no-faces` (the street faces' term dropped: 7e-3 -- 0.13), `forward-only` (a diode
+passage's slope always its forward table's: 1.3e-3 -- 4.3e-3 under the diode) and `ground-zero` (no
+drain at a ground cell: 8 -- 36 of the gradient). `relax-ends`: at the baseline, a random clearing,
+one owner of every two-owner shared passage cleared (99 buildings) and every building cleared, the
+relaxation's network is W's state's bit for bit (each way, street faces, conductance to ground,
+ground, unknowns) and J W's to 0; fault `owners-reversed` (the weights read an element's owners in
+reverse): apart at the partial clearings, J by 3e-3 -- 7e-2. `relax-monotone`: no table value falls
+as an owner clears (an exit's resistance share rises), and P along three orders of eight buildings
+each raised 0 -> 0.5 -> 1 never rises (largest step -1.4e-5, -6.1e-5); fault `cleared-slow` (a
+cleared building's ground at 1e-3): a million table steps down, P up 3.1e-2 -- 5.2e-2. `relax-warm`
+(the diode): SIMP's first six designs, each solved warm and cold, 0 apart, every wall passage on
+its current's side, 3 -- 4 passes warm against 4 -- 5 cold; fault `one-pass`: 5.5e-2 apart, 8,539
+passages off their side. `relax-identity`: W's plan reads back (no free first, polish scored
+exactly, no eps), S10's and B's names read back through walls_of and their rows' paths carry them,
+T's `.e` and `s` refused under W; faults `eps-accepted`, `part-dropped`. Every guard the change
+reaches, both ways as expected: leaky_check's eight (direction, party, settles, energy, monotone
+with `cleared-slow` on open_factor's per-triangle seam, walled-count, sources, walls-identity) and
+gap_clear_check's stage-1 list (enclosure, leak-assembly, exits-identity, identity, constants 28 at
+34d40e8a, baseline, uniform-control, pocket-escape, pocket-count, faces, flux; `roads` needs the
+main checkout).
+
+**The measurement** (leaky_simp.py: pick, arm, lenses, homes, report; rows leaky_rows/simp/,
+parquet ignored; summary_{blocks,groups,pairs}.csv). The 77 small walled-in blocks and the uniform
+study's five controls, area D 0.05, SIMP's default optimizing P: T, the uniform study's stored arm
+(RUNTIME, free first; the same RUNTIME: its rows hard-linked, the large controls' from a GPU); S10,
+SIMP's default `.f0` under Wk1l1000 (on UNIFORM's mesh, leaks and doors); B, the same under
+Wk1o10i3000n64 on 20 of the 77, picked before any result (leaky_rows/simp/b_blocks.csv, committed
+first): the 77 ordered by their walled-in homes at baseline then id, four strata of consecutive
+blocks (20, 19, 19, 19), five drawn from each by default_rng(20261021). Every clearing scored under
+T's, S10's and (on the 20) B's metric: Lens A of P, P_{1/2} and J_2 on each metric's own baseline,
+and B (i) by T's street reach (W's, its base's, equal clearing by clearing: checked).
+
+**People left walled in** (B (i)). Of the 327 walled-in homes on the 77, T leaves none (free
+first), S10 48 on 17 blocks: 21 on 63718 (the most walled-in homes, 77), 4 of the 11 homes with no
+open ground within ring_m and 44 of the 316 in pockets; where it leaves any, a median 0.26% of the
+block's population (3.8% at most). On B's 20 (57 walled-in homes, all in pockets): S10 leaves 11 on
+5 blocks, B 15 on 8 (8 left by both, 3 by S10 alone, 7 by B alone), T none.
+
+**Lens A**, the first arm's clearing less the second's, mean [95% Bayesian-bootstrap interval] over
+the blocks (S10 - T on all 82 but under B's metric, B's 20 there):
+
+    scorer    lens    S10 - T                  B - T (20)               S10 - B (20)
+    T's       L_P     -0.075 [-0.092, -0.062]  -0.055 [-0.083, -0.033]  -0.021 [-0.054, +0.009]
+              L_P1/2  -0.077 [-0.099, -0.060]  -0.070 [-0.109, -0.040]  -0.014 [-0.059, +0.030]
+              L_J2    -0.078 [-0.096, -0.062]  -0.071 [-0.114, -0.039]  -0.011 [-0.054, +0.031]
+    S10's     L_P     +0.022 [+0.017, +0.028]  -0.002 [-0.016, +0.010]  +0.024 [+0.015, +0.037]
+              L_P1/2  +0.042 [+0.034, +0.051]  -0.001 [-0.025, +0.018]  +0.044 [+0.028, +0.069]
+              L_J2    +0.030 [+0.023, +0.037]  -0.002 [-0.022, +0.014]  +0.034 [+0.021, +0.052]
+    B's (20)  L_P     -0.007 [-0.020, +0.009]  +0.025 [+0.016, +0.037]  -0.032 [-0.039, -0.024]
+              L_P1/2  +0.007 [-0.012, +0.030]  +0.035 [+0.019, +0.054]  -0.027 [-0.035, -0.020]
+              L_J2    -0.001 [-0.018, +0.018]  +0.028 [+0.015, +0.043]  -0.028 [-0.036, -0.021]
+
+Blocks ahead / behind on L_P: under T's metric S10 - T 5 / 77, B - T 2 / 18, S10 - B 10 / 10; under
+S10's 70 / 12, 10 / 10, 18 / 2; under B's 7 / 13, 19 / 1, 0 / 20. Each metric's own arm's L_P: T
+0.471 (82), S10 0.245 (82), B 0.349 (20). D used: a mean 0.0496 every arm. The clearings' Jaccard:
+median T-S10 0.28 (0.04 at least), T-B 0.38, S10-B 0.35.
+
+**S10 against B on the 20** (the brief's question). Under B's metric S10's clearing is short of B's
+on all 20 (L_P -0.032 [-0.039, -0.024], a mean 10% of B's gain, median 9%); under S10's metric B's
+is short of S10's on 18 (-0.024 [-0.037, -0.015], 11% of S10's gain, median 9%); under T's they tie
+(-0.021 [-0.054, +0.009]); and S10 leaves fewer walled in (11 homes on 5 blocks against B's 15 on
+8). So different, not worse: each clearing gives up about a tenth of the other's gain under the
+other's metric, the regret symmetric, and on the walled-in count S10 is no worse. (Stage 1's greedy
+put S10's clearing 5.6% short under B's metric and B's 0.7% under S10's; under SIMP the two regrets
+are equal.) Each walls' optimum is its own: under B's metric S10's clearing does no better than T's
+(-0.007 [-0.020, +0.009]), and under S10's B's no better than T's (-0.002).
+
+**S10 against T on all 82.** Under T's metric S10's clearing loses a mean 0.075 of L_P (16% of T's
+0.471; P_{1/2} and J_2 alike) and is behind on 77; under S10's metric it leads by 0.022 (9% of its
+own 0.245; P_{1/2} +0.042, J_2 +0.030), ahead on 70, behind on 12 (median 2% short, 0.041 at worst:
+SIMP's own answer under W beaten by T's clearing). The controls alike (T's metric -0.046, S10's
++0.012). T leaves no one walled in, S10 48 homes on 17 blocks.
+
+**The optimizer under W.** SIMP ends grey (its last iterate's share with x in (0.05, 0.95): a
+median 0.34 under S10, p10 0.26, p90 0.39; 0.17 under B; 0.05 under T). A wall's conductance linear
+in the density, its standing value about 1/2,000 of its cleared one at 1,000 m, gives most of a
+clearing's gain at a small density (at rho 0.125, x 0.5 at q 3, a wall's resistance is 99.6% gone),
+so q 3 does not push the design to 0/1; the incumbent's roundings carry the answer, and the polish
+keeps no move on 58 of the 82 blocks under S10 (a mean 21 of its 256 scorings) and on 4 of the 20
+under B (39): its first-order ranking of a wall's 2,000-fold change misleads, and a round with no
+gain ends it. Under its own metric S10's SIMP is beaten by T's clearing on 12 of 82 blocks, B's on
+1 of 20. The comparisons above are SIMP's default's under each metric, not the metrics' optima.
+
+**Compute** (here, single-threaded, at most 5 processes): S10's SIMP 1.94 process-h for the 82
+blocks (median 58 s a block against T's stored 39 s; 8152 21 min and 20023 11 min, T's 8 and 3 on a
+GPU), B's 2.65 for its 20 (median 331 s, 5.9x S10's on the same blocks), the lenses 0.54, the
+homes' rows 0.1; peak memory 7.1 GB (8152); the guards 3.9 (relax-gradient 0.5 a sweep, run three
+times as its ground check was settled; gap_clear_check's list 1.6). Estimated from three blocks
+before the run (S10 about 2, B about 1.5 process-h; the brief's thresholds 20 and 30).
