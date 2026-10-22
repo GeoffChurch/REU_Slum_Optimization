@@ -16,21 +16,29 @@ can change a call is a constant there), and nothing below asks which rule it hol
 the step, the cost model, the Monte Carlo sizes, the collapse veto and the seed are all in it,
 and the record revives as the screen itself.
 
+A LIVE SCREEN'S ROWS. epistemetry's `advance` is the live loop; what stays reblock's is feeding
+it a screen's rows in the order they were run (`arrived_of`). Its units are positions in the
+screen's order, so what arrives needs no block ids: the variant's gain over the default and its
+GPU-seconds on the blocks run, and the default's GPU-seconds on every block of the screen (the
+cost model's covariate, BASE_SECONDS), its own runs charged 0 (they exist already). Why a
+screen stopped is read off its `Stopped` record (`why_of`), never stored as a label.
+
 THE PIN. epistemetry is pinned in pyproject.toml (the `research` group, `[tool.uv.sources]` at a
 full SHA). A pin moves so:
 - edit the `rev`, then `uv lock --upgrade-package epistemetry`;
-- run `screening_check.py both-ways target,records,adapter,acceptance,screens`;
+- run `screening_check.py both-ways target,records,adapter,why,acceptance,screens`;
 - if `acceptance` fails only because the random numbers changed, regenerate the runs
   (`screening_check.py runs`) and pass `screening_check.py equivalent` against the committed CSV
   before committing the new one;
-- re-derive the phase-5 screens if `screens` fails the same way, and commit.
+- if `screens` fails the same way, re-derive the screens afresh (remove screen_decisions.json, then
+  `consolidated.py screen-report <preset> 0`), and commit.
 """
 from __future__ import annotations
 
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 import numpy as np
 from epistemetry.design.decide import (
@@ -44,7 +52,7 @@ from epistemetry.design.decide import (
     StopRule,
     ValueOfInformation,
 )
-from epistemetry.design.screen import SameTarget, Seen, TargetOf
+from epistemetry.design.screen import Arrived, Prefix, SameTarget, Seen, Stopped, TargetOf
 from epistemetry.stats.records import Recordable
 
 #: A call as the summaries spell it (epistemetry's calls are int rows at 165f98b, the truth's too).
@@ -136,3 +144,40 @@ class ZeroOne:
 
     def stop(self) -> StopRule:
         return ValueOfInformation(margin=StandardErrors(k=self.margin))
+
+
+# ---- a live screen ------------------------------------------------------------------------------
+
+def arrived_of(*, gain: np.ndarray, seconds: np.ndarray, base_seconds: np.ndarray) -> Arrived:
+    """A pairwise screen's rows as epistemetry's `Arrived`: `gain` (n,), the variant's Lens A
+    gain over the default on the blocks run, in the screen's order; `seconds` (n,), its
+    GPU-seconds on them; `base_seconds` (u,), the default's on every block of the screen, in its
+    order, those run then the rest. The units are positions in the screen's order; the outcomes
+    the targets' pair (gain, extra GPU-seconds over the default); the default's runs exist, so it
+    is charged 0; its GPU-seconds are the covariate the cost model scales by (BASE_SECONDS)."""
+    n, u = len(gain), len(base_seconds)
+    if gain.shape != (n,) or seconds.shape != (n,) or base_seconds.shape != (u,) or n > u:
+        raise ValueError(f"gain and seconds are one number a block run, (n,), and base_seconds "
+                         f"one a block of the screen, (u,) with u >= n: got {gain.shape}, "
+                         f"{seconds.shape}, {base_seconds.shape}")
+    return Arrived(order=np.arange(u),
+                   arms=(Prefix(units=np.arange(n),
+                                outcomes=np.column_stack([gain, seconds - base_seconds[:n]]),
+                                costs=seconds),),
+                   base_costs=np.zeros(n), covariates={BASE_SECONDS: base_seconds})
+
+
+#: Why an arm's screen stopped: its rule met at its last judgement, the collapse veto, or every
+#: block of the screen run.
+Why = Literal["settled", "collapse", "ran out"]
+
+
+def why_of(s: Stopped, *, arm: int, units: int) -> Why:
+    """Why arm `arm` of a screen of `units` blocks stopped, read off the record as epistemetry's
+    `Stopped` says: vetoed ("collapse"), its prefix the whole order ("ran out"), or else its
+    rule met at its last judgement ("settled")."""
+    if arm in s.vetoed:
+        return "collapse"
+    if s.arm_units[arm] == units:
+        return "ran out"
+    return "settled"

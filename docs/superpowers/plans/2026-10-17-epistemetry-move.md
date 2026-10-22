@@ -600,7 +600,7 @@ Expected: no import, path or call; prose that names them as history (screen_desi
 
 - [ ] **Step 3: Everything still runs**
 
-Run: `PYTHONPATH=. uv run python -c "import sys; sys.path.insert(0, 'research/roadless'); import region_leaks, consolidated, screening, screening_check"`, then `PYTHONPATH=. uv run python research/roadless/screening_check.py both-ways target,records,adapter,screens` and `... both-ways acceptance --workers 6`.
+Run: `PYTHONPATH=. uv run python -c "import sys; sys.path.insert(0, 'research/roadless'); import region_leaks, consolidated, screening, screening_check"`, then `PYTHONPATH=. uv run python research/roadless/screening_check.py both-ways target,records,adapter,why,screens` and `... both-ways acceptance --workers 6`.
 Expected: the imports succeed; every guard passes and fails under each of its faults.
 
 - [ ] **Step 4: Commit and push**
