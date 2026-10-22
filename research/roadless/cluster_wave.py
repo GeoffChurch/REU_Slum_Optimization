@@ -15,10 +15,13 @@ with the plan's Rulings 4, 7 and 12): a wave submitted whole, then read and stee
 1. The wave's commit is HEAD (`git rev-parse HEAD`; the working tree need not be clean: every run
    of the wave is submitted `--at` it, Ruling 7). `<w>` is a run name's (cluster_submit's NAME),
    neither `reblock` (the campaign) nor `submit` (`wave submit ...` is always a submit), no record
-   of the registry is a run of it, and (without --dry) the cluster has no `reblock-waves/<w>`. The
-   command's script is a file at the commit (cluster._script_at); it has `{id}`, and `{item}`
-   exactly when --items is given; --unpack's tars end in `.tar` (the steward deletes the wave's
-   inputs/*.tar at its end). Each of --nodes has its usable memory known (pool_plan.USABLE_GB) and
+   of the registry is a run of it, no record of it is here (`research/roadless/waves/<w>/`, whose
+   final.db a reused name would overwrite), and (without --dry) the cluster has no
+   `reblock-waves/<w>`. common.py has no uncommitted change (BANK_CODE): the bank is built here
+   by the working tree's common.write_bank while every run is `--at` HEAD. The command's script
+   is a file at the commit (cluster._script_at); it has `{id}`, and `{item}` exactly when
+   --items is given; --unpack's tars end in `.tar` (the steward deletes the wave's inputs/*.tar
+   at its end). Each of --nodes has its usable memory known (pool_plan.USABLE_GB) and
    serves the preset: the pool the market would start there (Waves.template's arguments) plans
    and routes, so a CPU ladder is refused off CPU_NODES and a GPU one on a node of unusable cards.
 2. The bank (common.write_bank, every id checked: a misspelt one is refused before anything is
@@ -30,25 +33,29 @@ with the plan's Rulings 4, 7 and 12): a wave submitted whole, then read and stee
    `.cluster_submit/waves/<w>/` here (git-ignored; replaced by the next attempt).
 3. Printed: the jobs by node and class, the long ones with their runs, the estimates' sources
    counted, the card- and CPU-hours estimated.
-4. Without --dry: `reblock-waves/<w>/inputs/` made on the cluster (mkdir: a name another machine
-   took meanwhile is refused), the seed (`jobs.json`), the bank, the tars and the --with files
-   rsynced there once (Ruling 7), then, each through cluster_submit `--at` the commit: the
+4. Without --dry: each run's submit planned with --dry first (a kind's refusal stops the wave
+   before anything ships); `reblock-waves/<w>/inputs/` made on the cluster (mkdir: a name another
+   machine took meanwhile is refused), the seed (`jobs.json`), the bank, the tars and the --with
+   files rsynced there once (Ruling 7), then, each through cluster_submit `--at` the commit: the
    steward (`<w>-steward`, reading the allocation on --board: PROJECT.cluster.board() unless a
    smoke wave names a hand-made one) and a long run per LONG job (`<w>-long-<job>`: its need's
    memory, rounded up, and LONG_TIME times its estimate at most LONG_MAX_MINUTES, the partition's
    7 days). No pool: the steward's first summary puts each class in the next sync's demand, and
-   the market starts its leases from Waves.template (Ruling 4). With --dry, each run's submit is
-   planned with --dry and nothing leaves this machine.
+   the market starts its leases from Waves.template (Ruling 4). A failure once the directory is
+   made (the rsync, a submit) says what was done and how to recover: with the steward live, `wave
+   <w> long`; without, remove `reblock-waves/<w>` there to submit the wave again. With --dry, each
+   run's submit is planned with --dry and nothing leaves this machine.
 
-**Ruling (Task 7): a fitted long job past the partition is refused.** A LONG job whose estimate is
-the family's fit (no stored or measured run of it) and whose run would need more than 7 days
-(LONG_TIME times its estimate: 4287's cycle_desire proposal, fitted at about 584 h) refuses the
-submit, naming each such job, before anything is shipped or submitted: the fit's worst rate says
-it may finish in no run, and capped at 7 days it would hold its memory for a week to be killed.
-The person leaves its block or item out (another wave), or checkpoints the method (the spec's
-Alternative C). Flagged and left out of the wave instead, it would vanish from the wave's record
-with only a printed line to say so. A stored or measured estimate past 7 days is capped at them:
-that work has finished within the partition before, and only the margins pass it.
+**Ruling (Task 7, as the controller corrected it): a fitted long job whose estimate passes the
+partition is refused.** A LONG job whose estimate is the family's fit (no stored or measured run of
+it) and whose estimate itself passes the partition's 7 days (4287's cycle_desire proposal, fitted
+at about 584 h) refuses the submit, naming each such job, before anything is shipped or
+submitted: the fit's worst rate says it may finish in no run, and capped at 7 days it would hold
+its memory for a week to be killed. The person leaves its block or item out (another wave), or
+checkpoints the method (the spec's Alternative C). Flagged and left out of the wave instead, it
+would vanish from the wave's record with only a printed line to say so. Every other long job's run
+is capped at 7 days: a fitted one whose estimate fits inside them (LONG_TIME times it need not),
+and a stored or measured one, whose work has finished within the partition before.
 
 `status`: the summary (one ssh call) by node and class, the workers reaped, the LONG jobs with no
 unfinished long run (`wave <w> long` submits them), the classes with jobs pending and no pool lease
@@ -75,8 +82,9 @@ only those FAILED. `cancel` asks the steward to cancel every job not ended (it t
 final snapshot, deletes the bank and tars, and exits 0: Ruling 12), and cancels every pool run
 and every long run of the wave that runs or whose continuation is undecided (CANCELLED_KINDS): a
 long run on a cancelled job would otherwise run on, its bank and tars deleted under it. The
-steward is not cancelled: it ends the wave. Without a live steward, no request is written, and
-the runs are cancelled all the same.
+steward is not cancelled: it ends the wave. Each cancel is tried (they are independent: one that
+fails leaves the others' recorded), and the failures are reported together. Without a live
+steward, no request is written, and the runs are cancelled all the same.
 
 Every verb but `status` (and a dry submit) is followed by reblock's demand, as cluster_submit's
 verbs of STATES_DEMAND are (cluster.main, from `Ran.states_demand`).
@@ -113,12 +121,10 @@ from cluster_submit.registry import Registry, RunRecord
 from cluster_submit.remote import SubprocessRunner
 from cluster_submit.submit import throttle_checked
 from pool_ladder import LADDERS, Ladder, class_name
-from pool_steward import BANK, INPUTS, REQUESTS, read_request
+from pool_steward import BANK, INPUTS, REQUESTS, SEED, read_request
 
 PROJECT = cluster.PROJECT
 WAVES = cluster.WAVES
-#: The seed's name among a wave's inputs (pool.py's `_queue` reads it there).
-SEED = "jobs.json"
 #: --unpack's tars' suffix: the steward deletes the wave's inputs/*.tar at its end
 #: (pool_steward.TARS).
 TAR = ".tar"
@@ -137,6 +143,9 @@ WAVE_KINDS = (cluster.Pool.name, cluster.Steward.name, cluster.Long.name)
 CANCELLED_KINDS = (cluster.Pool.name, cluster.Long.name)
 #: Where a submit writes a wave's seed and bank here, below the registry's directory.
 WORK = "waves"
+#: The code that builds a wave's bank here (common.write_bank, the working tree's), which must be
+#: as the wave's commit has it: its runs are `--at` that commit.
+BANK_CODE = ("research/roadless/common.py",)
 
 
 # ---- the edge: what the verbs act on, built once where the command line is read ---------------
@@ -209,6 +218,17 @@ def _each(edge: Edge, calls: Sequence[Call], *, what: str) -> int:
             print(f"[wave] {what}: {c.run} failed (exit {code}); done before it: {done}; not "
                   f"tried: {left}", file=sys.stderr)
             return 1
+    return 0
+
+
+def _every(edge: Edge, calls: Sequence[Call], *, what: str) -> int:
+    """Each of `calls`, independent of the others: every one tried, the failures said together:
+    0 when every one ran, else 1."""
+    failed = [c.run for c in calls if _ran(edge, c.argv)]
+    if failed:
+        print(f"[wave] {what}: {', '.join(failed)} failed (each said above); the rest ran",
+              file=sys.stderr)
+        return 1
     return 0
 
 
@@ -301,10 +321,10 @@ def _long_of(j: pq.JobSeed) -> psum.LongJob:
 
 
 def _unbounded(jobs: Sequence[pq.JobSeed]) -> list[pq.JobSeed]:
-    """The LONG jobs whose estimate is a fit and whose run would need more than LONG_MAX_MINUTES
-    (LONG_TIME times their estimate): the Ruling's, refused."""
+    """The LONG jobs whose estimate is a fit and itself passes LONG_MAX_MINUTES: the Ruling's,
+    refused."""
     return [j for j in jobs if j.lane == pq.Lane.LONG and j.source.startswith(FIT_SOURCE)
-            and LONG_TIME * j.minutes > LONG_MAX_MINUTES]
+            and j.minutes > LONG_MAX_MINUTES]
 
 
 # ---- submit -----------------------------------------------------------------------------------
@@ -331,6 +351,21 @@ def _unused(ctx: Context, wave: str) -> None:
     if runs:
         names = ", ".join(r.name for r in runs)
         raise SystemExit(f"wave {wave} has runs in this registry ({names}): a wave's name is new")
+
+
+def _recorded(records: Path, wave: str) -> None:
+    """No record of `wave` is here (`records`/<wave>: an earlier wave's summary, ledger and
+    final.db, which a wave of its name would overwrite), else a SystemExit."""
+    if (records / wave).exists():
+        raise SystemExit(f"{records / wave} exists: an earlier wave {wave}'s record, which a wave "
+                         "of its name would overwrite; a wave's name is new")
+
+
+def _uncommitted(repo: Path, paths: Sequence[str]) -> list[str]:
+    """Those of `paths` (below `repo`) that `git status` lists: changed, staged or untracked."""
+    out = subprocess.run(["git", "-C", str(repo), "status", "--porcelain", "--", *paths],
+                         check=True, capture_output=True, text=True).stdout
+    return [line[3:] for line in out.splitlines()]
 
 
 def _no_directory(ctx: Context, wave: str) -> None:
@@ -440,12 +475,25 @@ def _print_plan(seed: pq.Seed, *, nodes: Sequence[str], longs: Sequence[tuple[Ca
           f"`wave {h.wave} pools`)")
 
 
+def _recovery(wave: str, *, done: str) -> str:
+    """What a person does after a submit failed once `<WAVES>/<wave>` was made."""
+    return (f"[wave] {wave}: {WAVES}/{wave} is made on {PROJECT.cluster.host}, {done}: with its "
+            f"steward live, `wave {wave} long` submits its long runs; without, remove "
+            f"{WAVES}/{wave} there to submit the wave again")
+
+
 def _submit(edge: Edge, a: argparse.Namespace) -> Ran:
     import common  # geopandas and the block sources: only a submit needs them
 
     ctx = edge.ctx
     wave = _wave_name(a.wave)
     _unused(ctx, wave)
+    _recorded(edge.records, wave)
+    dirty = _uncommitted(cluster.REPO, BANK_CODE)
+    if dirty:
+        raise SystemExit(f"{', '.join(dirty)}: uncommitted changes, and the bank is built here by "
+                         "the working tree's common.write_bank while every run of the wave is "
+                         "--at HEAD: commit or set them aside first")
     if not a.dry:
         _no_directory(ctx, wave)
     items = [] if a.items is None else cluster._listed(a.items)
@@ -486,8 +534,8 @@ def _submit(edge: Edge, a: argparse.Namespace) -> Ran:
     unbounded = _unbounded(seed.jobs)
     if unbounded:
         raise SystemExit(
-            f"wave {wave}: fitted long jobs past the partition's {LONG_MAX_MINUTES / 1440:g} days "
-            f"({LONG_TIME:g} times their estimate), refused (the Ruling in cluster_wave.py): "
+            f"wave {wave}: fitted long jobs whose estimate passes the partition's "
+            f"{LONG_MAX_MINUTES / 1440:g} days, refused (the Ruling in cluster_wave.py): "
             + "; ".join(f"{j.block} {j.item}, {j.minutes / 60:.0f} h ({j.source})"
                         for j in unbounded)
             + ": leave their blocks or items out of this wave")
@@ -504,20 +552,26 @@ def _submit(edge: Edge, a: argparse.Namespace) -> Ran:
     (work / SEED).write_text(pq.seed_json(seed))
     inputs = _inputs([work / SEED, work / BANK, *tars.values(), *a.extra])
     _print_plan(seed, nodes=nodes, longs=longs, work=work)
-    if a.dry:
-        print(f"  dry: {WAVES}/{wave} on {PROJECT.cluster.host} not checked, nothing shipped; "
-              "each run planned with --dry:")
-        return Ran(code=_each(edge, [c._replace(argv=(*c.argv, "--dry")) for c in calls],
-                              what=f"wave {wave}'s dry submits"), states_demand=False)
+    print("  each run planned with --dry:" if a.dry else
+          "  each run planned with --dry first (nothing ships if one is refused):")
+    code = _each(edge, [c._replace(argv=(*c.argv, "--dry")) for c in calls],
+                 what=f"wave {wave}'s dry submits")
+    if a.dry or code:
+        print(f"  {WAVES}/{wave} on {PROJECT.cluster.host} not checked, nothing shipped"
+              if a.dry else f"  nothing shipped or submitted: {WAVES}/{wave} is not made")
+        return Ran(code=code, states_demand=False)
     _claim(ctx, wave)
     remote = ctx.remote()
-    remote.rsync("-a", *(str(f) for f in inputs), remote.at(f"{WAVES}/{wave}/{INPUTS}/"))
+    try:
+        remote.rsync("-a", *(str(f) for f in inputs), remote.at(f"{WAVES}/{wave}/{INPUTS}/"))
+    except SystemExit:
+        print(_recovery(wave, done="nothing submitted"), file=sys.stderr)
+        raise
     print(f"  shipped to {WAVES}/{wave}/{INPUTS}: {', '.join(f.name for f in inputs)}")
     code = _each(edge, calls, what=f"wave {wave}'s submits")
     if code:
-        print(f"[wave] {wave}'s inputs are in {WAVES}/{wave}/{INPUTS} on {PROJECT.cluster.host}: "
-              f"with its steward live, `wave {wave} long` submits its long runs; without, remove "
-              f"{WAVES}/{wave} there to submit the wave again", file=sys.stderr)
+        print(_recovery(wave, done="its submits stopped at the one that failed"),
+              file=sys.stderr)
     else:
         print(f"wave {wave}: submitted {', '.join(c.run for c in calls)}")
     return Ran(code=code, states_demand=True)
@@ -700,7 +754,7 @@ def _cancel(edge: Edge, wave: str) -> Ran:
         print(f"wave {wave}: no live steward of it in this registry, so no request written")
     calls = [Call(run=r.name, argv=("cancel", r.name)) for r in _wave_runs(ctx, wave)
              if r.kind in CANCELLED_KINDS and _undone(r)]
-    code = _each(edge, calls, what=f"wave {wave}'s cancels")
+    code = _every(edge, calls, what=f"wave {wave}'s cancels")
     if not code:
         print(f"wave {wave}: cancelled " + (", ".join(c.run for c in calls) or "no run")
               + " (pools and long runs; its steward ends the wave)")

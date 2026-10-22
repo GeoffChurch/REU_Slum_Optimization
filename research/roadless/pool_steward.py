@@ -60,6 +60,7 @@ LEDGER = "ledger.jsonl"
 FINAL = "final.db"
 REQUESTS = "requests"
 INPUTS = "inputs"
+SEED = "jobs.json"          # the wave's seed, in its inputs: any process of it makes the queue
 BANK = "bank.pkl"           # the wave's bank, deleted at its end
 TARS = "*.tar"              # --unpack's tars, deleted at its end
 #: How long a round waits for squeue: it answers in seconds, and a round must not wait on a

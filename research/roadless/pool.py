@@ -144,7 +144,7 @@ def _log(line: str) -> None:
 
 def _queue(wave: Path) -> pq.SqliteQueue:
     """The queue of the wave in `wave`, made from its seed if no process has made it."""
-    seed = wave / "inputs" / "jobs.json"
+    seed = wave / ps.INPUTS / ps.SEED
     return pq.SqliteQueue.open(wave / "queue.db", pq.read_seed(seed.read_text(), str(seed)))
 
 
@@ -164,10 +164,10 @@ def _work(ap: argparse.ArgumentParser, a: argparse.Namespace,
     commit = checkout_commit(checkout)
     oom = pw.oom_evidence(PROC_SELF_CGROUP.read_text(), CGROUP_ROOT)
     wave = Path(_env(environ, "HOME")) / WAVES / a.wave
-    inputs = wave / "inputs"
+    inputs = wave / ps.INPUTS
     queue = _queue(wave)
     child_env = {**environ, "CLUSTER_SUBMIT_INPUTS": str(inputs),
-                 "REBLOCK_BLOCK_BANK": str(inputs / "bank.pkl")}
+                 "REBLOCK_BLOCK_BANK": str(inputs / ps.BANK)}
 
     def run_line(c: pq.Claim) -> pw.Ran:
         return pw.run_job(c.job.line, cwd=checkout, env=child_env, log=_log,
