@@ -413,9 +413,11 @@ def screen_presets() -> dict[str, Screen]:
 
     return {
         # The default. Optimizes the realized loss: AdoptKeepAskByStake over the bracket's rates, a
-        # wrong call losing |gain - rate x extra GPU-seconds| over FUTURE uses; the lowest realized
-        # loss at every rate in the fourth replay. Gives up: more wrong calls (67 against
-        # fewest-wrong's 37 in 1,400 distinct pairwise runs), for fewer asks (284 against 318).
+        # wrong call losing |gain - rate x extra GPU-seconds| over FUTURE uses; in the fourth replay
+        # its realized loss below seqscreen's at every rate, and below fewest-wrong's at the
+        # bracket's bottom and middle (fewest-wrong's lower at its top). Gives up: more wrong calls
+        # (67 against fewest-wrong's 37 in 1,400 distinct pairwise runs), for fewer asks (284
+        # against 318).
         "realized-loss": screen_of(screening.RealizedLoss(rates=SCREEN_RATES, weights=weights,
                                                           uses=FUTURE, margin=0.0)),
         # Optimizes the wrong calls: AdoptKeepAsk over the bracket's ends, each arm priced by its

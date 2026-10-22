@@ -8586,10 +8586,12 @@ once at consolidated's edge (`screen_presets()`, every number that can change a 
 there) and injected into `screen-report <preset> <wave>`, which never asks which rule it holds:
 - `realized-loss`, the default: `AdoptKeepAskByStake` over the bracket's five geometric rates
   (`RATES_PER_GPU_SECOND`, 2e-6 -- 1.9e-5 Lens A per GPU-second), equally weighted, over FUTURE
-  (820) uses, a wrong call losing |gain - rate x extra GPU-seconds|; the lowest realized loss at
-  every rate in the fourth replay. It gives up wrong calls: 67 against 37 in the fourth replay's
-  1,400 distinct pairwise runs (each design without the veto, C1m4/p64 with it too), for fewer asks
-  (284 against 318).
+  (820) uses, a wrong call losing |gain - rate x extra GPU-seconds|; in the fourth replay its
+  realized loss was below seqscreen's at every rate, and below fewest-wrong's at the bracket's
+  bottom and middle (fewest-wrong's lower at its top: 532.1 against 533.7 without the veto, 495.2
+  against 496.8 with it). It gives up wrong calls: 67 against 37 in the fourth replay's 1,400
+  distinct pairwise runs (each design without the veto, C1m4/p64 with it too), for fewer asks (284
+  against 318).
 - `fewest-wrong`: `AdoptKeepAsk` over the bracket's ends, each arm priced by its own stake
   (`screening.OwnStake`, the third replay's 0-1 target). It gives up asks (318 against 284) and
   realized loss at the bracket's bottom and middle.
@@ -8673,9 +8675,9 @@ among C1m4/p64's 100 runs under the veto, where the collapse falls inside the fl
 (its 12 blocks): 1,609.3 GPU-seconds charged (5.9 blocks, mean) against 3,067.0 a wave pays;
 (wave_cost - cost) is a mean 0.475 of the design's cost over those 100 runs and 0.034 over all
 1,400; the same for both presets. It moves neither the comparison (both sides are replays charged
-unit by unit) nor the presets' ranking (both share the floor's step); it biases a live screen's
-cost forecast where a veto falls inside a multi-block step, which at step 1 is only the floor's
-first. Commented on #10 (the owner's yes, 2026-10-18):
+unit by unit) nor the presets' ranking (both share the floor's step); a replay under-charges
+against what a live wave pays where a veto falls inside a multi-block step, which at step 1 is only
+the floor's first. Commented on #10 (the owner's yes, 2026-10-18):
 https://github.com/GeoffChurch/epistemetry/issues/10#issuecomment-6338646207.
 
 **Phase 5's verdicts**, re-derived through `advance` under `realized-loss`
@@ -8697,10 +8699,10 @@ new:
 patch inside the guard's process; `both-ways` runs both, single-threaded, after the deletion: 51
 and 43 minutes):
 - `target`: each preset's target as its policy builds it, against the loss recomputed outside
-  epistemetry: realized-loss's risk, call and price 37 of 37 decisions, fewest-wrong's target and
-  own price 37 of 37. Faults `dropped-uses` (the target over 1 use, not FUTURE: 21 of 37 risks off,
-  the other 16 losing exactly 0) and `unstaked` (the own price without its stake: 37 of 37 off):
-  FAIL.
+  epistemetry: realized-loss's risk, call and price at 37 of 37 prefixes, fewest-wrong's target and
+  own price at 37 of 37, and each preset's price read off 3 of 3 decisions. Faults `dropped-uses`
+  (the target over 1 use, not FUTURE: 21 of 37 risks off, the other 16 losing exactly 0) and
+  `unstaked` (the own price without its stake: 37 of 37 off): FAIL.
 - `records`: each preset's `Screen.record()` round-trips through JSON and names its target. Fault
   `array-rates` (the rates the array np.geomspace returns): the record refuses it, FAIL.
 - `adapter`: a live screen fed through `screening.arrived_of` is epistemetry's replay, decision for
@@ -8731,7 +8733,7 @@ reader of any remains (`git show abe75d6d^:research/roadless/seqscreen.py` has t
 sets are common.py's (TUNING, 13; HELD, 46, in the order phase 5 ran them, frozen as data, since
 165f98b's `random_orders` no longer draws that permutation). The replays' data (Ruling 6, the
 owner's "delete"), after the comparison passed: 36 git-ignored paths, 58 MB (ten
-epireplay*.parquet, five *_jobs directories with screen_acceptance_jobs, 22 epireplay4 logs);
+epireplay*.parquet, five *_jobs directories with screen_acceptance_jobs, 21 epireplay4 logs);
 screen_acceptance.csv holds every acceptance run. The fixture stays: epireplay_designs.json is
 screen_designs.json, reblock's real-data acceptance fixture (epistemetry's spec puts each project's
 real-data acceptance test in that project, run through its pin), its five many-arm designs read by

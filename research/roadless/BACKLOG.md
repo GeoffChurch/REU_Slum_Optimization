@@ -789,11 +789,11 @@ Not pursued, with what would change that:
   epistemetry: the move"). epistemetry's `advance` on a `Screen` (consolidated `screen-report
   <preset> <wave>`, the presets built at its edge): ValueOfMoreUnits on the finite-population
   bootstrap of the variant's blocks, a stop when no number of further blocks is worth its GPU time;
-  AdoptKeepAskByStake over the bracket's five rates (`realized-loss`, the default; `fewest-wrong`
-  the 0-1 target at each arm's own stake), over FUTURE uses; a 15-block floor, step 1, and the
-  collapse veto. Each wave continues from the screens' stored ledger
-  (consolidated_rows/screen_decisions.json). kernelcore's reweighting collapses on these screens
-  (NOTES).
+  the target AdoptKeepAskByStake over the bracket's five rates (`realized-loss`, the default) or
+  AdoptKeepAsk over the bracket's ends, each arm priced by its own stake (`fewest-wrong`,
+  screening.OwnStake), over FUTURE uses; a 15-block floor, step 1, and the collapse veto. Each wave
+  continues from the screens' stored ledger (consolidated_rows/screen_decisions.json). kernelcore's
+  reweighting collapses on these screens (NOTES).
 
 ## Greedy
 
