@@ -17,7 +17,7 @@ stages), and checks what a task would get.
                                             # no-check, fit-capped, uncapped, any-node,
                                             # pools-only, fit-margin, unfinished-only,
                                             # first-cancel-stops, record-reused, no-bank-code,
-                                            # clean-always
+                                            # common-only, clean-always
     uv run python $C both-ways <guards,>    # each guard, then under each of its faults
 
 Each guard but `cpu` has its faults (FAULTS: a patch in this process, no file edited, as
@@ -151,12 +151,13 @@ tar whose name does not end in `.tar`; gpu-presets on orion (its cards unusable)
 fitted long jobs whose estimate passes 7 days (cycle_desire on both blocks, no stored row: the
 family's longest wall under 1 km2, 11000 minutes), naming them; a wave with a local record
 (`waves/g-10` here); and, cluster_wave._uncommitted answering it changed, an uncommitted
-common.py, naming it (the other cases read this checkout's common.py as committed, whatever it
-is where the guard runs). Planned with long runs capped at `--minutes` 10080 (7 days): a stored
+common.py and src/reblock, naming them (the other cases read this checkout's bank code as
+committed, whatever it is where the guard runs). Planned with long runs capped at `--minutes` 10080 (7 days): a stored
 long job (slow_stored: 7500 minutes with its margin), and fitted ones whose estimate fits inside 7
 days, 1.5 times it past them (fitted_slow on both blocks: its own fit over its five blocks,
-7000 minutes). cluster_wave._uncommitted on a git repo made here lists common.py once it is
-changed, and nothing while it is committed. Then the requests, on a registry with wave `w` live
+7000 minutes). cluster_wave._uncommitted on a git repo made here lists common.py and a file
+below src/reblock once they are changed (and no other file), and nothing while they are
+committed. Then the requests, on a registry with wave `w` live
 (its steward, a pool lease running, one finished with its continuation undecided, one finished and
 settled, a long run running, another wave's pool) and its seed of three jobs on the cluster:
 `wave w retry 2`, `wave w retry failed` and `wave w cancel` leave in `reblock-waves/w/requests/`
@@ -171,8 +172,9 @@ runs named `<w>-long-<block>`: no run name), `no-script-check` and `no-check` (a
 `any-node` (cluster_wave._servable a no-op: gpu-presets planned on orion), `pools-only` (cancel
 leaving the long runs), `unfinished-only` (cluster_wave._undone as unfinished alone: the undecided
 lease left), `first-cancel-stops` (cancel stopping at its first failure), `record-reused`
-(cluster_wave._recorded a no-op), `no-bank-code` (BANK_CODE empty) and `clean-always`
-(cluster_wave._uncommitted answering none).
+(cluster_wave._recorded a no-op), `no-bank-code` (BANK_CODE empty), `common-only` (BANK_CODE
+common.py alone: the Block producers' change unseen) and `clean-always` (cluster_wave._uncommitted
+answering none).
 
 (`gpu`, the retired raster's sizing checked against its scorer's measured peaks, went with it:
 NOTES, "The complex as the runtime: the raster retired".)
@@ -1008,7 +1010,8 @@ FIT_BLOCK = "guard.fit"         # wave: a stored run's block beside them, under 
 #: so its fit is its own
 FITTED = tuple(f"guard.fitted{k}" for k in range(1, 6))
 SCORE = "research/roadless/road_rescore.py"
-COMMON = "research/roadless/common.py"     # wave: the bank's code (cluster_wave.BANK_CODE)
+COMMON = "research/roadless/common.py"     # wave: the bank's code (cluster_wave.BANK_CODE) ...
+PRODUCER = "src/reblock/derive/guard.py"   # ... and a Block producer's file, below src/reblock
 
 
 class _Stored(NamedTuple):
@@ -1233,15 +1236,15 @@ def _wave_requests(tmp: Path) -> tuple[list[str], str]:
 
 def _uncommitted_check(repo: Path) -> list[str]:
     """cluster_wave._uncommitted on a git repo made in `repo`: BANK_CODE committed, none listed;
-    common.py changed, it alone."""
+    common.py and a file below src/reblock changed (and one outside BANK_CODE), those two."""
     def git(*args: str) -> None:
         subprocess.run(["git", "-C", str(repo), "-c", "core.hooksPath=/dev/null", "-c",
                         "commit.gpgsign=false", "-c", "user.name=guard", "-c",
                         "user.email=guard@localhost", *args], check=True, capture_output=True)
 
-    path = repo / COMMON
-    path.parent.mkdir(parents=True)
-    path.write_text("# committed\n")
+    for f in (COMMON, PRODUCER):
+        (repo / f).parent.mkdir(parents=True)
+        (repo / f).write_text("# committed\n")
     (repo / "other.py").write_text("")
     git("init", "-q")
     git("add", ".")
@@ -1249,11 +1252,12 @@ def _uncommitted_check(repo: Path) -> list[str]:
     bad = []
     if cluster_wave._uncommitted(repo, cluster_wave.BANK_CODE):
         bad.append("a committed common.py listed as uncommitted")
-    path.write_text("# changed\n")
-    (repo / "other.py").write_text("# changed\n")
+    for f in (COMMON, PRODUCER, "other.py"):
+        (repo / f).write_text("# changed\n")
     got = cluster_wave._uncommitted(repo, cluster_wave.BANK_CODE)
-    if got != [COMMON]:
-        bad.append(f"common.py changed (and another file): {got} listed, want [{COMMON}]")
+    if sorted(got) != [COMMON, PRODUCER]:
+        bad.append(f"common.py and {PRODUCER} changed (and another file): {got} listed, want "
+                   f"those two")
     return bad
 
 
@@ -1338,10 +1342,12 @@ def _wave_cases(edge: cluster_wave.Edge, planned: list[_Planned], *, tmp: Path, 
         dirty = _waved(edge, planned, _submit_line(
             "g-11", "--nodes", "orion", "--items", "clearance", preset=cpu, ids=(b,),
             command=score))
-    if dirty.refused is None or dirty.planned or COMMON not in dirty.refused:
-        bad.append(f"common.py uncommitted: {dirty.refused or 'planned'}, want refused naming "
-                   f"{COMMON}")
-    got.append(f"dirty common.py {'refused' if dirty.refused is not None else 'planned'}")
+    listed = (dirty.refused or "").partition(": uncommitted changes")[0]  # the paths it names
+    if (dirty.refused is None or dirty.planned
+            or listed.split(", ") != [COMMON, "src/reblock"]):
+        bad.append(f"the bank's code uncommitted: {dirty.refused or 'planned'}, want refused "
+                   f"naming {COMMON} and src/reblock")
+    got.append(f"dirty bank code {'refused' if dirty.refused is not None else 'planned'}")
     return bad, got
 
 
@@ -1449,6 +1455,7 @@ FAULTS: dict[str, dict[str, Callable[[], contextlib.AbstractContextManager[None]
         "first-cancel-stops": lambda: _patched(cluster_wave, "_every", cluster_wave._each),
         "record-reused": lambda: _patched(cluster_wave, "_recorded", lambda records, wave: None),
         "no-bank-code": lambda: _patched(cluster_wave, "BANK_CODE", ()),
+        "common-only": lambda: _patched(cluster_wave, "BANK_CODE", (COMMON,)),
         "clean-always": lambda: _patched(cluster_wave, "_uncommitted", _clean)}}
 
 

@@ -17,8 +17,9 @@ with the plan's Rulings 4, 7 and 12): a wave submitted whole, then read and stee
    neither `reblock` (the campaign) nor `submit` (`wave submit ...` is always a submit), no record
    of the registry is a run of it, no record of it is here (`research/roadless/waves/<w>/`, whose
    final.db a reused name would overwrite), and (without --dry) the cluster has no
-   `reblock-waves/<w>`. common.py has no uncommitted change (BANK_CODE): the bank is built here
-   by the working tree's common.write_bank while every run is `--at` HEAD. The command's script
+   `reblock-waves/<w>`. Neither common.py nor src/reblock (the Block producers it builds
+   through) has an uncommitted change (BANK_CODE): the bank is built here by the working tree's
+   common.write_bank while every run is `--at` HEAD. The command's script
    is a file at the commit (cluster._script_at); it has `{id}`, and `{item}` exactly when
    --items is given; --unpack's tars end in `.tar` (the steward deletes the wave's inputs/*.tar
    at its end). Each of --nodes has its usable memory known (pool_plan.USABLE_GB) and
@@ -143,9 +144,10 @@ WAVE_KINDS = (cluster.Pool.name, cluster.Steward.name, cluster.Long.name)
 CANCELLED_KINDS = (cluster.Pool.name, cluster.Long.name)
 #: Where a submit writes a wave's seed and bank here, below the registry's directory.
 WORK = "waves"
-#: The code that builds a wave's bank here (common.write_bank, the working tree's), which must be
-#: as the wave's commit has it: its runs are `--at` that commit.
-BANK_CODE = ("research/roadless/common.py",)
+#: The code that builds a wave's bank here (common.write_bank, the working tree's, and the Block
+#: producers it builds through: src/reblock, which `git status` reads whole), which must be as the
+#: wave's commit has it: its runs are `--at` that commit.
+BANK_CODE = ("research/roadless/common.py", "src/reblock")
 
 
 # ---- the edge: what the verbs act on, built once where the command line is read ---------------
@@ -492,8 +494,9 @@ def _submit(edge: Edge, a: argparse.Namespace) -> Ran:
     dirty = _uncommitted(cluster.REPO, BANK_CODE)
     if dirty:
         raise SystemExit(f"{', '.join(dirty)}: uncommitted changes, and the bank is built here by "
-                         "the working tree's common.write_bank while every run of the wave is "
-                         "--at HEAD: commit or set them aside first")
+                         "the working tree's common.write_bank and the Block producers of "
+                         "src/reblock while every run of the wave is --at HEAD: commit or set "
+                         "them aside first")
     if not a.dry:
         _no_directory(ctx, wave)
     items = [] if a.items is None else cluster._listed(a.items)
