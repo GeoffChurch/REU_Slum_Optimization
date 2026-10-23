@@ -8938,8 +8938,11 @@ lineup's networks (prefix_len, area weights):
 It leads every network at every budget, both pools' own included, with more road for the same D
 (4.5 km at 0.05 against cycle_native's 2.6, 11.2 km at 0.15 against 8.3). The screen held as a
 lower bound on every candidate solved (the exact drop 1.04 to 10.7 times it, median 1.9), but
-ranked the step's winner fourth in 61 of 195 steps: four is too few, and a run solving twelve a
-step is under way. The candidates are the two methods' roads, so ΔP greedy here selects and
+ranked the step's winner fourth in 61 of 195 steps. Solving twelve a step (184 steps, 199 roads,
+8.0 h) gains a little: L_P 0.225 / 0.300 / 0.454 / 0.583 / 0.652 at D 0.01 / 0.02 / 0.05 / 0.10 /
+0.15 (3.9 km at 0.05, 10.8 km at 0.15), and its winner was still twelfth in 28 steps: returns fall
+off with more solves, and a screen that counted the ground a road opens through buildings (which
+the corridor's present power cannot see) should pay more than a wider one. The candidates are the two methods' roads, so ΔP greedy here selects and
 orders their geometry rather than finding its own. One block. Every score carries the paved-only
 boost's gift to new roads (BACKLOG, Open, "Paving has no price"). Scripts and frames:
 .superpowers/sdd/2026-10-22-flow-roads/ (dp_greedy.py; power_resolve.py, the stopped re-solve),
