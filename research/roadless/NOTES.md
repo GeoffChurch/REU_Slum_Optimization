@@ -9002,57 +9002,70 @@ vortices) are in GeoffChurch/wiki-private, pages/reblock/roads-interact-as-induc
 measuring-clutter-in-a-road-network.md. Script: .superpowers/sdd/2026-10-22-flow-roads/
 pairs_check.py (not committed).
 
-### cycle_native scored by ΔP: its loops lie doubled (2026-10-23)
+### cycle_native's loops lie doubled; scored by ΔP, and kept apart (2026-10-23)
 
 The owner: "Score cycle_native's loops by ΔP is a good idea". The lineup's cycle_native on 5810
 move for move (its routing graph, its held free road, each step's shortlist of the 8 deepest
 unserved homes and their out-and-back loops), with the loop it commits chosen by the exact drop
 in P under RUNTIME per ramped ΔD instead of the July permeability's gain per priced displacement:
 each step carves the committed roads and the 8 loops into one mesh (dp_greedy's merged carving)
-and solves each exactly. 49 steps, 99 roads to D 0.151 in 4.6 h:
+and solves each exactly. 49 steps, 99 roads to D 0.151 in 4.6 h.
 
-    L_P at area D            0.01    0.02    0.05    0.10    0.15
-    cycle_native, ΔP         0.224   0.259   0.405   0.521   0.592
-    cycle_native             0.146   0.184   0.392   0.520   0.575
-    ΔP greedy, top 12        0.225   0.300   0.454   0.583   0.652
+Two orders have to be told apart. The lineup cuts a network by common.canonical_order (its held
+roads, then street first) over everything the method built, for cycle_native a network on to D
+0.37; the ΔP build stops at D 0.15 and is cut in build order. The same network cut the two ways
+(plain cycle_native's re-proposed, road for road the lineup's; cn_build_order.py):
 
-(its first cuts overshoot, the 0.01 frame at D 0.016 and 0.02 at 0.022, its first loops being
-long). It gains little over plain cycle_native, nothing at 0.10, while ΔP greedy over the pooled
-roads of two networks gains six to twelve points: cycle_native's move, not its choice, is what
-limits it. And it clutters like ΔP greedy: by the mean distance, q10 3.1 / 2.0 m and median 10.8
-/ 10.6 m at D 0.05 / 0.15, 16% / 19% of its length within 5 m of another road (cycle_native 1% /
-9%); critical excess +0.27 / +0.10 and sharp +0.33 / +0.17 (cycle_native -0.19 / -0.11 and -0.10
-/ -0.03); 3.4 / 9.3 km of road against 2.6 / 8.2.
+    L_P at area D                       0.01    0.02    0.05    0.10    0.15
+    cycle_native, canonical (lineup)    0.146   0.184   0.392   0.520   0.575
+    cycle_native, build order           0.131   0.277   0.384   0.479   0.571
+    cycle_native, ΔP, build order       0.224   0.259   0.405   0.521   0.592
+    ΔP greedy, top 12                   0.225   0.300   0.454   0.583   0.652
 
-The clutter is the generator's. Replaying the build (cn_dp_loops.py, which regenerates each
-step's shortlist and reproduced the built roads at all 49 steps): 58% of the shortlisted loops
-had legs under 10 m apart (the median distance from the shorter leg's points to the other), and
-ΔP chose them at about that rate (55%); in the 46 steps offering both kinds, the narrow loops'
-median ΔP / ΔD beat the wide ones' in only 37%. The return leg avoids only the outbound leg's own
-edges, so in a tight gap the next routing edge over is the way back and the loop is one road
-laid twice, a wider road at little more than one leg's displacement. ΔP is indifferent to that;
-plain cycle_native's networks rarely show it (its first loop is already another: 4 to 27% of the
-ΔP version's first loop coincides with it), so the July permeability presumably passed narrow
-loops over (*argued*).
+(cuts overshoot where the first loops are long: ΔP's 0.01 frame at D 0.016, plain build order's
+0.05 at 0.059.) In build order ΔP scoring lifts cycle_native 2 to 4 points at 0.05 to 0.15; the
+canonical cut is itself a selection from the larger network, worth 4 points at 0.10.
+
+The clutter is cycle_native's own, scored by ΔP or not. In build order to D 0.15, 63% of plain
+cycle_native's loops have legs under 10 m apart (the median distance from the shorter leg's
+points to the other), 43% under 5 m; replaying the ΔP build (cn_dp_loops.py, every step's
+shortlist regenerated, the built roads reproduced at all 49 steps), 58% of the loops offered
+were narrow and ΔP chose them at about that rate (55%), the narrow loops' median ΔP / ΔD beating
+the wide ones' in only 37% of the 46 steps offering both. The return leg avoids only the
+outbound leg's own edges, so in a tight gap the next routing edge over is the way back and the
+loop is one road laid twice. The canonical cut hides it, leaving one leg of many out. Share of
+road length within 5 m of another (clutter.py's mean distance), D 0.05 / 0.10 / 0.15:
+
+                                        build order      canonical
+    cycle_native                        4 / 14 / 26%     1 / 6 / 9%  (the lineup's)
+    cycle_native, ΔP                    16 / 15 / 19%    5 / 11 / 18%
 
 So the return leg also kept off every routing node closer than `apart` to the outbound leg
-(except within `apart` of its two ends): apart 0 is the rule above (the replay at 0 reproduced
-the first build at all 49 steps), 7 m one road width (the corridors cannot overlap), 14 m two.
-Narrow loops (legs under 10 m apart) fell to 4% of those offered at 7 m and none at 14 m:
+(except within `apart` of its two ends): apart 0 is the rule above, 7 m one road width (the
+corridors cannot overlap), 14 m two. In plain cycle_native (cn_apart.py: its propose copied with
+the rule added; apart 0 reproduced the lineup's 513 roads exactly) and in the ΔP build (cn_dp.py
+<apart>), no loop to D 0.15 is narrow at 14 m and almost none at 7 m (none of plain's, 4% of
+those offered to ΔP):
 
-    L_P at area D            0.01    0.02    0.05    0.10    0.15    km at 0.15
-    ΔP, apart 0              0.224   0.259   0.405   0.521   0.592   9.4
-    ΔP, apart 7              0.123   0.275   0.388   0.496   0.570   8.1
-    ΔP, apart 14             0.123   0.171   0.416   0.489   0.565   7.5
-    cycle_native             0.146   0.184   0.392   0.520   0.575   8.3
+    L_P at area D                       0.01    0.02    0.05    0.10    0.15    km at 0.15
+    cycle_native, canonical             0.146   0.184   0.392   0.520   0.575   8.3
+      apart 7                           0.124   0.274   0.359   0.462   0.554   7.4
+      apart 14                          0.128   0.195   0.385   0.470   0.545   7.6
+    cycle_native, build order           0.131   0.277   0.384   0.479   0.571   9.0
+      apart 7                           0.123   0.257   0.360   0.438   0.551   7.9
+    cycle_native, ΔP, build order       0.224   0.259   0.405   0.521   0.592   9.4
+      apart 7                           0.123   0.275   0.388   0.496   0.570   8.1
+      apart 14                          0.123   0.171   0.416   0.489   0.565   7.5
 
-(apart 14's 0.05 cut lands at D 0.055.) The clutter goes, past plain cycle_native's: within 5 m
-1% / 1% / 1% at D 0.05 / 0.10 / 0.15 for both (cycle_native 1% / 6% / 9%, apart 0 16% / 15% /
-19%); mean-distance q10 13.1 / 13.1 / 10.6 m at 7 m and 13.2 / 14.7 / 12.4 at 14 m (cycle_native
-14.2 / 6.3 / 5.7), medians 24 to 30 m; critical excess -0.03 / -0.15 and -0.08 / -0.21 at D 0.05
-/ 0.15 (cycle_native -0.19 / -0.11). It costs P: 2 to 3 points under apart 0 at 0.10 and 0.15,
-and a little under cycle_native, with less road. On this block the three ΔP runs and
-cycle_native trade L_P against clutter with none dominated; plain cycle_native's own clutter at
-0.10 and 0.15 may be the same narrow loops, so the rule may belong in reblock.methods.cycle_native
-itself (untested). Scripts: .superpowers/sdd/2026-10-22-flow-roads/cn_dp.py (build | frames |
-plates <apart>) and cn_dp_loops.py <apart>, not committed.
+(ΔP apart 14's 0.05 cut lands at D 0.055.) With the legs apart, 0 to 1% of the road lies within
+5 m of another at every budget in every run; mean-distance q10 10.6 to 15 m
+(cycle_native canonical 14.2 / 6.3 / 5.7, apart 0 in build order 6.3 / 3.7 / 1.8); critical
+excess at D 0.05 / 0.15 -0.03 / -0.15 (ΔP, 7 m) and -0.08 / -0.21 (ΔP, 14 m) against the lineup's
+cycle_native -0.19 / -0.11. It costs P: plain cycle_native gives up 3 / 6 / 2 points at 0.05 /
+0.10 / 0.15 at 7 m (canonical), 2 / 4 / 2 in build order; ΔP scoring with the legs at 7 m
+recovers most (0.388 / 0.496 / 0.570 in build order, 3 / 6 / 2 points over plain at 7 m in the
+same order). On this block nothing here is dominated: wide loops buy no clutter for a few points
+of L_P, ΔP buys back some of them. Whether to give reblock.methods.cycle_native the rule, as a
+required `apart`, is the owner's. Scripts: .superpowers/sdd/2026-10-22-flow-roads/cn_dp.py (build
+| frames | plates <apart>), cn_dp_loops.py <apart>, cn_apart.py (propose | frames | plates
+<apart>), cn_build_order.py <apart>; not committed.
