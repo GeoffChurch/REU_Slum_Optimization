@@ -8902,3 +8902,45 @@ refreshed every few roads), then the BACKLOG's pilot blocks. Compute: the field 
 proposals 245 s and 453 s, the frames about 11 min each on a 12 GB peak. Scripts and frames:
 .superpowers/sdd/2026-10-22-flow-roads/ (not committed); the "5810 Road Build-out" artifact
 shows all four networks under one slider.
+
+### ΔP greedy: roads chosen by what they do to P, a pilot on 5810 (2026-10-23)
+
+The re-solved version of the frozen pilot was started and stopped: with roads carved the power on
+them leaked into the field (the road boost is in the mesh's weights, Model.mesh_of, not in the
+triangles' factors st.kt, so a kt mask catches nothing; the built corridor held 11 to 13% of the
+field and half its pixels sat above the 0.80 quantile), and masking it on the raster is a patch
+on a method that only routes toward the power. The owner: "Masking is hacky. I think we should
+just try ΔP greedy". So the roads are chosen by P itself:
+
+* the pool: every road of the lineup's cycle_native and clearance_looped networks for 5810, exact
+  duplicates dropped (966), each a network of one stop in one carving, so one mesh (13.1M
+  triangles, 24,832 atoms, P0 within 8e-6 of the plain mesh's) holds every candidate and any set
+  of them is a state (a merged carving: the atoms any of them carves, their corridors' union
+  paved; the model's carving swapped on a shallow copy);
+* open to the build: touching the street or a built road (budget.STREET_TOL), and at least a
+  quarter of its corridor new ground;
+* free first: an open candidate whose ΔD under common.MEASURE is under 1e-9 is built at once (added
+  conductance never raises P, Rayleigh), as long as any is;
+* the screen: per open candidate the power its corridor dissipates now, each triangle weighted by
+  how much the road boost raises it (1 - b / max(b, road)), over its ΔD (Thomson's principle makes
+  the corridor term a lower bound on the drop, the ground a road opens aside); the top `top` by the
+  screen are solved exactly and the one lowering P most per ΔD is built.
+
+With top 4, 195 steps and 213 roads (18 free) to D 0.152 in 3.7 h, then built out like the
+lineup's networks (prefix_len, area weights):
+
+    L_P at area D            0.01    0.02    0.05    0.10    0.15
+    ΔP greedy, top 4         0.193   0.289   0.438   0.575   0.645
+    cycle_native             0.146   0.184   0.392   0.520   0.575
+    clearance_looped         0.072   0.145   0.239   0.371   0.421
+    SIMP clearing                            0.235
+
+It leads every network at every budget, both pools' own included, with more road for the same D
+(4.5 km at 0.05 against cycle_native's 2.6, 11.2 km at 0.15 against 8.3). The screen held as a
+lower bound on every candidate solved (the exact drop 1.04 to 10.7 times it, median 1.9), but
+ranked the step's winner fourth in 61 of 195 steps: four is too few, and a run solving twelve a
+step is under way. The candidates are the two methods' roads, so ΔP greedy here selects and
+orders their geometry rather than finding its own. One block. Every score carries the paved-only
+boost's gift to new roads (BACKLOG, Open, "Paving has no price"). Scripts and frames:
+.superpowers/sdd/2026-10-22-flow-roads/ (dp_greedy.py; power_resolve.py, the stopped re-solve),
+not committed; the "5810 Road Build-out" artifact shows it beside the four other networks.
