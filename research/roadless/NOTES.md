@@ -8871,3 +8871,34 @@ unbounded), keep (refuse, redo-all), double-claim (refuse), history (kept-measur
 cluster_check.py's template, demand, wave, kinds and more. The smoke waves are their live halves:
 the claim on ai's home, the worker's OOM promotion, the walltime kill to the long lane and the
 step-aside.
+
+### Roads from the flow, frozen: a pilot on 5810 (2026-10-22)
+
+The owner's "start with the frozen version now" (BACKLOG, New methods, "Roads from the flow"):
+5810's baseline flow under RUNTIME solved once, its power per m^2 painted on the betweenness
+sources' 1 m raster (BlockRaster) and turned into desire lines by betweenness.ridges.ridge_desire at
+their quantiles (0.80 to 0.98), and handed to cycle_native and clearance_looped through the
+substrate they already route over (DesireWarpedSubstrate at cycle_native_betweenness_contrast's
+buffer 3 m, eps 0.1, gamma 0.5), with the lineup's free-first stage. The methods still choose by
+their own objectives; only the routes move toward the power's ridges. (The paved ways were to be
+left out of the field; the street boost is not in the triangles' factors, so nothing was masked:
+paved ground is 2% of 5810's open ground and holds about 1% of the power.) Each network was built
+out like the lineup's (road_rescore.prefix_len under common.MEASURE, area weights) and scored on
+the gap complex under RUNTIME, the new roads at the proposed road's boost:
+
+    L_P at area D            0.05    0.10    0.15    whole network (D)
+    clearance_looped         0.239   0.371   0.421   0.569 (0.345)
+      power-guided           0.374   0.455   0.504   454 -> 458 roads (0.386)
+    cycle_native             0.392   0.520   0.575   0.707 (0.372)
+      power-guided           0.366   0.432   0.511   513 -> 425 roads (0.375)
+
+The power helps the tree method (+0.08 to +0.14 over the range) and hurts the loop method
+(-0.03 to -0.09): cycle_native already ranks each loop by its gain per displacement, and warped
+routes pull its candidates off what that ranking prefers; clearance_looped's tree ranks only by
+depth, so the field adds what it lacks. One block, one field, no re-solve: a pilot, not a verdict.
+Every score here carries the paved-only boost's gift to new roads (BACKLOG, Open, "Paving has no
+price"): SIMP's clearing is 0.235 at D 0.05 under RUNTIME. Next: the re-solved version (the field
+refreshed every few roads), then the BACKLOG's pilot blocks. Compute: the field 48 s, the
+proposals 245 s and 453 s, the frames about 11 min each on a 12 GB peak. Scripts and frames:
+.superpowers/sdd/2026-10-22-flow-roads/ (not committed); the "5810 Road Build-out" artifact
+shows all four networks under one slider.
