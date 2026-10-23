@@ -8876,8 +8876,8 @@ step-aside.
 
 The owner's "start with the frozen version now" (BACKLOG, New methods, "Roads from the flow"):
 5810's baseline flow under RUNTIME solved once, its power per m^2 painted on the betweenness
-sources' 1 m raster (BlockRaster) and turned into desire lines by betweenness.ridges.ridge_desire at
-their quantiles (0.80 to 0.98), and handed to cycle_native and clearance_looped through the
+sources' 1 m raster (BlockRaster) and turned into desire lines by
+betweenness.ridges.ridge_desire at their quantiles (0.80 to 0.98), and handed to cycle_native and clearance_looped through the
 substrate they already route over (DesireWarpedSubstrate at cycle_native_betweenness_contrast's
 buffer 3 m, eps 0.1, gamma 0.5), with the lineup's free-first stage. The methods still choose by
 their own objectives; only the routes move toward the power's ridges. (The paved ways were to be
