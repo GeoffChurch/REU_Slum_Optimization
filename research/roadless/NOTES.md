@@ -9001,3 +9001,39 @@ does not fix road and wall factors: it swaps the boundary conditions and turns s
 vortices) are in GeoffChurch/wiki-private, pages/reblock/roads-interact-as-induced-dipoles.md and
 measuring-clutter-in-a-road-network.md. Script: .superpowers/sdd/2026-10-22-flow-roads/
 pairs_check.py (not committed).
+
+### cycle_native scored by ΔP: its loops lie doubled (2026-10-23)
+
+The owner: "Score cycle_native's loops by ΔP is a good idea". The lineup's cycle_native on 5810
+move for move (its routing graph, its held free road, each step's shortlist of the 8 deepest
+unserved homes and their out-and-back loops), with the loop it commits chosen by the exact drop
+in P under RUNTIME per ramped ΔD instead of the July permeability's gain per priced displacement:
+each step carves the committed roads and the 8 loops into one mesh (dp_greedy's merged carving)
+and solves each exactly. 49 steps, 99 roads to D 0.151 in 4.6 h:
+
+    L_P at area D            0.01    0.02    0.05    0.10    0.15
+    cycle_native, ΔP         0.224   0.259   0.405   0.521   0.592
+    cycle_native             0.146   0.184   0.392   0.520   0.575
+    ΔP greedy, top 12        0.225   0.300   0.454   0.583   0.652
+
+(its first cuts overshoot, the 0.01 frame at D 0.016 and 0.02 at 0.022, its first loops being
+long). It gains little over plain cycle_native, nothing at 0.10, while ΔP greedy over the pooled
+roads of two networks gains six to twelve points: cycle_native's move, not its choice, is what
+limits it. And it clutters like ΔP greedy: by the mean distance, q10 3.1 / 2.0 m and median 10.8
+/ 10.6 m at D 0.05 / 0.15, 16% / 19% of its length within 5 m of another road (cycle_native 1% /
+9%); critical excess +0.27 / +0.10 and sharp +0.33 / +0.17 (cycle_native -0.19 / -0.11 and -0.10
+/ -0.03); 3.4 / 9.3 km of road against 2.6 / 8.2.
+
+The clutter is the generator's. Replaying the build (cn_dp_loops.py, which regenerates each
+step's shortlist and reproduced the built roads at all 49 steps): 58% of the shortlisted loops
+had legs under 10 m apart (the median distance from the shorter leg's points to the other), and
+ΔP chose them at about that rate (55%); in the 46 steps offering both kinds, the narrow loops'
+median ΔP / ΔD beat the wide ones' in only 37%. The return leg avoids only the outbound leg's own
+edges, so in a tight gap the next routing edge over is the way back and the loop is one road
+laid twice, a wider road at little more than one leg's displacement. ΔP is indifferent to that;
+plain cycle_native's networks rarely show it (its first loop is already another: 4 to 27% of the
+ΔP version's first loop coincides with it), so the July permeability presumably passed narrow
+loops over (*argued*). Running: the return leg also kept off every routing node closer than
+`apart` to the outbound leg (except within `apart` of its two ends), apart 7 m (one road width:
+the corridors cannot overlap) and 14 m (two). Scripts: .superpowers/sdd/2026-10-22-flow-roads/
+cn_dp.py (build | frames | plates <apart>) and cn_dp_loops.py, not committed.
