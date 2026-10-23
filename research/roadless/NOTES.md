@@ -9033,7 +9033,26 @@ edges, so in a tight gap the next routing edge over is the way back and the loop
 laid twice, a wider road at little more than one leg's displacement. ΔP is indifferent to that;
 plain cycle_native's networks rarely show it (its first loop is already another: 4 to 27% of the
 ΔP version's first loop coincides with it), so the July permeability presumably passed narrow
-loops over (*argued*). Running: the return leg also kept off every routing node closer than
-`apart` to the outbound leg (except within `apart` of its two ends), apart 7 m (one road width:
-the corridors cannot overlap) and 14 m (two). Scripts: .superpowers/sdd/2026-10-22-flow-roads/
-cn_dp.py (build | frames | plates <apart>) and cn_dp_loops.py, not committed.
+loops over (*argued*).
+
+So the return leg also kept off every routing node closer than `apart` to the outbound leg
+(except within `apart` of its two ends): apart 0 is the rule above (the replay at 0 reproduced
+the first build at all 49 steps), 7 m one road width (the corridors cannot overlap), 14 m two.
+Narrow loops (legs under 10 m apart) fell to 4% of those offered at 7 m and none at 14 m:
+
+    L_P at area D            0.01    0.02    0.05    0.10    0.15    km at 0.15
+    ΔP, apart 0              0.224   0.259   0.405   0.521   0.592   9.4
+    ΔP, apart 7              0.123   0.275   0.388   0.496   0.570   8.1
+    ΔP, apart 14             0.123   0.171   0.416   0.489   0.565   7.5
+    cycle_native             0.146   0.184   0.392   0.520   0.575   8.3
+
+(apart 14's 0.05 cut lands at D 0.055.) The clutter goes, past plain cycle_native's: within 5 m
+1% / 1% / 1% at D 0.05 / 0.10 / 0.15 for both (cycle_native 1% / 6% / 9%, apart 0 16% / 15% /
+19%); mean-distance q10 13.1 / 13.1 / 10.6 m at 7 m and 13.2 / 14.7 / 12.4 at 14 m (cycle_native
+14.2 / 6.3 / 5.7), medians 24 to 30 m; critical excess -0.03 / -0.15 and -0.08 / -0.21 at D 0.05
+/ 0.15 (cycle_native -0.19 / -0.11). It costs P: 2 to 3 points under apart 0 at 0.10 and 0.15,
+and a little under cycle_native, with less road. On this block the three ΔP runs and
+cycle_native trade L_P against clutter with none dominated; plain cycle_native's own clutter at
+0.10 and 0.15 may be the same narrow loops, so the rule may belong in reblock.methods.cycle_native
+itself (untested). Scripts: .superpowers/sdd/2026-10-22-flow-roads/cn_dp.py (build | frames |
+plates <apart>) and cn_dp_loops.py <apart>, not committed.
