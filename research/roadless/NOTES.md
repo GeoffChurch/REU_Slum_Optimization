@@ -8983,3 +8983,21 @@ the same. Proposed summary: the share of road length within one road width of an
 optimizer's repulsion the product form fits instead (a position kernel times an angle kernel,
 summed over pairs: the varifold energy; the arterial's repulsion r^2 / (r^2 + d^2) times cos^2 dθ).
 Script: .superpowers/sdd/2026-10-22-flow-roads/clutter.py (not committed).
+
+### Roads interact as induced dipoles: a check on 5810 (2026-10-23)
+
+To second order, two roads' interaction in P, ΔP(a) + ΔP(b) - ΔP(a u b), runs through the mixed
+Hessian of the Green's function, (I - 2 r r^T) / (2 pi r^2) in the free plane: homes are monopoles,
+roads induced dipoles polarized along their axes. Predicted: side by side subadditive, end to end
+superadditive. Checked with straight 40 m roads (width 7 m) at three places of strong flow, all 33
+carved into one mesh, every road and pair solved exactly; the ratio ΔP(a u b) / (ΔP(a) + ΔP(b)):
+parallel at 10 / 15 / 25 / 40 / 70 m centre to centre 0.72-0.73 / 0.75-0.78 / 0.82-0.86 /
+0.90-0.93 / 0.96-0.97; collinear touching 1.12-1.31, at gaps 10 / 25 / 50 m 1.22-1.24 / 1.08-1.14
+/ 1.01-1.05; the sign pattern at every site and distance. A perpendicular road crossing a's middle
+gave 0.85-0.90, confounded by the shared crossing (a clean test puts it beside a). So P already
+penalizes side-by-side redundancy through shielding, and ΔP greedy's clutter comes from the cost
+side, a duplicate costing nearly nothing. The argument, the clutter measures and Keller-Dykhne (it
+does not fix road and wall factors: it swaps the boundary conditions and turns sources into
+vortices) are in GeoffChurch/wiki-private, pages/reblock/roads-interact-as-induced-dipoles.md and
+measuring-clutter-in-a-road-network.md. Script: .superpowers/sdd/2026-10-22-flow-roads/
+pairs_check.py (not committed).
