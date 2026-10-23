@@ -8948,3 +8948,38 @@ own. One block. Every score carries the paved-only boost's gift to new roads (BA
 "Paving has no price"). Scripts and frames: .superpowers/sdd/2026-10-22-flow-roads/ (dp_greedy.py;
 power_resolve.py, the stopped re-solve), not committed; the "5810 Road Build-out" artifact shows
 both runs beside the four other networks.
+
+### Clutter: the mean distance from a road to its nearest neighbour (2026-10-23)
+
+The owner, on ΔP greedy's networks: "The ΔP methods both look awful ... what I like about
+cycle_native and clearance_looped is that they have nice, spread-out networks and their loops are
+usually large". A number for that, from the owner's lifted space (position x orientation, the
+contour models' R^2 x RP^1): per straight piece a of the new roads, mean(a -> b), the average over
+a's points of their distance to the segment b, minimized over the other pieces (the new roads' and
+the streets'). It folds angle into distance with the piece's own length as the scale (turning a
+piece by dθ moves its far end by L sin dθ), needs no parameter, and handles the cases a
+nearest-point measure gets wrong: a T-junction or a straight continuation scores about L / 2, a
+parallel road at offset h scores h. It is directed (a short piece alongside a long one is the
+redundant one: the right quantity for a build or prune decision, d(c -> network)) but not a
+Lawvere metric (b = [0, 10], c at 0, a at 10: d(a->b) 0, d(b->c) 5, d(a->c) 10); the directed
+Hausdorff distance is one (for a straight piece the larger of its ends' distances, distance to a
+convex set being convex along a line) but calls a road running alongside another and then past its
+end not redundant. Roads are straightened first (Douglas-Peucker at half their width): the routing
+graph bends every ~10 m, and cut at every vertex each piece's nearest neighbour was its own next
+piece (every network's median 4.5 to 6.6 m). Length-weighted, at area D 0.05 / 0.15:
+
+    mean distance (m)          q10          median       length within 5 m
+    cycle_native               14.2 / 5.7   34.6 / 18.8   1% / 9%
+    clearance_looped            5.0 / 5.2   13.5 / 12.6  10% / 10%
+    cycle_native, power         8.2 / 4.4   18.2 / 13.2   1% / 11%
+    clearance_looped, power     5.0 / 4.8   15.0 / 12.1  10% / 11%
+    ΔP greedy, top 4            3.1 / 3.1   11.0 / 10.4  23% / 22%
+    ΔP greedy, top 12           3.2 / 2.9   12.1 / 10.3  17% / 21%
+
+The low tail is the clutter: a fifth of ΔP greedy's road lies within 5 m of another, under a
+road's width, corridors overlapping; the median tells large loops (cycle_native) from gap-filling
+trees (clearance_looped). The directed Hausdorff ran about twice the mean throughout and ranked
+the same. Proposed summary: the share of road length within one road width of another. For an
+optimizer's repulsion the product form fits instead (a position kernel times an angle kernel,
+summed over pairs: the varifold energy; the arterial's repulsion r^2 / (r^2 + d^2) times cos^2 dθ).
+Script: .superpowers/sdd/2026-10-22-flow-roads/clutter.py (not committed).
