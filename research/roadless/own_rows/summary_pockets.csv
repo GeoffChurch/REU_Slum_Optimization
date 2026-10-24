@@ -1,0 +1,13 @@
+clearing,size,homes,freed,reached_median,reached_under_half,reached_under_tenth,largest_sealed,largest_sealed_blocks
+own,small,316,316,1.0,40,11,41,27
+own,large,356,356,1.0,44,8,42,17
+own,oversized,36,36,0.9756294023094954,8,2,8,3
+own,all,708,708,1.0,92,21,91,47
+T,small,316,302,1.0,35,8,36,23
+T,large,356,347,1.0,33,7,31,14
+T,oversized,36,36,1.0,2,0,2,2
+T,all,708,685,1.0,70,15,69,39
+U,small,316,301,1.0,16,2,16,6
+U,large,356,350,1.0,4,0,4,3
+U,oversized,36,36,1.0,0,0,0,0
+U,all,708,687,1.0,20,2,20,9

@@ -41,7 +41,10 @@ ring point but an allowed point within ring_m of its outline is SHADOWED and inj
 with none it is walled in (gap_complex's test, counted apart). On the fixed mesh a walled-in home
 may instead be placed in its POCKET (`in_pockets`, gap_clear.PocketDemand: NOTES, "A uniform rule
 for walled-in homes"): the same rule on the open ground no street reaches at baseline, its ring's
-points there, else (shadowed) any within ring_m of its outline; with none it has no demand.
+points there, else (shadowed) any within ring_m of its outline; with none it has no demand. Such a
+home, with no point of the rule on open ground at baseline, is GROUNDLESS (`groundless`): its reach
+is its ring's, cleared ground included, where every other home's is its own ground's (gap_complex's
+HOMES; `own_ring`, `live_homes`).
 
 The run's identity: gap_complex.Spec (s, ring_m, band_m), FlowSpec (R, sigma, quad, offset) and
 the Width (its w, and the ramp's s), required, keyword-only.
@@ -888,11 +891,34 @@ class Scores:
         return float(b @ u), uh
 
 
-def live_homes(geo: gc.Geometry, m: Mesh, c: Cells) -> NDArray[np.bool_]:
-    """Per home: some open ground within ring_m of its outline reaches the street on the mesh's
-    cells (a triangle with a cell, or the open band): Placement's test under the width form (its
-    complement the homes walled in)."""
-    return ring_of(geo, m.cx.spec.ring_m, m.xy, m.tri, m.cx.band_open).live(c.cell >= 0)
+def groundless(geo: gc.Geometry, ring_m: float, quad: int, xy: NDArray[np.float64],
+               tri: NDArray[np.int64], open_ring: sp.csr_matrix, homes: NDArray[np.bool_]
+               ) -> NDArray[np.bool_]:
+    """The homes of `homes` with no open ground within ring_m of their outline at baseline
+    (gap_complex's HOMES), by Placement's points: no sub-point (`quad` a triangle) of their open
+    triangles `open_ring` (homes x triangles of `tri`, of vertices xy: those within ring_m of the
+    home and open at baseline) within ring_m of the outline, the rule `in_pockets` places by, so a
+    groundless home is one PocketDemand leaves without demand. Pass as `homes` the homes with no
+    demand point on live ground (PointDemand.walled), or a superset: a home with one is not
+    groundless, and every other home is read as not groundless."""
+    rows = open_ring.tocsr()[np.flatnonzero(homes)]
+    used = np.unique(rows.indices)
+    P, wt, _t = _points_of(xy, tri[used], quad)
+    _S, _shadowed, placed = _placed(geo, ring_m, P, wt, homes)
+    return homes & ~placed
+
+
+def live_homes(geo: gc.Geometry, m: Mesh, c: Cells, own: gc.Own) -> NDArray[np.bool_]:
+    """Per home: some of its own ground (`own`, sampled on the baseline's mesh) lies in a triangle
+    with a cell on the mesh (one reaching the street), or its band is open at baseline; a
+    groundless home's, some open ground within ring_m of its outline does (a triangle with a cell,
+    or the open band): gap_complex's test (HOMES) under the width form (its complement the homes
+    walled in)."""
+    ring = ring_of(geo, m.cx.spec.ring_m, m.xy, m.tri, m.cx.band_open).live(c.cell >= 0)
+    t = locate(m, own.xy)
+    on = (t >= 0) & (c.cell[np.maximum(t, 0)] >= 0)
+    mine = (own.tri @ on.astype(np.float64) > 0) | own.band
+    return np.asarray(np.where(own.groundless, ring, mine))
 
 
 RING_CHUNK = 1_000_000    # ring_of: triangles made shapely polygons at a time (memory only)
@@ -928,3 +954,14 @@ def ring_of(geo: gc.Geometry, ring_m: float, xy: NDArray[np.float64], tri: NDArr
         bh, _ = shapely.STRtree(parts).query(polys, predicate="dwithin", distance=ring_m)
         band[bh] = True
     return Ring(tri=R, band=band)
+
+
+def own_ring(ring: Ring, open0: NDArray[np.bool_], bare: NDArray[np.bool_]) -> Ring:
+    """Each home's ground that frees it on a fixed mesh (gap_complex's HOMES), as a Ring: its
+    ring's triangles open at baseline (`open0`: its own ground) and its band; a groundless home's
+    (`bare`: `groundless`) whole ring (`ring`: every triangle within ring_m of its outline, the
+    footprints and zones a clearing opens among them)."""
+    keep = sp.diags((~bare).astype(np.float64)) @ ring.tri @ sp.diags(open0.astype(np.float64))
+    tri = (keep + sp.diags(bare.astype(np.float64)) @ ring.tri).tocsr()
+    tri.eliminate_zeros()
+    return Ring(tri=tri, band=ring.band)

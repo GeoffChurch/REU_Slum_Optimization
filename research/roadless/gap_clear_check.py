@@ -38,6 +38,8 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S pocket-escape <ids,> [fault]     # faults: pocket-unleaked, placement-dropped
     uv run python $S pocket-gradient <ids,> [fault]   # faults: adjoint-unleaked, pocket-unloaded
     uv run python $S pocket-count <ids,> [fault]      # fault: leak-seeded
+    uv run python $S own-ground <ids,> [fault]        # fault: ring-reach
+    uv run python $S groundless <ids,> [fault]        # fault: own-everywhere
     uv run python $S both-ways <guards,> <ids,|->  # each guard, then under each of its faults
 
 `baseline`: the fixed mesh (the runtime's metric, METRIC) against the complex rebuilt
@@ -53,8 +55,9 @@ its centres in order), and at each of WEIGHT_STATES' states every conductance is
 every home with demand has u0 > 0. Fault `no-conform`: the conformity's splits skipped (a mesh
 with face boundaries not Delaunay: refused).
 `reach`: at the baseline, the ONE_K single clearings, REACH_RANDOM random clearings at area D
-BUDGET and free first's state, the homes the flow model reaches (Model.live_homes_of) equal those
-the complex grown by w / 2 reaches at width 0 (gap_complex's test), home for home. Fault
+BUDGET and free first's state, the homes the flow model reaches (Model.live_homes_of: each home's
+own ground) equal those the complex grown by w / 2 reaches at width 0 (gap_complex's test,
+Model.complex_live), home for home. Fault
 `threshold`: the flow model's reach of a home off by one comparison (a ring with no triangle
 reaching the street counted as reaching it: gap_flow.Ring.live).
 `gradient`: the model's gradient (power 1 and 2, q 1 and 3, eps GRAD_EPS) at a random x in [0.1,
@@ -164,7 +167,7 @@ and the complex walls in the homes the flow model does (Model.free_first's check
 `features-dropped` (every block built with no OSM features: the cut absent), `unshifted` (the
 atoms left in the uncut block's frame: on 3934, whose railway cut moves its origin, the
 footprints misplaced and the complex's walled-in homes not the flow model's).
-`exits-identity`: the per-block metric's name is PER_BLOCK and its code digests 28 constants to the
+`exits-identity`: the per-block metric's name is PER_BLOCK and its code digests 29 constants to the
 same digest; RUNTIME is the per-block metric with metrics.EXITS, read back, and the region's
 T500b90D10; every configuration of region_leaks (and more shares and lam with the boost) under
 each preset's search spells a name that parses back to it, and no two share a name; every stored
@@ -265,6 +268,22 @@ without the homes placed in pockets, as code treating them as having no demand w
 leaves (B (i), by street reach) read the same under U's scorer as under T's, at the baseline, the
 ONE_K single clearings, REACH_RANDOM random clearings at BUDGET and free first's clearing under T.
 Fault `leak-seeded` (as `enclosure`'s: U then reads every home freed by its pocket's leak).
+
+A home is freed only when its own ground opens (owner 2026-10-21, "No, its own pocket must open";
+NOTES, "A home is freed only when its own ground opens"; gap_complex's HOMES), on RUNTIME (T):
+`own-ground`: on a block where free first by the previous test (every home read as groundless:
+any ground within ring_m frees it) at BUDGET frees a home through a neighbour's cleared ground
+alone, its own ground (its whole ring's triangles open at baseline, `_full_ring`) still not
+reaching the street (40185's home 21), the flow model and the complex both count that home walled
+in, B (i) its population among the rest; and free first by the test frees such a home exactly when
+its own ground reaches the street. Fault `ring-reach` (gap_flow.own_ring keeping the whole ring:
+the previous test).
+`groundless`: on a block with a walled-in home with no open ground within ring_m (23597's home
+93), the groundless homes on T's mesh and on U's are the homes PocketDemand leaves without demand,
+and free first (budget 1) frees each such home through cleared ground: its whole ring reaches the
+street while none of its ring's triangles open at baseline does. Fault `own-everywhere`
+(gap_flow.groundless reading no home as groundless: the own-ground test on these homes too, whose
+own ground is empty, so nothing frees them).
 """
 from __future__ import annotations
 
@@ -354,9 +373,11 @@ LEAK_PAIRS = ((LEAK_LAM, math.inf), (math.inf, 20.0), (100.0, 25.0))   # ... the
                          # (open_m, foot_m): open ground only, footprints only, both
 FOLD_SHARES = (0.0, 1.0, 0.75)   # leak-fold: the region test's shares at LEAK_LAM, as constants
                                  # (0.75: not symmetric under the swap)
-PER_BLOCK = "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a"   # the per-block metric's name: every
-                                                          # stored per-block row's, unchanged
-PER_BLOCK_CONSTANTS = 28
+PER_BLOCK = "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066"   # the per-block metric's name (moved by
+                                                          # gap_complex.ENCLOSURE_REV 2: every row
+                                                          # stored under v34d40e8a is the previous
+                                                          # test's)
+PER_BLOCK_CONSTANTS = 29
 SCALE_L = 800.0          # leak-scale: the open square's side (m)
 SCALE_LAM = 60.0         # ... the uniform leak's lam (the square's half-side over 6.7 lam: its
                          # Dirichlet edge moves the potential within SCALE_R by under 1e-4)
@@ -532,7 +553,8 @@ def reach(ids: list[str]) -> list[str]:
         for k in range(REACH_RANDOM):
             states[f"random{k}"] = _random(m, rng)
         fr = gc.free_first(m.geo, m.spec, w=m.form.filtration_w, grow=m.form.grow, budget=1.0,
-                           cost=m.cost, pop=m.pop, held0=np.zeros(m.n, dtype=bool), cx0=None)
+                           cost=m.cost, pop=m.pop, held0=np.zeros(m.n, dtype=bool), cx0=None,
+                           groundless=m.fx.groundless)
         states["free first"] = fr.held
         parts = []
         for name, x in states.items():
@@ -660,11 +682,11 @@ def free(ids: list[str]) -> list[str]:
 _FREE_FIRST = gc.free_first
 
 
-def _drop_crossing(geo, spec, *, w, grow, budget, cost, pop, held0, cx0):
+def _drop_crossing(geo, spec, *, w, grow, budget, cost, pop, held0, cx0, groundless):
     """gap_complex.free_first with its last crossing's buildings dropped from the held set, its
     claim (`left`) kept (fault `drop-crossing`)."""
     fr = _FREE_FIRST(geo, spec, w=w, grow=grow, budget=budget, cost=cost, pop=pop, held0=held0,
-                     cx0=cx0)
+                     cx0=cx0, groundless=groundless)
     if not fr.crossings:
         return fr
     held = fr.held.copy()
@@ -2535,7 +2557,7 @@ def pocket_escape(ids: list[str]) -> list[str]:
         S = mU.dem.S.tocsc()
         # the homes with no open ground within ring_m: no demand under U either
         open_tri = mU.factors(np.zeros(mU.n)).kt > 0
-        R = mU.fx.ring.tri.tocsr()
+        R = _full_ring(mU).tri.tocsr()
         ground = np.array([bool(open_tri[R.indices[R.indptr[h]:R.indptr[h + 1]]].any())
                            for h in range(mU.n)])
         bare = bool(np.array_equal(mU.nodem, ~ground))
@@ -2645,6 +2667,110 @@ def pocket_count(ids: list[str]) -> list[str]:
     return bad
 
 
+# ------------------------------------------------------------------ own ground
+
+def _full_ring(m: gcl.Model) -> gf.Ring:
+    """Each home's whole ring on the model's fixed mesh, every triangle within ring_m of its
+    outline (gap_flow.ring_of, as Fixed.of finds it before gap_flow.own_ring keeps its own
+    ground): the previous test's, and the oracle's."""
+    _ib, band_open = gc._open_ground(m.geo, np.ones(m.n, dtype=bool), m.spec.band_m, carve=None,
+                                     grow=0.0)
+    return gf.ring_of(m.geo, m.spec.ring_m, m.fx.fm.xy, m.fx.fm.tri, band_open)
+
+
+def _runtime_model(b: Block) -> gcl.Model:
+    """The block's model under RUNTIME (T), meshed afresh."""
+    return _model(b, gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU()))
+
+
+def own_ground(ids: list[str]) -> list[str]:
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        m = _runtime_model(b)
+        if not m.walled0.any():
+            bad.append(f"{bid}: no home walled in (the premise)")
+            continue
+        zero = np.zeros(m.n, dtype=bool)
+        # free first by the previous test (every home read as groundless: any ground within ring_m
+        # frees it), at the lenses' budget: T's free stage before the owner's ruling
+        was = gc.free_first(m.geo, m.spec, w=m.form.filtration_w, grow=m.form.grow,
+                            budget=BUDGET, cost=m.cost, pop=m.pop, held0=zero,
+                            cx0=m.fx.cx0.complex(), groundless=np.ones(m.n, dtype=bool))
+        st = m.factors(m.k_of(was.held))
+        street = st.reach.street[st.sys.cells.cell]
+        ring = _full_ring(m)
+        open0 = m.factors(np.zeros(m.n)).kt > 0
+        by_ring = ring.live(street)
+        by_own = gf.Ring(tri=(ring.tri @ sp.diags(open0.astype(np.float64))).tocsr(),
+                         band=ring.band).live(street)
+        # freed by a cleared neighbour within ring_m, the home's own pocket still sealed
+        cases = np.flatnonzero(m.walled0 & ~m.fx.groundless & by_ring & ~by_own)
+        if not len(cases):
+            bad.append(f"{bid}: free first by the previous test frees no home through a "
+                       "neighbour's ground alone (the premise)")
+            continue
+        live = m.live_homes_of(st)
+        cxl = m.complex_live(was.held)
+        share = float(m.cost[m.walled0 & ~live].sum())
+        counted = bool(not live[cases].any() and not cxl[cases].any()
+                       and m.enclosed_left(was.held) == share
+                       and share >= float(m.cost[cases].sum()))
+        # free first by the test frees them by opening their own ground (or leaves them)
+        held = m.free_first(budget=BUDGET, held=zero)
+        st1 = m.factors(m.k_of(held))
+        street1 = st1.reach.street[st1.sys.cells.cell]
+        own1 = gf.Ring(tri=(ring.tri @ sp.diags(open0.astype(np.float64))).tocsr(),
+                       band=ring.band).live(street1)
+        live1 = m.live_homes_of(st1)
+        opened = bool(np.array_equal(live1[cases], own1[cases]))
+        ok = counted and opened
+        print(f"{bid}: free first by the previous test holds {np.flatnonzero(was.held).tolist()} "
+              f"(D {float(m.cost[was.held].sum()):.4f}); homes freed there by a neighbour's ground "
+              f"alone, their own ground sealed: {cases.tolist()}, walled in by the flow model "
+              f"{(~live[cases]).tolist()} and the complex {(~cxl[cases]).tolist()} (B (i) "
+              f"{share:.5f}); free first by the test holds {np.flatnonzero(held).tolist()} "
+              f"(D {float(m.cost[held].sum()):.4f}), frees {cases[live1[cases]].tolist()} of them, "
+              f"each by its own ground {opened} -> {'ok' if ok else 'FAILS'}", flush=True)
+        if not ok:
+            bad.append(bid)
+    return bad
+
+
+def groundless(ids: list[str]) -> list[str]:
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        mT, mU = _tu(b)
+        # the homes with no open ground within ring_m: those PocketDemand leaves without demand
+        bare = mT.walled0 & mU.nodem
+        if not bare.any():
+            bad.append(f"{bid}: no walled-in home without open ground within ring_m (the premise)")
+            continue
+        same = bool(np.array_equal(mT.fx.groundless, mU.nodem)
+                    and np.array_equal(mU.fx.groundless, mU.nodem))
+        held = mT.free_first(budget=1.0, held=np.zeros(mT.n, dtype=bool))
+        st = mT.factors(mT.k_of(held))
+        street = st.reach.street[st.sys.cells.cell]
+        ring = _full_ring(mT)
+        open0 = mT.factors(np.zeros(mT.n)).kt > 0
+        by_open = gf.Ring(tri=(ring.tri @ sp.diags(open0.astype(np.float64))).tocsr(),
+                          band=ring.band).live(street)
+        live = mT.live_homes_of(st)
+        cases = np.flatnonzero(bare)
+        # each freed through cleared ground: its ring reaches the street, its open ground does not
+        freed = bool(live[cases].all() and ring.live(street)[cases].all()
+                     and not by_open[cases].any())
+        ok = same and freed
+        print(f"{bid}: walled-in homes with no open ground within ring_m {cases.tolist()} (T's "
+              f"groundless and U's alike {same}); free first holds {np.flatnonzero(held).tolist()} "
+              f"and frees {cases[live[cases]].tolist()} of them, each by cleared ground "
+              f"{freed} -> {'ok' if ok else 'FAILS'}", flush=True)
+        if not ok:
+            bad.append(bid)
+    return bad
+
+
 GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "baseline": baseline, "weights": weights, "reach": reach, "gradient": gradient,
     "free": free, "identity": identity, "convex": convex, "pattern": pattern,
@@ -2657,7 +2783,17 @@ GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "no-features": no_features,
     "faces": faces, "lazy-baseline": lazy_baseline, "uniform-control": uniform_control,
     "pocket-escape": pocket_escape, "pocket-gradient": pocket_gradient,
-    "pocket-count": pocket_count}
+    "pocket-count": pocket_count, "own-ground": own_ground, "groundless": groundless}
+
+
+_GROUNDLESS = gf.groundless
+
+
+def _none_groundless(geo: gc.Geometry, ring_m: float, quad: int, xy: np.ndarray, tri: np.ndarray,
+                     open_ring: sp.csr_matrix, homes: np.ndarray) -> np.ndarray:
+    """gap_flow.groundless reading no home as groundless: the own-ground test on every home
+    (fault `own-everywhere`)."""
+    return np.zeros_like(_GROUNDLESS(geo, ring_m, quad, xy, tri, open_ring, homes))
 
 
 def _fault_exits():
@@ -2720,6 +2856,9 @@ FAULTS: dict[str, dict[str, Callable]] = {
                         "pocket-unloaded": lambda: _patched(gcl.Relaxation, "value_sgrad",
                                                             _sgrad_pocket_unloaded)},
     "pocket-count": {"leak-seeded": lambda: _patched(gcl.Graph, "_grounded", _leak_seeded)},
+    "own-ground": {"ring-reach": lambda: _patched(gf, "own_ring",
+                                                  lambda ring, open0, bare: ring)},
+    "groundless": {"own-everywhere": lambda: _patched(gf, "groundless", _none_groundless)},
     "lazy-baseline": {"atoms": _baseline_on_atoms,
                       "eager": lambda: _patched(gcl.LazyBaseline, "__init__", _eager)},
     "trip-calibration": {"boundary-trips": lambda: _patched(gap_maps, "leak_drain",

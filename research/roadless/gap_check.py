@@ -60,6 +60,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import common  # noqa: E402
 import gap_complex as gc  # noqa: E402
+import gap_flow as gf  # noqa: E402
 import metrics  # noqa: E402
 
 S_SENS = (0.125, 0.25, 0.5)
@@ -387,18 +388,26 @@ def free(_ids: list[str]) -> list[str]:
     wpop = np.array([1.0, 0.05, 1.0, 1.2, 3.0, 3.0, 3.0])
     cost = wpop / wpop.sum()
     spec = metrics.spec_of(0.125)
+    # the groundless homes, by Placement's points on the baseline complex at the runtime's
+    # quadrature (gap_flow.groundless): none (the home's courtyard is its own ground)
+    base = gc.build(geo, spec, np.ones(n, dtype=bool), carve=None, grow=0.0)
+    hm = gc.homes_of(geo, base)
+    walled0 = gc.walled(gc.home_exits(hm, gc.exit_widths(base)), FREE_W)
+    quad = metrics.metric_of(metrics.PER_BLOCK, device="cpu").fs.quad
+    bare = gf.groundless(geo, spec.ring_m, quad, base.xy, base.tri, hm.ring, walled0)
     fr = gc.free_first(geo, spec, w=FREE_W, grow=0.0, budget=1.0, cost=cost, pop=wpop,
-                       held0=np.zeros(n, dtype=bool), cx0=None)
+                       held0=np.zeros(n, dtype=bool), cx0=None, groundless=bare)
     cx = gc.build(geo, spec, ~fr.held, carve=None, grow=0.0)
-    he = gc.home_exits(gc.homes_of(geo, cx), gc.exit_widths(cx))
-    ok = he[0] >= FREE_W and not fr.left[0]
-    print(f"free first at w {FREE_W:g}: held {np.flatnonzero(fr.held).tolist()}, passes "
+    he = gc.home_exits(gc.homes_own(geo, gc.own_of(geo, base, bare), cx), gc.exit_widths(cx))
+    ok = he[0] >= FREE_W and not fr.left[0] and not bare.any()
+    print(f"free first at w {FREE_W:g} (groundless {np.flatnonzero(bare).tolist()}): held "
+          f"{np.flatnonzero(fr.held).tolist()}, passes "
           f"{fr.passes}, the graph's misses {fr.misses}; the home's exit width rebuilt "
           f"{he[0]:.3f} -> {'ok' if ok else 'FAILS'}", flush=True)
     return [] if ok else ["shed"]
 
 
-def _no_rebuild(geo, spec, *, w, grow, budget, cost, pop, held0, cx0):
+def _no_rebuild(geo, spec, *, w, grow, budget, cost, pop, held0, cx0, groundless):
     """free_first stopping after its first pass: the graph's claim is the answer."""
     real = gc.build
 
@@ -411,7 +420,7 @@ def _no_rebuild(geo, spec, *, w, grow, budget, cost, pop, held0, cx0):
         return real(*a, **k)
     with _patched(gc, "build", build_once):
         fr = _FREE_FIRST(geo, spec, w=w, grow=grow, budget=budget, cost=cost, pop=pop,
-                         held0=held0, cx0=cx0)
+                         held0=held0, cx0=cx0, groundless=groundless)
     return gc.Freed(target=fr.target, held=fr.held, left=np.zeros_like(fr.left),
                     crossings=fr.crossings, passes=1, misses=0)
 

@@ -26,11 +26,21 @@ clearance (2 x its circumradius if acute, else its longest edge: the Delaunay ra
 and a walled-in pocket is a BAR from its exit width to its fill, the largest fill over the
 triangles cut off together (`Bars`).
 
-HOMES (the raster's Placement test on the complex). A home is live at w when some open ground within
-`ring_m` of its outline reaches the street at w: a triangle within ring_m of it whose exit width
-is at least w, or the open street band within ring_m of it (the raster's ground cells, open
-ground there, are its street). Distances are the polygons' own (shapely), so as in the raster a
-ring reaches through a thin wall.
+HOMES (the raster's Placement test on the complex, its own ground: owner 2026-10-21, "No, its own
+pocket must open"; NOTES, "A home is freed only when its own ground opens"). A home's OWN GROUND
+is the open ground within `ring_m` of its outline at baseline, every footprint standing (live or
+in a sealed pocket), and the open street band within ring_m then (the raster's ground cells, open
+ground there, are its street). A home is live at w when some of its own ground reaches the street
+at w: ground a clearing opens within ring_m of it (a neighbour's interior) frees it only by
+opening its own pocket. A GROUNDLESS home, with no open ground within ring_m at baseline (every
+side against another footprint or its zone: decided by Placement's points, gap_flow.groundless,
+as gap_clear.PocketDemand leaves it without demand), has no pocket to open: any ground within
+ring_m of it reaching the street frees it, cleared ground included (`homes_of`, its RING). On the
+baseline complex a home's own ground is its ring; on a complex rebuilt without some footprints,
+the triangles holding the centroids of its baseline ring's triangles (`Own`, `homes_own`): a
+baseline triangle is open ground in every rebuild and convex, so at width 0 one centroid reads its
+whole region. Distances are the polygons' own (shapely), so as in the raster a ring reaches
+through a thin wall.
 
 FREE FIRST (`free_first`, the raster's free first on the complex). At width w on the complex built
 on the footprints grown by `grow` (the study's: 0, the filtration read at w; the shy distance's
@@ -40,16 +50,19 @@ and the standing buildings; a building is adjacent to every component with a tri
 (grown) outline at a vertex on no other footprint's (clearing it opens its interior and frees the
 passages that end on it; a vertex where two footprints meet stays an obstacle while either
 stands), to the buildings whose grown footprints meet its own (within 2 grow), and to the street
-where its grown footprint reaches into the band. Each round one Dijkstra from the street, entering
-a building costing its population share, picks the crossing with the least D per unit of the
-home's population, as the raster's did. A pass ends when the graph frees every walled-in home
-or none it can afford; the complex is then rebuilt without the held buildings and the metric's own
-test (`walled`) re-run, another pass taking any home the graph freed wrongly. Clearing a building
+where its grown footprint reaches into the band. A home is freed through the components of its
+own ground (a groundless home's: of its ring, and the standing buildings within ring_m of it).
+Each round one Dijkstra from the street, entering a building costing its population share, picks
+the crossing with the least D per unit of the home's population, as the raster's did. A pass ends
+when the graph frees every walled-in home or none it can afford; the complex is then rebuilt
+without the held buildings and the metric's own test (`walled` of `homes_own`) re-run, another
+pass taking any home the graph freed wrongly. Clearing a building
 can open a passage no triangle of the old complex shows (two buildings close across its former
 footprint), so the graph is generous and the rebuild decides.
 
 The run's identity is `Spec` (s, ring_m, band_m: required, keyword-only, its name in every row);
-the width w, the growth and the budget are each call's, required.
+the width w, the growth, the budget and the groundless homes are each call's, required; the test
+of a walled-in home is ENCLOSURE_REV's, in the code's digest.
 """
 from __future__ import annotations
 
@@ -84,6 +97,10 @@ GROW_TOL_REL = 0.02  # a grown outline lies within this share of the growth of i
 SNAP_M = 1e-9        # vertices snapped to this grid (m): GEOS repeats a vertex where two
                      # outlines meet with the last bits apart, which made zero-area triangles;
                      # a triangle left with a repeated vertex is dropped
+ENCLOSURE_REV = 2    # the test of a walled-in home (HOMES: B (i)'s, gap_clear.Model.live_homes_of,
+                     # and free first's), in the code's digest (gap_clear.CODE) and so in every
+                     # complex metric's name: raised by any change to the test (2: freed only when
+                     # its own ground reaches the street, owner 2026-10-21)
 MERGE_M = 1e-7       # vertices closer than this (m) are one (`vertices`): where two grown
                      # outlines nearly touch their offset arcs cross twice a hair apart (1.4e-9
                      # m on 18912's shy 0.5), a passage that short has needles either side whose
@@ -582,8 +599,9 @@ def bars(cx: Complex, ex: Exits) -> Bars:
 
 @dataclass(frozen=True, eq=False)
 class Homes:
-    """Each home's open ground within ring_m of its outline on a complex: `ring` (homes x
-    triangles) 0/1, `band` the open street band within ring_m."""
+    """Each home's ground on a complex: `ring` (homes x triangles) 0/1, its open ground within
+    ring_m of its outline (homes_of) or the ground that frees it (homes_own); `band` the open
+    street band within ring_m."""
     ring: sp.csr_matrix
     band: NDArray[np.bool_]
 
@@ -601,6 +619,50 @@ def homes_of(geo: Geometry, cx: Complex) -> Homes:
                                               distance=cx.spec.ring_m)
         band[bh] = True
     return Homes(ring=ring, band=band)
+
+
+class Own(NamedTuple):
+    """Each home's own ground on a baseline triangulation (module docstring, HOMES): its triangles
+    there within ring_m of its outline (`tri`, homes x samples, 0/1: every triangle of the
+    baseline open at baseline), sampled by their centroids (`xy`), the open band within ring_m
+    then (`band`), and the groundless homes (`groundless`), whose ring on a state's triangulation
+    frees them instead. The complex's (`own_of`), and the rebuilt flow mesh's
+    (gap_compare.ComplexModel)."""
+    xy: NDArray[np.float64]
+    tri: sp.csr_matrix
+    band: NDArray[np.bool_]
+    groundless: NDArray[np.bool_]
+
+
+def own_of(geo: Geometry, base: Complex, groundless: NDArray[np.bool_]) -> Own:
+    """The homes' own ground on the baseline complex `base` (every footprint standing):
+    `groundless` the caller's (gap_flow.groundless)."""
+    if not base.standing.all():
+        raise ValueError("own ground is the baseline's: every footprint standing")
+    hm = homes_of(geo, base)
+    return Own(xy=base.xy[base.tri].mean(axis=1), tri=hm.ring.tocsr(), band=hm.band,
+               groundless=groundless)
+
+
+def located(tri_geom: NDArray[np.object_], xy: NDArray[np.float64]) -> sp.csr_matrix:
+    """(points x triangles) 0/1: the triangles `tri_geom` holding each point of `xy` (a point on a
+    shared edge in both; none outside them)."""
+    qi, qt = shapely.STRtree(tri_geom).query(shapely.points(xy[:, 0], xy[:, 1]),
+                                             predicate="intersects")
+    return sp.csr_matrix((np.ones(len(qi)), (qi, qt)), shape=(len(xy), len(tri_geom)))
+
+
+def homes_own(geo: Geometry, own: Own, cx: Complex) -> Homes:
+    """Each home's ground that frees it on `cx` (module docstring, HOMES), as Homes: a home with
+    own ground the triangles of cx holding its own ground's samples and its baseline band; a
+    groundless home its ring on cx (homes_of)."""
+    hm = homes_of(geo, cx)
+    mine = (sp.diags((~own.groundless).astype(np.float64)) @ own.tri).tocsr()
+    used = np.unique(mine.indices)
+    mine = ((mine[:, used] @ located(cx.tri_geom, own.xy[used])) > 0).astype(np.float64)
+    ring = (mine + sp.diags(own.groundless.astype(np.float64)) @ hm.ring).tocsr()
+    ring.eliminate_zeros()
+    return Homes(ring=ring, band=np.where(own.groundless, hm.band, own.band))
 
 
 def home_exits(hm: Homes, ex: Exits) -> NDArray[np.float64]:
@@ -678,20 +740,23 @@ def region_graph(geo: Geometry, cx: Complex, w: float) -> Graph:
     return Graph(ncomp=ncomp, street=street, comp=comp, adj=adj)
 
 
-def _sources(geo: Geometry, cx: Complex, hm: Homes, g: Graph, homes: NDArray[np.int64]
-             ) -> dict[int, NDArray[np.int64]]:
-    """Per home: the regions it is freed through: its ring triangles' components and the
-    standing buildings within ring_m of its outline (itself among them if standing: clearing a
-    building opens its interior, within ring_m of the home)."""
+def _sources(geo: Geometry, cx: Complex, hm: Homes, g: Graph, homes: NDArray[np.int64],
+             groundless: NDArray[np.bool_]) -> dict[int, NDArray[np.int64]]:
+    """Per home: the regions it is freed through (`hm`: homes_own): its own ground's components;
+    a groundless home's ring's, and the standing buildings within ring_m of its outline (itself
+    among them if standing: clearing a building opens its interior, within ring_m of the home)."""
     polys = geo.polys
     idx = np.flatnonzero(cx.standing)
     tree = shapely.STRtree(polys[idx])
-    qh, qb = tree.query(polys[homes], predicate="dwithin", distance=cx.spec.ring_m)
+    bare = homes[groundless[homes]]
+    qh, qb = tree.query(polys[bare], predicate="dwithin", distance=cx.spec.ring_m)
+    near = {int(h): idx[qb[qh == k]] for k, h in enumerate(bare)}
     R = hm.ring.tocsr()
     out = {}
-    for k, h in enumerate(homes):
+    for h in homes:
         tris = R.indices[R.indptr[h]:R.indptr[h + 1]]
-        out[int(h)] = np.unique(np.concatenate([g.comp[tris], g.ncomp + idx[qb[qh == k]]]))
+        parts = [g.comp[tris], *([g.ncomp + near[int(h)]] if groundless[h] else [])]
+        out[int(h)] = np.unique(np.concatenate(parts))
     return out
 
 
@@ -710,20 +775,22 @@ class Freed(NamedTuple):
 
 def free_first(geo: Geometry, spec: Spec, *, w: float, grow: float, budget: float,
                cost: NDArray[np.float64], pop: NDArray[np.float64], held0: NDArray[np.bool_],
-               cx0: Complex | None) -> Freed:
+               cx0: Complex | None, groundless: NDArray[np.bool_]) -> Freed:
     """Free first on the complex grown by `grow` at width w: `held0` (a clearing, held)
     plus crossings freeing the homes walled in at baseline at w that it leaves walled in, the
     least D (`cost`, each building's population share) per unit of the home's population (`pop`)
     first, while the held set's D stays within `budget` (module docstring). `cx0` the baseline
-    complex (grown by `grow`) if built, else None."""
+    complex (grown by `grow`) if built, else None; `groundless` the homes with no open ground
+    within ring_m at baseline (HOMES: gap_flow.groundless)."""
     held = held0.copy()
     base = (build(geo, spec, np.ones(len(cost), dtype=bool), carve=None, grow=grow)
             if cx0 is None else cx0)
     if base.grow != grow:
         raise ValueError(f"the baseline complex is grown by {base.grow:g}, free first by {grow:g}")
-    target = walled(home_exits(homes_of(geo, base), exit_widths(base)), w)
+    own = own_of(geo, base, groundless)
+    target = walled(home_exits(homes_own(geo, own, base), exit_widths(base)), w)
     cx = base if not held.any() else build(geo, spec, ~held, carve=None, grow=grow)
-    hm = homes_of(geo, cx)
+    hm = homes_own(geo, own, cx)
     left = target & walled(home_exits(hm, exit_widths(cx)), w)
     n = len(cost)
     crossings: list = []
@@ -731,7 +798,7 @@ def free_first(geo: Geometry, spec: Spec, *, w: float, grow: float, budget: floa
     while left.any():
         passes += 1
         g = region_graph(geo, cx, w)
-        src = _sources(geo, cx, hm, g, np.flatnonzero(left))
+        src = _sources(geo, cx, hm, g, np.flatnonzero(left), groundless)
         N = g.adj.shape[0]
         claimed = np.zeros(n, dtype=bool)
         progress = False
@@ -772,7 +839,7 @@ def free_first(geo: Geometry, spec: Spec, *, w: float, grow: float, budget: floa
             break
         held |= hold
         cx = build(geo, spec, ~held, carve=None, grow=grow)
-        hm = homes_of(geo, cx)
+        hm = homes_own(geo, own, cx)
         now = walled(home_exits(hm, exit_widths(cx)), w)
         misses += int((claimed & left & now).sum())
         left = target & now

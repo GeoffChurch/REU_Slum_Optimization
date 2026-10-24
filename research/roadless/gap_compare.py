@@ -57,6 +57,13 @@ class ComplexModel:
         c0 = gf.cells(m0)
         self.dem = gf.point_demand(self.geo, m0, c0)
         self.walled = self.dem.walled
+        # each home's own ground (gap_complex's HOMES): its ring on the baseline's mesh, every
+        # triangle of which is open ground then, sampled by their centroids; the groundless homes
+        # by Placement's points there
+        ring0 = gf.ring_of(self.geo, self.spec.ring_m, m0.xy, m0.tri, m0.cx.band_open)
+        self.own = gc.Own(xy=m0.xy[m0.tri].mean(axis=1), tri=ring0.tri.tocsr(), band=ring0.band,
+                          groundless=gf.groundless(self.geo, self.spec.ring_m, fs.quad, m0.xy,
+                                                   m0.tri, ring0.tri, self.walled))
         self.t_mesh = time.time() - t0
         sc = gf.Scores(m0, c0, self.dem)
         self.P0, self.u0 = sc.u_home(self.pop)
@@ -75,15 +82,16 @@ class ComplexModel:
         return r, u
 
     def scored(self, standing: np.ndarray, carve) -> tuple[dict, np.ndarray, np.ndarray]:
-        """(the lenses of a clearing, its escape times per home, the homes it reaches: some open
-        ground within ring_m of the outline reaching the street, gap_flow.live_homes)."""
+        """(the lenses of a clearing, its escape times per home, the homes it reaches: some of
+        their own ground reaching the street, a groundless home's any open ground within ring_m,
+        gap_flow.live_homes)."""
         t0 = time.time()
         m = gf.mesh(self.geo, self.spec, self.fs, self.form, standing, carve=carve)
         c = gf.cells(m)
         sc = gf.Scores(m, c, self.dem)
         P, u = sc.u_home(self.pop)
         Pq, _ = sc.u_home(self.inj_q)
-        live = gf.live_homes(self.geo, m, c)
+        live = gf.live_homes(self.geo, m, c, self.own)
         left = self.walled & ~live
         J2 = float(np.nansum(self.pop * u ** 2))
         return dict(P=P, Pq=Pq, L_P=1.0 - P / self.P0, L_J2=1.0 - (J2 / self.J2_0) ** 0.5,
@@ -91,10 +99,3 @@ class ComplexModel:
                     enclosed=float(self.cost[left].sum()), n_enclosed=int(left.sum()),
                     unknowns=int((~c.ground).sum()), nt=m.nt, dropped=sc.dropped,
                     t=time.time() - t0), u, live
-
-    def free_first(self, held: np.ndarray) -> np.ndarray:
-        """gap_complex.free_first at the form's w from `held` (no budget): the held set grown (the
-        three forms share stage 1's topology)."""
-        fr = gc.free_first(self.geo, self.spec, w=self.form.w, grow=0.0, budget=1.0,
-                           cost=self.cost, pop=self.pop, held0=held, cx0=None)
-        return fr.held
