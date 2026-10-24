@@ -9109,8 +9109,9 @@ as a finite conductor (docs/superpowers/specs/2026-10-23-street-as-conductor-des
 The design (docs/superpowers/specs/2026-10-23-street-as-conductor-design.md): the street faces
 joined to a graph of the street centrelines (2,928 nodes, 2 m apart, 5.6 km; width 6 m; factor
 the RUNTIME boost on paved ways, 59% of the nodes, or 1) instead of to ground, ground cells merged
-into their nodes, band points injected at their nodes, RUNTIME's uniform leak (sigma |c| / lam^2
-on every cell) kept on the diagonal as the only ground. With the destination a building drawn by
+into their nodes, band points injected at their nodes, RUNTIME's internal leak (Lo6214b562: every
+cell's conductance to ground, 90% at buildings, calibrated to a 500 m median trip) kept on the
+diagonal as the only ground. With the destination a building drawn by
 area (the origins' law), everyone at once to one random destination dissipates exactly (Q^2 / 2)
 K in expectation, K = E[R_bc] the mean effective resistance between two random built points: the
 owner's model and independent trips are one functional for interior trips, differing only in the
@@ -9135,6 +9136,15 @@ it (the design's prediction failed; its tie criterion was not met either). K com
 methods (0.22 to 0.25 against P's 0.33 to 0.65) and ranks ΔP cycle_native with the legs 7 m apart
 first, the doubled-road networks after it; plain cycle_native's legs apart lose instead (0.225
 against 0.235). In the all-to-one mix the interior term is 26 times P at baseline, so any p under
-about 0.95 is K alone. The uniform leak (lam about 1 km) lets trips end anywhere and damps the
-long pairs where loops would count most. One block. Scripts: .superpowers/sdd/2026-10-22-flow-roads/
-street.py (check | score <network> | table <factor>), trips.py; not committed.
+about 0.95 is K alone. The internal leak already ends trips at buildings (a 500 m median) and
+damps the long pairs where loops would count most. One block. Scripts:
+.superpowers/sdd/2026-10-22-flow-roads/street.py (check | score <network> <factor> <boost> | table
+<factor> <boost>), trips.py; not committed.
+
+No walking along the street (its factor 0, crossings kept: both sides meet at the centreline's
+nodes) is no counterfactual for the street as the loops' backbone (the owner: "give the boundary 0
+conductivity, if it might be the case that its serving as the backbone for all the loops"): the
+block's open ground falls into 897 pieces that reach one another only along the street, the front
+yards and pockets on its edge, so the street is the only link for much of the block, not only the
+loops' closure. The street at open ground's conductance (factor 1) is the nearest meaningful one,
+and there the tree's loops gain 0.015 (0.208 against 0.193 at D 0.15).

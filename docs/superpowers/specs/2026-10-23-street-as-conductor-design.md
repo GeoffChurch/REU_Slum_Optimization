@@ -39,7 +39,7 @@ Instead the street becomes a graph of nodes on the street centrelines, and only 
   A ground cell is merged into its street node.
   Both sides of a street inside the block meet on its centreline, so crossing it is free, as it should be at this scale.
 - **Demand:** a home's points in the band, which today escape at once, inject into their nearest street node.
-- **Ground:** RUNTIME's uniform leak (`sigma |c| / lam^2` on every cell: trips may end anywhere) stays on the diagonal and is the operator's only ground, so no gauge node is chosen.
+- **Ground:** RUNTIME's internal leak (`Lo6214b562`, `gap_exits.InternalLeak`: every cell's conductance to ground, 90% of it at buildings, calibrated to a 500 m median trip) stays on the diagonal and is the operator's only ground, so no gauge node is chosen.
   Joining each leaking cell to a street node instead (2.86 million long edges) wrecked the nested dissection's fill and ran SuperLU out of memory.
 - **Not modelled:** walking beyond the street into the neighbouring blocks; a region's leaks; vehicles.
 
