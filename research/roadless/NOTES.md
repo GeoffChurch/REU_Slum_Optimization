@@ -9103,3 +9103,38 @@ whose branches meet the street already has loops through it. And without P's cro
 alike: ΔP greedy's lead under P is mostly relieved bottlenecks. The faithful test needs the street
 as a finite conductor (docs/superpowers/specs/2026-10-23-street-as-conductor-design.md). Script:
 .superpowers/sdd/2026-10-22-flow-roads/trips.py (exact | score <network> | table), not committed.
+
+### Trips inside the block with the street conducting: loops pay a little (2026-10-23)
+
+The design (docs/superpowers/specs/2026-10-23-street-as-conductor-design.md): the street faces
+joined to a graph of the street centrelines (2,928 nodes, 2 m apart, 5.6 km; width 6 m; factor
+the RUNTIME boost on paved ways, 59% of the nodes, or 1) instead of to ground, ground cells merged
+into their nodes, band points injected at their nodes, RUNTIME's uniform leak (sigma |c| / lam^2
+on every cell) kept on the diagonal as the only ground. With the destination a building drawn by
+area (the origins' law), everyone at once to one random destination dissipates exactly (Q^2 / 2)
+K in expectation, K = E[R_bc] the mean effective resistance between two random built points: the
+owner's model and independent trips are one functional for interior trips, differing only in the
+egress part (P against D). K = 2 tr(F^T A F), F F^T = diag(pi) - pi pi^T, by Hutch++. Checks on
+the baseline: 3.861 +- 0.011 against 3.851 exact; h 1 m against 2 m 0.3%; the street times 1e6
+2.2446 against the grounded street's 2.2385. A conducting street raises the baseline's K from 2.24
+to 3.86. L_K = 1 - K / K0 (+-0.002) at area D 0.10 / 0.15, the street boosted:
+
+    clearance (the tree)           0.160 / 0.217
+    clearance_looped               0.177 / 0.234
+    cycle_native, canonical        0.167 / 0.235
+    cycle_native, build order      0.157 / 0.226
+    cycle_native, apart 7          0.158 / 0.225
+    ΔP greedy, top 12              0.178 / 0.241
+    ΔP cycle_native, apart 0       0.183 / 0.241
+    ΔP cycle_native, apart 7       0.185 / 0.251
+
+(street factor 1: 0.193 / 0.208 / 0.208 / 0.200 / 0.199 / 0.215 / 0.212 / 0.223 at 0.15, the same
+order.) clearance_looped leads the tree by 0.017 +- 0.003 at both budgets, against 0.020 with the
+street grounded: loops pay for interior trips, a little, and a conducting street does not raise
+it (the design's prediction failed; its tie criterion was not met either). K compresses the
+methods (0.22 to 0.25 against P's 0.33 to 0.65) and ranks ΔP cycle_native with the legs 7 m apart
+first, the doubled-road networks after it; plain cycle_native's legs apart lose instead (0.225
+against 0.235). In the all-to-one mix the interior term is 26 times P at baseline, so any p under
+about 0.95 is K alone. The uniform leak (lam about 1 km) lets trips end anywhere and damps the
+long pairs where loops would count most. One block. Scripts: .superpowers/sdd/2026-10-22-flow-roads/
+street.py (check | score <network> | table <factor>), trips.py; not committed.

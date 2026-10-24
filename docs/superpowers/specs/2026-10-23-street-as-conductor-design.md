@@ -39,8 +39,8 @@ Instead the street becomes a graph of nodes on the street centrelines, and only 
   A ground cell is merged into its street node.
   Both sides of a street inside the block meet on its centreline, so crossing it is free, as it should be at this scale.
 - **Demand:** a home's points in the band, which today escape at once, inject into their nearest street node.
-- **Gauge:** the operator has no ground; one street node is grounded for the factorization.
-  Every interior realization injects zero in total, so `P_g` and `R_bc` do not depend on which node it is.
+- **Ground:** RUNTIME's uniform leak (`sigma |c| / lam^2` on every cell: trips may end anywhere) stays on the diagonal and is the operator's only ground, so no gauge node is chosen.
+  Joining each leaking cell to a street node instead (2.86 million long edges) wrecked the nested dissection's fill and ran SuperLU out of memory.
 - **Not modelled:** walking beyond the street into the neighbouring blocks; a region's leaks; vehicles.
 
 Assembly is the existing cells' passages (`Reach.W`) and faces (`Reach.Gf`) relabelled onto cells plus street nodes, factored by the run's `gap_factor.SuperLU` on a pattern with the nodes' coordinates (its nested dissection, its refinement).
@@ -54,7 +54,6 @@ Required and in the run's identity: `w` (6 m, a residential street's), `h` (2 m)
 ## Checks, each with its fault
 
 - **The street-is-ground limit:** with the street factor times 1e6, `K` must equal the grounded test's `2 D - 2 P / Q^2` within Hutch++'s error (fault: the faces mapped to the wrong node).
-- **Gauge:** `K` with a second, distant reference node must agree to solver precision (fault: an injection that does not sum to zero).
 - **Hutch++ against exact** on the baseline, one solve per home, as for D.
 - **h:** `K` at `h` 1 m and 2 m within 1% (fault: a node spacing far coarser than the faces').
 
@@ -65,3 +64,9 @@ The eight networks scored in `trips.py` (clearance, clearance_looped, cycle_nati
 - **Prediction (argued):** with the street conducting, `K` rewards loops: clearance_looped's lead on the tree under `K` is above its 0.020 with the street grounded, and the loop networks gain on the tree networks as `p` falls.
 - **Falsified if** clearance_looped and clearance tie under `K` at matched D within twice the standard error: then interior access, too, does not ask for loops on this block.
 - Reported with the street factor both as the boost gives it and at 1 (unpaved), since most of 5810's lanes are tagged unpaved and the answer may turn on it.
+
+## Outcome (2026-10-23)
+
+The checks passed (Hutch++ 3.861 ± 0.011 against 3.851 exact; `h` 0.3%; the limit 2.2446 against 2.2385).
+clearance_looped led the tree under `K` by 0.017 ± 0.003 at area D 0.10 and 0.15, against 0.020 with the street grounded: loops pay a little for interior trips, and a conducting street does not raise it, so the prediction failed and the tie criterion was not met.
+Numbers in NOTES, "Trips inside the block with the street conducting: loops pay a little".
