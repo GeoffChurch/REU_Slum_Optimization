@@ -657,7 +657,8 @@ Open:
     the arterial). Re-proposing them under the ramped stage (a median 0.03 -- 0.08 h a network
     for clearance, clearance_looped, cycle_native and resistance_lp, 4.3 h at most; cycle_desire
     0.5 h on the large blocks and 10 -- 55 h on the oversized) would make the lineup's networks
-    what its code proposes.
+    what its code proposes. **Decided** (owner 2026-10-24): T or U first; under U the stage goes
+    and the networks are proposed without it; if T stays, re-propose them under the ramped stage.
 - **A uniform rule for walled-in homes** (the owner's call, 2026-10-21: "A uniform rule would be
   nicer if it works"; NOTES, "A uniform rule for walled-in homes: destinations in their pockets, no
   free first"; built on research/uniform-leak: metrics.UNIFORM, relax's `.f0`). Measured on the 121
@@ -683,7 +684,7 @@ Open:
     counts a home freed only when its own ground reaches the street ("No, its own pocket must
     open"), not when a neighbour cleared within 1 m does; free first frees by the same test. Open:
     T or U (the owner asked what U's two fixes are, and whether a home's source belongs inside its
-    footprint rather than on its outline's ring).
+    footprint rather than on its outline's ring; 2026-10-24: "ideally U").
 - **The rate bracket** (`consolidated.RATES_PER_GPU_SECOND`, 2e-6 -- 1.9e-5 Lens A per GPU-second).
   A screen whose call turns on the rate prints an "ask" (this much Lens A for this much more
   time?); the owner's answer moves an end of the bracket to that screen's break-even rate
