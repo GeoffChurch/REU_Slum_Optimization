@@ -9987,7 +9987,7 @@ On eight replayed steps (each step's twelve):
 a holds the potential (an upper bound: dL the candidate's operator less the present one, the
 cells it opens eliminated by their Schur complement); a^2 / (a + b), b = (dL u)' A^-1 (dL u), is
 the variational lower bound with dL u as trial (exact for a rank-one change). The cheap form of a
-(DIRICHLET in dp_greedy.py: the corridor's power times max(b, r) / b - 1 on open ground, and
+(Dirichlet in dp_greedy.py: the corridor's power times max(b, r) / b - 1 on open ground, and
 through each stretch of the centreline inside a standing building a resistor, its length over
 sigma, r and the road's width, between the potentials of the cells holding its ends 1 m outside;
 a stretch with an end in a dead cell skipped) tracks a at log r 0.977 and ranks at Spearman 0.49.
@@ -10001,12 +10001,18 @@ Built out to D 0.15 (L_P from the steps' own log, interpolated at each D):
     Thomson, top 12       0.200   0.299   0.367   0.454   0.533   0.583   0.617   0.652   8.0 h
     Thomson, top 4        0.189   0.287   0.357   0.437   0.520   0.574   0.611   0.642   3.7 h
     Dirichlet, top 5      0.229   0.328   0.379   0.454   0.506   0.571   0.612   0.638   1.4 h
+    Dirichlet 3 + Th. 2   0.199   0.331   0.380   0.465   0.549   0.589   0.623   0.655   1.7 h
 
-The Dirichlet screen leads below D 0.03 (the connections through buildings), ties at 0.05 and
-trails by 0.01 -- 0.03 above, in 156 roads against 199: its building term sometimes overshoots
-by orders (623 at step 60: 1.6e10 against an exact 2.4e6), crowding the open ground's candidates
-out of five places once the good crossings are built. A first run read a stretch's end with no
-solved cell near as the street (potential 0) and fell behind from the start (L_P 0.285 at D
-0.062); its log is not kept. Scripts: .superpowers/sdd/2026-10-22-flow-roads/dp_greedy.py (Pick:
-`build thomson:12`, `build dirichlet:5`, `build dirichlet:3+thomson:2`), not committed; the
-earlier runs renamed dp_greedy_thomson_top{4,12}.
+The Dirichlet screen alone leads below D 0.03 (the connections through buildings), ties at 0.05
+and trails by 0.01 -- 0.03 above, in 156 roads against 199: its building term sometimes
+overshoots by orders (623 at step 60: 1.6e10 against an exact 2.4e6), crowding the open ground's
+candidates out of five places once the good crossings are built. Its top three and Thomson's top
+two together (no candidate twice) are the best of the four from D 0.02 up, above Thomson's top
+twelve by 0.003 -- 0.032 in a fifth of the time, 192 roads; the step's winner was in Dirichlet's
+three on 61 of 174 steps and in Thomson's two on 129 (both on 17). Below D 0.02 it trails the
+Dirichlet top five (0.199 against 0.229 at 0.01): the early crossings came later. A first
+Dirichlet run read a stretch's end with no solved cell near as the street (potential 0) and fell
+behind from the start (L_P 0.285 at D 0.062); its log is not kept. Scripts:
+.superpowers/sdd/2026-10-22-flow-roads/dp_greedy.py (`build <pick> <cost>`: `thomson:12 D`,
+`dirichlet:5 D`, `dirichlet:3+thomson:2 D`), not committed; a run's name carries its pick and
+its cost (dp_greedy_thomson_top12_D).
