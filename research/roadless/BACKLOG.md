@@ -628,6 +628,25 @@ Open:
   pyamg's removal and the two mesh speed-ups (Infrastructure). Decided, so not listed: the
   translucent search is the cheap preset (owner 2026-10-15), and the cheap preset takes S0.005cat
   with the re-run (owner yes, the consolidated pass's (3)).
+- **Try everything** (owner 2026-10-24: "Let's try everything"; the plan, in order within each
+  strand):
+  - Walled-in homes, round 2 (a subagent on research/walled-in; brief
+    .superpowers/sdd/2026-10-24-walled-in/brief.md): T, U and W each with its best optimizer; U
+    with F1 (every home has demand: a groundless home's on its own footprint, its building's leak
+    there) and less myopic optimizers (free first's crossings as moves, path moves from one
+    solve's potentials, walls translucent first, the Frank-Wolfe bound as a certificate).
+  - ΔP greedy (here, .superpowers/sdd/2026-10-22-flow-roads/dp_greedy.py): each step's exact
+    candidates over 7 forked processes (done: step 100's twelve in 25 s against 153, bit for bit);
+    a screen that treats each candidate as a 1D conductor coupled to the present potentials (the
+    plane's Green's function between its nodes), tested offline on the logged steps; gap_clear's
+    host work cut (a state from the candidates' stored triangles, conductances rebuilt only where
+    a candidate changes them: 5 of a candidate's 11 s; cold caches accepted); the study code into
+    the repo; cuDSS on a cluster card (SuperLU's factorization is 5.9 s of the 11); a repulsion
+    cost term between road pieces, its weight swept; its own candidates.
+  - A road-placing SIMP: a road density per triangle up to the boost, displacement where it
+    covers a building, repulsion or a paving price, a filter at a road's width.
+  - The damage term: expected P over single blockages from one solve and each road piece's
+    leverage (Sherman-Morrison); for vehicles on the road graph alone (agenda item 5).
 - **The public package's displacement, and the methods' internal costs, onto the ramped
   destroyed area** (later: at the site revamp). The research lineup adopted the ramped destroyed
   area on 2026-10-18 (owner: "now, before the full rerun"; NOTES, "The research lineup's
