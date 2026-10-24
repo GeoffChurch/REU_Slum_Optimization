@@ -9145,9 +9145,28 @@ In the all-to-one mix the interior term is about 30 times P at baseline, so any 
 is K alone. One block. Scripts: .superpowers/sdd/2026-10-22-flow-roads/street.py (check <boost> |
 score <network> <factor> <boost> | table <factor> <boost>), trips.py; not committed.
 
-No walking along the street (its factor 0, crossings kept: both sides meet at the centreline's
-nodes) is no counterfactual for the street as the loops' backbone (the owner: "give the boundary 0
-conductivity, if it might be the case that its serving as the backbone for all the loops"): the
-block's open ground falls into 897 pieces that reach one another only along the street, the front
-yards and pockets on its edge, so the street is the only link for much of the block, not only the
-loops' closure.
+The outline insulating (2026-10-24). 5810's street is its outline alone (5.6 km, the outer ring
+and one hole), so the owner's "give the boundary 0 conductivity, if it might be the case that its
+serving as the backbone for all the loops" is the street with no walking along it, its faces
+still joined to their nearest nodes (street.py's factor `insulated`). An earlier reading, that
+this split the open ground into 897 pieces and so was no counterfactual, counted the pieces
+unweighted: they are street nodes with no face and empty slivers, and 6,615 of the 6,617 homes
+stay on the main component (the other two drop out of K). K0 rises by 40% (4.33 to 6.06 at 10x,
+5.48 to 7.31 at 3x): the outline carried much of the interior trips. L_K at area D 0.10 / 0.15
+(+-0.001):
+
+                                   insulated, 10x   insulated, 3x
+    clearance (the tree)           0.133 / 0.178    0.066 / 0.095
+    clearance_looped               0.151 / 0.194    0.078 / 0.105
+    cycle_native, canonical        0.139 / 0.196    0.074 / 0.108
+    cycle_native, build order      0.131 / 0.188    0.069 / 0.102
+    cycle_native, apart 7          0.130 / 0.185    0.067 / 0.099
+    ΔP greedy, top 12              0.161 / 0.210    0.091 / 0.121
+    ΔP cycle_native, apart 0       0.144 / 0.197    0.076 / 0.108
+    ΔP cycle_native, apart 7       0.152 / 0.204    0.074 / 0.108
+
+The tree's loops gain 0.018 / 0.016 at 10x and 0.012 / 0.010 at 3x, 14% / 9% and 19% / 11% of
+the tree's own, as with the outline conducting; K_tree / K_looped is 1.022 / 1.020 against 1.027
+/ 1.024 at 10x. Cut, the outline costs the tree and its loops alike: it was a shortcut for every
+network, not the loops' backbone. ΔP greedy leads at both contrasts; plain cycle_native in build
+order or 7 m apart falls below clearance_looped, level with the tree at 10x and D 0.10.

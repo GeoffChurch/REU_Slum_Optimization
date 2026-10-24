@@ -71,5 +71,6 @@ The eight networks scored in `trips.py` (clearance, clearance_looped, cycle_nati
 
 The checks passed on the leak-free operator (Hutch++ 4.327 ± 0.011 against 4.318 exact; `h` 0.5%; every home with demand on the gauge's component).
 clearance_looped led the tree under `K` by 0.022 and 0.019 at area D 0.10 and 0.15 (14% and 9% of the tree's own gain), and by 0.014 and 0.011 with the boost at 3 instead of 10: loops pay a little for interior trips, and neither the conducting street, nor leaving out the leak, nor a lower contrast makes it more, so the prediction failed and the tie criterion was not met.
-Setting the street's conductance along it to 0 split the block's open ground into 897 pieces, so it is no counterfactual.
+5810's street is its outline alone, so the owner's "give the boundary 0 conductivity" is the street with no walking along it, its faces still joined to their nodes (2026-10-24).
+It leaves 6,615 of the 6,617 homes on one component, and raises `K0` by 40%, but the loops' gain on the tree stays 14% and 9% of the tree's own at 10× (19% and 11% at 3×): the outline was a shortcut for every network, not the loops' backbone.
 Numbers in NOTES, "Trips inside the block with the street conducting: loops pay a little".
