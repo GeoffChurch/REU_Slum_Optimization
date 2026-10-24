@@ -9108,43 +9108,46 @@ as a finite conductor (docs/superpowers/specs/2026-10-23-street-as-conductor-des
 
 The design (docs/superpowers/specs/2026-10-23-street-as-conductor-design.md): the street faces
 joined to a graph of the street centrelines (2,928 nodes, 2 m apart, 5.6 km; width 6 m; factor
-the RUNTIME boost on paved ways, 59% of the nodes, or 1) instead of to ground, ground cells merged
-into their nodes, band points injected at their nodes, RUNTIME's internal leak (Lo6214b562: every
-cell's conductance to ground, 90% at buildings, calibrated to a 500 m median trip) kept on the
-diagonal as the only ground. With the destination a building drawn by
-area (the origins' law), everyone at once to one random destination dissipates exactly (Q^2 / 2)
-K in expectation, K = E[R_bc] the mean effective resistance between two random built points: the
-owner's model and independent trips are one functional for interior trips, differing only in the
-egress part (P against D). K = 2 tr(F^T A F), F F^T = diag(pi) - pi pi^T, by Hutch++. Checks on
-the baseline: 3.861 +- 0.011 against 3.851 exact; h 1 m against 2 m 0.3%; the street times 1e6
-2.2446 against the grounded street's 2.2385. A conducting street raises the baseline's K from 2.24
-to 3.86. L_K = 1 - K / K0 (+-0.002) at area D 0.10 / 0.15, the street boosted:
+the metric's boost on paved ways, 59% of the nodes) instead of to ground, ground cells merged into
+their nodes, band points injected at their nodes. RUNTIME's internal leak (Lo6214b562: every
+cell's conductance to ground, 90% at buildings) is left out: an interior trip's destination is its
+one ground, and the leak would carry current from near one home to near another through the
+ground, a free connector as the grounded street was (kept, it cut the baseline's K by 12%, 4.33
+to 3.86). One street node is the gauge; every home with demand is on its component. With the
+destination a building drawn by area (the origins' law), everyone at once to one random
+destination dissipates exactly (Q^2 / 2) K in expectation, K = E[R_bc] the mean effective
+resistance between two random built points: the owner's model and independent trips are one
+functional for interior trips, differing only in the egress part (P against D). K = 2 tr(F^T A
+F), F F^T = diag(pi) - pi pi^T, by Hutch++. Checks on the baseline: 4.327 +- 0.011 against 4.318
+exact; h 1 m against 2 m 0.5%; with the leak kept, the street times 1e6 gave 2.2446 against the
+grounded street's 2.2385 (the faces' mapping). L_K = 1 - K / K0 (+-0.002) and L_P at area D
+0.10 / 0.15, under the boost at 10 (RUNTIME) and at 3 (the owner: "the 10x conductivity is so
+high that even a tree-like network suffices ... try 3x"):
 
-    clearance (the tree)           0.160 / 0.217
-    clearance_looped               0.177 / 0.234
-    cycle_native, canonical        0.167 / 0.235
-    cycle_native, build order      0.157 / 0.226
-    cycle_native, apart 7          0.158 / 0.225
-    ΔP greedy, top 12              0.178 / 0.241
-    ΔP cycle_native, apart 0       0.183 / 0.241
-    ΔP cycle_native, apart 7       0.185 / 0.251
+                                   L_K, 10x        L_K, 3x         L_P, 10x        L_P, 3x
+    clearance (the tree)           0.162 / 0.220   0.078 / 0.114   0.224 / 0.325   0.120 / 0.181
+    clearance_looped               0.184 / 0.239   0.092 / 0.125   0.371 / 0.421   0.189 / 0.226
+    cycle_native, canonical        0.170 / 0.240   0.089 / 0.128   0.520 / 0.575   0.291 / 0.333
+    cycle_native, build order      0.160 / 0.232   0.082 / 0.123   0.479 / 0.571   0.254 / 0.334
+    cycle_native, apart 7          0.161 / 0.228   0.080 / 0.118   0.462 / 0.554   0.248 / 0.316
+    ΔP greedy, top 12              0.187 / 0.250   0.101 / 0.139   0.583 / 0.652   0.337 / 0.396
+    ΔP cycle_native, apart 0       0.186 / 0.245   0.094 / 0.130   0.521 / 0.592   0.269 / 0.333
+    ΔP cycle_native, apart 7       0.192 / 0.254   0.089 / 0.130   0.496 / 0.570   0.255 / 0.319
 
-(street factor 1: 0.193 / 0.208 / 0.208 / 0.200 / 0.199 / 0.215 / 0.212 / 0.223 at 0.15, the same
-order.) clearance_looped leads the tree by 0.017 +- 0.003 at both budgets, against 0.020 with the
-street grounded: loops pay for interior trips, a little, and a conducting street does not raise
-it (the design's prediction failed; its tie criterion was not met either). K compresses the
-methods (0.22 to 0.25 against P's 0.33 to 0.65) and ranks ΔP cycle_native with the legs 7 m apart
-first, the doubled-road networks after it; plain cycle_native's legs apart lose instead (0.225
-against 0.235). In the all-to-one mix the interior term is 26 times P at baseline, so any p under
-about 0.95 is K alone. The internal leak already ends trips at buildings (a 500 m median) and
-damps the long pairs where loops would count most. One block. Scripts:
-.superpowers/sdd/2026-10-22-flow-roads/street.py (check | score <network> <factor> <boost> | table
-<factor> <boost>), trips.py; not committed.
+The tree's loops gain 0.022 / 0.019 under K at 10x (14% / 9% of the tree's own), 0.014 / 0.011
+at 3x (18% / 10%); at D 0.05 they lose (0.097 against 0.101). So loops pay for interior trips, a
+little, and neither a conducting street, nor leaving out the leak, nor a third of the contrast
+makes it more than about a seventh of what the tree does; the design's prediction failed and its
+tie criterion was not met. Roads do about half as much at 3x under either measure. K compresses
+the methods (0.22 to 0.25 against P's 0.33 to 0.65 at 10x) and ranks the ΔP networks first:
+cycle_native with its legs 7 m apart at 10x, ΔP greedy at 3x (the networks were built at 10x).
+In the all-to-one mix the interior term is about 30 times P at baseline, so any p under about 0.95
+is K alone. One block. Scripts: .superpowers/sdd/2026-10-22-flow-roads/street.py (check <boost> |
+score <network> <factor> <boost> | table <factor> <boost>), trips.py; not committed.
 
 No walking along the street (its factor 0, crossings kept: both sides meet at the centreline's
 nodes) is no counterfactual for the street as the loops' backbone (the owner: "give the boundary 0
 conductivity, if it might be the case that its serving as the backbone for all the loops"): the
 block's open ground falls into 897 pieces that reach one another only along the street, the front
 yards and pockets on its edge, so the street is the only link for much of the block, not only the
-loops' closure. The street at open ground's conductance (factor 1) is the nearest meaningful one,
-and there the tree's loops gain 0.015 (0.208 against 0.193 at D 0.15).
+loops' closure.

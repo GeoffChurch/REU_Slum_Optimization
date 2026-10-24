@@ -39,8 +39,10 @@ Instead the street becomes a graph of nodes on the street centrelines, and only 
   A ground cell is merged into its street node.
   Both sides of a street inside the block meet on its centreline, so crossing it is free, as it should be at this scale.
 - **Demand:** a home's points in the band, which today escape at once, inject into their nearest street node.
-- **Ground:** RUNTIME's internal leak (`Lo6214b562`, `gap_exits.InternalLeak`: every cell's conductance to ground, 90% of it at buildings, calibrated to a 500 m median trip) stays on the diagonal and is the operator's only ground, so no gauge node is chosen.
-  Joining each leaking cell to a street node instead (2.86 million long edges) wrecked the nested dissection's fill and ran SuperLU out of memory.
+- **Ground:** none but the gauge.
+  RUNTIME's internal leak (`Lo6214b562`, `gap_exits.InternalLeak`: every cell's conductance to ground, 90% of it at buildings) is left out: an interior trip's destination is its one ground, and a leak would carry current from near one home to near another through the ground, a free connector as the grounded street was.
+  One street node is the gauge (every probe injects zero in total), and only the homes on its component take part, the set fixed at the baseline so every state scores the same homes (a sealed pocket's homes, reached only through the leak, have no interior trips).
+  A first run kept the leak as the only ground, after joining each leaking cell to a street node (2.86 million long edges) had wrecked the nested dissection's fill; its loops' gain was 0.017 and is superseded.
 - **Not modelled:** walking beyond the street into the neighbouring blocks; a region's leaks; vehicles.
 
 Assembly is the existing cells' passages (`Reach.W`) and faces (`Reach.Gf`) relabelled onto cells plus street nodes, factored by the run's `gap_factor.SuperLU` on a pattern with the nodes' coordinates (its nested dissection, its refinement).
@@ -67,6 +69,7 @@ The eight networks scored in `trips.py` (clearance, clearance_looped, cycle_nati
 
 ## Outcome (2026-10-23)
 
-The checks passed (Hutch++ 3.861 ± 0.011 against 3.851 exact; `h` 0.3%; the limit 2.2446 against 2.2385).
-clearance_looped led the tree under `K` by 0.017 ± 0.003 at area D 0.10 and 0.15, against 0.020 with the street grounded: loops pay a little for interior trips, and a conducting street does not raise it, so the prediction failed and the tie criterion was not met.
+The checks passed on the leak-free operator (Hutch++ 4.327 ± 0.011 against 4.318 exact; `h` 0.5%; every home with demand on the gauge's component).
+clearance_looped led the tree under `K` by 0.022 and 0.019 at area D 0.10 and 0.15 (14% and 9% of the tree's own gain), and by 0.014 and 0.011 with the boost at 3 instead of 10: loops pay a little for interior trips, and neither the conducting street, nor leaving out the leak, nor a lower contrast makes it more, so the prediction failed and the tie criterion was not met.
+Setting the street's conductance along it to 0 split the block's open ground into 897 pieces, so it is no counterfactual.
 Numbers in NOTES, "Trips inside the block with the street conducting: loops pay a little".
