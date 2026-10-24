@@ -8,8 +8,10 @@ every home's demand (metrics.HOMES: F1, gap_clear.HomeDemand); and F's less myop
 each a named part of its plan (relax.Plan): Fa free first's crossings as the polish's moves
 (`jF8`), Fb path moves (`jV4s32`, gap_joins), Fc walls translucent first (`.e0.05-0.0001`), Fd
 Frank-Wolfe's start and bound (`fw40`), Fe SIMP's roundings compared exactly (`k1s1e-06E`: the
-eps world at 1e-6 misreads a sealed pocket), Fx their best combination and Tx T with the best of
-(b) or (c) (both named once the first wave is in); W, walls that leak (S10, its fit
+eps world at 1e-6 misreads a sealed pocket), Ff free first as a track (`.ft`: the better of SIMP
+from nothing held and with free first's crossings held), Fx the best combination (a, b and f)
+and Tx T with the better of (b) or (c), (b) (the second wave's three, named from the first's
+small blocks); W, walls that leak (S10, its fit
 optimizer GxLr10: leaky_simp's S10x, on a core), on the small blocks. SIMP's default otherwise,
 its polish scored exactly on every device (`E`: the eps world at 1e-6 misreads a sealed pocket,
 whose leak is of the order of its walls' eps conductance).
@@ -25,7 +27,7 @@ whose leak is of the order of its walls' eps conductance).
 `arm`: the arm's run (relax.one, or leaky_simp's W arm), its row relax's (or leaky_simp's) with the
 device, the host, the wall time and the peak memory (relax_rows/<metric>/<plan>/D0.05/).
 
-`block`: the arms in turn, then `lenses` and `chains` (a small block's task).
+`block`: the arms in turn, then `lenses` (a small block's task).
 
 `lenses`: every arm's clearing that stands (and none) scored under T's, U's and F's metrics:
 Lens A of P, P_{1/2} and J_2 on each metric's own baseline and
@@ -109,6 +111,12 @@ ARMS = {
     "Fc": Spec("F", "fw0.q3.i10.e0.05-0.0001.k1s1e-06.p256w8x2E.f0"),
     "Fd": Spec("F", "fw40.q3.i10.e0.0001.k1s1e-06.p256w8x2E.f0"),
     "Fe": Spec("F", "fw0.q3.i10.e0.0001.k1s1e-06E.p256w8x2E.f0"),
+    # the second wave, from the first's small blocks (progress.md): free first as a track (f);
+    # the combination of what helped (a, b, f: c lost on 23 of 24, d and e tied); T with the
+    # better of (b) and (c), (b)
+    "Ff": Spec("F", f"{_E}E.ft"),
+    "Fx": Spec("F", f"{_E}jF8jV4s32E.ft"),
+    "Tx": Spec("T", f"{_E}jV4s32E"),
 }
 W_ARM = "S10x"                       # leaky_simp's: S10 (Wk1l1000) under GxLr10, on a core
 FD = "Fd"                            # the arm whose row carries Frank-Wolfe's bound
@@ -173,9 +181,11 @@ def cleared(label: str, bid: str, n: int) -> NDArray[np.bool_]:
     return x
 
 
-def outs(bid: str) -> tuple[Path, Path, Path]:
-    return (ROWS / "lenses" / f"{bid}.parquet", ROWS / "homes" / f"{bid}.parquet",
-            ROWS / "fair" / f"{bid}.parquet")
+def outs(bid: str, label: str) -> tuple[Path, Path, Path]:
+    """One clearing's rows (`none`, or an arm's): its lenses, its walled-in homes, its freeing D;
+    an arm added later adds its own and replaces none."""
+    return (ROWS / "lenses" / bid / f"{label}.parquet", ROWS / "homes" / bid / f"{label}.parquet",
+            ROWS / "fair" / bid / f"{label}.parquet")
 
 
 def sizes() -> pd.Series:
@@ -192,20 +202,20 @@ def wlenses(bid: str, *, standing: clearings.Standing) -> None:
     """Every standing arm's clearing of `bid` (W's among them) under W's metric, on a core
     (leaky_simp's view: Lens A on W's own baseline; its B (i), its base's, checked against the
     walled-in homes `lenses` left under T's) (ROWS/wlenses/<id>.parquet)."""
-    out = ROWS / "wlenses" / f"{bid}.parquet"
-    if not standing.todo(out):
+    labels = ["none", *labels_of(bid)]
+    todo = [lb for lb in labels if standing.todo(ROWS / "wlenses" / bid / f"{lb}.parquet")]
+    if not todo:
         return
     t0 = time.time()
-    labels = labels_of(bid)
-    n = int(_row(labels[0], bid)["n"])
-    xs = {"none": np.zeros(n, dtype=bool), **{lb: cleared(lb, bid, n) for lb in labels}}
+    n = int(_row(labels[1], bid)["n"])
+    xs = {lb: np.zeros(n, dtype=bool) if lb == "none" else cleared(lb, bid, n) for lb in todo}
     w = leaky_simp._w_view(bid, "W", leaky_simp.w_arm(W_ARM).metric, xs)
-    homes = pd.read_parquet(outs(bid)[1])
     for lb in xs:
-        if f"left_{lb}" in homes and not np.array_equal(
-                w.left[lb][homes.home.to_numpy()], homes[f"left_{lb}"].to_numpy()):
+        homes = pd.read_parquet(outs(bid, lb)[1])
+        if not np.array_equal(w.left[lb][homes.home.to_numpy()], homes.left.to_numpy()):
             raise RuntimeError(f"{bid}: W's B (i) and T's part on {lb!r}")
-    standing.write(pd.DataFrame(w.rows), out)
+        standing.write(pd.DataFrame([r for r in w.rows if r["clearing"] == lb]),
+                       ROWS / "wlenses" / bid / f"{lb}.parquet")
     print(f"{bid}: W's lenses on {len(xs)} clearings; {time.time() - t0:.0f}s", flush=True)
 
 
@@ -274,17 +284,17 @@ def score(bid: str, rule: str, metric: gcl.ComplexMetric, xs: dict[str, NDArray[
 
 
 def lenses(bid: str, device: str, *, standing: clearings.Standing) -> None:
-    """Every standing arm's clearing of `bid` under every metric (module docstring)."""
-    paths = outs(bid)
-    if not any([standing.todo(o) for o in paths]):
+    """Every standing arm's clearing of `bid` whose rows `standing` says to make, under every
+    metric (module docstring), each clearing's rows its own (outs)."""
+    labels = ["none", *labels_of(bid)]
+    todo = [lb for lb in labels if any([standing.todo(o) for o in outs(bid, lb)])]
+    if not todo:
         return
     t0 = time.time()
-    labels = labels_of(bid)
-    n = int(_row(labels[0], bid)["n"])
-    xs = {"none": np.zeros(n, dtype=bool), **{lb: cleared(lb, bid, n) for lb in labels}}
+    n = int(_row(labels[1], bid)["n"])
+    xs = {lb: np.zeros(n, dtype=bool) if lb == "none" else cleared(lb, bid, n) for lb in todo}
     sc = {rule: score(bid, rule, metrics.metric_of(name, device=device), xs, fair=rule == "T")
           for rule, name in RULES.items()}
-    rows = [r for s in sc.values() for r in s.rows]
     left = {rule: s.left for rule, s in sc.items()}
     for rule, lf in left.items():
         for label in xs:
@@ -293,12 +303,16 @@ def lenses(bid: str, device: str, *, standing: clearings.Standing) -> None:
     F = sc["F"]
     w0 = sc["T"].walled0
     med = float(np.nanmedian(F.u0))
-    homes = pd.DataFrame(dict(block=bid, home=np.flatnonzero(w0), share=F.cost[w0],
-                              groundless=F.groundless[w0], u0_F=F.u0[w0] / med,
-                              **{f"left_{lb}": left["T"][lb][w0] for lb in xs},
-                              **{f"uF_{lb}": F.u[lb][w0] / med for lb in xs}))
-    for o, df in zip(paths, (pd.DataFrame(rows), homes, pd.DataFrame(sc["T"].fair)), strict=True):
-        standing.write(df, o)
+    for lb in xs:
+        rows = [r for s in sc.values() for r in s.rows if r["clearing"] == lb]
+        homes = pd.DataFrame(dict(block=bid, clearing=lb, home=np.flatnonzero(w0),
+                                  share=F.cost[w0], groundless=F.groundless[w0],
+                                  u0_F=F.u0[w0] / med, left=left["T"][lb][w0],
+                                  uF=F.u[lb][w0] / med))
+        fair = [r for r in sc["T"].fair if r["clearing"] == lb]
+        for o, df in zip(outs(bid, lb), (pd.DataFrame(rows), homes, pd.DataFrame(fair)),
+                         strict=True):
+            standing.write(df, o)
     print(f"{bid}: {int(w0.sum())} walled in; left "
           + ", ".join(f"{lb} {int(left['T'][lb][w0].sum())}" for lb in xs)
           + f"; lenses {time.time() - t0:.0f}s", flush=True)
@@ -346,7 +360,7 @@ def chain_check(bid: str, device: str, *, standing: clearings.Standing) -> None:
 # ------------------------------------------------------------------ the report
 
 def _read(kind: str) -> pd.DataFrame:
-    paths = sorted((ROWS / kind).glob("*.parquet"))
+    paths = sorted((ROWS / kind).glob("*/*.parquet"))
     return pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True) if paths else \
         pd.DataFrame()
 
@@ -363,7 +377,11 @@ def _bb(d: NDArray[np.float64], rng: np.random.Generator) -> tuple[float, float]
 def report() -> None:
     sz = pd.read_csv(BLOCKS).set_index("block")
     lens = pd.concat([_read("lenses"), _read("wlenses")], ignore_index=True)
-    homes = _read("homes")
+    long = _read("homes")
+    homes = long.pivot(index=["block", "home"], columns="clearing", values=["left", "uF"])
+    homes.columns = [f"{col[0]}_{col[1]}" for col in homes.columns]
+    base = long.drop_duplicates(["block", "home"]).set_index(["block", "home"])
+    homes = base[["share", "groundless", "u0_F"]].join(homes).reset_index()
     fair = _read("fair")
     blocks = sorted(set(lens.block))
     arms = [lb for lb in [*ARMS, "W"] if lb in set(lens.clearing)]
@@ -510,7 +528,6 @@ def main(argv: list[str]) -> None:
         for label in argv[2].split(","):
             run_arm(label, argv[1], argv[3], standing=standing)
         lenses(argv[1], argv[3], standing=standing)
-        chain_check(argv[1], argv[3], standing=standing)
     elif len(argv) == 3 and argv[0] == "lenses" and argv[2] in ("cpu", "gpu"):
         lenses(argv[1], argv[2], standing=standing)
     elif len(argv) == 3 and argv[0] == "chains" and argv[2] in ("cpu", "gpu"):
