@@ -360,7 +360,8 @@ items up front"), in the order proposed:
    clearings_check and the store (every run keyed by its metric's name), and free first for the
    road methods are on the complex. The translucent search (the tension at eps 0.05) is on the
    frontier at the cheap preset's cost (+0.010 [+0.005, +0.019] over it, 11 of 13; SIMP's default
-   still ahead), so it stays selectable and whether the cheap preset adopts it is the owner's call.
+   still ahead), so it stays selectable and whether the cheap preset adopts it is the owner's call
+   (adopted 2026-10-15: the cheap preset is the translucent search).
    Cross-checks against the raster: the road order is the raster's at Kendall tau +0.83 (+1.00 on
    the 26 blocks where B (i) ties among the methods; elsewhere enclosure decides, the shy distance
    walling in 174 homes behind gaps under 0.5 m that the raster's cells pass: the metric's choice);
@@ -620,6 +621,13 @@ can be done after we've done the entire website/README/examples revamp"):
   vehicle of width W reaches, over W (item 4, decision 3).
 
 Open:
+- **The owner's calls, in one place** (2026-10-24). Below: "Paving has no price"; "Repulsion in
+  the road builders"; "How the lineup cuts a network to a budget"; T or U ("A uniform rule for
+  walled-in homes"); the consolidated pass's (1) and (2), with the rate bracket; free first's
+  stage under the ramped D (in the first item); "A screen continued over real waves". Elsewhere:
+  pyamg's removal and the two mesh speed-ups (Infrastructure). Decided, so not listed: the
+  translucent search is the cheap preset (owner 2026-10-15), and the cheap preset takes S0.005cat
+  with the re-run (owner yes, the consolidated pass's (3)).
 - **The public package's displacement, and the methods' internal costs, onto the ramped
   destroyed area** (later: at the site revamp). The research lineup adopted the ramped destroyed
   area on 2026-10-18 (owner: "now, before the full rerun"; NOTES, "The research lineup's
@@ -691,7 +699,8 @@ Open:
     yes puts the bracket's top at its break-even, 7.9e-6 Lens A per GPU-second, a no its bottom.
   - (3) Take S0.005cat into the cheap preset (`cheap005`)? +0.0018 L_P on the 60 large blocks
     (ahead on 38, behind on 22) at 73 s against 69 s a block on one card; +0.0007 on the 220 small
-    (41 / 38) at 17 s against 14 s. Both are on the frontier.
+    (41 / 38) at 17 s against 14 s. Both are on the frontier. **Decided**: yes (owner), taken
+    with the paved-boost re-run (Status, Next).
 - **Paving has no price** (found 2026-10-22, **owner's call**): under the paved-only boost a new
   road gets 10x the open ground's conductance and 5810's own lanes (all but 2% unpaved) none, so a
   road along a lane counts as paving it: at area D 0.05 cycle_native's L_P is 0.392 under RUNTIME
@@ -703,6 +712,24 @@ Open:
   (recommended); new roads unboosted, as the lineup was; or paving existing lanes as an
   intervention, with clearing allowed to pave what it clears. The held re-run and the site's
   headline wait on it.
+- **Repulsion in the road builders** (2026-10-24, **owner's call**; NOTES, "Clutter", "Roads
+  interact as induced dipoles", "cycle_native's loops lie doubled"). ΔP greedy clutters because a
+  second road beside a built one displaces no one, so it costs nothing while P still credits it
+  (about 45% of its own gain at 10 m: the dipoles' shielding). The owner: rely on repulsion rather
+  than a paving price? Proposed: a short-range repulsion between road pieces that sees their angle
+  (r^2 / (r^2 + d^2) times cos^2 of the angle between them, r one or two road widths: crossings
+  and T-junctions free, a parallel road within a few widths dear) as the cost term of ΔP greedy
+  and the road SIMP, its weight in the run's identity, in place of the `apart` rule (which then
+  does not go into reblock.methods.cycle_native). Coulomb's own 1/d reaches far and is singular
+  where roads meet: it would charge every junction and, summed, grow as the square of the road
+  length, a paving price in disguise. Repulsion fixes the builders' form, not the score: a lone
+  road along a lane has nothing to repel, so "Paving has no price" stays open beside it.
+- **How the lineup cuts a network to a budget** (2026-10-24, **owner's call**; NOTES,
+  "cycle_native's loops lie doubled"). The lineup cuts each network at a budget in its canonical
+  (street-first) order, not in the order its method built it. For cycle_native that hides its own
+  narrow loops (road within 5 m of another: 9% of its length at area D 0.15 against 26% in build
+  order) and is worth 0.04 of L_P at D 0.10 (0.520 against 0.479). Keep the canonical cut (one
+  rule for every method) or cut in build order (each network as its method would build it).
 - **A screen continued over real waves** (the owner's call; NOTES, "Pruning by epistemetry: the
   move"). consolidated.screen_data's cost covariate for a block is the pass's default time until
   the screen runs it and the screen's own re-run of the default after, so a ledger made in waves
