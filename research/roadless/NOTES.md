@@ -9951,3 +9951,62 @@ the tree's own, as with the outline conducting; K_tree / K_looped is 1.022 / 1.0
 / 1.024 at 10x. Cut, the outline costs the tree and its loops alike: it was a shortcut for every
 network, not the loops' backbone. ΔP greedy leads at both contrasts; plain cycle_native in build
 order or 7 m apart falls below clearance_looped, level with the tree at 10x and D 0.10.
+
+### ΔP greedy: a faster step, and a screen that sees through buildings (2026-10-24)
+
+The owner's "try everything" (BACKLOG, Open): ΔP greedy's speed and its screen. On 5810's pool
+mesh (966 candidates, 13.1M triangles) an exact candidate takes 11 s on a core: SuperLU's
+factorization 5.9 s, the test of which triangle centroids lie in the merged corridor 2.0 s, the
+other conductances 1.4 s, the reach 0.4, the assembly 0.4, the solve 0.7 (peak 13 GB).
+
+* Each step's exact candidates over forked processes: step 100's twelve in 25 s on 7 against 153,
+  every drop bit for bit the serial run's.
+* CG on the candidate's system preconditioned by the present state's factor (no refactorization):
+  no. It stopped unconverged at 500 iterations, 230 s a candidate: a candidate opens thousands of
+  cells inside buildings, which the present factor does not hold.
+* cuDSS on a card (research/roadless/dp_bench.py, the run dpbench-gpu on ai03): the factorization
+  0.39 s against 5.9 (15x), the card's peak 7.4 GB, every drop the log's to 4.5e-7; but a
+  candidate 8.5 s, the host's work 7 s of it (the conductances 5.3 s on ai03's core, the reach
+  0.55, the assembly 0.77, the solve and its transfers 1.45). The card pays once that is cut:
+  a state from the candidates' stored triangles, conductances rebuilt only where a candidate
+  changes them (gap_clear; BACKLOG, "Try everything").
+
+The screen. Thomson's bound (the current held: the corridor's present power times 1 - b / max(b,
+r) per triangle, b its factor and r the road's) cannot see ground a road opens through a
+building, which carries no current: in the top-12 run's log the exact drop is 1.2 -- 4.2x it
+(q10 -- q90), and its top pick is the step's winner on 66 of 184 steps. The share of a
+candidate's corridor in buildings explains part of that (r 0.33; with length and step, R^2 0.21).
+On eight replayed steps (each step's twelve):
+
+    exact drop against      log r    winner ranked first / in the top 4 (of 8)   within-step
+                                                                                 Spearman
+    Thomson                 0.916    4 / 5                                        0.24
+    Dirichlet a = u'dL u    0.956    5 / 8                                        0.54
+    a^2 / (a + b)           0.881    4 / 6                                        0.60
+
+a holds the potential (an upper bound: dL the candidate's operator less the present one, the
+cells it opens eliminated by their Schur complement); a^2 / (a + b), b = (dL u)' A^-1 (dL u), is
+the variational lower bound with dL u as trial (exact for a rank-one change). The cheap form of a
+(DIRICHLET in dp_greedy.py: the corridor's power times max(b, r) / b - 1 on open ground, and
+through each stretch of the centreline inside a standing building a resistor, its length over
+sigma, r and the road's width, between the potentials of the cells holding its ends 1 m outside;
+a stretch with an end in a dead cell skipped) tracks a at log r 0.977 and ranks at Spearman 0.49.
+Over every open candidate (steps 20, 60, 100 and 150 of the Thomson top-12 build) its top five
+held a candidate 1.9 -- 3.6x the logged winner's drop per unit D, the same few at every step
+(8, 104 and 112, cutting through buildings to join two regions), never built in that run.
+
+Built out to D 0.15 (L_P from the steps' own log, interpolated at each D):
+
+    D                     0.01    0.02    0.03    0.05    0.075   0.10    0.125   0.15    time
+    Thomson, top 12       0.200   0.299   0.367   0.454   0.533   0.583   0.617   0.652   8.0 h
+    Thomson, top 4        0.189   0.287   0.357   0.437   0.520   0.574   0.611   0.642   3.7 h
+    Dirichlet, top 5      0.229   0.328   0.379   0.454   0.506   0.571   0.612   0.638   1.4 h
+
+The Dirichlet screen leads below D 0.03 (the connections through buildings), ties at 0.05 and
+trails by 0.01 -- 0.03 above, in 156 roads against 199: its building term sometimes overshoots
+by orders (623 at step 60: 1.6e10 against an exact 2.4e6), crowding the open ground's candidates
+out of five places once the good crossings are built. A first run read a stretch's end with no
+solved cell near as the street (potential 0) and fell behind from the start (L_P 0.285 at D
+0.062); its log is not kept. Scripts: .superpowers/sdd/2026-10-22-flow-roads/dp_greedy.py (Pick:
+`build thomson:12`, `build dirichlet:5`, `build dirichlet:3+thomson:2`), not committed; the
+earlier runs renamed dp_greedy_thomson_top{4,12}.
