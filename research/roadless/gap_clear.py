@@ -1854,6 +1854,11 @@ class Relaxation:
         incumbent's and the polish's scorer."""
         return Relaxation(self.m, self.power_, q=1.0, eps=eps)
 
+    def scorer(self, eps: float) -> Relaxation | None:
+        """relax.Incumbent's scorer at the plan's scoring eps (relax.Plan.kscore): the eps world
+        at `eps` (metric_world), or none at 0 (every candidate scored exactly, no polish)."""
+        return self.metric_world(eps) if eps > 0 else None
+
 
 # ------------------------------------------------------------------ the run's metric
 
@@ -1945,10 +1950,12 @@ def check_disjoint(name: str) -> None:
 
 
 _NUM = r"([0-9]+(?:\.[0-9]+)?(?:e-?[0-9]+)?)"
+# the name's grammar; its `walls` group a wall metric's part (gap_walls.walls_of reads those names,
+# complex_of refuses them: no optimizer runs on walls)
 _NAME = re.compile(rf"cx\+(close|shy|ramp){_NUM}(?:s{_NUM})?\+s{_NUM}r{_NUM}b{_NUM}"
                    rf"\+R{_NUM}(?:g([0-9]+)x{_NUM})?q([0-9]+)(?:k{_NUM})?"
                    rf"(?:o(-?{_NUM[1:-1]}),(-?{_NUM[1:-1]}))?(\+lumped)?(\+pockets)?"
-                   rf"\+v([0-9a-f]+){gx.SUFFIX_RE}(?:@e{_NUM})?")
+                   rf"(?P<walls>\+W[^+]+)?\+v([0-9a-f]+){gx.SUFFIX_RE}(?:@e{_NUM})?")
 
 
 def complex_of(name: str, *, factorization: gap_factor.Factorization) -> ComplexMetric:
@@ -1958,11 +1965,14 @@ def complex_of(name: str, *, factorization: gap_factor.Factorization) -> Complex
     if m is None:
         raise ValueError(f"unknown complex metric {name!r}: cx+<form><w>+s<s>r<ring>b<band>+"
                          "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped][+pockets]"
-                         "+v<code>[+x[B<line>c<cross>][E0][L[p][o<open>][b<foot>]]"
+                         "[+W<walls>]+v<code>[+x[B<line>c<cross>][E0][L[p][o<open>][b<foot>]]"
                          "[S<boost>[s<surfaces>]h<classes>]v<exits code>]"
                          "[@e<search eps>]")
     (kind, w, ramp_s, s_, ring, band, R, levels, grade, quad, sigma, ox, oy,
-     lumped, pockets, code, *exits, search) = m.groups()
+     lumped, pockets, walls, code, *exits, search) = m.groups()
+    if walls is not None:
+        raise ValueError(f"{name!r} names walls ({walls}): a wall metric, read by "
+                         "gap_walls.walls_of; no optimizer runs on it")
     if code != CODE:
         raise ValueError(f"{name!r}: code {code}, but this code's constants digest to {CODE} "
                          "(its rows are another code's)")

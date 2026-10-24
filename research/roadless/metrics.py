@@ -18,6 +18,7 @@ import gap_clear
 import gap_complex as gc
 import gap_exits as gx
 import gap_factor
+import gap_walls
 
 COMPLEX = "cx+"           # every complex metric's name starts so (gap_clear.ComplexMetric.name)
 # The per-block metric (owner 2026-10-14: the shy distance at 0.5 m on the gap complex, its Spec and
@@ -58,6 +59,17 @@ def _uniform() -> str:
 
 
 UNIFORM = _uniform()
+
+
+def walls_on_uniform(part: str, *, device: str) -> gap_walls.WallMetric:
+    """Walls that leak (gap_walls; owner 2026-10-21, NOTES "Walls that leak: every home's source
+    inside it, each wall priced as a length"): UNIFORM's mesh, leaks (on every cell open at
+    baseline) and doors (where its homes' buildings' destinations leak) with the walls `part`
+    names (`Wk<k_in>l<ell>`, `Wk<k_in>o<ell_out>i<ell_in>n<passes>`), on `device`; read back from
+    its name (gap_walls.walls_of)."""
+    metric = gap_walls.WallMetric(base=metric_of(UNIFORM, device=device),
+                                  walls=gap_walls.walls_part_of(f"+{part}"))
+    return gap_walls.walls_of(metric.name, factorization=gap_factor.factorization_of(device))
 
 
 def metric_of(token: str, *, device: str) -> gap_clear.ComplexMetric:

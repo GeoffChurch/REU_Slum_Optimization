@@ -694,6 +694,63 @@ Open:
     it open), and when its own building is among those cleared (74 of 764). Open: T or U
     (the owner asked what U's two fixes are, and whether a home's source belongs inside its
     footprint rather than on its outline's ring; 2026-10-24: "ideally U").
+- **Walls that leak** (stage 3 measured, the owner's call; owner 2026-10-21: "can't they go through
+  other buildings, just slowly?", "everyone would pay to get out of their own home", "walls be
+  (imperfect/leaky) diodes", "launch these one at a time so we can be adaptive"; NOTES, "Walls that
+  leak: every home's source inside it, each wall priced as a length"; built on
+  research/leaky-walls: gap_walls, leaky.py, leaky_check.py). Scoring only on UNIFORM's mesh, leaks
+  and doors, against T, on the 77 small walled-in blocks and five controls. First setting,
+  symmetric 200 m, k_in 1 (`Wk1l200`): open homes 91% moved by over 5% (W / T median 1.21, p10
+  0.67, p90 4.79); walled-in homes 1.97x their block's median (U: 208x), 1.2% of P0; own wall 39%
+  of an open home's escape time; through-traffic 5% from open ground, 6% from neighbours; 3.1x the
+  unknowns, 5.6x the time. Second, the diode out 10 m, in 1,000 m (`Wk1o10i1000n64`): open homes'
+  ranks kept better (Spearman by block median 0.93 against 0.91) but P0 halved (0.52x T's, below on
+  every block); walled-in homes 2.8x the median (max 11.5x), 1.6% of P0; own wall 14%; 8 passes a
+  solve (max 11), 82x T's time. Third, out 10 m, in 10,000 m (`Wk1o10i10000n64`): the entry price
+  sets the walled-in homes' exchange rate (9.8x the median, p90 30x, max 82x; 20% of J_2,0, 97% at
+  most; the 11 homes with no open ground 1.4x the pocket homes' median) while the open homes barely
+  move between the diodes (Spearman 0.93, P0 0.62x T's); 9 passes a solve (max 13), 97x T's time.
+  Fourth, out 100 m, in 3,000 m (`Wk1o100i3000n64`): P0 0.92x T's, open homes centred on T's (W / T
+  median 0.99), Spearman 0.937; walled-in homes 3.9x the median (p90 7.3x, max 14x), 2.1% of P0,
+  4.8% of J_2,0; own wall 31%; 6 passes a solve, 65x T's time. The owner's question whether the
+  exit price is a uniform shift of P (single clearings, six small blocks): no; clearing a home
+  frees its own residents from its own wall, so the exit price reweights the gains (std of the A -
+  B shift 7.3x B's; Spearman of dP / D, symmetric 3,000 m against the 10 m diode 0.63, against
+  setting 4 0.74); symmetric walls would change which buildings are cleared. Every W setting ranks
+  the clearings that free walled-in homes at the top (T does not). The warm start built
+  (gap_walls.WarmStart: 9 passes a solve to 5). Worse or just different (the owner): symmetric
+  walls at the entry price (3,000 m) somewhat worse (its greedy clearings lose 17% and 10% under
+  the diodes' metrics, theirs 5 -- 7% under its; 14% of its top gains spare a demolished home's
+  residents their walls); symmetric 200 m not worse there (its clearings lose about 0 under the
+  diodes'), at a tenth of the cost, but a lower walled-in toll and more people left walled in;
+  greedy over single gains crude (joint gain 0.44 of the singles' sum), so SIMP under each would
+  settle it. A symmetric price in between: 1,000 m (`Wk1l1000`) frees like the diodes (29 of 102
+  left walled in, B 33, C 31) and is not shown worse on regret (its clearing loses 0.7% under C's
+  metric, 5.6% under B's; theirs 0.7% and -0.5% under its), at a fifth of B's scoring time; it
+  gives up B's walled-in toll (3.9x the block median against 27x) and B's ranking of the others'
+  gains (Spearman 0.76). The owner's default: symmetric 1,000 m. Stage 2, SIMP under the walls
+  (gap_walls.WallRelaxation: every element's W values multilinear in its owners' cleared densities,
+  the conductance linear as SIMP's own form, W bit for bit at 0/1; an obtuse exit's resistance so;
+  the adjoint gradient; the diode warm from the last design; leaky_simp.py, leaky_check's relax-*
+  guards): SIMP's default `.f0` under Wk1l1000 (S10) on the 82 blocks and under diode B on 20,
+  against T's stored arm. On the 20 S10 and B are different, not worse: each clearing gives up
+  about a tenth of the other's gain under the other's metric (S10 under B's L_P -0.032 [-0.039,
+  -0.024], B under S10's -0.024 [-0.037, -0.015]), and S10 leaves fewer walled in (11 homes against
+  15; T 0). On the 82 S10's clearing loses 0.075 L_P under T's metric (behind on 77) and leads by
+  0.022 under its own (ahead on 70); it leaves 48 of 327 walled-in homes on 17 blocks (T none: free
+  first). SIMP is weak under W (its last iterate grey, median 0.34 under S10; the polish keeps no
+  move on 58 of 82). Stage 3, an optimizer fit for the walls (walls_greedy.py: a greedy over W's
+  exact gains per unit D; CELF parted from the full greedy on all seven pilot blocks it was checked
+  on, so GxLr10, CELF with every candidate within 10 m of a building taken re-scored, which takes
+  the full greedy's choices on four of seven and is within its L_P on the rest at a fraction of its
+  ~n^3 cost; SIMP with a projection or q to 5 no better than its default): on a pilot of 10 GxLr10
+  led W's own L_P (+0.016 over SIMP's default) and freed the most. Run on the 82 and B's 20: S10
+  and B stay different, not worse (S10's clearing 0.036 L_P short under B's metric on all 20, B's
+  0.026 short under S10's on all 20, a tie under T's) and the symmetric wall leaves fewer walled in
+  (4 homes against 11; T 0); against T on the 82 the walls' clearing loses 0.050 L_P under T's
+  metric (11%) and leads by 0.034 under its own, leaving 27 of 327 walled-in homes (SIMP's default
+  48). Next: the owner's call (W with GxLr10 as the walls' default, or T); a leaks-in-interiors
+  variant later.
 - **The rate bracket** (`consolidated.RATES_PER_GPU_SECOND`, 2e-6 -- 1.9e-5 Lens A per GPU-second).
   A screen whose call turns on the rate prints an "ask" (this much Lens A for this much more
   time?); the owner's answer moves an end of the bracket to that screen's break-even rate

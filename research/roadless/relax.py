@@ -39,6 +39,12 @@ from the held buildings as polish_greedy's greedy does (since the consolidated p
 never moving them. fw and .m are not built for held buildings: a block whose free stage holds any
 raises.
 
+`one` also runs under walls that leak (gap_walls.WallMetric, its model gap_walls.WallModel and its
+relaxation gap_walls.WallRelaxation: NOTES, "Walls that leak", stage 2), called with that metric
+(leaky_simp.py): W's relaxation is W itself at every 0/1 clearing, so its plan names no eps world
+(no `.e`, no `s`: refused), its every rounding scored by W and its polish ranked by W's gradient at
+q 1; W runs no free first (`.f0`: its walled-in homes have demand inside their walls).
+
 plan: fw<FW iterations, 0 = start SIMP from uniform x>.q<final q>.i<OC updates per q>, e.g.
 fw0.q3.i10; the optional suffixes are Plan's (.e .b .k[s] .r[l] .p .w .m .g .G .u .f0). (The raster's
 coarse plans, `.c` and `.C`, its grids, `.h`, `.a` and `.g<d0>x<smax>...`, and its solve
@@ -67,6 +73,7 @@ from clear import EPS, rows_dir  # noqa: E402
 
 if TYPE_CHECKING:
     import gap_clear    # gap_clear imports this module at run time
+    import gap_walls    # ... and gap_walls too
 
 D_LENS = 0.05          # Lens A's budget (owner, 2026-10-03: 0.10 saturates under sightline)
 OUT = HERE / "relax_rows"
@@ -477,7 +484,8 @@ class Incumbent:
     the rounding of update 3 scores 0.810 and the last 0.012, the gate and its neighbours, being
     substitutes, flipping between x 0.3 and 0.5 until the continuation drops them (NOTES)."""
 
-    def __init__(self, rel: gap_clear.Relaxation, budget: float, every: int, *, samples: int,
+    def __init__(self, rel: gap_clear.Relaxation | gap_walls.WallRelaxation, budget: float,
+                 every: int, *, samples: int,
                  sample_in: tuple[tuple[float, float], ...],
                  first: np.ndarray | None = None, score_eps: float = 0.0):
         self.rel, self.budget, self.every, self.first = rel, budget, every, first
@@ -485,9 +493,11 @@ class Incumbent:
         # rounded that many times at random
         self.samples, self.sample_in = samples, sample_in
         self.rng = np.random.default_rng(SAMPLE_SEED)
-        # score_eps > 0: candidates scored in the eps world at score_eps under the METRIC
-        # conductance (rel may optimize under a search one), q 1, no projection
-        self.scorer = rel.metric_world(score_eps) if score_eps > 0 else None
+        # the relaxation's scorer at score_eps (its `scorer`): T's eps world at score_eps > 0
+        # under the METRIC conductance (rel may optimize under a search one), q 1, no
+        # projection, or None (every candidate scored exactly, no polish); W's relaxation itself
+        # at q 1 (W at every 0/1 clearing: gap_walls.WallRelaxation.scorer)
+        self.scorer = rel.scorer(score_eps)
         self.n = 0
         self.J, self.r = np.inf, np.zeros(rel.c.n)
         self._seen: set[bytes] = set()
@@ -563,7 +573,7 @@ class Incumbent:
             f"{moves} moves kept, {used} scorings, J {J0:.6g} -> {self.J:.6g}")
 
 
-def simp(rel: gap_clear.Relaxation, x0: np.ndarray, budget: float,
+def simp(rel: gap_clear.Relaxation | gap_walls.WallRelaxation, x0: np.ndarray, budget: float,
          stages: tuple[tuple[float, float], ...], iters: int, update: Update, log=print,
          xlo: np.ndarray | None = None, watch=None) -> np.ndarray:
     """SIMP continuation from x0: for (q, beta) in stages, up to `iters` updates by `update`
@@ -615,8 +625,8 @@ def built_for_holds(plan: Plan) -> bool:
     return plan.fw == 0 and plan.starts <= 1
 
 
-def one(bid: str, power: float, metric: gap_clear.ComplexMetric, plan: Plan, budget: float, *,
-        demand: common.Demand) -> dict:
+def one(bid: str, power: float, metric: gap_clear.ComplexMetric | gap_walls.WallMetric,
+        plan: Plan, budget: float, *, demand: common.Demand) -> dict:
     """SIMP at one budget on `bid` under `metric`, J_power under `demand` (common.Demand: J_1 is
     P_q under a common.PriorityDemand), the cost the area population's."""
     [b] = common.build_blocks([bid])

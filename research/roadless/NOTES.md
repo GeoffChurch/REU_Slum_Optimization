@@ -8695,6 +8695,654 @@ each rebuild), peak RSS 41 GB (1182), at most 6 processes and then 4 (the contro
 `pockets` 3.0 process-h; the guards about 12.5 process-h, 9.5 of them the free-roads guard's (both
 ways twice, the second time with its barrier check).
 
+### Walls that leak: every home's source inside it, each wall priced as a length (owner 2026-10-21)
+
+**The question.** On the uniform rule's walled-in homes the owner asked: "can't they go through
+other buildings, just slowly? This is actually more realistic than it sounds, since nobody is
+actually blocked in in a slum"; "What if the interior of a building conducts at some rate that we
+can set to match that of open ground ... and the boundary has higher resistance?"; "everyone
+would pay to get out of their own home" (trips starting on a moat outside the walls rejected: it
+ignores the walk across a large building's interior); "A middle-ground could have walls be
+(imperfect/leaky) diodes"; "we should launch these one at a time so we can be adaptive". The
+brief and its rulings: .superpowers/sdd/2026-10-21-leaky-walls (progress.md).
+
+**The model (W)**, gap_walls.py: an option beside T (gap_clear.Model untouched), scoring only (the
+baseline and any 0/1 clearing on the base metric's fixed mesh: UNIFORM's mesh, leaks, doors and
+B (i)); no optimizer, SIMP's interpolation of a partly cleared building's walls being stage 2.
+- Each standing building owns its grown footprint, the faces within w / 2 of it (FullMesh.fzone:
+  its footprint, its shy zone, a gap narrower than w that two zones close). A triangle is inside
+  the set S of standing buildings whose grown footprint holds it, open with none: exactly T's open
+  ground.
+- Interiors conduct k_in times open ground (no street boost: a building is no street). k_in is at
+  most 1, so clearing never slows the ground and P stays monotone.
+- A passage from triangle a to b with S(a) != S(b) leaves S(a) less S(b) and enters S(b) less
+  S(a), costing c = ell_out [it leaves one] + ell_in [it enters one], and conducts 1 / (1 / T_e +
+  c / (sigma |e|)), T_e what it conducts with no wall: sigma |e| / (d_e + c) at factor 1. Open
+  ground into a building ell_in, out ell_out; a party wall (S(a) = {A}, S(b) = {B}: two grown
+  footprints meeting in a line) ell_out + ell_in both ways, a linear resistor; two buildings closer
+  than w share a zone, crossed in two steps of ell_in and ell_out, the same total each way.
+- An inside triangle's street face is its building's wall onto the street (c = ell_out: the
+  potential is never negative, so its current only leaves); an inside obtuse exit (gap_clear's
+  ground cell) conducts sigma |f| / ell_out and is no ground. 64 of the 82 blocks below have
+  inside street faces (25,126 in all), 333 inside obtuse exits.
+- A cleared building is open ground: no walls, its interior and zone the metric's open ground.
+- Every home's source is inside it: its population over its own footprint's triangles (its cover,
+  not its zone) by area, its escape time the injection-weighted mean potential there. Every home
+  has demand but one whose footprint lies wholly outside the meshed region (5618's home 209, under
+  the railway's cut: no interior triangle, so no source, out of P).
+- The leaks are UNIFORM's to the cell: the open ground's on every cell open at baseline, the
+  sealed pockets among them, and each building's destination at its doors (where U's placement
+  puts its home's points, on open ground). Interiors leak nothing (the leaks-in-interiors variant
+  is a later run).
+- B (i) is the base model's: the street's reach through open ground only, never through a wall.
+- The solve is a Strategy resolved where the name is read: SymmetricWalls (ell_out == ell_in, one
+  factorization a state) or DiodeWalls (an active-set loop: each wall passage's side guessed out
+  of its building first, solved, sides taken from the currents' signs, the same pattern refactored
+  until none changes; a passage within SIDE_REL 1e-12 of the largest potential keeps its side;
+  unsettled within the cap its name carries, it raises; the passes recorded per solve).
+- The name: `+Wk<k_in>l<ell>` (symmetric) or `+Wk<k_in>o<ell_out>i<ell_in>n<cap>` after the
+  placement's part, in gap_clear's grammar (_NAME's `walls` group), which complex_of refuses (no
+  optimizer runs W unawares) and gap_walls.walls_of reads back. No constant of gap_clear's
+  modules changed: CODE 34d40e8a and every cached mesh's key stand. Runner leaky.py (block,
+  report; rows leaky_rows/<setting>/, parquet ignored), guards leaky_check.py. (walls.py was the
+  2026-10-11 study's, deleted at 9e10bbf; the new files are named apart.)
+
+    the first setting: cx+shy0.5+s0.125r1b1+R0.5g4x2q4+pockets+Wk1l200+v34d40e8a+xB8c3Lpo6214b562S10spavedh<classes>v65531d75
+
+**Rulings** (how the existing pieces meet W).
+- The shy zone and the closed narrow gaps belong to the building's interior: the wall sits on the
+  grown footprint's outline, where T's open ground begins, so T's open ground and its passable
+  width are untouched (a lane still conducts W - w). The other readings fail: the zone kept as
+  today (closed) seals every source in; a wall on the footprint's own outline needs the zone to
+  conduct as open ground, which widens every lane by w.
+- The street band: an inside street face is a wall onto the street (above).
+- Road prefixes: W refuses a carved mesh; T's road code is untouched.
+- W's sources are not a gap_clear.Placement: the Fixed's placement also seats the buildings'
+  destinations (the leak's foot reads its points), which this run keeps on open ground at the
+  doors; points placed inside would drop those leaks (OpenSites has no interior) or need a second
+  cached demand (a cache format change, re-keying every mesh). W keeps U's placement for the doors
+  and U's cached meshes, and injects inside by its own rule (WallModel.sources).
+
+**Guards** (leaky_check.py, each both ways; its walls SYM, ell 200 m, and DIODE, out 50 m, in
+300 m, k_in 1). `direction` (a strip 60 x 12 m, its east edge the street, a building B across it
+between two alleys, a home H in the west one): the current through each wall group from the
+potentials and the definition alone (sigma |e| / (d_e + c), c ell_in entering and ell_out leaving)
+equals conservation's: H's wall out 0.2353 of 0.2353 (its residents pay ell_out), B's west wall in
+0.2353 and its east wall out 2 of 2 (through-current pays ell_in + ell_out), the diode in 2
+passes; fault `in-out-swapped`: 1.40, 0.039 and 11.9. `party` (buildings A and B w apart across a
+strip, the street east, then west): 80 party passages carry 1 and -1 toward B at ell_out + ell_in;
+fault `one-side` (a party passage charged ell_out alone one way): 0.143 of 1. `settles` (the
+direction block, 19570): every asymmetric wall passage on its current's side after 2 and 6 passes;
+fault `one-pass`: 96 of 352 and 24,038 of 68,212 off it. `energy` (the direction block, 19570, each
+walls, the baseline and a random clearing): P = q . u against the dissipation under the
+current-voltage curve (each passage at its current's side's conductance, not the solver's record)
+3e-12 -- 1.7e-10 apart, every unknown cell's imbalance at most 9.6e-11 of the largest current
+through a cell; fault `wrong-side` (one wall passage settled on the wrong side): 5.4e-3 and
+2.7e-2 apart on the direction block, the loop unsettled on 19570. `monotone` (19570, three orders
+of eight buildings cleared one by one, each walls): P never rises (largest step -6e-5 -- -1.3e-3);
+fault `cleared-slow` (a cleared building's ground at 1e-3): +7.9e-3 and +1.5e-2. `walled-count`
+(20269, 23597): the walled-in homes a clearing leaves read the same under W as under T at the
+baseline, three single clearings, two random ones and T's free first (1 and 6 at baseline, 0
+after free first); fault `through-walls` (B (i) from W's own reach). `sources` (19570, 20269,
+23597): every home's sources on its own footprint by area against a shapely oracle (centroids
+within its polygon) to 8e-8 -- 1.8e-7 of its population (tolerance 1e-6: slivers within the
+linework's snap read either side by a centroid), every source cell an unknown, no home without
+demand; fault `doors` (the sources at the base's demand points: W's own baseline check refuses
+them, on open obtuse exits). `walls-identity`: 12 names on UNIFORM, RUNTIME and the
+per-block metric read back, complex_of refuses each, walls_of refuses a name without walls, a
+diode of equal lengths, a k_in over 1 and a zero wall are refused, gap_walls's constants are
+SIDE_REL alone; fault `part-dropped`. gap_clear_check's guards that touch the mesh, demand, leaks
+or identity, as expected both ways at this code: enclosure, leak-assembly, exits-identity,
+identity, constants (28, 34d40e8a), baseline, uniform-control, pocket-escape, pocket-count, faces,
+flux (`roads` needs the main checkout's road_rows: not run).
+
+**The first setting: symmetric, ell_in = ell_out = 200 m, k_in 1, leaks on open ground**
+(`Wk1l200`; leaky_rows/Wk1l200/summary_{blocks,groups}.csv). The 77 small blocks with walled-in
+homes (17,107 homes, 327 walled in) and the uniform rule's five controls (small 20954, 41940,
+41779; large 8152, 20023: 2,670 homes), at baseline, against T (RUNTIME).
+1. Open homes (connected under T at baseline, 19,449): 91.4% move by more than 5% from T's escape
+   time (by block a median 94%, 68% -- 99%; controls 94%). The ratio W / T: median 1.21, p10 0.67,
+   p90 4.79 (walled-in blocks 1.16, 0.65, 5.01; controls 1.38, 1.05, 3.62); 62% rise by more than
+   5% and 29% fall. A block's P0 is a median 1.09x T's (T's over the homes it scores; 0.40 --
+   1.98, below T's on 36 of 82), J_2,0 0.74x (0.04 -- 2.94).
+2. Walled-in homes (327): their escape time is a median 1.97x their block's median home (p90 2.88,
+   max 3.95); under U a median 208x (its 121 blocks).
+3. They hold a median 1.2% of W's P0 (35% at most, 63718: 77 walled-in homes) and 1.7% of J_2,0
+   (46% at most); under U a median 44% and 98%.
+4. A home's own wall carries a median 39% of an open home's escape time (p90 84%), 15% of a
+   walled-in home's (p90 27%): a walled-in home's trip is long after its own wall.
+5. Through-traffic: the current entering buildings from open ground is a median 5.2% of the
+   current injected (pooled 6.4%; controls 0.8%; 41% on 63718), and from another building (a party
+   wall, or a zone two buildings share) 6.0% more (pooled 7.0%). The walls dissipate a median 51%
+   of P0, the interiors 0.8%.
+6. Cost: the system's unknowns are a median 3.1x T's (1.8x -- 7.8x; small blocks 75 k -> 245 k at
+   the median; the large controls 1.08 M -> 1.98 M and 1.83 M -> 3.90 M), the baseline's scoring
+   (the state, the factorization, P's and P_{1/2}'s solves) a median 5.6x T's time (14x at most;
+   0.10 s -> 0.57 s on a small block, 3.9 s -> 13.6 s on 8152); one factorization, one pass (the
+   symmetric walls are linear). The energy identity held on every block to 2.5e-10.
+
+**What the first setting says.** At 200 m the walls do not act as the brief's "about 400 m of
+walking" for anyone but a lone walker: a wall's length is per unit of its width, and a home's
+whole outline conducts in parallel, so a 26 m outline at 200 m conducts sigma 26 / 200, what about
+4 m of a lane 0.5 m wide past the shy distance conducts. With every home's own interior a wide
+conductor at k_in 1 (its current crosses it toward the street side before leaving) and the
+neighbours' interiors a way round the alleys' contention, W's escape times sit near T's in level
+(P0 1.09x at the median) but not home for home: the source moved inside and the toll every home
+pays at its own wall reorder them (the open home nearest the street pays most relative to T). The
+walled-in homes are no longer outliers (2x the median, not U's 208x; 1.2% of P0, not 44%): the
+leaky walls answer "nobody is actually blocked in". A check that the machinery is T's where no
+current crosses a wall (41940, ell 100 km): the potential on the open ground just outside each
+home's walls is T's escape time to a median 1.03 (p10 0.95, p90 1.27).
+
+**Beside the setting** (four small blocks, 19570, 41940, 38486, 63718; diagnostics, not settings,
+for the next choice). Symmetric ell 1,000 -- 30,000 m: P0 1.7 -- 4.7x T's at 1,000, 10 -- 38x at
+10,000; the open homes move by more than 5% at every length (91 -- 100%); the walled-in homes
+stay within 0.7 -- 4x of the median (the own wall is a toll on every home alike, and grows with
+ell as theirs does); the own wall's share of an open home's escape time 0.56 -- 0.76 at 1,000,
+0.88 -- 0.95 at 30,000. Diodes, out 10 or 50 m and in 1,000 or 10,000 m: 6 -- 13 passes; the open
+homes' escape times fall below T's (median 0.23 -- 0.90 of T's: a home leaves cheaply through its
+own wide interior), still more than 5% off on 90 -- 100%; the walled-in homes 0.8 -- 11x the
+median at in 1,000 m and 1.6 -- 79x at in 10,000 m (38486's courtyard, its way out through
+neighbours).
+
+**Compute.** Here, single-threaded, at most 2 processes: the 82 blocks 0.29 process-h (the two
+large controls 0.17 of it, meshing T's and U's afresh: they ran on the cluster in the uniform
+study; the small blocks' meshes were the uniform study's, hard-linked), peak RSS 7.6 GB (8152);
+the guards about 2 process-h; the diagnostics 0.2.
+
+**Four more measures** (the controller's, for the second setting on: the >5% measure no longer
+parts settings), leaky.py's report: (7) the open homes' rank agreement with T, Spearman's
+correlation of their escape times under W and under T, by block; (8) P0 under W over T's, by
+block; (9) the walls' dissipation split by the way the current crosses: outward (out of a
+building onto open ground, the inside street faces among it), inward (into one from open ground),
+party (building to building: a party wall proper never occurs on a real block, two buildings
+crossing through a shared zone in two one-way steps, so a wall passage inside on both sides is
+party); (10) the diode's passes per solve. Both settings re-run for (9) (the first's other numbers
+the same). The first setting's: (7) median 0.914, p10 0.732, min 0.663 (43874); (8) median 1.09,
+p10 0.68, p90 1.55; (9) outward 44% of P0 (pooled 40%), inward 1.1% (2.0%), party 3.2% (4.1%).
+
+**The second setting: a diode, ell_out 10 m, ell_in 1,000 m, k_in 1, cap 64**
+(`Wk1o10i1000n64`; the controller's pick of the first report's suggestion: cheap to leave one's
+own home, dear to cut through another's; leaky_rows/Wk1o10i1000n64/summary_{blocks,groups}.csv).
+The same 82 blocks.
+1. Open homes: 97.6% move by more than 5% (by block 92% -- 100%), now mostly down: W / T median
+   0.63, p10 0.30, p90 0.99 (89% fall by more than 5%, 9% rise).
+2. Walled-in homes: a median 2.8x their block's median home (p90 5.8, max 11.5).
+3. They hold a median 1.6% of P0 (43% at most, 63718) and 2.6% of J_2,0 (55% at most).
+4. Own wall: a median 14% of an open home's escape time (p90 75%), 16% of a walled-in home's (p90
+   53%).
+5. Through-traffic: 7.4% of the current enters buildings from open ground (pooled 8.8%), 2.7% from
+   another building (3.3%). The walls dissipate a median 21% of P0, the interiors 3.7%.
+6. Cost: unknowns as the first setting's (3.1x T's); the baseline's scoring a median 82x T's time
+   (256x at most; 0.10 s -> 8.8 s on a small block, 3.9 s -> 176 s on 8152): each of P's and
+   P_{1/2}'s solves loops on its own, every pass a factorization.
+7. Rank agreement with T: Spearman median 0.926, p10 0.861, min 0.744 (43817), higher than the
+   first setting's at every quantile.
+8. P0 W / T: median 0.52, p10 0.35, p90 0.66; below T's on all 82 blocks (0.15 -- 0.88).
+9. Walls: outward 10% of P0 (pooled 8.3%), inward 6.8% (9.1%), party 2.6% (4.0%).
+10. Passes per solve: median 8, max 11 (164 solves: 6 -- 11); no block reached the cap of 64.
+Against the first setting: leaving one's home now costs little (own wall 14% of an open home's
+escape time, not 39%) and the homes keep T's order better (Spearman 0.93 against 0.91), but P0
+halves: with exits cheap, each home's own interior at k_in 1 is a wide way to its best side, and
+the open homes' escape times fall below T's on 89% of them. The walled-in homes' toll rises (2.8x
+the median, not 2.0x; up to 11.5x) as the dearer entry makes their way through neighbours cost
+more, and through-traffic shifts from neighbour-to-neighbour (2.7%, not 6.0%) to open ground into
+a building (7.4%, not 5.2%). The diode costs 15x the symmetric setting's scoring time.
+
+**Beside the second setting** (19570, 41940, 38486, 63718; diagnostics, not settings): k_in is a
+small lever under this diode. At k_in 0.3 and 0.1 P0 W / T rises from 0.18 -- 0.88 to 0.21 --
+0.93 and 0.29 -- 1.05, the open homes' median W / T from 0.23 -- 0.63 to 0.33 -- 0.83, Spearman
+moves by at most 0.02, and the walled-in homes' toll against the median falls (38486's courtyard
+from 11x to 7.6x: the median home slows more than they do).
+
+**Compute, the second setting** (here, 2 processes): its 82 blocks twice (once more for (9)), 0.7
+process-h each pass; the first setting's re-run 0.16; the diagnostics 0.15.
+
+**The third setting: a diode, ell_out 10 m, ell_in 10,000 m, k_in 1, cap 64**
+(`Wk1o10i10000n64`; the second report's suggestion, the controller's pick: the entry price the one
+knob of the walled-in homes' exchange rate; leaky_rows/Wk1o10i10000n64/). The same 82 blocks, all
+82 settled (no block at the cap). Its ten measures beside the other settings' are in the fourth
+setting's table below.
+
+The walled-in homes by situation (U's placement, leaky.py `placement`): 316 have open ground in a
+pocket, 11 (on 8 blocks) none within ring_m, their only ways out into neighbours (their multiples
+of the block median by setting in the table below, line 2b). The entry price acts on both, since a
+pocket's one way to the street is also into a building; the no-ground homes pay it straight from
+their own walls and on 10,000 m lie 1.4x the pocket homes at the median and 2.8x at p90.
+
+What the third setting says: the entry price sets the walled-in homes' exchange rate (median 2.0x,
+2.8x, 9.8x the block median across the three settings; J_2,0's share 1.6%, 2.6%, 20%, 97% at most
+on 44837) while the open homes barely move between the diodes (Spearman 0.926 and 0.927; P0 W / T
+0.52 and 0.62, through-traffic now 1.5% from open ground): the open homes' level is set by the
+exit price and the sources inside (P0 1.09x at 200 m symmetric, 0.52 -- 0.62x at 10 m out). Its
+cost: 9 passes a solve (7 -- 13), 97x T's scoring time (12 s on a small block, 176 s on 8152).
+
+**Compute, the third setting** (here, 2 processes): its 82 blocks 0.86 process-h; U's placement
+rows 0.05.
+
+**The fourth setting: a diode, ell_out 100 m, ell_in 3,000 m, k_in 1, cap 64**
+(`Wk1o100i3000n64`; the third report's suggestion, the controller's pick: an exit price between
+the symmetric 200 m's level and the 10 m diodes', an entry price between their walled-in tolls;
+leaky_rows/Wk1o100i3000n64/). The same 82 blocks, all settled (no block at the cap). The ten
+measures of the four settings (all 82 blocks; the walled-in homes' rows on the 77):
+
+                                  sym 200 m       o10 i1,000      o10 i10,000     o100 i3,000
+    1  open moved > 5%            91.4%           97.6%           97.3%           88.0%
+       W / T med (p10, p90)       1.21 (.67,4.8)  .63 (.30,.99)   .68 (.30,.99)   .99 (.62,2.8)
+    2  walled-in / block median   1.97, 2.88,     2.83, 5.80,     9.85, 30.0,     3.93, 7.34,
+       (med, p90, max)            3.95            11.5            82.4            14.2
+    2b pocket (316): med, p90     1.96, 2.87      2.82, 5.77      9.82, 29.1      3.92, 7.10
+       no ground (11): med, p90   2.30, 3.62      3.35, 10.8      13.9, 81.5      4.24, 14.2
+    3  share of P0: med, max      1.1%, 35%       1.6%, 43%       4.7%, 64%       2.1%, 49%
+       of J_2,0: med, max         1.6%, 46%       2.6%, 55%       20%, 97%        4.8%, 66%
+    4  own wall, open: med, p90   39%, 84%        14%, 75%        12%, 74%        31%, 83%
+       walled-in: med, p90        15%, 27%        16%, 53%        27%, 69%        21%, 50%
+    5  entering from open, bldg   5.2%, 6.0%      7.4%, 2.7%      1.5%, 0.5%      2.1%, 1.5%
+       walls, interiors (of P0)   51%, 0.8%       21%, 3.7%       17%, 2.7%       37%, 1.1%
+    6  unknowns, time x T (med)   3.1, 5.7        3.1, 82         3.1, 97         3.1, 65
+    7  Spearman med, p10, min     .914,.732,.663  .926,.861,.744  .927,.855,.758  .937,.813,.765
+    8  P0 W / T med (p10, p90)    1.09 (.68,1.55) .52 (.35,.66)   .62 (.45,.85)   .92 (.62,1.20)
+    9  walls out/in/party, med    44/1.1/3.2%     10/6.8/2.6%     8.3/4.2/1.9%    32/2.3/1.9%
+       ... pooled                 40/2.0/4.1%     8.3/9.1/4.0%    5.7/9.3/6.2%    26/4.4/3.8%
+    10 passes per solve med, max  1, 1            8, 11           9, 13           6, 9
+
+What the fourth setting says: the two prices land where the first three put them. P0 is 0.92x T's
+at the median (between the symmetric 1.09x and the 10 m diodes' 0.52 -- 0.62x; below T's on 55 of
+82 blocks, 0.31 -- 1.67x), the open homes' W / T centred on 1 (median 0.99, 43% up and 45% down by
+more than 5%: 88% moved, the fewest of the four), their order the closest to T's at the median
+(Spearman 0.937, though its p10, 0.813, is under the 10 m diodes'). The walled-in homes sit at 3.9x
+the block median (p90 7.3x, max 14.2x on a no-ground home), 2.1% of P0 and 4.8% of J_2,0 (66% at
+most): clearly worse than their neighbours, over half of a block's J_2,0 only on 63718 (66%) and
+44837 (56%), of its P0 on none. The own wall takes 31% of an open home's escape time. Its cost: 6
+passes a solve (5 -- 9), 65x T's scoring time (7.7 s on a small block, 176 s on 8152).
+
+**Compute, the fourth setting** (here, 2 processes): its 82 blocks 0.70 process-h.
+
+**Does the exit price shift P uniformly?** (owner 2026-10-21: "if the current sources are always
+the interiors of buildings, isn't the effect of varying the egress resistance (close to) a uniform
+shift in total power dissipation P? If so, why not just use symmetric walls since it would, I'd
+guess, not change which buildings are cleared?"). Tested on single-building clearings at baseline
+(leaky_single.py; rows leaky_rows/single/, summary_{pairs,shift,drivers,frees}.csv): on six small
+walled-in blocks (19570, 41940, 38486, 63718, and 44837 and 21622, which with 63718 hold homes with
+no open ground within ring_m; 1,282 buildings), each building j cleared alone, dP_j = P0 - P(j
+cleared) and dP_j / D_j (D_j its population share, the metric's cost) under A `Wk1l3000`
+(symmetric at setting 4's entry price), B `Wk1o10i3000n64`, C `Wk1o100i3000n64` (setting 4), S1
+`Wk1l200` and T (RUNTIME). Medians over the six blocks (min -- max):
+1. Spearman of dP_j / D_j: A-B 0.63 (0.46 -- 0.85), A-C 0.74 (0.69 -- 0.88), B-C 0.96 (0.91 --
+   0.99); against T: A 0.21 (-0.03 -- 0.78), B 0.47, C 0.45, S1 0.46. Top-10 Jaccard: A-B 0.43,
+   A-C 0.60, B-C 0.82; each against T 0.00 -- 0.18. Top 5%: A-B 0.39, A-C 0.53, B-C 0.78.
+2. The shift is not uniform: std_j[dP_j(A) - dP_j(B)] / std_j[dP_j(B)] is 7.3 (3.4 -- 17; the exit
+   price from 10 m to 3,000 m moves the gains seven times more than they spread under B); C against
+   B 0.35 (0.23 -- 1.15), S1 against B 0.65.
+3. What drives it: clearing j frees its own residents from their own wall, a toll that scales with
+   the exit price and with j's population over its outline. The shift dP_j(A) - dP_j(B) follows
+   the difference of j's own-wall dissipation at baseline (Spearman 0.90, 0.79 -- 0.96; C - B
+   0.84) more than the frontage its clearing opens to its neighbours (0.73; C - B 0.52); under A
+   j's own wall is a median 24% -- 66% of its gain by block. The exit price is not a constant
+   added to every home: a clearing removes the cleared home's share of it.
+4. The clearings that free walled-in homes (178 of the 1,282, on five blocks): in the top 10 by
+   dP_j / D_j, summed over the blocks, A 35, B 32, C 32, S1 18, T 1; in the top 5% (65 places) A
+   41, B 37, C 38, S1 24, T 2; their best rank 1 or 2 on four of the five walled-in blocks under
+   A, B and C (7 or 8 on 19570; 8 -- 44 under T, which gives a walled-in home no demand).
+So symmetric walls would change which buildings are cleared: against setting 4 (C), A's top 10 has
+a Jaccard of 0.60 (its top 5% 0.53), and it agrees with T least of all (Spearman 0.21). The entry
+price fixed, the exit price decides how much a clearing is worth to the cleared home's own
+residents.
+
+**The warm start** (owner 2026-10-21: yes; gap_walls.WarmStart, a Strategy of WallModel in no name:
+the loop settles on the state's one solution from any start). Every state after the baseline
+starts each wall passage on the baseline's P solve's side. On 19570's diode B, 30 single
+clearings: 9 passes a solve cold (max 12), 5 warm (max 10), half the time, P bit for bit. In the
+test above: B 5 passes (max 12), C 4 (max 9). `settles` both ways from each start (19570: 6 passes
+at baseline; a random clearing 4 warm, 6 cold).
+
+**Compute** (here, 2 processes): the six blocks 3.65 process-h (63718 1.87 h: B and C 81% of it),
+the warm start's test and `settles` 0.15, over the ~3 asked.
+
+**Worse, or just different?** (owner 2026-10-21: "Symmetric walls might not be equivalent, but
+are they *worse*? Or just different? ... we would hopefully be able to default to the symmetric
+case if it's not worse"; the diode costs about 10x the symmetric walls' scoring, 5x warm.)
+leaky_split.py on the same blocks and settings (rows leaky_rows/single/{decomp,regret}/,
+summary_{split,split_pairs,regret,left}.csv).
+1. Each single clearing's gain split exactly, dP_j = self_j + others_j, self_j = pop_j (u_j,0 -
+   u_j,j): the cleared home's own residents (the metric keeps their demand: their escape time
+   falls to what the open ground they are left on gives, they are not removed). Over the top 10 by
+   dP_j / D_j, self is a median 14% of the gain under A (3% -- 26% by block), 12.5% under S1, 5%
+   under C, -1% under B (its residents lose a little: their footprint becomes a way through for
+   others) and 4% under T; over the top 5% the same. So A's gains are mostly others' too, and
+   others_j / D_j ranks differently as well: Spearman A-B 0.66 (0.54 -- 0.74), A-C 0.77, B-C
+   0.95, B-S1 0.89, C-S1 0.97; against T 0.24 (A), 0.46 (B), 0.43 (C), 0.47 (S1). A's difference
+   is partly the displaced residents' own wall (it rewards demolishing a home to spare its
+   residents its walls) and partly the price on the frontage a clearing opens to its neighbours,
+   who leave through it at A's 3,000 m and B's 10 m. (B and C on four blocks: 19570's and 63718's
+   left out for the budget; A, S1 and T on all six.)
+2. The regret matrix: per setting X a clearing greedy over its single gains (largest dP_j / D_j
+   first to area D 0.05), scored under every setting Y; the shortfall (G_Y(c_Y) - G_Y(c_X)) /
+   G_Y(c_Y), median over the six blocks (rows X, columns Y):
+
+                 A       B       C       S1      T
+       A         0       0.168   0.103   0.232   0.457
+       B         0.050   0       0.008   0.172   0.433
+       C         0.070   0.006   0       0.084   0.449
+       S1        0.149  -0.009  -0.024   0       0.302
+       T         0.696   0.508   0.514   0.405   0
+
+   A's clearing loses 17% and 10% of the diodes' gains under their metrics, theirs 5% and 7%
+   under A's: A is the more parochial. S1's (symmetric 200 m) loses nothing under B's and C's
+   (-1%, -2%) and the least under T's (30%). People left walled in by T's street reach (102 walled
+   in on the six blocks): A 29, C 31, B 33, S1 51, T 83 (T's greedy over P frees none on purpose: T
+   gives walled-in homes no demand; its optimizer frees first).
+   The greedy is crude: a clearing's joint gain is a median 0.44 of its buildings' single gains
+   summed (0.25 -- 0.73), and on 24 of the 150 entries another setting's clearing beats a metric's
+   own greedy under that metric (up to 20%: S1's under B on 38486). Differences under ~20% are not
+   settled here; SIMP under each metric would settle them.
+What it says: symmetric walls at the entry price (A, 3,000 m) are somewhat worse, not just
+different: its clearings serve the diodes' objectives less than theirs serve its own, part of its
+gain is demolishing homes to spare their residents their walls (14% of its top gains, about 0
+under the diodes), and it agrees least with T. Symmetric walls nearer the exit price (S1, 200 m)
+are not worse on this test: their clearings do as well as the diodes' under the diodes' metrics.
+What S1 gives up is the walled-in homes' toll (2.0x the block median, setting 4's 3.9x) and it
+leaves more people walled in (51 against 29 -- 33).
+
+**Compute** (here, 2 processes): the decompositions and the regret 1.7 process-h.
+
+**A symmetric price in between** (the controller 2026-10-21: the owner wants symmetric walls as
+the default if they are not worse; S1 is not worse on regret but leaves 51 of 102 walled in
+against the diodes' 29 -- 33). Symmetric S5 `Wk1l500`, S10 `Wk1l1000` and S15 `Wk1l1500` through
+the same single gains (leaky_split `decompose`, gains and the self split in one pass), greedy
+clearings to D 0.05 and the regret matrix, every setting against every other (summary_regret.csv,
+the matrix now 8 x 8). Shortfall of row X's clearing under column Y's metric, median over the six
+blocks:
+
+                 A       B       C       S1      S5      S10     S15     T
+       A         0       0.168   0.103   0.232   0.092   0.021   0.000   0.457
+       B         0.050   0       0.008   0.172   0.136   0.007   0.019   0.433
+       C         0.070   0.006   0       0.084   0.058  -0.005   0.034   0.449
+       S1        0.149  -0.009  -0.024   0       0.012   0.010   0.094   0.302
+       S5        0.045  -0.001  -0.038   0.032   0       -0.021  0.005   0.325
+       S10       0.037   0.056   0.007   0.113   0.047   0       0.020   0.421
+       S15       0.000   0.122   0.060   0.185   0.052  -0.009   0       0.329
+
+People left walled in (102 at baseline): A 29, S10 29, S15 29, C 31, B 33, S5 42, S1 51, T 83.
+Self's share of the top-10 gains: S5 12.3%, S10 12.1%, S15 12.6% (B -1%, C 5%). The walled-in
+homes' multiple of their block's median at baseline, on the four blocks B and C were decomposed on
+(18 homes): B 27x, C 12x, A 4.5x, S15 4.1x, S10 3.9x, S5 3.5x, S1 2.9x. Scoring time per single
+clearing, median over the blocks: every symmetric price 0.53 -- 0.63 s (one factorization), C 1.92
+s, B 2.79 s (5.3x S10's), T 0.15 s.
+What it says: S10 (1,000 m) frees like the diodes (29 left) and its clearing loses 0.7% of C's
+gain under C's metric and 5.6% of B's under B's, where theirs lose -0.5% and 0.7% under S10's: on
+a greedy whose joint gains are half its singles' sum, that is not shown worse. S5 (500 m) is the
+cleaner on regret (its clearing loses nothing under B's or C's) but leaves 42 walled in; S15 and A
+lose 12% -- 17% under B's. What a symmetric price gives up against diode B: the walled-in homes'
+toll (S10 3.9x the block median against B's 27x: a symmetric wall taxes every home's exit alike,
+so it cannot price the walled-in homes' way out apart), 12% of its top gains sparing a cleared
+home's residents their own walls (B's -1%), and B's ranking of the others' gains (Spearman 0.76).
+
+**Compute** (here, 2 processes): S5, S10, S15's decompositions 0.9 process-h, the regret re-run
+0.25.
+
+**Stage 2: SIMP under the walls, against today's rule** (the owner 2026-10-21: the default walls
+the symmetric 1,000 m, "They could both exist as options but we would hopefully be able to default
+to the symmetric case if it's not worse"; the test "1,000 m on all, diode B on 20"; the brief
+.superpowers/sdd/2026-10-21-leaky-walls/brief-stage2.md, its rulings in progress.md there).
+
+**The relaxation** (gap_walls.WallRelaxation and Interp; relax.one runs it as it runs T's, from a
+WallMetric: leaky_simp.py). Every element a clearing re-weights (a static passage each way, a
+finite street face, a cell's obtuse exits) depends only on its owners, the buildings whose grown
+footprint holds one of its triangles (19570: of 495,812 passages 96,451 have none, 284,623 one,
+105,500 two, 8,589 three, 649 four). Its values at every 0/1 clearing of its owners are computed
+once by WallModel.state's own arithmetic; at a design x, with each building's cleared density rho =
+proj(x)^q (relax.project; q and beta SIMP's continuation's), the element's value is their
+multilinear extension in its owners' densities. Rulings:
+
+- The conductance, not the wall's length, moves linearly: with one owner v_s + (v_c - v_s) rho,
+  SIMP's own eps + (1 - eps) proj(x)^q with eps the standing conductance's share of the cleared one
+  (a wall fades from ell to none and the interior goes from k_in to the open ground's factor as the
+  conductance they give rises linearly). So the relaxation is W bit for bit at every 0/1 clearing
+  (no eps world: a standing building conducts by its walls) and monotone (W's every value only
+  rises as a building clears, and a monotone function's multilinear extension on the cube is
+  monotone). Rejected: the length linear in rho (the conductance's slope at standing is d_e / ell
+  of the clearing's gain, 5e-4 at 1,000 m: the gradient would not see walls); T's least-k over a
+  triangle's zone (not exact at a partial 0/1 clearing of a shared zone, whose walls depend on
+  which building stands).
+
+- An obtuse exit's cleared value is ground (an infinite conductance), so its resistance is
+  interpolated: ell_out / (sigma |f|) times 1 - prod rho (the multilinear extension of "an owner
+  stands"), the cell ground once every owner is cleared. Its gradient there is the limit: the
+  currents that drain into the cell under u and under the adjoint, over the exits' standing
+  conductance. The ground turns on over 1 - x ~ Gs / K (the exits' standing conductance over the
+  cell's others'): on 19570 at 200 m the slope is -45.08 at x 1, -42.7 at 1 - 1e-4 and -45.06 at 1
+  - 1e-6, so SIMP's gradient there is steep but continuous.
+
+- The gradient by the adjoint through each element's slopes in its owners' densities (a diode's at
+  its settled sides: P is twice the minimum energy, its envelope the settled sides' conductances).
+  A diode's loop at each design starts from the previous design's sides (the relaxation's own
+  state; W's exact scores keep WarmStart), in no name: the loop settles on the design's one
+  solution from any start.
+
+- Under W SIMP's eps worlds have no counterpart, so the W arms' plan is SIMP's default without
+  `.e0.0001` and `s1e-06`: `fw0.q3.i10.k1.p256w8x2E.f0` (every iterate's rounding scored by W, the
+  polish ranked by W's relaxation's gradient at q 1 and scored exactly, as T's on a core; no free
+  first). WallModel.relaxation refuses a named eps and WallRelaxation.scorer a scoring eps;
+  relax.Incumbent takes its scorer from the relaxation (gap_clear.Relaxation.scorer: T unchanged).
+  No constant changed (CODE 34d40e8a).
+
+**Guards** (leaky_check.py, each both ways on 19570 under the guards' SYM, 200 m, and DIODE, out 50
+m, in 300 m). `relax-gradient`: the gradient against central differences (extrapolated, the closest
+of steps 1e-3 and 1e-4) on six buildings (the largest |gradient|, owners of shared zones and of
+inside street faces) at SIMP's start and a random design, q 1 and 3: 4e-7 -- 2.5e-5 of the largest
+(tolerance 1e-4); at a grounded exit's owner (x 1) the limit against the gradient just below it
+extrapolated: 1.2e-7 and 7e-9 (differences of J reach the limit only at steps whose roundoff swamps
+them); faults `no-faces` (the street faces' term dropped: 7e-3 -- 0.13), `forward-only` (a diode
+passage's slope always its forward table's: 1.3e-3 -- 4.3e-3 under the diode) and `ground-zero` (no
+drain at a ground cell: 8 -- 36 of the gradient). `relax-ends`: at the baseline, a random clearing,
+one owner of every two-owner shared passage cleared (99 buildings) and every building cleared, the
+relaxation's network is W's state's bit for bit (each way, street faces, conductance to ground,
+ground, unknowns) and J W's to 0; fault `owners-reversed` (the weights read an element's owners in
+reverse): apart at the partial clearings, J by 3e-3 -- 7e-2. `relax-monotone`: no table value falls
+as an owner clears (an exit's resistance share rises), and P along three orders of eight buildings
+each raised 0 -> 0.5 -> 1 never rises (largest step -1.4e-5, -6.1e-5); fault `cleared-slow` (a
+cleared building's ground at 1e-3): a million table steps down, P up 3.1e-2 -- 5.2e-2. `relax-warm`
+(the diode): SIMP's first six designs, each solved warm and cold, 0 apart, every wall passage on
+its current's side, 3 -- 4 passes warm against 4 -- 5 cold; fault `one-pass`: 5.5e-2 apart, 8,539
+passages off their side. `relax-identity`: W's plan reads back (no free first, polish scored
+exactly, no eps), S10's and B's names read back through walls_of and their rows' paths carry them,
+T's `.e` and `s` refused under W; faults `eps-accepted`, `part-dropped`. Every guard the change
+reaches, both ways as expected: leaky_check's eight (direction, party, settles, energy, monotone
+with `cleared-slow` on open_factor's per-triangle seam, walled-count, sources, walls-identity) and
+gap_clear_check's stage-1 list (enclosure, leak-assembly, exits-identity, identity, constants 28 at
+34d40e8a, baseline, uniform-control, pocket-escape, pocket-count, faces, flux; `roads` needs the
+main checkout).
+
+**The measurement** (leaky_simp.py: pick, arm, lenses, homes, report; rows leaky_rows/simp/,
+parquet ignored; summary_{blocks,groups,pairs}.csv). The 77 small walled-in blocks and the uniform
+study's five controls, area D 0.05, SIMP's default optimizing P: T, the uniform study's stored arm
+(RUNTIME, free first; the same RUNTIME: its rows hard-linked, the large controls' from a GPU); S10,
+SIMP's default `.f0` under Wk1l1000 (on UNIFORM's mesh, leaks and doors); B, the same under
+Wk1o10i3000n64 on 20 of the 77, picked before any result (leaky_rows/simp/b_blocks.csv, committed
+first): the 77 ordered by their walled-in homes at baseline then id, four strata of consecutive
+blocks (20, 19, 19, 19), five drawn from each by default_rng(20261021). Every clearing scored under
+T's, S10's and (on the 20) B's metric: Lens A of P, P_{1/2} and J_2 on each metric's own baseline,
+and B (i) by T's street reach (W's, its base's, equal clearing by clearing: checked).
+
+**People left walled in** (B (i)). Of the 327 walled-in homes on the 77, T leaves none (free
+first), S10 48 on 17 blocks: 21 on 63718 (the most walled-in homes, 77), 4 of the 11 homes with no
+open ground within ring_m and 44 of the 316 in pockets; where it leaves any, a median 0.26% of the
+block's population (3.8% at most). On B's 20 (57 walled-in homes, all in pockets): S10 leaves 11 on
+5 blocks, B 15 on 8 (8 left by both, 3 by S10 alone, 7 by B alone), T none.
+
+**Lens A**, the first arm's clearing less the second's, mean [95% Bayesian-bootstrap interval] over
+the blocks (S10 - T on all 82 but under B's metric, B's 20 there):
+
+    scorer    lens    S10 - T                  B - T (20)               S10 - B (20)
+    T's       L_P     -0.075 [-0.092, -0.062]  -0.055 [-0.083, -0.033]  -0.021 [-0.054, +0.009]
+              L_P1/2  -0.077 [-0.099, -0.060]  -0.070 [-0.109, -0.040]  -0.014 [-0.059, +0.030]
+              L_J2    -0.078 [-0.096, -0.062]  -0.071 [-0.114, -0.039]  -0.011 [-0.054, +0.031]
+    S10's     L_P     +0.022 [+0.017, +0.028]  -0.002 [-0.016, +0.010]  +0.024 [+0.015, +0.037]
+              L_P1/2  +0.042 [+0.034, +0.051]  -0.001 [-0.025, +0.018]  +0.044 [+0.028, +0.069]
+              L_J2    +0.030 [+0.023, +0.037]  -0.002 [-0.022, +0.014]  +0.034 [+0.021, +0.052]
+    B's (20)  L_P     -0.007 [-0.020, +0.009]  +0.025 [+0.016, +0.037]  -0.032 [-0.039, -0.024]
+              L_P1/2  +0.007 [-0.012, +0.030]  +0.035 [+0.019, +0.054]  -0.027 [-0.035, -0.020]
+              L_J2    -0.001 [-0.018, +0.018]  +0.028 [+0.015, +0.043]  -0.028 [-0.036, -0.021]
+
+Blocks ahead / behind on L_P: under T's metric S10 - T 5 / 77, B - T 2 / 18, S10 - B 10 / 10; under
+S10's 70 / 12, 10 / 10, 18 / 2; under B's 7 / 13, 19 / 1, 0 / 20. Each metric's own arm's L_P: T
+0.471 (82), S10 0.245 (82), B 0.349 (20). D used: a mean 0.0496 every arm. The clearings' Jaccard:
+median T-S10 0.28 (0.04 at least), T-B 0.38, S10-B 0.35.
+
+**S10 against B on the 20** (the brief's question). Under B's metric S10's clearing is short of B's
+on all 20 (L_P -0.032 [-0.039, -0.024], a mean 10% of B's gain, median 9%); under S10's metric B's
+is short of S10's on 18 (-0.024 [-0.037, -0.015], 11% of S10's gain, median 9%); under T's they tie
+(-0.021 [-0.054, +0.009]); and S10 leaves fewer walled in (11 homes on 5 blocks against B's 15 on
+8). So different, not worse: each clearing gives up about a tenth of the other's gain under the
+other's metric, the regret symmetric, and on the walled-in count S10 is no worse. (Stage 1's greedy
+put S10's clearing 5.6% short under B's metric and B's 0.7% under S10's; under SIMP the two regrets
+are equal.) Each walls' optimum is its own: under B's metric S10's clearing does no better than T's
+(-0.007 [-0.020, +0.009]), and under S10's B's no better than T's (-0.002).
+
+**S10 against T on all 82.** Under T's metric S10's clearing loses a mean 0.075 of L_P (16% of T's
+0.471; P_{1/2} and J_2 alike) and is behind on 77; under S10's metric it leads by 0.022 (9% of its
+own 0.245; P_{1/2} +0.042, J_2 +0.030), ahead on 70, behind on 12 (median 2% short, 0.041 at worst:
+SIMP's own answer under W beaten by T's clearing). The controls alike (T's metric -0.046, S10's
++0.012). T leaves no one walled in, S10 48 homes on 17 blocks.
+
+**The optimizer under W.** SIMP ends grey (its last iterate's share with x in (0.05, 0.95): a
+median 0.34 under S10, p10 0.26, p90 0.39; 0.17 under B; 0.05 under T). A wall's conductance linear
+in the density, its standing value about 1/2,000 of its cleared one at 1,000 m, gives most of a
+clearing's gain at a small density (at rho 0.125, x 0.5 at q 3, a wall's resistance is 99.6% gone),
+so q 3 does not push the design to 0/1; the incumbent's roundings carry the answer, and the polish
+keeps no move on 58 of the 82 blocks under S10 (a mean 21 of its 256 scorings) and on 4 of the 20
+under B (39): its first-order ranking of a wall's 2,000-fold change misleads, and a round with no
+gain ends it. Under its own metric S10's SIMP is beaten by T's clearing on 12 of 82 blocks, B's on
+1 of 20. The comparisons above are SIMP's default's under each metric, not the metrics' optima.
+
+**Compute** (here, single-threaded, at most 5 processes): S10's SIMP 1.94 process-h for the 82
+blocks (median 58 s a block against T's stored 39 s; 8152 21 min and 20023 11 min, T's 8 and 3 on a
+GPU), B's 2.65 for its 20 (median 331 s, 5.9x S10's on the same blocks), the lenses 0.54, the
+homes' rows 0.1; peak memory 7.1 GB (8152); the guards 3.9 (relax-gradient 0.5 a sweep, run three
+times as its ground check was settled; gap_clear_check's list 1.6). Estimated from three blocks
+before the run (S10 about 2, B about 1.5 process-h; the brief's thresholds 20 and 30).
+
+**Stage 3: an optimizer fit for the walls** (the owner 2026-10-21, through the controller: yes to
+an optimizer suited to the walls before judging them: a greedy over W's exact gains and a
+projection on SIMP, the better on a pilot run on the 82 and B's 20; the rulings in progress.md,
+Stage 3).
+
+**The candidates.** (1) SIMP with a projection or a steeper penalty, chosen on three tuning blocks
+(3786, 19570, 18286: stage 2's timing blocks, kept out of the pilot). W's L_P under S10 and the
+last iterate's grey: SIMP's default 0.2123 / 0.3391 / 0.2063 (grey 0.24 / 0.36 / 0.29); relax's
+Heaviside projection with its sharpness doubling over the continuation, .b1-16 0.1931 / 0.3378 /
+0.2041 (0.04 / 0.08 / 0.06), .b1-64 0.1931 / 0.3378 / 0.2046 (0.01 / 0.02 / 0.003), .b4-64 0.2073 /
+0.2965 / 0.1786; the steeper penalty, q continued to 5 (`.q5`), 0.2093 / 0.3423 / 0.2063 (0.12 /
+0.16 / 0.09). Ruling: SIMP's candidate is .q5, the default's L_P (the same mean, 0.2526) at half
+its grey; the projection makes SIMP binary but lands lower (.b1-64 0.007 a block below, .b4-64
+0.025). (2) A greedy over W's exact gains (walls_greedy.py): each step the building with the
+largest gain in P per unit of its D among those that still fit, each gain W's discrete scorer's
+(the clearing's state and its solve, warm from the current clearing's sides), to D 0.05. Three
+Strategies in the rows' identity: `Gx` (every candidate re-scored each step), `GxL` (CELF: stale
+gains as bounds, the top re-scored and taken once on top with a current gain) and `GxLr<radius_m>`
+(GxL, and after each building taken every candidate within radius_m of it re-scored at once).
+
+**Lazy against full.** CELF takes the full greedy's choices only where gains fall as the clearing
+grows; here they rise where a neighbour's clearing opens a way. On the pilot's seven blocks of at
+most 250 buildings GxL parted from Gx on every one (from its second to its ninth step), Gx ahead by
+a mean 0.0095 of L_P [-0.025, -0.002] (21622: after 140 and 20, Gx took 60 at 335,160 a unit D, its
+gain risen from a stale value well below the top; GxL 0.2896 against 0.3409). The buildings GxL
+missed lay 0 -- 7.4 m from one already taken. Ruling: GxLr10 (refresh within 10 m, the largest such
+distance with a margin). It takes Gx's choices on four of the seven (21269, 20318, 43304, 21622)
+and is within -0.0004 -- +0.0039 of its L_P on the other three (52730 ahead of the full greedy: a
+greedy is no optimum), mean +0.0005 [-0.000, +0.002], at 1.5x GxL's scores. Gx costs ~n^3 (its
+scores grow as the steps times n: 217 -- 2,842 s on blocks of 119 -- 203 buildings, about a day on
+18286 or 5618, days on the large controls), far over the brief's 20 process-h; GxLr10 199 -- 454
+scores there against Gx's 695 -- 3,322.
+
+**The pilot** (leaky_rows/simp/pilot_blocks.csv, committed before any result: the 77 walled-in
+small blocks less the tuning three, by walled-in homes then id, five strata, two drawn from each by
+default_rng(20261023); leaky_rows/simp/pilot/summary_*.csv). W's own L_P under S10, mean over the
+ten, and the walled-in homes left of 99 by T's street reach: SIMP's default 0.2653, 21; .q5 0.2670,
+26; GxL 0.2693, 16; GxLr10 0.2810, 14 (+0.0157 [+0.009, +0.025] over the default, ahead on 9 of
+10); on its seven (19 walled-in homes) Gx 0.2530 and GxLr10 0.2535, each leaving 1 home, GxL 2,
+SIMP's default none. GxLr10 is the fit optimizer (leaky_simp.FIT).
+
+**Guard** (leaky_check `greedy-exact`, both ways on 41940 under the guards' SYM and DIODE, GxL and
+GxLr10): every step's gain is W's exact gain (J before less J after, each scored afresh by
+WallModel.exact) to 0 of J0, and the run stops at the budget (D within it, no building left that
+fits); faults `stale-gain` (a popped gain taken without re-scoring: 2.7e-2 -- 4.3e-2 of J0) and
+`over-budget` (a candidate's fit ignoring its cost: D 1.0). relax-identity both ways on the arms by
+label (each arm's name and rows' path read back).
+
+**The measurement** (leaky_simp.py's `fit` study: rows leaky_rows/simp/fit/,
+summary_{blocks,groups,pairs}.csv). GxLr10 under S10 (S10x) on the 82 blocks and under diode B (Bx)
+on B's 20, beside T's stored arm and stage 2's SIMP defaults (S10, B), every clearing under T's,
+S10's and (on the 20) B's metric; a greedy's clearing is 0/1 throughout (grey 0, against SIMP's
+default 0.34 under S10 and 0.17 under B).
+
+**People left walled in** (B (i), T's street reach). Of the 327 walled-in homes on the 77, T leaves
+none (free first), S10x 27 on 12 blocks (4 of the 11 with no open ground within ring_m, 23 in
+pockets; SIMP's default S10 left 48 on 17). On B's 20 (57 homes, all in pockets): S10x leaves 4 on
+2 blocks, Bx 11 on 6 (B's default 15 on 8, S10's 11 on 5).
+
+**Lens A**, the first arm's clearing less the second's, mean [95% Bayesian-bootstrap interval]
+(S10x - T and S10x - S10 on all 82 but under B's metric, B's 20 there):
+
+    scorer    lens    S10x - Bx (20)           S10x - T                 S10x - S10
+    T's       L_P     -0.004 [-0.025, +0.014]  -0.050 [-0.061, -0.039]  +0.026 [+0.016, +0.039]
+              L_P1/2  +0.016 [-0.009, +0.040]  -0.050 [-0.063, -0.038]  +0.027 [+0.013, +0.047]
+              L_J2    +0.014 [-0.009, +0.039]  -0.047 [-0.059, -0.036]  +0.031 [+0.019, +0.046]
+    S10's     L_P     +0.026 [+0.019, +0.033]  +0.034 [+0.029, +0.041]  +0.012 [+0.010, +0.014]
+              L_P1/2  +0.045 [+0.034, +0.059]  +0.058 [+0.048, +0.068]  +0.015 [+0.012, +0.019]
+              L_J2    +0.036 [+0.028, +0.046]  +0.046 [+0.039, +0.054]  +0.016 [+0.013, +0.018]
+    B's (20)  L_P     -0.036 [-0.044, -0.029]  -0.006 [-0.020, +0.009]  +0.000 [-0.006, +0.006]
+              L_P1/2  -0.031 [-0.040, -0.022]  +0.010 [-0.010, +0.036]  +0.003 [-0.005, +0.011]
+              L_J2    -0.031 [-0.040, -0.024]  +0.003 [-0.016, +0.023]  +0.003 [-0.003, +0.009]
+
+Blocks ahead / behind on L_P: under T's metric S10x - Bx 10 / 10, S10x - T 10 / 72, S10x - S10 54 /
+28; under S10's 20 / 0, 80 / 2, 76 / 6; under B's 0 / 20, 8 / 12, 11 / 9. Each metric's own fit
+arm's L_P: T 0.471 (82), S10x 0.256 (82), Bx 0.354 (20). Bx against B's default under B's metric
++0.005 [+0.000, +0.010] (12 / 7); Bx against T under B's +0.030 [+0.019, +0.043]. D used: a mean
+0.0498 every greedy arm. Jaccard: median T-S10x 0.29, S10x-Bx 0.42, S10-S10x 0.37.
+
+**With a fit optimizer, S10 against B on the 20.** Under B's metric S10x's clearing is short of
+Bx's on all 20 (L_P -0.036 [-0.044, -0.029], a mean 11% of Bx's gain, median 9%); under S10's
+metric Bx's is short of S10x's on all 20 (-0.026 [-0.033, -0.019], 10%, median 11%); under T's they
+tie (-0.004 [-0.025, +0.014]); and S10x leaves fewer walled in (4 homes on 2 blocks against Bx's 11
+on 6). Different, not worse, as under SIMP's default: each clearing gives up about a tenth of the
+other's gain under the other's metric, and on the walled-in count the symmetric wall is the better.
+
+**With a fit optimizer, S10 against T on the 82.** Under T's metric S10x's clearing loses a mean
+0.050 of L_P (11% of T's 0.471; P_{1/2} and J_2 alike), behind on 72 (SIMP's default under S10 lost
+0.075, behind on 77); under S10's metric it leads by 0.034 (13% of its own 0.256; P_{1/2} +0.058,
+J_2 +0.046), ahead on 80, behind on 2 (0.002 and 0.008: SIMP's default was beaten on 12). T leaves
+no one walled in (free first), S10x 27 homes on 12 blocks. Under B's metric S10x's clearing ties
+T's (-0.006 [-0.020, +0.009]), while Bx's beats T's by 0.030: each wall's optimum stays its own.
+The fit optimizer moved the walls' clearing toward T's (Jaccard with T 0.29 against SIMP's 0.28;
+T's metric's shortfall from 0.075 to 0.050) and further from SIMP's own (+0.012 under S10, +0.026
+under T).
+
+**Compute** (here, single-threaded, at most 4 processes): the tuning trials 0.6 process-h; the
+pilot's arms 4.4 (Gx 2.3 of it, GxLr10 1.1, GxL 0.7, .q5 0.27) and its lenses and homes 0.1; the
+fit run S10x 17.5 process-h (8152 5.5 h, 20023 2.8 h, the 80 small 9.2; median 255 s a block
+against SIMP's default 58 s and T's 39 s), Bx 12.7 (median 1,405 s, B's default 331 s), the lenses
+and homes 0.7; peak memory 6.8 GB (8152); the GxL fit run's first 1.7 h on 3 processes discarded
+when GxLr10 replaced it; the guards 1.2 (greedy-exact three times, relax-identity). Within the
+brief's 20 and 30 process-h; estimated from the pilot at 11 and 8 before the run, the large
+controls and 18286's diode ran longer than the pilot's blocks implied.
+
+**The own-wall term does not bias the clearing (2026-10-22, null).** Under S10 every home pays to
+cross its own wall, a term near q^2 / G_own that only demolishing the home removes; at the walls'
+infinite limit T is the lexicographic optimum (walls' crossings first, then P0), and the question
+was whether S10's clearing leans toward homes with many people behind a short wall, an artifact
+rather than freeing anyone. It does not. On the 82 blocks' stored clearings at equal D (D_S10x -
+D_T mean +0.0002), the cleared homes' mean against the block's: q/perimeter S10x 0.833, T 0.842,
+S10x - T -0.009 [-0.023, +0.003], above on 36; q^2/perimeter -0.008 [-0.044, +0.030], 32; the
+model's own q^2/G_own -0.008 [-0.046, +0.031], 32 (Bayesian bootstrap, 95%). SIMP's default
+under S10 leans +0.17 on q^2/perimeter, all from clearing larger homes (q +0.11 [+0.085,
++0.146]), none from shape (compactness -0.002). The term is large: at baseline wall resistors
+dissipate 0.70 of S10's P0 (0.48-0.88) and the isolated own-wall term 0.39 (0.10-0.65); S10x's
+clearing takes 0.073 of the baseline wall dissipation against T's 0.059, which is current crossing
+walls, the thing W should go after. Compute 286 process-s. Scripts and rows:
+.superpowers/sdd/2026-10-21-leaky-walls/ownwall/ (not committed).
+
 ### Pruning by epistemetry: the move (owner 2026-10-17)
 
 **Why.** The owner's decision of 2026-10-17: the consolidated pass prunes with seqscreen (its
