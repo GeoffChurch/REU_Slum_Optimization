@@ -474,7 +474,7 @@ def walled_count(ids: list[str]) -> list[str]:
 
 def _through_walls(self: gw.WallModel, st: gw.WallState) -> np.ndarray:
     """WallModel.street_reach from W's own reach, through walls (fault `through-walls`)."""
-    return np.asarray(self.base.fx.ring.live(st.live[self.sys.cells.cell]))
+    return np.asarray(self.base.fx.own.live(st.live[self.sys.cells.cell]))
 
 
 def sources(ids: list[str]) -> list[str]:

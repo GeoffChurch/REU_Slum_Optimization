@@ -2971,7 +2971,7 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "pocket-escape": {"pocket-unleaked": lambda: _patched(gx.OpenSites, "cells",
                                                           lambda self, site: site.live),
                       "placement-dropped": lambda: _patched(gcl.PocketDemand, "demand",
-                                                            lambda self, g: gcl._live_demand(g))},
+                                                            lambda self, g: g.live)},
     "pocket-gradient": {"adjoint-unleaked": lambda: _patched(gcl.Relaxation, "value_sgrad",
                                                              _sgrad_unleaked),
                         "pocket-unloaded": lambda: _patched(gcl.Relaxation, "value_sgrad",
