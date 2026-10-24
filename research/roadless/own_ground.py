@@ -94,9 +94,10 @@ def stored(root: Path) -> None:
           flush=True)
 
 
-def pockets_run(bid: str, *, replace: bool) -> None:
+def pockets_run(bid: str, *, standing: clearings.Standing) -> None:
     out = ROWS / "pockets" / f"{bid}.parquet"
-    clearings.check_new(out, replace=replace)
+    if not standing.todo(out):
+        return
     t0 = time.time()
     metric = metrics.metric_of(metrics.RUNTIME, device="cpu")
     [b] = common.build_blocks([bid])
@@ -144,7 +145,7 @@ def pockets_run(bid: str, *, replace: bool) -> None:
             row[f"reached_{name}"] = float(a[on].sum() / a.sum())
             row[f"largest_{name}"] = bool(on[inv == big].any())
         rows.append(row)
-    clearings.write_once(pd.DataFrame(rows), out, replace=replace)
+    standing.write(pd.DataFrame(rows), out)
     print(f"{bid}: {len(homes)} walled-in homes with own ground; {time.time() - t0:.0f}s",
           flush=True)
 
@@ -160,10 +161,10 @@ class Tests(NamedTuple):
     own: np.ndarray
 
 
-def block_run(bid: str, *, replace: bool) -> None:
+def block_run(bid: str, *, standing: clearings.Standing) -> None:
     outs = _outs(bid)
-    for o in outs:
-        clearings.check_new(o, replace=replace)
+    if not any([standing.todo(o) for o in outs]):   # every one asked
+        return
     t0 = time.time()
     metric = metrics.metric_of(metrics.RUNTIME, device="cpu")
     [b] = common.build_blocks([bid])
@@ -247,7 +248,7 @@ def block_run(bid: str, *, replace: bool) -> None:
         was_at_own=at_own.was[h], held_was=fr.held[h], held_own=held[h],
         **{f"{arm}_{t}": getattr(at[arm], t)[h] for arm in ARMS for t in Tests._fields}))
     for o, df in zip(outs, (pd.DataFrame([row]), homes), strict=True):
-        clearings.write_once(df, o, replace=replace)
+        standing.write(df, o)
     print(f"{bid}: {int(w.sum())} walled in ({row['n_groundless']} groundless); the previous "
           f"test's free first D {row['D_was']:.4f} leaves {row['left_was']}, frees {row['via']} "
           f"through a neighbour alone; the test's D {row['D_own']:.4f} leaves {row['left_own']}, "
@@ -351,11 +352,11 @@ def report() -> None:
 
 
 def main(argv: list[str]) -> None:
-    argv, replace = clearings.replace_flag(argv)
+    argv, standing = clearings.standing_of(argv)
     if len(argv) == 2 and argv[0] == "block":
-        block_run(argv[1], replace=replace)
+        block_run(argv[1], standing=standing)
     elif len(argv) == 2 and argv[0] == "pockets":
-        pockets_run(argv[1], replace=replace)
+        pockets_run(argv[1], standing=standing)
     elif len(argv) == 2 and argv[0] == "stored":
         stored(Path(argv[1]))
     elif argv == ["report"]:
