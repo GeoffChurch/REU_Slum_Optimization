@@ -19,6 +19,7 @@ whose leak is of the order of its walls' eps conductance).
     uv run python $S block <id> <label,...> <cpu|gpu> [--replace|--keep-standing]
     uv run python $S lenses <id> <cpu|gpu> [--replace|--keep-standing]
     uv run python $S chains <id> <cpu|gpu> [--replace|--keep-standing]
+    uv run python $S wlenses <id> [--replace|--keep-standing]
     uv run python $S report
 
 `arm`: the arm's run (relax.one, or leaky_simp's W arm), its row relax's (or leaky_simp's) with the
@@ -26,14 +27,17 @@ device, the host, the wall time and the peak memory (relax_rows/<metric>/<plan>/
 
 `block`: the arms in turn, then `lenses` and `chains` (a small block's task).
 
-`lenses`: every arm's clearing that stands (and none) scored under T's, U's and F's metrics (and
-W's on a core, the small blocks): Lens A of P, P_{1/2} and J_2 on each metric's own baseline and
+`lenses`: every arm's clearing that stands (and none) scored under T's, U's and F's metrics:
+Lens A of P, P_{1/2} and J_2 on each metric's own baseline and
 B (i) (the same under every metric: checked) (ROWS/lenses/<id>.parquet); per home walled in at
 baseline, whether each clearing leaves it walled in and its escape time under F's metric after it
 against the block's median home at baseline (ROWS/homes/<id>.parquet); per clearing the D its
 freeing costs: the cleared buildings whose return alone would wall in again a home it frees, their
 D against the population freed (the owner's fairness concern; T's free stage's own D beside it)
 (ROWS/fair/<id>.parquet).
+
+`wlenses`: every arm's clearing under W's metric, on a core, the small blocks
+(ROWS/wlenses/<id>.parquet).
 
 `chains`: does a path move find free first's crossings unprompted? At baseline under F, free
 first's crossings within the budget against the chains (gap_joins.chains, Fb's sources and width,
@@ -184,21 +188,51 @@ def labels_of(bid: str) -> list[str]:
     return out + (["W"] if arm_path("W", bid).exists() else [])
 
 
+def wlenses(bid: str, *, standing: clearings.Standing) -> None:
+    """Every standing arm's clearing of `bid` (W's among them) under W's metric, on a core
+    (leaky_simp's view: Lens A on W's own baseline; its B (i), its base's, checked against the
+    walled-in homes `lenses` left under T's) (ROWS/wlenses/<id>.parquet)."""
+    out = ROWS / "wlenses" / f"{bid}.parquet"
+    if not standing.todo(out):
+        return
+    t0 = time.time()
+    labels = labels_of(bid)
+    n = int(_row(labels[0], bid)["n"])
+    xs = {"none": np.zeros(n, dtype=bool), **{lb: cleared(lb, bid, n) for lb in labels}}
+    w = leaky_simp._w_view(bid, "W", leaky_simp.w_arm(W_ARM).metric, xs)
+    homes = pd.read_parquet(outs(bid)[1])
+    for lb in xs:
+        if f"left_{lb}" in homes and not np.array_equal(
+                w.left[lb][homes.home.to_numpy()], homes[f"left_{lb}"].to_numpy()):
+            raise RuntimeError(f"{bid}: W's B (i) and T's part on {lb!r}")
+    standing.write(pd.DataFrame(w.rows), out)
+    print(f"{bid}: W's lenses on {len(xs)} clearings; {time.time() - t0:.0f}s", flush=True)
+
+
 # ------------------------------------------------------------------ every clearing scored
 
 def _critical(m: gcl.Model, x: NDArray[np.bool_]) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
     """(the walled-in homes clearing `x` frees, by B (i); the cleared buildings whose return alone
-    walls one of them in again)."""
+    walls one of them in again). Found by halving: returning a group that walls no freed home in
+    again holds none of them (B (i)'s reach only grows as buildings clear), so a group that does
+    is split until each part is one building or walls no one in."""
     live = m.live_homes_of(m.factors(m.k_of(x)))
     freed = m.walled0 & live
     crit = np.zeros(m.n, dtype=bool)
-    if not freed.any():
-        return freed, crit
-    for b in np.flatnonzero(x):
+
+    def rewalls(group: NDArray[np.int64]) -> bool:
         y = x.copy()
-        y[b] = False
-        if (freed & ~m.live_homes_of(m.factors(m.k_of(y)))).any():
-            crit[b] = True
+        y[group] = False
+        return bool((freed & ~m.live_homes_of(m.factors(m.k_of(y)))).any())
+    todo = [np.flatnonzero(x)] if freed.any() else []
+    while todo:
+        g = todo.pop()
+        if not rewalls(g):
+            continue
+        if len(g) == 1:
+            crit[g[0]] = True
+        else:
+            todo += [g[:len(g) // 2], g[len(g) // 2:]]
     return freed, crit
 
 
@@ -252,12 +286,6 @@ def lenses(bid: str, device: str, *, standing: clearings.Standing) -> None:
           for rule, name in RULES.items()}
     rows = [r for s in sc.values() for r in s.rows]
     left = {rule: s.left for rule, s in sc.items()}
-    if "W" in labels:
-        if device != "cpu":
-            raise ValueError(f"{bid}: W's lenses run on a core (leaky_simp's)")
-        w = leaky_simp._w_view(bid, "W", leaky_simp.w_arm(W_ARM).metric, xs)
-        rows += w.rows
-        left["W"] = w.left
     for rule, lf in left.items():
         for label in xs:
             if not np.array_equal(lf[label], left["T"][label]):
@@ -334,7 +362,7 @@ def _bb(d: NDArray[np.float64], rng: np.random.Generator) -> tuple[float, float]
 
 def report() -> None:
     sz = pd.read_csv(BLOCKS).set_index("block")
-    lens = _read("lenses")
+    lens = pd.concat([_read("lenses"), _read("wlenses")], ignore_index=True)
     homes = _read("homes")
     fair = _read("fair")
     blocks = sorted(set(lens.block))
@@ -438,6 +466,38 @@ def report() -> None:
         srow.append(row)
     t = pd.DataFrame(srow)
     t.to_csv(ROWS / "summary_sizes.csv", index=False)
+    # which rule leaves whom: per pair of arms the walled-in homes one leaves and the other frees
+    wrow = []
+    on = homes[homes.block.isin(wide.index[~wide.control])]
+    for a in arms:
+        for b_ in arms:
+            ca, cb = f"left_{a}", f"left_{b_}"
+            if a == b_ or ca not in on or cb not in on:
+                continue
+            both = on[ca].notna() & on[cb].notna()
+            la, lb = on[ca].astype(bool) & both, on[cb].astype(bool) & both
+            wrow.append(dict(a=a, b=b_, homes=int(both.sum()),
+                             a_leaves_b_frees=int((la & ~lb).sum()),
+                             of_them_groundless=int((la & ~lb & on.groundless).sum()),
+                             blocks=int(on[la & ~lb].block.nunique())))
+    pd.DataFrame(wrow).to_csv(ROWS / "summary_whom.csv", index=False)
+    # the uniform study's 32: U's optimizer below T's clearing by U's own measure there
+    old = pd.read_csv(HERE / "uniform_rows" / "summary_blocks.csv").set_index("block")
+    the32 = old.index[old.dL_P_U < -1e-9]
+    g = wide[wide.index.isin(the32)]
+    r32 = []
+    for lb in arms:
+        if lb == "W":
+            continue
+        for scorer in ("U", "F"):
+            own, vs = f"L_P_{scorer}_{lb}", f"L_P_{scorer}_T"
+            if own not in g or vs not in g:
+                continue
+            d = (g[own] - g[vs]).dropna()
+            r32.append(dict(arm=lb, scorer=scorer, blocks=len(d), below=int((d < -1e-9).sum()),
+                            mean=float(d.mean()), median=float(d.median()), worst=float(d.min()),
+                            below_mean=float(d[d < -1e-9].mean()) if (d < -1e-9).any() else 0.0))
+    pd.DataFrame(r32).to_csv(ROWS / "summary_32.csv", index=False)
     pd.set_option("display.width", 220)
     print(t.round(4).T.to_string())
 
@@ -455,6 +515,8 @@ def main(argv: list[str]) -> None:
         lenses(argv[1], argv[2], standing=standing)
     elif len(argv) == 3 and argv[0] == "chains" and argv[2] in ("cpu", "gpu"):
         chain_check(argv[1], argv[2], standing=standing)
+    elif len(argv) == 2 and argv[0] == "wlenses":
+        wlenses(argv[1], standing=standing)
     elif argv == ["report"]:
         report()
     else:

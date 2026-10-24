@@ -319,14 +319,15 @@ DEFAULT_UPDATE = OC()
 
 
 class FreeStage(Protocol):
-    """B's first stage (module docstring): its part of the plan's name and the buildings it holds,
-    from `held`, within `budget`."""
+    """B's first stage (module docstring): its part of the plan's name and, per track SIMP runs
+    (one, or two whose better is kept: FreeTrack), the buildings it holds, from `held`, within
+    `budget`."""
 
     @property
     def suffix(self) -> str: ...
 
-    def held(self, c: gap_clear.Model | gap_walls.WallModel, *, budget: float,
-             held: np.ndarray) -> np.ndarray: ...
+    def tracks(self, c: gap_clear.Model | gap_walls.WallModel, *, budget: float,
+               held: np.ndarray) -> tuple[np.ndarray, ...]: ...
 
 
 @dataclass(frozen=True)
@@ -339,13 +340,18 @@ class FreeFirst:
     def suffix(self) -> str:
         return ""
 
-    def held(self, c: gap_clear.Model | gap_walls.WallModel, *, budget: float,
-             held: np.ndarray) -> np.ndarray:
-        import gap_clear
-        if not isinstance(c, gap_clear.Model):
-            raise ValueError("free first runs on the complex's model: walls that leak have no "
-                             "free stage (`.f0`)")
-        return c.free_first(budget=budget, held=held)
+    def tracks(self, c: gap_clear.Model | gap_walls.WallModel, *, budget: float,
+               held: np.ndarray) -> tuple[np.ndarray, ...]:
+        return (_free_first(c, budget=budget, held=held),)
+
+
+def _free_first(c: gap_clear.Model | gap_walls.WallModel, *, budget: float,
+                held: np.ndarray) -> np.ndarray:
+    import gap_clear
+    if not isinstance(c, gap_clear.Model):
+        raise ValueError("free first runs on the complex's model: walls that leak have no free "
+                         "stage (`.f0`)")
+    return c.free_first(budget=budget, held=held)
 
 
 @dataclass(frozen=True)
@@ -356,9 +362,26 @@ class NoFree:
     def suffix(self) -> str:
         return ".f0"
 
-    def held(self, c: gap_clear.Model | gap_walls.WallModel, *, budget: float,
-             held: np.ndarray) -> np.ndarray:
-        return held.copy()
+    def tracks(self, c: gap_clear.Model | gap_walls.WallModel, *, budget: float,
+               held: np.ndarray) -> tuple[np.ndarray, ...]:
+        return (held.copy(),)
+
+
+@dataclass(frozen=True)
+class FreeTrack:
+    """Free first as a track, not a rule (`.ft`; NOTES, "Walled-in homes, round 2"): SIMP and its
+    polish run twice, from nothing held and with free first's crossings held (T's procedure under
+    this metric), and the better clearing by the exact score is kept, so the objective decides
+    whether the crossings pay. One track where free first holds nothing more."""
+
+    @property
+    def suffix(self) -> str:
+        return ".ft"
+
+    def tracks(self, c: gap_clear.Model | gap_walls.WallModel, *, budget: float,
+               held: np.ndarray) -> tuple[np.ndarray, ...]:
+        first = _free_first(c, budget=budget, held=held)
+        return (held.copy(),) if np.array_equal(first, held) else (held.copy(), first)
 
 
 class Stage(NamedTuple):
@@ -485,11 +508,12 @@ class Plan(NamedTuple):
     buildings lifted to the uniform share) with `warm` updates per stage; `starts` > 1 (one
     only): that many SIMP runs (start_x), one incumbent over all of them; `update` the design
     update rule (`.u<name>`; OC's classic rule is not named); `free` the free stage (FreeStage:
-    free first, not named, or none, `.f0`). Every field is plan_of's, from the spec."""
+    free first, not named, none, `.f0`, or both as tracks, `.ft`). Every field is plan_of's, from
+    the spec."""
     fw: int
     qmax: float
     iters: int
-    free: FreeFirst | NoFree
+    free: FreeFirst | NoFree | FreeTrack
     eps: float
     translucent: EpsFixed | EpsFrom
     b0: float
@@ -584,7 +608,7 @@ def plan_of(spec: str) -> Plan:
                      r"(?:\.w(?P<w>\d+))?(?:\.m(?P<m>\d+))?"
                      r"(?:\.g(?P<g>S[0-9.]+cat(?:w\d+)?))?(?:\.G(?P<G>S[0-9.]+cat(?:w\d+)?)(?:e(?P<Ge>[0-9.]+))?)?"
                      r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?"
-                     r"(?P<f0>\.f0)?",
+                     r"(?P<f>\.f0|\.ft)?",
                      spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
@@ -592,7 +616,8 @@ def plan_of(spec: str) -> Plan:
     update: Update = (OC(float(g["oc"]), float(g["ocm"])) if g["oc"] is not None
                       else MMA(float(g["mma"])) if g["mma"] is not None
                       else DEFAULT_UPDATE)
-    free: FreeFirst | NoFree = FreeFirst() if g["f0"] is None else NoFree()
+    free: FreeFirst | NoFree | FreeTrack = (FreeFirst() if g["f"] is None else NoFree()
+                                           if g["f"] == ".f0" else FreeTrack())
     translucent: EpsFixed | EpsFrom = (EpsFixed() if g["e0"] is None
                                        else EpsFrom(eps0=float(g["e0"])))
     plan = Plan(fw=int(g["fw"]), qmax=float(g["q"]), iters=int(g["i"]), free=free,
@@ -789,36 +814,28 @@ def built_for_holds(plan: Plan) -> bool:
     return plan.fw == 0 and plan.starts <= 1
 
 
-def one(bid: str, power: float, metric: gap_clear.ComplexMetric | gap_walls.WallMetric,
-        plan: Plan, budget: float, *, demand: common.Demand) -> dict[str, Any]:
-    """SIMP at one budget on `bid` under `metric`, J_power under `demand` (common.Demand: J_1 is
-    P_q under a common.PriorityDemand), the cost the area population's."""
-    [b] = common.build_blocks([bid])
-    c = metric.clearing(b, demand=demand)
-    rel = c.relaxation(power, q=1.0, eps=plan.eps)
-    def log(s: str) -> None:
-        print(f"{bid} {s}", flush=True)
-    t0 = time.time()
-    # B's first stage (plan.free): the crossings that free the enclosed homes, held at 1 through
-    # SIMP (xlo), the incumbent's roundings (first) and its polish (not movable); none enclosed,
-    # or no free stage, none held
-    held = plan.free.held(c, budget=budget, held=np.zeros(c.n, dtype=bool))
+class Track(NamedTuple):
+    """One track of a block's solve (FreeStage.tracks): its best clearing's exact J and the
+    clearing, SIMP's last iterate (of its best start) and the buildings the track held."""
+    J: float
+    r: np.ndarray
+    xs: np.ndarray
+    held: np.ndarray
+
+
+def _track(c: gap_clear.Model | gap_walls.WallModel,
+           rel: gap_clear.Relaxation | gap_walls.WallRelaxation, plan: Plan, budget: float,
+           held: np.ndarray, *, power: float, x_fw: np.ndarray | None,
+           log: Callable[[str], None], t0: float) -> Track:
+    """SIMP (from Frank-Wolfe's x if `x_fw`), its incumbent, a greedy's seed or second track and
+    the polish, `held` held at 1 through SIMP (xlo), the incumbent's roundings (first) and its
+    polish (not movable)."""
     if held.any() and not built_for_holds(plan):
-        raise NotImplementedError(f"{bid}: the free stage holds {int(held.sum())} buildings, and "
-                                  f"fw and .m are not built for held buildings: {plan.name}")
+        raise NotImplementedError(f"the free stage holds {int(held.sum())} buildings, and fw "
+                                  f"and .m are not built for held buildings: {plan.name}")
     xlo = np.where(held, 1.0, XMIN)
-    out: dict[str, Any] = dict(block=bid, n=c.n, power=power, demand=demand.name,
-                               plan=plan.name, along=metric.name, device=metric.device)
-    if plan.fw > 0:
-        fw = frank_wolfe(rel, budget, plan.fw, log=log)
-        x = fw["x"]
-        r = round_by_x(x, c.cost, budget)
-        frac = (x > 1e-6) & (x < 1 - 1e-6)
-        out.update(iters=len(fw["hist"]), relaxed_perm=rel.perm(fw["J"]),
-                   bound_perm=rel.perm(fw["lb"]), rounded_perm=rel.perm(rel.exact(r)),
-                   rounded_D=float(c.cost @ r), frac_share=float(np.mean(frac)),
-                   frac_cost=float(c.cost[frac].sum()), cleared=np.flatnonzero(r).tolist(),
-                   x=x.tolist())
+    if x_fw is not None:
+        x = x_fw
     elif held.any():
         # path's start with its fixed set: held at 1, the rest an even share of the budget left
         rest = budget - float(c.cost[held].sum())
@@ -883,11 +900,54 @@ def one(bid: str, power: float, metric: gap_clear.ComplexMetric | gap_walls.Wall
         log(f"  tracks: SIMP {inc.J:.6g}, the greedy {inc_g.J:.6g}")
         if inc_g.J < inc.J:
             inc = inc_g
-    Jbest, rs = inc.best()
-    out.update(simp_perm=rel.perm(Jbest), simp_D=float(c.cost @ rs),
+    J, r = inc.best()
+    return Track(J=J, r=r, xs=xs, held=held)
+
+
+def one(bid: str, power: float, metric: gap_clear.ComplexMetric | gap_walls.WallMetric,
+        plan: Plan, budget: float, *, demand: common.Demand) -> dict[str, Any]:
+    """SIMP at one budget on `bid` under `metric`, J_power under `demand` (common.Demand: J_1 is
+    P_q under a common.PriorityDemand), the cost the area population's: each of the free stage's
+    tracks (_track), the best by its exact J kept (`tracks_perm` each's)."""
+    [b] = common.build_blocks([bid])
+    c = metric.clearing(b, demand=demand)
+    rel = c.relaxation(power, q=1.0, eps=plan.eps)
+
+    def log(s: str) -> None:
+        print(f"{bid} {s}", flush=True)
+    t0 = time.time()
+    # B's first stage (plan.free): per track, the buildings held (the crossings that free the
+    # enclosed homes, or none)
+    tracks = plan.free.tracks(c, budget=budget, held=np.zeros(c.n, dtype=bool))
+    out: dict[str, Any] = dict(block=bid, n=c.n, power=power, demand=demand.name,
+                               plan=plan.name, along=metric.name, device=metric.device)
+    x_fw = None
+    if plan.fw > 0:
+        if any(h.any() for h in tracks):
+            raise NotImplementedError(f"{bid}: the free stage holds buildings, and fw is not "
+                                      f"built for held buildings: {plan.name}")
+        fw = frank_wolfe(rel, budget, plan.fw, log=log)
+        x_fw = fw["x"]
+        r = round_by_x(x_fw, c.cost, budget)
+        frac = (x_fw > 1e-6) & (x_fw < 1 - 1e-6)
+        out.update(iters=len(fw["hist"]), relaxed_perm=rel.perm(fw["J"]),
+                   bound_perm=rel.perm(fw["lb"]), rounded_perm=rel.perm(rel.exact(r)),
+                   rounded_D=float(c.cost @ r), frac_share=float(np.mean(frac)),
+                   frac_cost=float(c.cost[frac].sum()), cleared=np.flatnonzero(r).tolist(),
+                   x=x_fw.tolist())
+    done = [_track(c, rel, plan, budget, held, power=power, x_fw=x_fw, log=log, t0=t0)
+            for held in tracks]
+    k = int(np.argmin([tr.J for tr in done]))
+    tr = done[k]
+    rs, xs, held = tr.r, tr.xs, tr.held
+    if len(done) > 1:
+        log("  tracks: " + ", ".join(f"{i} {rel.perm(d.J):.4f}" for i, d in enumerate(done))
+            + f"; track {k} kept")
+    out.update(simp_perm=rel.perm(tr.J), simp_D=float(c.cost @ rs),
                simp_grey=float(np.mean((xs > 0.05) & (xs < 0.95))),
                simp_cleared=np.flatnonzero(rs).tolist(), simp_x=xs.tolist(),
                free_D=float(c.cost[held].sum()), free_cleared=np.flatnonzero(held).tolist(),
+               tracks_perm=[rel.perm(d.J) for d in done], track=k,
                enclosed=c.enclosed_left(rs > 0), t=time.time() - t0)
     print(f"{bid} n={c.n} p={power:g} {metric.name} {plan.name}: "
           + (f"relaxed {out['relaxed_perm']:.4f} bound {out['bound_perm']:.4f} rounded "
@@ -926,7 +986,10 @@ def path(bid: str, power: float, metric: gap_clear.ComplexMetric, plan: Plan, *,
     t0 = time.time()
     for i, D in enumerate(PATH_DS):
         last = fixed
-        fixed = plan.free.held(c, budget=D, held=last)
+        tracks = plan.free.tracks(c, budget=D, held=last)
+        if len(tracks) != 1:
+            raise ValueError(f"path runs one track: {plan.name}")
+        fixed = tracks[0]
         rest = max(D - float(c.cost[fixed].sum()), 0.0)
         even = rest / max(float(c.cost[~fixed].sum()), 1e-12)
         warm = plan.warm > 0 and i > 0

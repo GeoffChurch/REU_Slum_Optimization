@@ -19,6 +19,9 @@ its faults (FAULTS: python walled_check.py <guard> <ids,|-> <fault>).
 - `translucent` (a real block): SIMP under `.e0.05-0.0001` optimizes stage k of n at 0.05 (1e-4 /
   0.05)^(k / (n - 1)), the last at the plan's eps, every iterate in its stage's eps world. Fault
   `stage-eps-kept` (gap_clear.Relaxation.stage keeping its eps).
+- `free-track` (a real block under metrics.HOMES): `.ft` keeps the better of its two tracks, each
+  the run its free stage alone gives (`.f0`, and free first held: SIMP is deterministic), their
+  scores its `tracks_perm`. Fault `first-only` (FreeTrack's tracks the first alone).
 - `fw-bound` (a real block under metrics.HOMES, `.f0`): Frank-Wolfe's bound at FW_ITERS lies at or
   below the exact J of every clearing tried within the budget (its own rounding, random ones, free
   first's crossings). Fault `empty-step` (relax.knapsack's step nothing: the gap 0, the "bound" the
@@ -233,12 +236,21 @@ def join_budget(ids: list[str]) -> list[str]:
     bad = []
     for bid in ids:
         m = _homes_model(bid)
-        x = _random(m, np.random.default_rng(SEED + 1))
         none = np.zeros(m.n, dtype=bool)
         crossings = m.freed(budget=1.0, held=none).crossings
         if not crossings:
             bad.append(f"{bid}: no crossing (the premise)")
             continue
+        # a clearing filled to the budget in a random order, none of the crossings' buildings
+        # among it: every crossing then breaks the budget unless it gives back
+        x = none.copy()
+        avoid = np.zeros(m.n, dtype=bool)
+        avoid[[b for cr in crossings for b in cr.path]] = True
+        left = BUDGET
+        for b in np.random.default_rng(SEED + 1).permutation(m.n):
+            if not avoid[b] and m.cost[b] <= left:
+                x[b] = True
+                left -= float(m.cost[b])
         held = np.zeros(m.n, dtype=bool)
         rel = m.relaxation(1.0, q=1.0, eps=1e-4)
         g = rel.metric_world(1e-6).value_sgrad(x.astype(float))[1]
@@ -263,11 +275,12 @@ def join_budget(ids: list[str]) -> list[str]:
             J1 = m.exact(y, 1.0)[0]
             J2 = _homes_model(bid).exact(y, 1.0)[0] if mv is tier.moves[0] else J1
             exact = max(exact, abs(J1 / J2 - 1.0))
-        ok = bool(tier.moves) and fits and least and exact <= 1e-12
+        gave = sum(1 for mv in tier.moves if mv.restore)
+        ok = bool(tier.moves) and gave > 0 and fits and least and exact <= 1e-12
         print(f"{bid}: {len(crossings)} crossings, {len(tier.moves)} offered at a random "
-              f"clearing on the budget: D at most {worst:.6f} (budget {BUDGET:g}) {fits}, the "
-              f"least worth given back {least}, J afresh within {exact:.1e} "
-              f"-> {'ok' if ok else 'FAILS'}", flush=True)
+              f"clearing on the budget (D {float(m.cost[x].sum()):.6f}), {gave} giving back: D "
+              f"at most {worst:.6f} (budget {BUDGET:g}) {fits}, the least worth given back "
+              f"{least}, J afresh within {exact:.1e} -> {'ok' if ok else 'FAILS'}", flush=True)
         if not ok:
             bad.append(bid)
     return bad
@@ -337,9 +350,40 @@ def _empty_step(grad: np.ndarray, cost: np.ndarray, budget: float) -> np.ndarray
     return np.zeros(len(grad))
 
 
+# ------------------------------------------------------------------ free-track
+
+TRACK_PLAN = "fw0.q3.i10.e0.0001.k1s1e-06.p64w8x2E"     # the guard's: a shorter polish
+
+
+def free_track(ids: list[str]) -> list[str]:
+    bad = []
+    metric = metrics.metric_of(metrics.HOMES, device="cpu")
+    for bid in ids:
+        rows = {f: relax.one(bid, 1.0, metric, relax.plan_of(TRACK_PLAN + f), BUDGET, demand=POP)
+                for f in (".ft", ".f0", "")}
+        ft, none, first = rows[".ft"], rows[".f0"], rows[""]
+        best = max((none, first), key=lambda r: float(r["simp_perm"]))
+        ok = (ft["simp_perm"] == best["simp_perm"]
+              and ft["simp_cleared"] == best["simp_cleared"]
+              and ft["tracks_perm"] == [none["simp_perm"], first["simp_perm"]]
+              and len(first["free_cleared"]) > 0)
+        print(f"{bid}: `.ft` {ft['simp_perm']:.6f} (tracks {ft['tracks_perm']}, kept "
+              f"{ft['track']}); `.f0` alone {none['simp_perm']:.6f}, free first held "
+              f"{first['simp_perm']:.6f} ({len(first['free_cleared'])} held) "
+              f"-> {'ok' if ok else 'FAILS'}", flush=True)
+        if not ok:
+            bad.append(bid)
+    return bad
+
+
+def _first_track_only(self: relax.FreeTrack, c: Any, *, budget: float,
+                      held: np.ndarray) -> tuple[np.ndarray, ...]:
+    return (held.copy(),)
+
+
 GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "join-planted": join_planted, "join-null": join_null, "join-budget": join_budget,
-    "translucent": translucent, "fw-bound": fw_bound}
+    "translucent": translucent, "fw-bound": fw_bound, "free-track": free_track}
 
 FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "join-planted": {"no-adjacency": lambda: _patched(gap_joins, "adjacency", _empty_adjacency),
@@ -349,6 +393,7 @@ FAULTS: dict[str, dict[str, Callable[[], AbstractContextManager[None]]]] = {
     "translucent": {"stage-eps-kept": lambda: _patched(gcl.Relaxation, "stage",
                                                        _stage_eps_kept)},
     "fw-bound": {"empty-step": lambda: _patched(relax, "knapsack", _empty_step)},
+    "free-track": {"first-only": lambda: _patched(relax.FreeTrack, "tracks", _first_track_only)},
 }
 
 
