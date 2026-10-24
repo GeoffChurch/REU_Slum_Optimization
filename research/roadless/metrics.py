@@ -61,6 +61,19 @@ def _uniform() -> str:
 UNIFORM = _uniform()
 
 
+# Every home has demand under the uniform rule (NOTES, "Walled-in homes, round 2: T, U and W, each
+# with its best optimizer": F1, the owner's "self-sufficient moonbase"): UNIFORM with each home
+# that has no open ground within ring_m placed on its own ground as B (i) reads it, its building's
+# destination there (`+homes`: gap_clear.HomeDemand), so its escape time at baseline is its own
+# building's and a clearing that opens ground within ring_m of its outline joins it
+def _homes() -> str:
+    uniform = gap_clear.complex_of(UNIFORM, factorization=gap_factor.SuperLU())
+    return dataclasses.replace(uniform, placement=gap_clear.HomeDemand()).name
+
+
+HOMES = _homes()
+
+
 def walls_on_uniform(part: str, *, device: str) -> gap_walls.WallMetric:
     """Walls that leak (gap_walls; owner 2026-10-21, NOTES "Walls that leak: every home's source
     inside it, each wall priced as a length"): UNIFORM's mesh, leaks (on every cell open at

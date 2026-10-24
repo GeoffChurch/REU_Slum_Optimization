@@ -788,11 +788,12 @@ def relax_warm(ids: list[str]) -> list[str]:
         # from the last design's sides) and cold (from the outward sides)
         xs: list[np.ndarray] = []
 
-        def keep(x: np.ndarray, stage: tuple[float, float], into: list[np.ndarray] = xs) -> None:
+        def keep(x: np.ndarray, stage: relax.Stage, into: list[np.ndarray] = xs) -> None:
             into.append(x.copy())
 
         rel = wm.relaxation(1.0, q=1.0, eps=clear.EPS)
-        relax.simp(rel, relax.start_x(0, wm.cost, BUDGET), BUDGET, ((1.5, 0.0),), WARM_ITERS,
+        relax.simp(rel, relax.start_x(0, wm.cost, BUDGET), BUDGET,
+                   (relax.Stage(q=1.5, beta=0.0, eps=clear.EPS),), WARM_ITERS,
                    relax.DEFAULT_UPDATE, log=lambda s: None, watch=keep)
         rep = wm.relaxation(1.0, q=1.5, eps=clear.EPS)
         worst, wrong, passes = 0.0, 0, []

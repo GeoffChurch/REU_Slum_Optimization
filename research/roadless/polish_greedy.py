@@ -120,7 +120,7 @@ def run(bid: str, power: float, metric: gap_clear.ComplexMetric, picker_spec: st
     s = search.SearchState.start(c, power=power, score=search.UNSCORED, world=None)
     s.movable[held] = False                                 # held stay held
     moves = search.polish(scoring.world(scorer), budget=budget, width=width, pairs=pairs,
-                          pool=relax.PAIR_POOL, tries=tries)(s, search.Silent())
+                          pool=relax.PAIR_POOL, tries=tries, joins=())(s, search.Silent())
     rp, used = c.removed.astype(float), s.scorings
     perm = rel.perm(rel.exact(rp))
     t = time.time() - t0

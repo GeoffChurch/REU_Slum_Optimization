@@ -844,6 +844,29 @@ def in_pockets(dem: PointDemand, geo: gc.Geometry, spec: gc.Spec, quad: int,
             t[used])
 
 
+def on_own_ground(dem: PointDemand, own: Ring, homes: NDArray[np.bool_], quad: int,
+                  xy: NDArray[np.float64], tri: NDArray[np.int64]
+                  ) -> tuple[PointDemand, NDArray[np.int64]]:
+    """`dem` with each of `homes` placed on its own ground (`own`, own_ring's: a groundless home's
+    every triangle within ring_m of its outline, its footprint and the closed ground around it),
+    by area: the sub-points (`quad` a triangle) of each home's triangles, its own copies of a
+    triangle it shares with another, appended after dem's (gap_clear.HomeDemand). Returns (the
+    demand, per appended point its triangle of `tri`, of vertices xy)."""
+    R = (sp.diags(homes.astype(np.float64)) @ own.tri).tocoo()
+    if R.nnz == 0:
+        return dem, np.zeros(0, dtype=np.int64)
+    P, wt, t = _points_of(xy, tri[R.col], quad)
+    h = np.repeat(R.row, quad)
+    tot = np.bincount(h, weights=wt, minlength=len(homes))
+    S2 = sp.csr_matrix((wt / tot[h], (np.arange(len(P)), h)), shape=(len(P), len(homes)))
+    placed = tot > 0
+    return (PointDemand(xy=np.concatenate([dem.xy, P]),
+                        band=np.concatenate([dem.band, np.zeros(len(P), dtype=bool)]),
+                        S=sp.vstack([dem.S, S2]).tocsr(), walled=dem.walled & ~placed,
+                        shadowed=dem.shadowed, pocket=dem.pocket),
+            R.col[t])
+
+
 def locate(m: Mesh, xy: NDArray[np.float64]) -> NDArray[np.int64]:
     """Per point, the mesh's triangle holding it (-1 none: the band, or outside)."""
     geom = shapely.polygons(m.xy[m.tri])

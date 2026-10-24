@@ -82,6 +82,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import os
 import re
 import time
@@ -898,7 +899,10 @@ class Ground(NamedTuple):
     """What a placement reads of a block's baseline (Fixed.of): the buildings (`geo`), the Spec,
     the demand's quadrature, the fixed mesh, per triangle whether it reaches the street with every
     footprint standing (`live0`: the ground cells among them) and whether it is open then (`open0`:
-    its factor positive, the sealed pockets' ground among them), and the open street band."""
+    its factor positive, the sealed pockets' ground among them), the open street band, the demand
+    on the ground reaching the street (`live`: _live_demand, with per point its triangle), the
+    groundless homes (gap_flow.groundless: no open ground within ring_m) and each home's ground
+    that frees it (`own`: gap_flow.own_ring, a groundless home's whole ring)."""
     geo: gc.Geometry
     spec: gc.Spec
     quad: int
@@ -906,16 +910,21 @@ class Ground(NamedTuple):
     live0: NDArray[np.bool_]
     open0: NDArray[np.bool_]
     band_open: Any
+    live: tuple[gf.PointDemand, NDArray[np.int64]]
+    groundless: NDArray[np.bool_]
+    own: gf.Ring
 
 
-def _live_demand(g: Ground) -> tuple[gf.PointDemand, NDArray[np.int64]]:
+def _live_demand(geo: gc.Geometry, spec: gc.Spec, quad: int, fm: FullMesh,
+                 live0: NDArray[np.bool_], band_open: Any
+                 ) -> tuple[gf.PointDemand, NDArray[np.int64]]:
     """The demand on the triangles reaching the street at baseline (gap_flow.demand_on), per point
     its triangle (-1 in the band)."""
-    ids = np.flatnonzero(g.live0)
-    dem = gf.demand_on(g.geo, g.spec, g.quad, g.fm.xy, g.fm.tri[ids], g.band_open)
-    nin = len(ids) * g.quad
+    ids = np.flatnonzero(live0)
+    dem = gf.demand_on(geo, spec, quad, fm.xy, fm.tri[ids], band_open)
+    nin = len(ids) * quad
     ptri = -np.ones(len(dem.xy), dtype=np.int64)
-    ptri[:nin] = ids[np.arange(nin) // g.quad]
+    ptri[:nin] = ids[np.arange(nin) // quad]
     return dem, ptri
 
 
@@ -942,7 +951,7 @@ class LiveDemand:
         return ""
 
     def demand(self, g: Ground) -> tuple[gf.PointDemand, NDArray[np.int64]]:
-        return _live_demand(g)
+        return g.live
 
     def check(self, leak: gx.NoLeak | gx.InternalLeak) -> None:
         return None
@@ -960,7 +969,7 @@ class PocketDemand:
         return "pockets"
 
     def demand(self, g: Ground) -> tuple[gf.PointDemand, NDArray[np.int64]]:
-        dem, ptri = _live_demand(g)
+        dem, ptri = g.live
         pk = np.flatnonzero(g.open0 & ~g.live0)
         dem, rows = gf.in_pockets(dem, g.geo, g.spec, g.quad, g.fm.xy, g.fm.tri[pk])
         return dem, np.concatenate([ptri, pk[rows]])
@@ -969,6 +978,38 @@ class PocketDemand:
         if not leak.pockets:
             raise ValueError(f"the demand in the pockets needs a leak there (gap_exits.OpenSites), "
                              f"not {leak!r}: a pocket's home would escape at once")
+
+
+@dataclass(frozen=True)
+class HomeDemand:
+    """Every home has demand (NOTES, "Walled-in homes, round 2": F1, the owner's "self-sufficient
+    moonbase"): PocketDemand, and each home it leaves without demand, the groundless (no open
+    ground within ring_m at baseline), placed on its own ground as B (i) reads it (Ground.own,
+    gap_flow.own_ring: every triangle within ring_m of its outline, its footprint among them; by
+    area, gap_flow.on_own_ground), closed ground where its building's destination (the internal
+    leak's buildings' part, gap_exits.LeakSite.sealed) is the only one: at baseline it escapes
+    into its own building, and a clearing that opens ground within ring_m of its outline joins
+    that ground's points to it. Needs the leak in the pockets with a buildings' part (refused
+    without: a home on closed ground with no leak there would be no unknown, its escape time
+    0). Spelt `+homes`."""
+
+    @property
+    def name(self) -> str:
+        return "homes"
+
+    def demand(self, g: Ground) -> tuple[gf.PointDemand, NDArray[np.int64]]:
+        dem, ptri = PocketDemand().demand(g)
+        if (dem.walled != g.groundless).any():
+            raise RuntimeError("the pockets' placement leaves without demand homes other than "
+                               "the groundless")
+        dem, tri = gf.on_own_ground(dem, g.own, g.groundless, g.quad, g.fm.xy, g.fm.tri)
+        return dem, np.concatenate([ptri, tri])
+
+    def check(self, leak: gx.NoLeak | gx.InternalLeak) -> None:
+        PocketDemand().check(leak)
+        if not (isinstance(leak, gx.InternalLeak) and leak.foot_m < math.inf):
+            raise ValueError(f"a home on its own closed ground ends its trips at its building: the "
+                             f"leak needs a buildings' part (a finite foot_m), not {leak!r}")
 
 
 class Fixed(NamedTuple):
@@ -1031,16 +1072,21 @@ class Fixed(NamedTuple):
         _ib, band_open = gc._open_ground(geo, np.ones(len(geo.polys), dtype=bool), spec.band_m,
                                          carve=None, grow=0.0)
         open0 = kt > 0
-        dem, ptri = placement.demand(Ground(geo=geo, spec=spec, quad=fs.quad, fm=fm, live0=live0,
-                                            open0=open0, band_open=band_open))
+        live = _live_demand(geo, spec, fs.quad, fm, live0, band_open)
         ring = gf.ring_of(geo, spec.ring_m, fm.xy, fm.tri, band_open)
+        # the groundless homes among those without demand on live ground (a superset of the
+        # placement's homes without demand: gap_flow.groundless reads the same homes from either)
         bare = gf.groundless(geo, spec.ring_m, fs.quad, fm.xy, fm.tri,
-                             ring.tri @ sp.diags(open0.astype(np.float64)), dem.walled)
+                             ring.tri @ sp.diags(open0.astype(np.float64)), live[0].walled)
+        own = gf.own_ring(ring, open0, bare)
+        dem, ptri = placement.demand(Ground(geo=geo, spec=spec, quad=fs.quad, fm=fm, live0=live0,
+                                            open0=open0, band_open=band_open, live=live,
+                                            groundless=bare, own=own))
         # free first's baseline: the plain mesh's built now and stored with it, a carved mesh's
         # on use
         cx0: Baseline = (LazyBaseline(geo, spec, form.grow) if carving.stops else
                          StoredBaseline(arrays=_baseline_arrays(geo, spec, form.grow), spec=spec))
-        fx = cls(fm=fm, dem=dem, ptri=ptri, groundless=bare, own=gf.own_ring(ring, open0, bare),
+        fx = cls(fm=fm, dem=dem, ptri=ptri, groundless=bare, own=own,
                  cx0=cx0, t_build=time.time() - t0, carving=carving)
         cls._store(fx, path)
         return fx
@@ -1484,9 +1530,12 @@ class Model:
         open0 = (np.bincount(cells.cell, weights=f0.kt > 0, minlength=cells.n) > 0) & ~r0.ground
         if (r0.unknown & ~open0).any():
             raise RuntimeError("a cell live at baseline that is not open then")
+        # the homes placed on their own closed ground (HomeDemand: groundless, with demand)
+        on_own = (fx.groundless & ~fx.dem.walled).astype(np.float64)
         self.leak_site = gx.LeakSite(
             area=np.bincount(cells.cell, weights=tri_area, minlength=cells.n), live=r0.unknown,
-            open=open0, foot=np.asarray(bare.Pc @ shapely.area(self.polys_)), sigma=fs.sigma)
+            open=open0, foot=np.asarray(bare.Pc @ shapely.area(self.polys_)),
+            sealed=np.asarray(bare.Pc @ on_own) > 0, sigma=fs.sigma)
         self.sys = bare.with_graph(bare.graph.with_leak(exits.leak.per_cell(self.leak_site),
                                                         live0=self.leak_site.live))
         self.dem = fx.dem
@@ -1714,6 +1763,10 @@ class Model:
         return Tension(model=self, st=st, u=u, home_u=uh, g_=g)
 
     def free_first(self, *, budget: float, held: NDArray[np.bool_]) -> NDArray[np.bool_]:
+        """The buildings free first holds (`freed`)."""
+        return np.asarray(self.freed(budget=budget, held=held).held)
+
+    def freed(self, *, budget: float, held: NDArray[np.bool_]) -> gc.Freed:
         """gap_complex.free_first on the complex grown as the form grows its footprints, read at
         its filtration width, on the fixed mesh's groundless homes (module docstring), checked
         home for home by the flow model's own reach: its walled-in homes at baseline, and those it
@@ -1734,7 +1787,7 @@ class Model:
         print(f"{bid} free: {n0 - int(left.sum())} of {n0} walled-in homes freed, D "
               f"{float(self.cost_[fr.held & ~held].sum()):.4f} on {len(fr.crossings)} crossings "
               f"({fr.passes} passes), {int(left.sum())} left walled in", flush=True)
-        return np.asarray(fr.held)
+        return fr
 
     def relaxation(self, power: float, *, q: float, eps: float) -> Relaxation:
         return Relaxation(self, power, q=q, eps=eps)
@@ -1802,6 +1855,10 @@ class Relaxation:
     @property
     def J0(self) -> float:
         return self.J0_
+
+    def stage(self, st: relax.Stage) -> None:
+        """SIMP's continuation stage `st`: its q, beta and eps (relax.simp; relax.Translucence)."""
+        self.q, self.beta, self.eps = st.q, st.beta, st.eps
 
     def proj(self, x: NDArray[np.float64]) -> NDArray[np.float64]:
         return relax.project(x, self.beta)
@@ -1881,7 +1938,7 @@ class ComplexMetric:
     fs: gf.FlowSpec
     form: gf.Width
     lumped: bool
-    placement: LiveDemand | PocketDemand
+    placement: LiveDemand | PocketDemand | HomeDemand
     search_eps: float
     exits: gx.Exits
     factorization: gap_factor.Factorization
@@ -1954,7 +2011,7 @@ _NUM = r"([0-9]+(?:\.[0-9]+)?(?:e-?[0-9]+)?)"
 # complex_of refuses them: no optimizer runs on walls)
 _NAME = re.compile(rf"cx\+(close|shy|ramp){_NUM}(?:s{_NUM})?\+s{_NUM}r{_NUM}b{_NUM}"
                    rf"\+R{_NUM}(?:g([0-9]+)x{_NUM})?q([0-9]+)(?:k{_NUM})?"
-                   rf"(?:o(-?{_NUM[1:-1]}),(-?{_NUM[1:-1]}))?(\+lumped)?(\+pockets)?"
+                   rf"(?:o(-?{_NUM[1:-1]}),(-?{_NUM[1:-1]}))?(\+lumped)?(\+pockets|\+homes)?"
                    rf"(?P<walls>\+W[^+]+)?\+v([0-9a-f]+){gx.SUFFIX_RE}(?:@e{_NUM})?")
 
 
@@ -1964,7 +2021,8 @@ def complex_of(name: str, *, factorization: gap_factor.Factorization) -> Complex
     m = _NAME.fullmatch(name)
     if m is None:
         raise ValueError(f"unknown complex metric {name!r}: cx+<form><w>+s<s>r<ring>b<band>+"
-                         "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped][+pockets]"
+                         "R<R>[g<levels>x<grade>]q<quad>[k<sigma>][o<x>,<y>][+lumped]"
+                         "[+pockets|+homes]"
                          "[+W<walls>]+v<code>[+x[B<line>c<cross>][E0][L[p][o<open>][b<foot>]]"
                          "[S<boost>[s<surfaces>]h<classes>]v<exits code>]"
                          "[@e<search eps>]")
@@ -1987,7 +2045,9 @@ def complex_of(name: str, *, factorization: gap_factor.Factorization) -> Complex
                      grade=0.0 if grade is None else float(grade),
                      sigma=gf.SIGMA_ISO if sigma is None else float(sigma), quad=int(quad),
                      offset=gf.OFFSET if ox is None else (float(ox), float(oy)))
-    placement: LiveDemand | PocketDemand = LiveDemand() if pockets is None else PocketDemand()
+    placement: LiveDemand | PocketDemand | HomeDemand = (
+        LiveDemand() if pockets is None else PocketDemand() if pockets == "+pockets"
+        else HomeDemand())
     metric = ComplexMetric(spec=gc.Spec(s=float(s_), ring_m=float(ring), band_m=float(band)),
                            fs=fs, form=form, lumped=lumped is not None, placement=placement,
                            search_eps=clear.EPS if search is None else float(search),

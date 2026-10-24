@@ -954,6 +954,14 @@ class WallRelaxation:
     def J0(self) -> float:
         return self.J0_
 
+    def stage(self, st: relax.Stage) -> None:
+        """SIMP's continuation stage `st` (relax.simp): its q and beta; W has no eps world, so a
+        stage naming one (an eps but the plan's unnamed default, clear.EPS: a translucent start
+        among them) is refused, as WallModel.relaxation refuses a named eps."""
+        if st.eps != clear.EPS:
+            raise ValueError(f"W has no eps world: a continuation stage at eps {st.eps:g}")
+        self.q, self.beta = st.q, st.beta
+
     def proj(self, x: NDArray[np.float64]) -> NDArray[np.float64]:
         return np.asarray(relax.project(x, self.beta))
 
