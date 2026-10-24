@@ -9069,3 +9069,37 @@ of L_P, ΔP buys back some of them. Whether to give reblock.methods.cycle_native
 required `apart`, is the owner's. Scripts: .superpowers/sdd/2026-10-22-flow-roads/cn_dp.py (build
 | frames | plates <apart>), cn_dp_loops.py <apart>, cn_apart.py (propose | frames | plates
 <apart>), cn_build_order.py <apart>; not committed.
+
+### Trips with destinations inside the block, scored with the street grounded (2026-10-23)
+
+The owner: "if you could have a single point be GND, but nobody knows which point it will be,
+only the probability distribution (maybe equal probability for every point in the interior of
+every building, and some other probability for the traversible points on the boundary)". With
+the street as the destination at probability p and otherwise a building drawn by its area, G the
+Green's function grounded at the street and q the homes' injection (population, here exactly
+proportional to area, so the destination law is q / Q and <pi, u> = P / Q):
+
+    all to one    E[P_g] = (2p - 1) P + Q^2 (1 - p) D       everyone at once to one destination
+    independent   E[R]   = (2 - p) D - 2 (1 - p) P / Q^2    each trip alone (no contention)
+
+with D = sum_b pi_b G_bb, each home's lone resistance to the street, area-weighted: a trace, by
+Hutch++ in 192 solves a state with the same probes in every state (exact on the baseline from a
+solve per home: 1.1879 against Hutch++'s 1.1916 +- 0.0053). At area D 0.15 (L under each, 1 -
+X / X0; +-0.003 on the trip columns):
+
+    network                       P       all to one, p 0    independent, p 1 / p 0
+    clearance (the tree)          0.325   0.272              0.275 / 0.272
+    clearance_looped              0.421   0.292              0.300 / 0.292
+    cycle_native (canonical)      0.575   0.309              0.325 / 0.309
+    ΔP greedy, top 12             0.652   0.310              0.331 / 0.310
+    ΔP cycle_native, apart 7      0.570   0.319              0.334 / 0.319
+
+Interior destinations do not reward loops here: clearance_looped's lead on the tree falls from
+0.096 under P to 0.020. Both objectives fall to D below p = 1 (Q^2 D is 16 times P at baseline),
+and D barely separates the networks (0.27 to 0.33 against P's 0.33 to 0.65). Two causes. The
+street is grounded, a free connector: an interior trip goes out and back in at no cost, so a tree
+whose branches meet the street already has loops through it. And without P's cross terms
+(sum_{i != k} w_i w_k G_ik, the overlap of two homes' ways out: contention) the methods look
+alike: ΔP greedy's lead under P is mostly relieved bottlenecks. The faithful test needs the street
+as a finite conductor (docs/superpowers/specs/2026-10-23-street-as-conductor-design.md). Script:
+.superpowers/sdd/2026-10-22-flow-roads/trips.py (exact | score <network> | table), not committed.
