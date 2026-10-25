@@ -41,7 +41,7 @@ own mesh by road_state; D by common.MEASURE on the world-frame ground):
     PYTHONPATH=. uv run python research/roadless/road_simp.py rescore <block> <plan> cpu|gpu <rev>
 
 `rescore` builds this revision's answers from revision <rev>'s design of the same plan (its
-<block>_x.parquet, written from rev 4; SIMP's loop is rev 2's throughout, the revisions since
+<block>_x.parquet and <block>_it.parquet, written from rev 4; SIMP's loop is rev 2's throughout, the revisions since
 changing only the answers) and writes them as this revision's, the iterates carried over and
 `x_rev` recording where the design came from (`run` writes its own REV).
 
@@ -49,7 +49,8 @@ plan: rs.D<D>.k<per_km>.r<radius>.q<q,...>.b<beta,...>.i<iters> (the stages pair
 order), e.g. rs.D0.05.k0.01.r3.5.q1,2,3,3,3.b1,2,4,8,16.i30; its name (Plan.name) adds the raster's
 pixel and the eps world's eps (.p<PIXEL>e<EPS>). Rows in road_simp_rows/<metric>/<name>/
 <block>.parquet beside its design (<block>_x.parquet: x per pixel, parquet so the cluster's pull
-brings it), its paved ground (<block>_ground.parquet) and its roads (<block>_roads.parquet).
+brings it) and iterates (<block>_it.parquet), both written before the answers are scored, its
+paved ground (<block>_ground.parquet) and its roads (<block>_roads.parquet).
 """
 from __future__ import annotations
 
@@ -478,7 +479,7 @@ def rescore(bid: str, plan: Plan, device: str, *, rev: int,
     t0 = time.time()
     src = OUT / metrics.RUNTIME / plan.name_at(rev) / f"{bid}.parquet"
     x = pd.read_parquet(src.with_name(f"{bid}_x.parquet"))["x"].to_numpy()
-    rows = pd.read_parquet(src)[list(Iterate._fields)].assign(x_rev=rev)
+    rows = pd.read_parquet(src.with_name(f"{bid}_it.parquet")).assign(x_rev=rev)
     [b] = common.build_blocks([bid])
     rd = Roads(metric.clearing(b, demand=common.PopulationDemand()), radius=plan.radius)
     if len(x) != len(rd.raster.on):
@@ -493,6 +494,11 @@ def answer(b: Any, metric: gcl.ComplexMetric, rd: Roads, x: NDArray[np.float64],
     bid = b.block_id
     beta = plan.stages[-1][1]
     geo = rd.m.geo
+    # the design and its iterates first, so a failure while scoring (two of rev 4's twelve 5810
+    # runs were killed meshing their answers) leaves them for `rescore`
+    out.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"x": x}).to_parquet(out.with_name(f"{bid}_x.parquet"))
+    rows[list(Iterate._fields)].to_parquet(out.with_name(f"{bid}_it.parquet"))
     ground = geo.utm(paved(rd, x, beta))
     lines = shapely.get_parts(geo.utm(roads(rd, x, beta)))
     del rd                                     # the eps world's model, before two more are built
@@ -506,8 +512,6 @@ def answer(b: Any, metric: gcl.ComplexMetric, rd: Roads, x: NDArray[np.float64],
           f"{sc['paved_paved']:.0f} m^2; roads L_P {sc['roads_L_P']:.4f}, D "
           f"{sc['roads_D_exact']:.4f}, {sc['roads_m']:.0f} m ({sc['roads_apart_m']:.0f} m apart "
           f"dropped) ({time.time() - t0:.0f}s)", flush=True)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    pd.DataFrame({"x": x}).to_parquet(out.with_name(f"{bid}_x.parquet"))
     gpd.GeoDataFrame(geometry=[ground], crs=b.crs).to_parquet(
         out.with_name(f"{bid}_ground.parquet"))
     net.to_parquet(out.with_name(f"{bid}_roads.parquet"))
