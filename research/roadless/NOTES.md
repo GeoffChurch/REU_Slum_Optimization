@@ -10368,16 +10368,29 @@ vehicle or ΔP greedy can reach them; and the skeleton stops a half-width short 
 (only 39 -- 93% of a D 0.05 answer's length in pieces within 4 m of it). Rev 4 joined each end
 whose inscribed disk reaches past the block toward the street, rev 5 to it by the shortest line,
 rev 6 keeps only the pieces linked to the street (each rescored from rev 4's design: `rescore`;
-SIMP's loop is rev 2's throughout). Linked, at r 3.5, D 0.05, against the lazy greedy at the
-same D:
+SIMP's loop is rev 2's throughout; D 0.15 k 0.08 r 7 was killed while meshing its answers three
+times). Linked, against the lazy greedy (lineup pool) at the same D:
 
-    k        rev 5 (all pieces)          rev 6 (linked)              lazy greedy
-    0.08     0.570  D 0.071  2.92 km     0.328  D 0.034  1.21 km     0.427  2.36 km
-    0.04     0.651  D 0.081  4.99 km     0.421  D 0.037  2.28 km     0.441  2.54 km
-    0.02                                 0.500  D 0.048  3.88 km     0.488  3.25 km
+    plan (D, k, r)    rev 6 linked roads             dropped   lazy greedy
+    0.05 0.08 7       0.384  D 0.015  1.32 km        0.35 km   0.295  1.29 km
+    0.05 0.04 7       0.390  D 0.023  1.84 km        0.98      0.359  1.75
+    0.05 0.02 7       0.496  D 0.027  3.31 km        0.31      0.388  1.90
+    0.05 0.01 7       0.540  D 0.032  4.59 km        0.35      0.418  2.27
+    0.15 0.04 7       0.339  D 0.029  1.48 km        1.43      0.405  2.19
+    0.15 0.02 7       0.454  D 0.044  2.83 km        1.65      0.475  3.05
+    0.15 0.01 7       0.594  D 0.075  5.30 km        0.68      0.557  4.94
+    0.05 0.08 3.5     0.328  D 0.034  1.21 km        1.70      0.427  2.36
+    0.05 0.04 3.5     0.421  D 0.037  2.28 km        2.70      0.441  2.54
+    0.05 0.02 3.5     0.500  D 0.048  3.88 km        3.81      0.488  3.25
+    0.05 0.01 3.5     0.624  D 0.069  8.02 km        3.25      0.544  4.65
 
-(1.7, 2.7 and 3.8 km dropped). Linked, SIMP's roads sit about on the greedy's frontier (behind it
-at k 0.08 in half the road, ahead by 0.012 at k 0.02 in a fifth more); the rest of SIMP's lead is
+(rev 5, all pieces, at r 3.5: k 0.08 0.570 at D 0.071 in 2.92 km, k 0.04 0.651 at 0.081 in 4.99.)
+At r 7 and D 0.05 the linked roads lead the greedy at their own D by 0.03 -- 0.12: at k 0.08 on
+every axis (0.384 against 0.295 at D 0.015 in 1.32 km against 1.29), at k 0.02 and 0.01 in 1.7 --
+2x the road (the greedy's pool, short connections, has nothing that long at so little D: SIMP's
+r 7 roads run through open ground). At r 3.5, where most of the skeleton floats, and at D 0.15,
+where the paved answer's D goes into wide trunks the single road does not keep, they trail or tie.
+SIMP's lead in rev 3 was partly the floating pieces and partly these roads; the rest is
 paving, not road. The skeleton at a road's width is not the paved answer: at r 3.5 the paved
 features can be narrower than 7 m and rev 3's roads overshot D (0.05 to 0.07 -- 0.10), at r 7
 they landed under it (0.030 -- 0.035, wide trunks reduced to one road). On 20954 (small and
@@ -10391,10 +10404,22 @@ So on 5810 the price of paving decides the answer's shape, and paving is where S
 from: unpriced in D, paved open ground buys L_P 0.75 -- 0.84 at D 0.05 -- 0.15 with 50 -- 83k m^2
 (the lazy ΔP greedy 0.678 at 0.15 in 9.2 km of 7 m roads), much of it in islands no road reaches.
 Under this metric a plaza or a footpath grid inside the block is worth as much as a road to the
-street; whether that is the owner's intent is the "paving has no price" question. Next: rev 6's
-linked roads as ΔP greedy's candidates (`simp:<plan>`), alone and beside the lineup's pool, the
-exact ΔP / ΔD ordering and cutting them. Scripts: research/roadless/road_simp.py,
-road_simp_check.py; rows in research/roadless/road_simp_rows/ (not committed).
+street; whether that is the owner's intent is the "paving has no price" question.
+
+SIMP's linked roads as ΔP greedy's candidates (pool `lineup+simp:<plan>`, the lazy pick, cost D):
+with D 0.05 k 0.02 r 3.5's 452 lines beside the lineup's 966, the build takes 33 of them (1.6 of
+its 10.7 km to D 0.15, on the block's east side, where SIMP's joined spurs are) and leads the
+lineup-only build at every D:
+
+    D                       0.01    0.02    0.03    0.05    0.075   0.10    0.125   0.15    km
+    lineup                  0.236   0.340   0.410   0.493   0.556   0.611   0.647   0.678   9.1
+    lineup + SIMP r 3.5     0.246   0.346   0.414   0.512   0.585   0.635   0.671   0.695   10.4
+
+in more road (3.8 / 7.3 / 10.4 km at D 0.05 / 0.10 / 0.15 against 3.4 / 6.7 / 9.1) and a little
+more clutter (17 / 23 / 22% within 5 m against 16 / 20 / 18%); 2.0 h. The r 7 pool (D 0.05 k 0.01)
+is running. Scripts: research/roadless/road_simp.py, road_simp_check.py; rows in
+research/roadless/road_simp_rows/ (not committed); the greedy's pool in
+.superpowers/sdd/2026-10-22-flow-roads/dp_greedy.py (Pool: Lineup, Simp, Union).
 
 ### The damage term for vehicles, on the road graph alone: a lens on 5810 (2026-10-25)
 
