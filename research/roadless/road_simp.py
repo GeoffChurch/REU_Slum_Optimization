@@ -29,10 +29,18 @@ own mesh by road_state; D by common.MEASURE on the world-frame ground):
     road's width, where `paved` keeps their trunks' widths. Thinning eats a strip from its ends, so
     the skeleton stops about a half-width short of the street where the paved strip meets it (rev
     3: 7 -- 61% of the length on 5810 in pieces more than 4 m from it): each end whose inscribed
-    disk reaches past the block (the raster's pixels off the design) is joined to the nearest such
-    pixel. Pieces still apart from the street are kept, their length reported (roads_floating_m).
+    disk (its distance off the mask, and a pixel's diagonal) reaches the street is joined to it by
+    the shortest line (rev 4 joined it to the nearest pixel off the design, up to a pixel from the
+    street, and off-design pixels also sit inside the block between large triangles' centroids).
+    Pieces still apart from the street are kept, their length reported (roads_floating_m).
 
     PYTHONPATH=. uv run python research/roadless/road_simp.py run <block> <plan> cpu|gpu [--replace]
+    PYTHONPATH=. uv run python research/roadless/road_simp.py rescore <block> <plan> cpu|gpu <rev>
+
+`rescore` builds this revision's answers from revision <rev>'s design of the same plan (its
+<block>_x.parquet, written from rev 4; SIMP's loop is rev 2's throughout, the revisions since
+changing only the answers) and writes them as this revision's, the iterates carried over and
+`x_rev` recording where the design came from (`run` writes its own REV).
 
 plan: rs.D<D>.k<per_km>.r<radius>.q<q,...>.b<beta,...>.i<iters> (the stages pair q and beta in
 order), e.g. rs.D0.05.k0.01.r3.5.q1,2,3,3,3.b1,2,4,8,16.i30; its name (Plan.name) adds the raster's
@@ -84,9 +92,10 @@ MOVE = 0.2           # OC's move limit (relax.simp's)
 NU_TOL = 1e-3        # OC: nu bisected to this factor (cannot change the answer beyond it)
 HALF = 0.5           # the answer: the triangles whose road density reaches it
 SMOOTH_M = 0.1       # m: the paved answer's closing, opening and simplification
-REV = 4              # the code's revision, in the plan's name (2: D bisected at the trial update,
+REV = 5              # the code's revision, in the plan's name (2: D bisected at the trial update,
                      # the answers smoothed and doubled; 3: the roads' mask unholed; 4: the
-                     # skeleton's ends joined to the street)
+                     # skeleton's ends joined toward the street; 5: joined to it)
+X_FROM = 4           # the first revision that writes its design (rescore's earliest source)
 OUT = HERE / "road_simp_rows"
 MESHES = HERE / "road_simp_rows" / ".meshes"     # the answers' carved meshes
 
@@ -108,10 +117,14 @@ class Plan:
 
     @property
     def name(self) -> str:
+        return self.name_at(REV)
+
+    def name_at(self, rev: int) -> str:
+        """The plan's name as revision `rev` wrote it."""
         q = ",".join(f"{q:g}" for q, _ in self.stages)
         b = ",".join(f"{b:g}" for _, b in self.stages)
         return (f"rs.D{self.D:g}.k{self.per_km:g}.r{self.radius:g}.q{q}.b{b}.i{self.iters}"
-                f".p{PIXEL:g}e{EPS:g}v{REV}")
+                f".p{PIXEL:g}e{EPS:g}v{rev}")
 
     @staticmethod
     def of(spec: str) -> Plan:
@@ -317,13 +330,27 @@ def _oc(x: NDArray[np.float64], on: NDArray[np.bool_], gain: NDArray[np.float64]
     return trial(hi), hi
 
 
+class Iterate(NamedTuple):
+    """One OC update's row."""
+    q: float
+    beta: float
+    it: int
+    P: float
+    L_P: float
+    A: float
+    D: float
+    nu: float
+    change: float
+    t: float
+
+
 def simp(rd: Roads, plan: Plan, *,
-         log: Any = print) -> tuple[NDArray[np.float64], list[dict[str, float]]]:
+         log: Any = print) -> tuple[NDArray[np.float64], list[Iterate]]:
     """OC from XMIN everywhere (no road)."""
     x = np.full(len(rd.raster.on), XMIN)
     lam = rd.price(plan.per_km)
     on = rd.raster.on
-    rows = []
+    rows: list[Iterate] = []
     nu = 0.0
     t0 = time.time()
     for q, beta in plan.stages:
@@ -342,8 +369,8 @@ def simp(rd: Roads, plan: Plan, *,
             xn, nu = _oc(x, on, -gP, lam * gA, gD, D_of=D_of, budget=plan.D, nu0=nu)
             change = float(np.abs(xn - x)[on].max())
             x = xn
-            rows.append(dict(q=q, beta=beta, it=it, P=P, L_P=1.0 - P / rd.P0, A=A, D=D, nu=nu,
-                             change=change, t=time.time() - t0))
+            rows.append(Iterate(q=q, beta=beta, it=it, P=P, L_P=1.0 - P / rd.P0, A=A, D=D,
+                                nu=nu, change=change, t=time.time() - t0))
             log(f"q {q:g} beta {beta:g} it {it}: L_P {1 - P / rd.P0:.4f} + price "
                 f"{lam * A / rd.P0:.4f}, D {D:.4f}, paved {A:.0f} m^2, change {change:.3f} "
                 f"({time.time() - t0:.0f}s)")
@@ -377,18 +404,18 @@ def roads(rd: Roads, x: NDArray[np.float64], beta: float) -> Any:
         for da, db in ((0, 1), (1, -1), (1, 0), (1, 1)):
             if (a + da, b + db) in keep:
                 segs.append(((a + 0.5, b + 0.5), (a + da + 0.5, b + db + 0.5)))
-    # the ends joined to the street (module docstring): an end's inscribed disk (its distance off
-    # the mask) reaching the nearest pixel off the design, padded so the raster's edge is off it
-    block = np.pad(ra.on.reshape(ra.shape), 1)
-    off, (oi, oj) = ndimage.distance_transform_edt(block, return_indices=True)
-    inside = ndimage.distance_transform_edt(np.pad(on, 1))
-    deg = ndimage.correlate(np.pad(skel, 1).astype(np.int64), np.ones((3, 3), dtype=np.int64),
-                            mode="constant")
-    ends = np.pad(skel, 1) & (deg == 2) & (off <= inside + np.sqrt(2.0))
-    for a, b in zip(*np.nonzero(ends), strict=True):
-        segs.append(((a - 0.5, b - 0.5), (oi[a, b] - 0.5, oj[a, b] - 0.5)))
     xy = ra.lo + PIXEL * np.asarray(segs, dtype=np.float64).reshape(-1, 2, 2)
-    return shapely.line_merge(shapely.multilinestrings(shapely.linestrings(xy)))
+    # the ends joined to the street (module docstring): an end whose inscribed disk reaches it
+    inside = ndimage.distance_transform_edt(on) * PIXEL
+    deg = ndimage.correlate(skel.astype(np.int64), np.ones((3, 3), dtype=np.int64),
+                            mode="constant")
+    ea, eb = np.nonzero(skel & (deg == 2))
+    ends = shapely.points(ra.lo + PIXEL * (np.stack([ea, eb], axis=1) + 0.5))
+    street = rd.m.geo.streets
+    near = shapely.distance(ends, street) <= inside[ea, eb] + np.sqrt(2.0) * PIXEL
+    joins = shapely.shortest_line(ends[near], street)
+    return shapely.line_merge(shapely.multilinestrings(
+        np.concatenate([shapely.linestrings(xy), joins])))
 
 
 def floating_m(net: gpd.GeoDataFrame, streets: gpd.GeoDataFrame) -> float:
@@ -425,15 +452,45 @@ def run(bid: str, plan: Plan, device: str, *, standing: clearings.Standing) -> N
         return
     t0 = time.time()
     [b] = common.build_blocks([bid])
-    m = metric.clearing(b, demand=common.PopulationDemand())
-    rd = Roads(m, radius=plan.radius)
-    print(f"{bid}: {m.fx.fm.nt} triangles, {int(rd.raster.on.sum())} design pixels, P0 "
+    rd = Roads(metric.clearing(b, demand=common.PopulationDemand()), radius=plan.radius)
+    print(f"{bid}: {rd.m.fx.fm.nt} triangles, {int(rd.raster.on.sum())} design pixels, P0 "
           f"{rd.P0:.6e} ({time.time() - t0:.0f}s)", flush=True)
     x, rows = simp(rd, plan, log=lambda s: print(s, flush=True))
+    answer(b, metric, rd, x, plan, pd.DataFrame(rows).assign(x_rev=REV), device=device, out=out,
+           t0=t0, standing=standing)
+
+
+def rescore(bid: str, plan: Plan, device: str, *, rev: int,
+            standing: clearings.Standing) -> None:
+    """This revision's answers from revision `rev`'s design (module docstring)."""
+    if not X_FROM <= rev < REV:
+        raise SystemExit(f"rev {rev}: a design to rescore is written by revisions {X_FROM} .. "
+                         f"{REV - 1}")
+    metric = metrics.metric_of(metrics.RUNTIME, device=device)
+    out = OUT / metrics.RUNTIME / plan.name / f"{bid}.parquet"
+    if not standing.todo(out):
+        return
+    t0 = time.time()
+    src = OUT / metrics.RUNTIME / plan.name_at(rev) / f"{bid}.parquet"
+    x = pd.read_parquet(src.with_name(f"{bid}_x.parquet"))["x"].to_numpy()
+    rows = pd.read_parquet(src)[list(Iterate._fields)].assign(x_rev=rev)
+    [b] = common.build_blocks([bid])
+    rd = Roads(metric.clearing(b, demand=common.PopulationDemand()), radius=plan.radius)
+    if len(x) != len(rd.raster.on):
+        raise SystemExit(f"{src}: {len(x)} pixels, this raster {len(rd.raster.on)}")
+    answer(b, metric, rd, x, plan, rows, device=device, out=out, t0=t0, standing=standing)
+
+
+def answer(b: Any, metric: gcl.ComplexMetric, rd: Roads, x: NDArray[np.float64], plan: Plan,
+           rows: pd.DataFrame, *, device: str, out: Path, t0: float,
+           standing: clearings.Standing) -> None:
+    """The design's two answers scored (module docstring), written beside it to `out`."""
+    bid = b.block_id
     beta = plan.stages[-1][1]
-    ground = m.geo.utm(paved(rd, x, beta))
-    lines = m.geo.utm(roads(rd, x, beta))
-    del rd, m                                  # the eps world's model, before two more are built
+    geo = rd.m.geo
+    ground = geo.utm(paved(rd, x, beta))
+    lines = geo.utm(roads(rd, x, beta))
+    del rd                                     # the eps world's model, before two more are built
     net = gpd.GeoDataFrame(geometry=list(shapely.get_parts(lines)), crs=b.crs).assign(
         width_m=ROAD_W)
     sc = {f"paved_{k}": v for k, v in score(b, metric, ground).items()}
@@ -442,16 +499,15 @@ def run(bid: str, plan: Plan, device: str, *, standing: clearings.Standing) -> N
     sc["roads_floating_m"] = floating_m(net, b.streets)
     print(f"{bid} {plan.name}: paved L_P {sc['paved_L_P']:.4f}, D {sc['paved_D_exact']:.4f}, "
           f"{sc['paved_paved']:.0f} m^2; roads L_P {sc['roads_L_P']:.4f}, D "
-          f"{sc['roads_D_exact']:.4f}, {sc['roads_m']:.0f} m ({time.time() - t0:.0f}s)",
-          flush=True)
+          f"{sc['roads_D_exact']:.4f}, {sc['roads_m']:.0f} m, {sc['roads_floating_m']:.0f} m "
+          f"apart ({time.time() - t0:.0f}s)", flush=True)
     out.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame({"x": x}).to_parquet(out.with_name(f"{bid}_x.parquet"))
     gpd.GeoDataFrame(geometry=[ground], crs=b.crs).to_parquet(
         out.with_name(f"{bid}_ground.parquet"))
     net.to_parquet(out.with_name(f"{bid}_roads.parquet"))
-    df = pd.DataFrame(rows).assign(block=bid, plan=plan.name, **sc, device=device,
-                                   host=socket.gethostname(), peak_rss_gb=gap_calib.peak_gb(),
-                                   t_total=time.time() - t0)
+    df = rows.assign(block=bid, plan=plan.name, **sc, device=device, host=socket.gethostname(),
+                     peak_rss_gb=gap_calib.peak_gb(), t_total=time.time() - t0)
     standing.write(df, out)
 
 
@@ -459,6 +515,8 @@ def main(argv: list[str]) -> None:
     argv, standing = clearings.standing_of(argv)
     if len(argv) == 4 and argv[0] == "run" and argv[3] in ("cpu", "gpu"):
         run(argv[1], Plan.of(argv[2]), argv[3], standing=standing)
+    elif len(argv) == 5 and argv[0] == "rescore" and argv[3] in ("cpu", "gpu"):
+        rescore(argv[1], Plan.of(argv[2]), argv[3], rev=int(argv[4]), standing=standing)
     else:
         raise SystemExit(__doc__)
 
