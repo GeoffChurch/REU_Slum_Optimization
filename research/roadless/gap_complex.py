@@ -760,15 +760,26 @@ def _sources(geo: Geometry, cx: Complex, hm: Homes, g: Graph, homes: NDArray[np.
     return out
 
 
+class Crossing(NamedTuple):
+    """One of free first's crossings: the `home` it frees, the buildings it holds `new` (those its
+    path crosses not held before it) and their D, and the buildings that free it from the
+    baseline alone (`path`: every building its path crosses, the held ones among them, and every
+    building held before its pass, which a later pass's complex has made open ground)."""
+    home: int
+    new: list[int]
+    D: float
+    path: list[int]
+
+
 class Freed(NamedTuple):
     """free_first's answer at one width: `target` the homes walled in at baseline; `held` the
     buildings cleared; `left` the homes still walled in (by the complex rebuilt without `held`);
-    `crossings` in order (home, buildings); `passes` the rebuilds; `misses` the homes a pass's
-    graph freed that its rebuild did not."""
+    `crossings` in order (Crossing); `passes` the rebuilds; `misses` the homes a pass's graph
+    freed that its rebuild did not."""
     target: NDArray[np.bool_]
     held: NDArray[np.bool_]
     left: NDArray[np.bool_]
-    crossings: list
+    crossings: list[Crossing]
     passes: int
     misses: int
 
@@ -793,7 +804,7 @@ def free_first(geo: Geometry, spec: Spec, *, w: float, grow: float, budget: floa
     hm = homes_own(geo, own, cx)
     left = target & walled(home_exits(hm, exit_widths(cx)), w)
     n = len(cost)
-    crossings: list = []
+    crossings: list[Crossing] = []
     passes = misses = 0
     while left.any():
         passes += 1
@@ -823,16 +834,17 @@ def free_first(geo: Geometry, spec: Spec, *, w: float, grow: float, budget: floa
                 while t != g.street:
                     path.append(t)
                     t = int(pred[t])
-                new = sorted({t - g.ncomp for t in path if t >= g.ncomp} - set(
-                    np.flatnonzero(hold | held).tolist()))
+                every = sorted({t - g.ncomp for t in path if t >= g.ncomp})
+                new = sorted(set(every) - set(np.flatnonzero(hold | held).tolist()))
                 D = float(cost[new].sum())
                 if D <= room and D / pop[h] < key:
-                    best, key = (int(h), new, D), D / pop[h]
+                    best, key = Crossing(home=int(h), new=new, D=D, path=sorted(
+                        set(every) | set(np.flatnonzero(held).tolist()))), D / pop[h]
             if best is None:
                 break
-            h, new, D = best
-            hold[new] = True
-            crossings.append((h, new, D))
+            hold[best.new] = True
+            crossings.append(best)
+            h = best.home
             claimed[h] = True
             progress = True
         if not progress or not (hold & ~held).any():

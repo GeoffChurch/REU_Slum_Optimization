@@ -135,12 +135,15 @@ class LeakSite(NamedTuple):
     (m^2), `live` (an unknown at baseline with the edge open: live and not ground, every footprint
     standing), `open` (open at baseline: its factor positive with every footprint standing, and
     not ground; `live` and the sealed pockets), `foot` (the footprint area its homes inject there,
-    m^2: gap_clear.System.Pc @ each building's footprint area), and the sheet conductance
-    `sigma`."""
+    m^2: gap_clear.System.Pc @ each building's footprint area), `sealed` (a cell where a home
+    placed on its own closed ground injects: gap_clear.HomeDemand's groundless homes, whose
+    building's destination is their one way out at baseline; none under the other placements),
+    and the sheet conductance `sigma`."""
     area: NDArray[np.float64]
     live: NDArray[np.bool_]
     open: NDArray[np.bool_]
     foot: NDArray[np.float64]
+    sealed: NDArray[np.bool_]
     sigma: float
 
 
@@ -256,9 +259,11 @@ class InternalLeak:
         return site.sigma / self.foot_m ** 2
 
     def per_cell(self, site: LeakSite) -> NDArray[np.float64]:
+        """The open ground's leak on the sites, the buildings' where their homes inject on the
+        sites and on the sealed cells (LeakSite.sealed: a home on its own closed ground)."""
         on = self.sites.cells(site)
         open_ground = np.where(on, site.sigma * site.area / self.open_m ** 2, 0.0)
-        buildings = np.where(on, site.sigma * site.foot / self.foot_m ** 2, 0.0)
+        buildings = np.where(on | site.sealed, site.sigma * site.foot / self.foot_m ** 2, 0.0)
         return open_ground + buildings
 
 

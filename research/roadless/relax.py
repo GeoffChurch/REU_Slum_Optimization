@@ -59,7 +59,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple, Protocol
+from typing import TYPE_CHECKING, Any, NamedTuple, Protocol
 
 import numpy as np
 import pandas as pd
@@ -188,7 +188,8 @@ FW_BACKOFF = 4.0
 FW_STEP_FLOOR = 1e-3
 
 
-def frank_wolfe(rel: gap_clear.Relaxation, budget: float, iters: int, log=print) -> dict:
+def frank_wolfe(rel: gap_clear.Relaxation | gap_walls.WallRelaxation, budget: float, iters: int,
+                log: Callable[[str], object] = print) -> dict[str, Any]:
     cost = rel.c.cost
     x = np.zeros(len(cost))
     J, grad = rel.value_grad(x)
@@ -265,7 +266,8 @@ class OC:
     def start(self) -> Stepper:
         return self
 
-    def trial(self, x, B, lo):
+    def trial(self, x: np.ndarray, B: np.ndarray, lo: np.ndarray
+              ) -> Callable[[float], np.ndarray]:
         a, b = np.maximum(lo, x - self.move), np.minimum(1.0, x + self.move)
         return lambda lam: np.clip(x * (B / lam) ** self.eta, a, b)
 
@@ -297,7 +299,8 @@ class _MMAStep:
         self.prev: list[np.ndarray] = []        # the last two iterates
         self.gap: np.ndarray | None = None
 
-    def trial(self, x, B, lo):
+    def trial(self, x: np.ndarray, B: np.ndarray, lo: np.ndarray
+              ) -> Callable[[float], np.ndarray]:
         r = self.rule
         if self.gap is None or len(self.prev) < 2:
             gap = np.maximum(x, 0.01) if self.gap is None else self.gap
@@ -316,26 +319,39 @@ DEFAULT_UPDATE = OC()
 
 
 class FreeStage(Protocol):
-    """B's first stage (module docstring): its part of the plan's name and the buildings it holds,
-    from `held`, within `budget`."""
+    """B's first stage (module docstring): its part of the plan's name and, per track SIMP runs
+    (one, or two whose better is kept: FreeTrack), the buildings it holds, from `held`, within
+    `budget`."""
 
     @property
     def suffix(self) -> str: ...
 
-    def held(self, c: gap_clear.Model, *, budget: float, held: np.ndarray) -> np.ndarray: ...
+    def tracks(self, c: gap_clear.Model | gap_walls.WallModel, *, budget: float,
+               held: np.ndarray) -> tuple[np.ndarray, ...]: ...
 
 
 @dataclass(frozen=True)
 class FreeFirst:
     """Free first (gap_clear.Model.free_first): the crossings that free the homes walled in at
-    baseline, cheapest per unit of population, held."""
+    baseline, cheapest per unit of population, held. The complex's model only: walls that leak
+    have no free stage (their plans say `.f0`)."""
 
     @property
     def suffix(self) -> str:
         return ""
 
-    def held(self, c: gap_clear.Model, *, budget: float, held: np.ndarray) -> np.ndarray:
-        return c.free_first(budget=budget, held=held)
+    def tracks(self, c: gap_clear.Model | gap_walls.WallModel, *, budget: float,
+               held: np.ndarray) -> tuple[np.ndarray, ...]:
+        return (_free_first(c, budget=budget, held=held),)
+
+
+def _free_first(c: gap_clear.Model | gap_walls.WallModel, *, budget: float,
+                held: np.ndarray) -> np.ndarray:
+    import gap_clear
+    if not isinstance(c, gap_clear.Model):
+        raise ValueError("free first runs on the complex's model: walls that leak have no free "
+                         "stage (`.f0`)")
+    return c.free_first(budget=budget, held=held)
 
 
 @dataclass(frozen=True)
@@ -346,26 +362,139 @@ class NoFree:
     def suffix(self) -> str:
         return ".f0"
 
-    def held(self, c: gap_clear.Model, *, budget: float, held: np.ndarray) -> np.ndarray:
-        return held.copy()
+    def tracks(self, c: gap_clear.Model | gap_walls.WallModel, *, budget: float,
+               held: np.ndarray) -> tuple[np.ndarray, ...]:
+        return (held.copy(),)
+
+
+@dataclass(frozen=True)
+class FreeTrack:
+    """Free first as a track, not a rule (`.ft`; NOTES, "Walled-in homes, round 2"): SIMP and its
+    polish run twice, from nothing held and with free first's crossings held (T's procedure under
+    this metric), and the better clearing by the exact score is kept, so the objective decides
+    whether the crossings pay. One track where free first holds nothing more."""
+
+    @property
+    def suffix(self) -> str:
+        return ".ft"
+
+    def tracks(self, c: gap_clear.Model | gap_walls.WallModel, *, budget: float,
+               held: np.ndarray) -> tuple[np.ndarray, ...]:
+        first = _free_first(c, budget=budget, held=held)
+        return (held.copy(),) if np.array_equal(first, held) else (held.copy(), first)
+
+
+class Stage(NamedTuple):
+    """One stage of SIMP's continuation: the penalty q, the projection's beta and the eps world
+    (a standing building's conductance share) it optimizes in."""
+    q: float
+    beta: float
+    eps: float
+
+
+class Translucence(Protocol):
+    """SIMP's eps over its continuation (NOTES, "Walled-in homes, round 2"): the eps of stage k of
+    n (the last at the plan's eps) and its part of the plan's name."""
+
+    def eps_at(self, k: int, n: int, eps: float) -> float: ...
+
+    def part(self, eps: float) -> str: ...
+
+
+@dataclass(frozen=True)
+class EpsFixed:
+    """The plan's eps in every stage: `.e<eps>`, unnamed at the tension's (clear.EPS)."""
+
+    def eps_at(self, k: int, n: int, eps: float) -> float:
+        return eps
+
+    def part(self, eps: float) -> str:
+        return f".e{eps:g}" if eps != EPS else ""
+
+
+@dataclass(frozen=True)
+class EpsFrom:
+    """Walls translucent first: stage k of n at eps0 (eps / eps0)^(k / (n - 1)), geometric from
+    `eps0` down to the plan's eps at the last stage, so a sealed pocket shows in the gradient early
+    (every building of a crossing conducts enough that each one's opening pays);
+    `.e<eps0>-<eps>`."""
+    eps0: float
+
+    def eps_at(self, k: int, n: int, eps: float) -> float:
+        if not self.eps0 > eps > 0.0:
+            raise ValueError(f"translucent first runs from a larger eps down: {self.eps0:g} to "
+                             f"{eps:g}")
+        return eps if n == 1 else float(self.eps0 * (eps / self.eps0) ** (k / (n - 1)))
+
+    def part(self, eps: float) -> str:
+        return f".e{self.eps0:g}-{eps:g}"
+
+
+class JoinKind(Protocol):
+    """A source of the polish's joins (search.Joiner; NOTES, "Walled-in homes, round 2"), built
+    per block where the plan meets its model (relax.one): its part of the polish's name."""
+
+    @property
+    def part(self) -> str: ...
+
+    def joiner(self, c: gap_clear.Model, *, budget: float, held: np.ndarray) -> search.Joiner: ...
+
+
+@dataclass(frozen=True)
+class Crossings:
+    """Free first's crossings as moves (gap_joins.CrossingJoiner): each crossing gap_complex's
+    free first makes at baseline within the budget, all its buildings, offered as one move and
+    never held; `width` of them scored a round; `jF<width>`."""
+    width: int
+
+    @property
+    def part(self) -> str:
+        return f"jF{self.width}"
+
+    def joiner(self, c: gap_clear.Model, *, budget: float, held: np.ndarray) -> search.Joiner:
+        import gap_joins
+        return gap_joins.CrossingJoiner(c, budget=budget, width=self.width, held=held)
+
+
+@dataclass(frozen=True)
+class Chains:
+    """Path moves (gap_joins.ChainJoiner): from the state's potentials, chains of standing
+    buildings joining two regions at different potentials, estimated by the difference squared
+    over the chain's resistance and each region's own; from the `sources` buildings touching the
+    highest potentials, the best `width` scored a round; `jV<width>s<sources>`."""
+    width: int
+    sources: int
+
+    @property
+    def part(self) -> str:
+        return f"jV{self.width}s{self.sources}"
+
+    def joiner(self, c: gap_clear.Model, *, budget: float, held: np.ndarray) -> search.Joiner:
+        import gap_joins
+        return gap_joins.ChainJoiner(width=self.width, sources=self.sources, held=held)
 
 
 class Plan(NamedTuple):
     """How a block is solved: `fw` Frank-Wolfe iterations from x = 0 (0: start SIMP from the
     uniform x = D, no bound), SIMP continuation q = 1.5, 2, ... `qmax` with up to `iters`
-    optimality-criteria updates each, closed buildings conducting `eps` while optimizing (named only when not the tension's),
-    and projected (Relaxation.proj) with beta from `b0` doubling each stage up to `bmax`,
-    extra stages at qmax until it gets there (b0 0: no projection, not named); `keep` > 0:
-    the answer is the best exact-scored rounding of the iterates every `keep` updates (0: the
+    optimality-criteria updates each, closed buildings conducting `eps` while optimizing (named
+    only when not the tension's), in every stage or from a larger eps down (`translucent`:
+    Translucence), and projected (Relaxation.proj) with beta from `b0` doubling each stage up to
+    `bmax`, extra stages at qmax until it gets there (b0 0: no projection, not named); `keep` >
+    0: the answer is the best exact-scored rounding of the iterates every `keep` updates (0: the
     last iterate's); `kscore` > 0 scores the candidates in the eps world at that eps (the
-    relaxation's cached structure: no new system per candidate), the winner exactly; `samples`
+    relaxation's cached structure: no new system per candidate), the winner exactly, unless
+    `kexact` (`E` after it: every candidate scored exactly, the eps world then only the polish's
+    ranking: a sealed pocket's leak is of the order of its walls' eps conductance, so the eps world
+    misreads it); `samples`
     > 0: each offered iterate is also rounded that many times at random (round_sampled), every
     distinct candidate scored, in every stage or (`late` > 0) only the last `late`; `polish`
     > 0: then exchange refinement on the undecided buildings (Incumbent.polish), `polish`
     scorings at most, the best `pwidth` ranked moves scored per round, over every building
     in each phase of `polish_sets` (True: every building, `P`; False: the undecided ones,
     `p`; `pP` the undecided then every one), with two-for-one moves if `polish_pairs` (`x2`),
-    its candidates scored as `polish_scoring` says (search.PolishScoring: in the scorer's eps
+    then a tier per kind of `joins` (JoinKind: several buildings cleared together, `j...`), its
+    candidates scored as `polish_scoring` says (search.PolishScoring: in the scorer's eps
     world, unnamed, or exactly, `E`; ranked in that eps world either way);
     `seed` (one only): that greedy picker's clearing within the budget offered to the incumbent
     before SIMP runs (`.g<picker>`: the polish starts from the better of the two); `track`
@@ -379,41 +508,47 @@ class Plan(NamedTuple):
     buildings lifted to the uniform share) with `warm` updates per stage; `starts` > 1 (one
     only): that many SIMP runs (start_x), one incumbent over all of them; `update` the design
     update rule (`.u<name>`; OC's classic rule is not named); `free` the free stage (FreeStage:
-    free first, not named, or none, `.f0`)."""
+    free first, not named, none, `.f0`, or both as tracks, `.ft`). Every field is plan_of's, from
+    the spec."""
     fw: int
     qmax: float
     iters: int
-    free: FreeFirst | NoFree
-    eps: float = EPS
-    b0: float = 0.0
-    bmax: float = 0.0
-    keep: int = 0
-    kscore: float = 0.0
-    samples: int = 0
-    late: int = 0
-    polish: int = 0
-    pwidth: int = 0
-    polish_sets: tuple[bool, ...] = ()
-    polish_pairs: bool = False
-    warm: int = 0
-    starts: int = 0
-    seed: str = ""
-    track: str = ""
-    track_gate: float = -1.0
-    update: Update = DEFAULT_UPDATE
-    polish_scoring: search.PolishScoring = search.InEps()
+    free: FreeFirst | NoFree | FreeTrack
+    eps: float
+    translucent: EpsFixed | EpsFrom
+    b0: float
+    bmax: float
+    keep: int
+    kscore: float
+    kexact: bool
+    samples: int
+    late: int
+    polish: int
+    pwidth: int
+    polish_sets: tuple[bool, ...]
+    polish_pairs: bool
+    joins: tuple[Crossings | Chains, ...]
+    warm: int
+    starts: int
+    seed: str
+    track: str
+    track_gate: float
+    update: Update
+    polish_scoring: search.PolishScoring
 
     @property
     def name(self) -> str:
         return (f"fw{self.fw}.q{self.qmax:g}.i{self.iters}"
-                + (f".e{self.eps:g}" if self.eps != EPS else "")
+                + self.translucent.part(self.eps)
                 + (f".b{self.b0:g}-{self.bmax:g}" if self.b0 > 0 else "")
                 + (f".k{self.keep}" if self.keep > 0 else "")
                 + (f"s{self.kscore:g}" if self.kscore > 0 else "")
+                + ("E" if self.kexact else "")
                 + (f".r{self.samples}" if self.samples > 0 else "")
                 + (f"l{self.late}" if self.late > 0 else "")
                 + (f".{''.join('P' if a else 'p' for a in self.polish_sets)}{self.polish}"
                    f"w{self.pwidth}" + ("x2" if self.polish_pairs else "")
+                   + "".join(j.part for j in self.joins)
                    + self.polish_scoring.suffix if self.polish > 0 else "")
                 + (f".w{self.warm}" if self.warm > 0 else "")
                 + (f".m{self.starts}" if self.starts > 1 else "")
@@ -424,33 +559,56 @@ class Plan(NamedTuple):
                 + self.free.suffix)
 
     @property
-    def stages(self) -> tuple[tuple[float, float], ...]:
-        """(q, beta) per continuation stage."""
+    def stages(self) -> tuple[Stage, ...]:
+        """(q, beta, eps) per continuation stage."""
         qs = [float(q) for q in np.arange(1.5, self.qmax + 1e-9, 0.5)]
         if self.b0 == 0:
-            return tuple((q, 0.0) for q in qs)
-        out, b = [], self.b0
-        for q in qs:
-            out.append((q, b))
-            b = min(2 * b, self.bmax)
-        while out[-1][1] < self.bmax:
-            out.append((qs[-1], b))
-            b = min(2 * b, self.bmax)
-        return tuple(out)
+            qb = [(q, 0.0) for q in qs]
+        else:
+            qb, b = [], self.b0
+            for q in qs:
+                qb.append((q, b))
+                b = min(2 * b, self.bmax)
+            while qb[-1][1] < self.bmax:
+                qb.append((qs[-1], b))
+                b = min(2 * b, self.bmax)
+        n = len(qb)
+        return tuple(Stage(q=q, beta=beta, eps=self.translucent.eps_at(k, n, self.eps))
+                     for k, (q, beta) in enumerate(qb))
 
 
 SIMP_DEFAULT = "fw0.q3.i10.e0.0001.k1s1e-06.p256w8x2"     # SIMP's default (plan_of's spec)
 
+_NUMBER = r"[0-9]+(?:\.[0-9]+)?(?:e-?[0-9]+)?"
+
+
+def _joins_of(spec: str) -> tuple[Crossings | Chains, ...]:
+    """The polish's joins a spec's `j...` parts name, in order."""
+    out: list[Crossings | Chains] = []
+    for kind, width, sources in re.findall(r"j(F|V)(\d+)(?:s(\d+))?", spec):
+        if kind == "F" and not sources:
+            out.append(Crossings(width=int(width)))
+        elif kind == "V" and sources:
+            out.append(Chains(width=int(width), sources=int(sources)))
+        else:
+            raise ValueError(f"unknown joins {spec!r}: jF<width> or jV<width>s<sources>")
+    if "".join(j.part for j in out) != spec:
+        raise ValueError(f"unknown joins {spec!r}: jF<width> or jV<width>s<sources>")
+    return tuple(out)
+
 
 def plan_of(spec: str) -> Plan:
-    m = re.fullmatch(r"fw(?P<fw>\d+)\.q(?P<q>[0-9.]+)\.i(?P<i>\d+)"
-                     r"(?:\.e(?P<e>[0-9.e-]+?))?(?:\.b(?P<b0>[0-9.]+)-(?P<bmax>[0-9.]+))?"
-                     r"(?:\.k(?P<k>\d+)(?:s(?P<ks>[0-9.e-]+))?)?(?:\.r(?P<r>\d+)(?:l(?P<rl>\d+))?)?"
-                     r"(?:\.(?P<pset>p|P|pP)(?P<p>\d+)w(?P<pw>\d+)(?P<px>x2)?(?P<pe>E?))?"
+    m = re.fullmatch(rf"fw(?P<fw>\d+)\.q(?P<q>[0-9.]+)\.i(?P<i>\d+)"
+                     rf"(?:\.e(?:(?P<e0>{_NUMBER})-)?(?P<e>{_NUMBER}))?"
+                     r"(?:\.b(?P<b0>[0-9.]+)-(?P<bmax>[0-9.]+))?"
+                     r"(?:\.k(?P<k>\d+)(?:s(?P<ks>[0-9.e-]+))?(?P<kE>E)?)?"
+                     r"(?:\.r(?P<r>\d+)(?:l(?P<rl>\d+))?)?"
+                     r"(?:\.(?P<pset>p|P|pP)(?P<p>\d+)w(?P<pw>\d+)(?P<px>x2)?"
+                     r"(?P<pj>(?:j[FV]\d+(?:s\d+)?)*)(?P<pe>E?))?"
                      r"(?:\.w(?P<w>\d+))?(?:\.m(?P<m>\d+))?"
                      r"(?:\.g(?P<g>S[0-9.]+cat(?:w\d+)?))?(?:\.G(?P<G>S[0-9.]+cat(?:w\d+)?)(?:e(?P<Ge>[0-9.]+))?)?"
                      r"(?:\.u(?:oc(?P<oc>[0-9.]+)m(?P<ocm>[0-9.]+)|mma(?P<mma>[0-9.]+)))?"
-                     r"(?P<f0>\.f0)?",
+                     r"(?P<f>\.f0|\.ft)?",
                      spec)
     if m is None:
         raise ValueError(f"unknown plan {spec!r}")
@@ -458,24 +616,33 @@ def plan_of(spec: str) -> Plan:
     update: Update = (OC(float(g["oc"]), float(g["ocm"])) if g["oc"] is not None
                       else MMA(float(g["mma"])) if g["mma"] is not None
                       else DEFAULT_UPDATE)
-    free: FreeFirst | NoFree = FreeFirst() if g["f0"] is None else NoFree()
-    return Plan(fw=int(g["fw"]), qmax=float(g["q"]), iters=int(g["i"]), free=free,
-                eps=EPS if g["e"] is None else float(g["e"]),
+    free: FreeFirst | NoFree | FreeTrack = (FreeFirst() if g["f"] is None else NoFree()
+                                           if g["f"] == ".f0" else FreeTrack())
+    translucent: EpsFixed | EpsFrom = (EpsFixed() if g["e0"] is None
+                                       else EpsFrom(eps0=float(g["e0"])))
+    plan = Plan(fw=int(g["fw"]), qmax=float(g["q"]), iters=int(g["i"]), free=free,
+                eps=EPS if g["e"] is None else float(g["e"]), translucent=translucent,
                 b0=0.0 if g["b0"] is None else float(g["b0"]),
                 bmax=0.0 if g["bmax"] is None else float(g["bmax"]),
                 keep=0 if g["k"] is None else int(g["k"]),
-                kscore=0.0 if g["ks"] is None else float(g["ks"]),
+                kscore=0.0 if g["ks"] is None else float(g["ks"]), kexact=g["kE"] is not None,
                 samples=0 if g["r"] is None else int(g["r"]),
                 late=0 if g["rl"] is None else int(g["rl"]),
                 polish=0 if g["p"] is None else int(g["p"]),
                 pwidth=0 if g["pw"] is None else int(g["pw"]),
                 polish_sets=() if g["pset"] is None else tuple(ch == "P" for ch in g["pset"]),
                 polish_pairs=g["px"] is not None,
+                joins=_joins_of(g["pj"] or ""),
                 polish_scoring=search.polish_scoring_of(g["pe"] or ""),
                 warm=0 if g["w"] is None else int(g["w"]),
                 starts=0 if g["m"] is None else int(g["m"]), seed=g["g"] or "", track=g["G"] or "",
                 track_gate=-1.0 if g["Ge"] is None else float(g["Ge"]),
                 update=update)
+    if not plan.stages:             # (a translucence the continuation cannot run raises here)
+        raise ValueError(f"{spec!r}: no continuation stage (q to {plan.qmax:g})")
+    if plan.name != spec:
+        raise ValueError(f"{spec!r} spells the plan {plan.name!r}")
+    return plan
 
 
 class Incumbent:
@@ -486,9 +653,13 @@ class Incumbent:
 
     def __init__(self, rel: gap_clear.Relaxation | gap_walls.WallRelaxation, budget: float,
                  every: int, *, samples: int,
-                 sample_in: tuple[tuple[float, float], ...],
-                 first: np.ndarray | None = None, score_eps: float = 0.0):
+                 sample_in: tuple[Stage, ...],
+                 first: np.ndarray | None = None, score_eps: float = 0.0,
+                 exact_candidates: bool):
         self.rel, self.budget, self.every, self.first = rel, budget, every, first
+        # every candidate scored exactly (Plan.kexact: the scorer's eps world then only ranks
+        # the polish's moves), or in the scorer's eps world, the winner exactly
+        self.exact_candidates = exact_candidates
         # samples > 0: each offered iterate of a stage in `sample_in` ((q, beta)) is also
         # rounded that many times at random
         self.samples, self.sample_in = samples, sample_in
@@ -503,9 +674,10 @@ class Incumbent:
         self._seen: set[bytes] = set()
 
     def _score(self, r: np.ndarray) -> float:
-        return self.rel.exact(r) if self.scorer is None else self.scorer.value(r)
+        return (self.rel.exact(r) if self.scorer is None or self.exact_candidates
+                else self.scorer.value(r))
 
-    def offer(self, x: np.ndarray, stage: tuple[float, float]) -> None:
+    def offer(self, x: np.ndarray, stage: Stage) -> None:
         cost = self.rel.c.cost
         grey = float(np.mean((x > 0.05) & (x < 0.95)))
         n = self.samples if stage in self.sample_in else 0
@@ -536,15 +708,17 @@ class Incumbent:
 
     def best(self) -> tuple[float, np.ndarray]:
         """(exact J, clearing) of the best candidate."""
-        return (self.J if self.scorer is None else self.rel.exact(self.r)), self.r
+        return (self.J if self.scorer is None or self.exact_candidates
+                else self.rel.exact(self.r)), self.r
 
-    def __call__(self, x: np.ndarray, stage: tuple[float, float]) -> None:
+    def __call__(self, x: np.ndarray, stage: Stage) -> None:
         self.n += 1
         if self.n % self.every == 0:
             self.offer(x, stage)
 
     def polish(self, x: np.ndarray, tries: int, width: int, everything: bool, pairs: bool, *,
-               scoring: search.PolishScoring, log=print) -> None:
+               scoring: search.PolishScoring, joins: tuple[search.Joiner, ...],
+               log: Callable[[str], object] = print) -> None:
         """Exchange refinement of the incumbent (search.exchange_round) over every building if
         `everything`, else over the undecided ones: grey in the final iterate x, or where the
         incumbent and x's top-x rounding disagree (late samples flip them; NOTES "Where .r2's
@@ -566,7 +740,8 @@ class Incumbent:
         s = search.SearchState(c=c, power=self.rel.power, score=search.UNSCORED, world=None,
                                order=[], scorings=0, movable=np.isin(np.arange(c.n), movable))
         moves = search.polish(scoring.world(self.scorer), budget=self.budget, width=width,
-                              pairs=pairs, pool=PAIR_POOL, tries=tries)(s, search.Silent())
+                              pairs=pairs, pool=PAIR_POOL, tries=tries,
+                              joins=joins)(s, search.Silent())
         self.J, self.r, used = s.score.J, c.removed.astype(float), s.scorings
         c.removed[:] = False                    # relax.one keeps its clearings in x, not here
         log(f"  polish: {len(movable)} {'buildings' if everything else 'undecided buildings'}, "
@@ -574,9 +749,10 @@ class Incumbent:
 
 
 def simp(rel: gap_clear.Relaxation | gap_walls.WallRelaxation, x0: np.ndarray, budget: float,
-         stages: tuple[tuple[float, float], ...], iters: int, update: Update, log=print,
-         xlo: np.ndarray | None = None, watch=None) -> np.ndarray:
-    """SIMP continuation from x0: for (q, beta) in stages, up to `iters` updates by `update`
+         stages: tuple[Stage, ...], iters: int, update: Update,
+         log: Callable[[str], object] = print, xlo: np.ndarray | None = None,
+         watch: Callable[[np.ndarray, Stage], None] | None = None) -> np.ndarray:
+    """SIMP continuation from x0: for (q, beta, eps) in stages, up to `iters` updates by `update`
     (classic OC: x <- clip(x (-g / (lam c H'(x)))^1/2) within 0.2 of x) within [xlo (default
     XMIN), 1], lam bisected so that c . H(x) = budget (H = rel.proj; H' cancels the one in g, so
     the ratio is the sensitivity to the projected clearing per unit cost). Non-convex: a local
@@ -585,13 +761,14 @@ def simp(rel: gap_clear.Relaxation | gap_walls.WallRelaxation, x0: np.ndarray, b
     lo_ = np.full(len(cost), XMIN) if xlo is None else xlo
     x = np.clip(x0, lo_, 1.0)
     free = x > lo_
-    rel.q, rel.beta = stages[0]
+    rel.stage(stages[0])
     over = float(cost @ rel.proj(x)) - budget
     if over > 0:                                         # scale the free part into the budget
         x[free] = np.maximum(lo_[free], x[free] * (1 - over / float(cost[free] @ x[free])))
     t0 = time.time()
-    for q, beta in stages:
-        rel.q, rel.beta = q, beta
+    for st in stages:
+        rel.stage(st)
+        q, beta = st.q, st.beta
         step = update.start()
         for it in range(iters):
             J, gs = rel.value_sgrad(x)
@@ -607,16 +784,28 @@ def simp(rel: gap_clear.Relaxation | gap_walls.WallRelaxation, x0: np.ndarray, b
             change = float(np.abs(xn - x).max())
             x = xn
             if watch is not None:
-                watch(x, (q, beta))
+                watch(x, st)
             if it % 5 == 0 or change < 1e-3:
                 sx = rel.proj(x)
-                log(f"    simp q {q:g} beta {beta:g} it {it:2d} J {J:.6g} grey "
+                log(f"    simp q {q:g} beta {beta:g} eps {st.eps:.3g} it {it:2d} J {J:.6g} grey "
                     f"{np.mean((sx > 0.05) & (sx < 0.95)):.3f} change {change:.3f} "
                     f"{time.time() - t0:.0f}s")
             if change < 1e-3:
                 break
-    rel.q, rel.beta = 1.0, 0.0
+    rel.stage(Stage(q=1.0, beta=0.0, eps=stages[-1].eps))
     return x
+
+
+def joiners_of(plan: Plan, c: gap_clear.Model | gap_walls.WallModel, *, budget: float,
+               held: np.ndarray) -> tuple[search.Joiner, ...]:
+    """The plan's joins on the block's model (Plan.joins; none: no join tier): built on the
+    complex's model only, its free stage's buildings held."""
+    if not plan.joins:
+        return ()
+    import gap_clear
+    if not isinstance(c, gap_clear.Model):
+        raise ValueError(f"the polish's joins run on the complex's model: {plan.name}")
+    return tuple(j.joiner(c, budget=budget, held=held) for j in plan.joins)
 
 
 def built_for_holds(plan: Plan) -> bool:
@@ -625,35 +814,28 @@ def built_for_holds(plan: Plan) -> bool:
     return plan.fw == 0 and plan.starts <= 1
 
 
-def one(bid: str, power: float, metric: gap_clear.ComplexMetric | gap_walls.WallMetric,
-        plan: Plan, budget: float, *, demand: common.Demand) -> dict:
-    """SIMP at one budget on `bid` under `metric`, J_power under `demand` (common.Demand: J_1 is
-    P_q under a common.PriorityDemand), the cost the area population's."""
-    [b] = common.build_blocks([bid])
-    c = metric.clearing(b, demand=demand)
-    rel = c.relaxation(power, q=1.0, eps=plan.eps)
-    log = lambda s: print(f"{bid} {s}", flush=True)  # noqa: E731
-    t0 = time.time()
-    # B's first stage (plan.free): the crossings that free the enclosed homes, held at 1 through
-    # SIMP (xlo), the incumbent's roundings (first) and its polish (not movable); none enclosed,
-    # or no free stage, none held
-    held = plan.free.held(c, budget=budget, held=np.zeros(c.n, dtype=bool))
+class Track(NamedTuple):
+    """One track of a block's solve (FreeStage.tracks): its best clearing's exact J and the
+    clearing, SIMP's last iterate (of its best start) and the buildings the track held."""
+    J: float
+    r: np.ndarray
+    xs: np.ndarray
+    held: np.ndarray
+
+
+def _track(c: gap_clear.Model | gap_walls.WallModel,
+           rel: gap_clear.Relaxation | gap_walls.WallRelaxation, plan: Plan, budget: float,
+           held: np.ndarray, *, power: float, x_fw: np.ndarray | None,
+           log: Callable[[str], None], t0: float) -> Track:
+    """SIMP (from Frank-Wolfe's x if `x_fw`), its incumbent, a greedy's seed or second track and
+    the polish, `held` held at 1 through SIMP (xlo), the incumbent's roundings (first) and its
+    polish (not movable)."""
     if held.any() and not built_for_holds(plan):
-        raise NotImplementedError(f"{bid}: the free stage holds {int(held.sum())} buildings, and "
-                                  f"fw and .m are not built for held buildings: {plan.name}")
+        raise NotImplementedError(f"the free stage holds {int(held.sum())} buildings, and fw "
+                                  f"and .m are not built for held buildings: {plan.name}")
     xlo = np.where(held, 1.0, XMIN)
-    out = dict(block=bid, n=c.n, power=power, demand=demand.name, plan=plan.name,
-               along=metric.name, device=metric.device)
-    if plan.fw > 0:
-        fw = frank_wolfe(rel, budget, plan.fw, log=log)
-        x = fw["x"]
-        r = round_by_x(x, c.cost, budget)
-        frac = (x > 1e-6) & (x < 1 - 1e-6)
-        out.update(iters=len(fw["hist"]), relaxed_perm=rel.perm(fw["J"]),
-                   bound_perm=rel.perm(fw["lb"]), rounded_perm=rel.perm(rel.exact(r)),
-                   rounded_D=float(c.cost @ r), frac_share=float(np.mean(frac)),
-                   frac_cost=float(c.cost[frac].sum()), cleared=np.flatnonzero(r).tolist(),
-                   x=x.tolist())
+    if x_fw is not None:
+        x = x_fw
     elif held.any():
         # path's start with its fixed set: held at 1, the rest an even share of the budget left
         rest = budget - float(c.cost[held].sum())
@@ -665,7 +847,8 @@ def one(bid: str, power: float, metric: gap_clear.ComplexMetric | gap_walls.Wall
         raise ValueError(f"multi-start is built for fw0: {plan.name}")
     sample_in = plan.stages[-plan.late:] if plan.late > 0 else plan.stages
     inc = Incumbent(rel, budget, max(plan.keep, 1), samples=plan.samples, sample_in=sample_in,
-                    first=held.astype(float), score_eps=plan.kscore)
+                    first=held.astype(float), score_eps=plan.kscore,
+                    exact_candidates=plan.kexact)
     watch = inc if plan.keep > 0 else None
     if plan.seed and plan.track:
         raise ValueError(f"a greedy seeds the incumbent or runs as a second track, not both: "
@@ -674,6 +857,9 @@ def one(bid: str, power: float, metric: gap_clear.ComplexMetric | gap_walls.Wall
     if plan.seed or plan.track:
         # the greedy free first too (as polish_greedy.run): from the free stage's buildings, its
         # picks while they fit the rest of the budget; none held, the greedy from nothing
+        import gap_clear
+        if not isinstance(c, gap_clear.Model):
+            raise ValueError(f"a greedy's seed or track runs on the complex's model: {plan.name}")
         spec = plan.seed or plan.track
         rnd = search.greedy_round(spec)
         c.removed[:] = held
@@ -696,28 +882,72 @@ def one(bid: str, power: float, metric: gap_clear.ComplexMetric | gap_walls.Wall
         inc.offer(xk, plan.stages[-1])                # the last iterate's rounding
         if k == 0 or inc.J < J_before:
             xs = xk
+    joiners = joiners_of(plan, c, budget=budget, held=held)
     if plan.polish > 0:
         for everything in plan.polish_sets:
             inc.polish(xs, plan.polish, plan.pwidth, everything, plan.polish_pairs,
-                       scoring=plan.polish_scoring, log=log)
+                       scoring=plan.polish_scoring, joins=joiners, log=log)
     if plan.track:
         inc_g = Incumbent(rel, budget, 1, samples=0, sample_in=(), first=held.astype(float),
-                          score_eps=plan.kscore)
+                          score_eps=plan.kscore, exact_candidates=plan.kexact)
         inc_g.consider(r_greedy, f"the greedy {plan.track}, the second track")
         gated = plan.track_gate >= 0 and inc_g.J > inc.J * (1 + plan.track_gate / 100)
         if gated:
             log(f"  the greedy's track not polished: {inc_g.J:.6g} raw, SIMP {inc.J:.6g} polished")
         for everything in plan.polish_sets if plan.polish > 0 and not gated else ():
             inc_g.polish(xs, plan.polish, plan.pwidth, everything, plan.polish_pairs,
-                         scoring=plan.polish_scoring, log=log)
+                         scoring=plan.polish_scoring, joins=joiners, log=log)
         log(f"  tracks: SIMP {inc.J:.6g}, the greedy {inc_g.J:.6g}")
         if inc_g.J < inc.J:
             inc = inc_g
-    Jbest, rs = inc.best()
-    out.update(simp_perm=rel.perm(Jbest), simp_D=float(c.cost @ rs),
+    J, r = inc.best()
+    return Track(J=J, r=r, xs=xs, held=held)
+
+
+def one(bid: str, power: float, metric: gap_clear.ComplexMetric | gap_walls.WallMetric,
+        plan: Plan, budget: float, *, demand: common.Demand) -> dict[str, Any]:
+    """SIMP at one budget on `bid` under `metric`, J_power under `demand` (common.Demand: J_1 is
+    P_q under a common.PriorityDemand), the cost the area population's: each of the free stage's
+    tracks (_track), the best by its exact J kept (`tracks_perm` each's)."""
+    [b] = common.build_blocks([bid])
+    c = metric.clearing(b, demand=demand)
+    rel = c.relaxation(power, q=1.0, eps=plan.eps)
+
+    def log(s: str) -> None:
+        print(f"{bid} {s}", flush=True)
+    t0 = time.time()
+    # B's first stage (plan.free): per track, the buildings held (the crossings that free the
+    # enclosed homes, or none)
+    tracks = plan.free.tracks(c, budget=budget, held=np.zeros(c.n, dtype=bool))
+    out: dict[str, Any] = dict(block=bid, n=c.n, power=power, demand=demand.name,
+                               plan=plan.name, along=metric.name, device=metric.device)
+    x_fw = None
+    if plan.fw > 0:
+        if any(h.any() for h in tracks):
+            raise NotImplementedError(f"{bid}: the free stage holds buildings, and fw is not "
+                                      f"built for held buildings: {plan.name}")
+        fw = frank_wolfe(rel, budget, plan.fw, log=log)
+        x_fw = fw["x"]
+        r = round_by_x(x_fw, c.cost, budget)
+        frac = (x_fw > 1e-6) & (x_fw < 1 - 1e-6)
+        out.update(iters=len(fw["hist"]), relaxed_perm=rel.perm(fw["J"]),
+                   bound_perm=rel.perm(fw["lb"]), rounded_perm=rel.perm(rel.exact(r)),
+                   rounded_D=float(c.cost @ r), frac_share=float(np.mean(frac)),
+                   frac_cost=float(c.cost[frac].sum()), cleared=np.flatnonzero(r).tolist(),
+                   x=x_fw.tolist())
+    done = [_track(c, rel, plan, budget, held, power=power, x_fw=x_fw, log=log, t0=t0)
+            for held in tracks]
+    k = int(np.argmin([tr.J for tr in done]))
+    tr = done[k]
+    rs, xs, held = tr.r, tr.xs, tr.held
+    if len(done) > 1:
+        log("  tracks: " + ", ".join(f"{i} {rel.perm(d.J):.4f}" for i, d in enumerate(done))
+            + f"; track {k} kept")
+    out.update(simp_perm=rel.perm(tr.J), simp_D=float(c.cost @ rs),
                simp_grey=float(np.mean((xs > 0.05) & (xs < 0.95))),
                simp_cleared=np.flatnonzero(rs).tolist(), simp_x=xs.tolist(),
                free_D=float(c.cost[held].sum()), free_cleared=np.flatnonzero(held).tolist(),
+               tracks_perm=[rel.perm(d.J) for d in done], track=k,
                enclosed=c.enclosed_left(rs > 0), t=time.time() - t0)
     print(f"{bid} n={c.n} p={power:g} {metric.name} {plan.name}: "
           + (f"relaxed {out['relaxed_perm']:.4f} bound {out['bound_perm']:.4f} rounded "
@@ -756,14 +986,18 @@ def path(bid: str, power: float, metric: gap_clear.ComplexMetric, plan: Plan, *,
     t0 = time.time()
     for i, D in enumerate(PATH_DS):
         last = fixed
-        fixed = plan.free.held(c, budget=D, held=last)
+        tracks = plan.free.tracks(c, budget=D, held=last)
+        if len(tracks) != 1:
+            raise ValueError(f"path runs one track: {plan.name}")
+        fixed = tracks[0]
         rest = max(D - float(c.cost[fixed].sum()), 0.0)
         even = rest / max(float(c.cost[~fixed].sum()), 1e-12)
         warm = plan.warm > 0 and i > 0
         x = np.where(fixed, 1.0, np.maximum(x, even) if warm else even)
         inc = Incumbent(rel, D, max(plan.keep, 1), samples=plan.samples,
                         sample_in=plan.stages[-plan.late:] if plan.late > 0 else plan.stages,
-                        first=fixed.astype(float), score_eps=plan.kscore)
+                        first=fixed.astype(float), score_eps=plan.kscore,
+                        exact_candidates=plan.kexact)
         x = simp(rel, x, D, plan.stages, plan.warm if warm else plan.iters, plan.update,
                  log=lambda s: None,
                  xlo=np.where(fixed, 1.0, XMIN), watch=inc if plan.keep > 0 else None)

@@ -57,6 +57,7 @@ The check that audits the parts' pairings (a Gradient ranking with TopSingles is
 from __future__ import annotations
 
 import dataclasses
+import functools
 import re
 import sys
 import time
@@ -77,6 +78,7 @@ from clear import rows_dir  # noqa: E402
 if TYPE_CHECKING:
     import clearings    # main's Standing (the caller's, resolved by clearings.standing_of)
     import gap_clear    # gap_clear imports this module at run time
+    import gap_walls    # ... and gap_walls too
 
 R = TypeVar("R")
 R_co = TypeVar("R_co", covariant=True)             # a Ranker only returns it
@@ -167,7 +169,7 @@ class SearchState:
     current state's in `world` (UNSCORED, None: not scored); `order` every building cleared, in
     pick order (relax.cut_to_budget's); `scorings` the candidate scorings spent (the caps);
     `movable` the buildings a move may touch."""
-    c: gap_clear.Model
+    c: gap_clear.Model | gap_walls.WallModel
     power: float
     score: Score
     world: World | None
@@ -176,8 +178,8 @@ class SearchState:
     movable: np.ndarray
 
     @classmethod
-    def start(cls, c: gap_clear.Model, *, power: float, score: Score, world: World | None
-              ) -> SearchState:
+    def start(cls, c: gap_clear.Model | gap_walls.WallModel, *, power: float, score: Score,
+              world: World | None) -> SearchState:
         """From c's current clearing, nothing spent, every building movable."""
         return cls(c, power, score, world, [], 0, np.ones(c.n, dtype=bool))
 
@@ -536,11 +538,22 @@ class Gains(NamedTuple):
     T: np.ndarray               # t.g / cost: gain per unit of population (removed: -inf)
 
 
+def complex_model(s: SearchState) -> gap_clear.Model:
+    """The state's model as the complex's (gap_clear.Model): the greedy's tension, its spacing and
+    its catchments read it, and walls that leak (gap_walls.WallModel) have none of them (W's
+    greedy is walls_greedy's)."""
+    import gap_clear
+    if not isinstance(s.c, gap_clear.Model):
+        raise TypeError("the greedy's rounds run on the complex's model, not on walls that leak")
+    return s.c
+
+
 @dataclass(frozen=True)
 class AddTension:
     def rank(self, s: SearchState) -> Gains:
-        t = s.c.tension(s.power, restore=False)
-        return Gains(t, t.g / s.c.cost)
+        c = complex_model(s)
+        t = c.tension(s.power, restore=False)
+        return Gains(t, t.g / c.cost)
 
 
 def _addable(s: SearchState, j: int) -> bool:
@@ -573,7 +586,7 @@ class Spaced:
         return len(self._taken(s, r))
 
     def _taken(self, s: SearchState, r: Gains) -> list[int]:
-        c = s.c
+        c = complex_model(s)
         D, target = clear._next_target(c, self.delta)
         taken: list[int] = []
         near: set[int] = set()
@@ -608,7 +621,7 @@ class Diverse:
         return len(self._batches(s, r)[0].add)
 
     def _batches(self, s: SearchState, r: Gains) -> list[Move]:
-        c = s.c
+        c = complex_model(s)
         D, target = clear._next_target(c, self.delta)
         order = [int(j) for j in np.argsort(-r.T) if _addable(s, j)]
         cum = np.cumsum(c.cost[order])
@@ -736,15 +749,69 @@ class Gradient:
         return Grad(g=self.world.value_sgrad(r)[1], r=r)
 
 
+class Join(NamedTuple):
+    """A move clearing several buildings together (gap_joins: one of free first's crossings, a
+    chain of buildings between two potentials): `add` the buildings it clears (those still
+    standing and not held are cleared), `est` its key in its tier, lower first (its source's:
+    the chains' estimated change in J; equal for the crossings, which the give-back ranks)."""
+    add: tuple[int, ...]
+    est: float
+
+
+class Joiner(Protocol):
+    """A source of joins for the polish's last tiers (relax.Plan.joins), with the buildings no
+    move may touch (`held`: free first's, or none)."""
+
+    @property
+    def held(self) -> np.ndarray: ...
+
+    def joins(self, s: SearchState) -> list[Join]: ...
+
+
+def _joined(s: SearchState, r: Grad, joiner: Joiner, budget: float) -> Batches:
+    """The joiner's joins as moves within the budget: each its buildings not yet cleared nor
+    held, and where they would break the budget the cleared buildings worth least given back
+    (by the ranking's linearized loss per unit of population, -g_b / cost_b, least first, never
+    one held) until they fit; a join that cannot fit, or adds nothing, is dropped. Each move's
+    estimate is the join's key plus the linearized loss of what it gives back."""
+    cost, g, cleared = s.c.cost, r.g, r.r > 0
+    held = joiner.held
+    pool = np.flatnonzero(cleared & ~held)
+    order = pool[np.argsort(-g[pool] / cost[pool], kind="stable")]
+    moves: list[Move] = []
+    est: list[float] = []
+    for j in joiner.joins(s):
+        add = sorted({int(b) for b in j.add if not cleared[b] and not held[b]})
+        if not add:
+            continue
+        need = float(cost[cleared].sum() + cost[add].sum()) - budget
+        restore: list[int] = []
+        loss, freed = 0.0, 0.0
+        for b in order if need > 1e-12 else ():
+            if freed >= need - 1e-12:
+                break
+            restore.append(int(b))
+            freed += float(cost[b])
+            loss += float(-g[b])
+        if freed < need - 1e-12:
+            continue
+        moves.append(Move(add=add, restore=restore))
+        est.append(j.est + loss)
+    return Batches(moves, np.asarray(est, dtype=float))
+
+
 @dataclass(frozen=True, kw_only=True)
 class Swaps:
     """Add one the budget left allows or swap one in for a cleared one, within s.movable; with
     `pairs`, a second tier of two-in-one-out and one-in-two-out among the `pool` most
     promising (floating search's escalation: their summed estimates would crowd the singles
-    out of one ranking)."""
+    out of one ranking); then a tier per joiner of `joins` (_joined: several buildings cleared
+    together, anywhere but the held buildings, the least worth given back to fit), reached only
+    when no single or pair is kept."""
     budget: float
     pairs: bool
     pool: int
+    joins: tuple[Joiner, ...]
 
     def size(self, s: SearchState, r: Grad) -> int:
         return 1
@@ -757,32 +824,34 @@ class Swaps:
         out: list[Callable[[], Tier]] = [lambda: _singles(g, ins, outs, cost, left)]
         if self.pairs:
             out.append(lambda: _pairs(g, ins, outs, cost, left, self.pool))
+        out += [functools.partial(_joined, s, r, j, self.budget) for j in self.joins]
         return out
 
 
 def exchange_round(world: Graded, *, budget: float, width: int, pairs: bool, pool: int,
-                   tries: int) -> Round[Grad]:
+                   tries: int, joins: tuple[Joiner, ...]) -> Round[Grad]:
     """Exchange refinement's round: moves ranked by their linearized change from the world's
-    gradient at the 0/1 clearing, the best `width` scored in it, the best kept if it improves."""
+    gradient at the 0/1 clearing, the best `width` scored in it, the best kept if it improves
+    (`joins`: Swaps' last tiers)."""
     return Round(name=f"P{tries}w{width}" + ("x2" if pairs else ""), rank=Gradient(world),
-                 refine=None, build=Swaps(budget=budget, pairs=pairs, pool=pool),
+                 refine=None, build=Swaps(budget=budget, pairs=pairs, pool=pool, joins=joins),
                  evaluate=Top(world=world, width=width, tries=tries), accept=IfBetter())
 
 
 def exchange(world: Graded, *, budget: float, width: int, pairs: bool, pool: int,
-             tries: int) -> Part:
+             tries: int, joins: tuple[Joiner, ...]) -> Part:
     """Exchange refinement until a round improves nothing or `tries` scorings are spent, from a
     state already scored in `world`."""
     return Until(Do(exchange_round(world, budget=budget, width=width, pairs=pairs, pool=pool,
-                                   tries=tries)),
+                                   tries=tries, joins=joins)),
                  Spent(tries))
 
 
 def polish(world: Graded, *, budget: float, width: int, pairs: bool, pool: int,
-           tries: int) -> Part:
+           tries: int, joins: tuple[Joiner, ...]) -> Part:
     """Exchange refinement of a state not yet scored in `world`."""
     return Seq((Rescore(world), exchange(world, budget=budget, width=width, pairs=pairs,
-                                         pool=pool, tries=tries)))
+                                         pool=pool, tries=tries, joins=joins)))
 
 
 @dataclass(frozen=True)
@@ -856,7 +925,7 @@ class RestoreTension:
     everything put back), per unit of population."""
 
     def rank(self, s: SearchState) -> Order:
-        c = s.c
+        c = complex_model(s)
         on = np.flatnonzero(c.removed)
         loss = -c.tension(s.power, restore=True).g[on] / c.cost[on]
         return Order(on[np.argsort(loss, kind="stable")])
@@ -1206,7 +1275,7 @@ class Swings:
                 ToBest(archive),
                 With(Silent(), polish(self.scoring.world(polish_world), budget=d_max,
                                       width=self.width, pairs=self.pairs, pool=self.pool,
-                                      tries=self.tries)),
+                                      tries=self.tries, joins=())),
                 Kept(archive=archive, d_max=d_max))
         return Built(part=Seq((*swings, *last)), rows=rec)
 

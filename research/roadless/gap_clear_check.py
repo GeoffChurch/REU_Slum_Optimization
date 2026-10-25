@@ -708,7 +708,8 @@ def _raster_names() -> list[str]:
 def identity(_ids: list[str]) -> list[str]:
     bad = []
     for name in (NAME, f"cx+close0.125+s0.125r1b1+R0.5g4x2q4+v{gcl.CODE}",
-                 f"cx+ramp0.5s0.5+s0.125r1b1+R0.25q4+lumped+v{gcl.CODE}", metrics.UNIFORM):
+                 f"cx+ramp0.5s0.5+s0.125r1b1+R0.25q4+lumped+v{gcl.CODE}", metrics.UNIFORM,
+                 metrics.HOMES):
         try:
             back = gcl.complex_of(name, factorization=gap_factor.SuperLU()).name
         except ValueError as e:
@@ -2771,6 +2772,125 @@ def groundless(ids: list[str]) -> list[str]:
     return bad
 
 
+# ------------------------------------------------------------------ every home has demand (F1)
+
+HOMES_TOL = 1e-7         # home-demand: the other homes' escape times and P0 against U's (relative:
+                         # the same cells and demand but F1's, whose closed cells are their own
+                         # components; the refined solves on two factorizations of a system whose
+                         # leaks are ~1e-7 of its conductances, 7e-9 apart on 23597); F1's islands
+                         # drain their injection to ISLAND_TOL (one row each: u = injection / leak)
+ISLAND_TOL = 1e-12
+
+
+def _uh(b: Block) -> tuple[gcl.Model, gcl.Model]:
+    """The block's models under metrics.UNIFORM (U) and metrics.HOMES (U with F1), meshed afresh."""
+    u, h = (gcl.complex_of(name, factorization=gap_factor.SuperLU())
+            for name in (metrics.UNIFORM, metrics.HOMES))
+    return _model(b, u), _model(b, h)
+
+
+def home_demand(ids: list[str]) -> list[str]:
+    """F1 (gap_clear.HomeDemand): U's homes without demand, the groundless, each placed on its own
+    ground by area with its building's leak there, escape into their own buildings at baseline
+    (finite, over U's walled-in pocket homes' median), every other home's escape time U's; their
+    closed cells join no other cell, each drains its injection by its leak; and a clearing that
+    frees one by B (i) (free first's at budget 1) joins some of its points to the street, its
+    escape time falling. A block with no groundless home: HOMES is U, demand and leak bit for
+    bit."""
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        mU, mH = _uh(b)
+        f1 = mH.fx.groundless & ~mH.nodem
+        if not mU.nodem.any():
+            same = bool(np.array_equal(mH.dem.xy, mU.dem.xy) and (mH.dem.S != mU.dem.S).nnz == 0
+                        and np.array_equal(mH.sys.graph.leak, mU.sys.graph.leak)
+                        and not mH.leak_site.sealed.any() and mH.base.P == mU.base.P)
+            print(f"{bid}: no home without demand under U; HOMES's demand, leak and P0 U's "
+                  f"bit for bit {same} -> {'ok' if same else 'FAILS'}", flush=True)
+            if not same:
+                bad.append(bid)
+            continue
+        placed = bool(np.array_equal(f1, mU.nodem) and not mH.nodem.any())
+        if not f1.any():
+            print(f"{bid}: U's homes without demand {np.flatnonzero(mU.nodem).tolist()}, HOMES "
+                  "places none -> FAILS", flush=True)
+            bad.append(bid)
+            continue
+        # on its own ground: every point of an F1 home in a triangle of its own ring
+        S = mH.dem.S.tocsc()
+        own = mH.fx.own.tri.tocsr()
+        on_own = all(bool(np.isin(mH.fx.ptri[S.indices[S.indptr[h]:S.indptr[h + 1]]],
+                                  own.indices[own.indptr[h]:own.indptr[h + 1]]).all())
+                     for h in np.flatnonzero(f1))
+        st0 = mH.state(np.zeros(mH.n))
+        r0 = st0.reach
+        sealed = mH.leak_site.sealed
+        leak = mH.sys.graph.leak
+        # the closed cells: each its own component, an unknown, draining what it is given
+        comp = _components(st0, np.flatnonzero(r0.unknown))
+        alone = bool(sealed.any() and r0.unknown[sealed].all()
+                     and len(np.unique(comp[sealed])) == int(sealed.sum())
+                     and not np.isin(comp[r0.unknown & ~sealed], comp[sealed]).any())
+        u = mH.solve(st0, mH.pop)
+        rhs = mH._rhs(st0, mH.pop)
+        drain = float(np.max(np.abs(leak[sealed] * u[sealed] / rhs[sealed] - 1.0)))
+        others = ~f1 & ~mH.nodem
+        du = float(np.max(np.abs(mH.u_pop0[others] / mU.u_pop0[others] - 1.0)))
+        pf = mH.pop * np.nan_to_num(mH.u_pop0)
+        dP = abs((mH.base.P - float(pf[f1].sum())) / mU.base.P - 1.0)
+        pocket = mU.walled0 & ~mU.nodem
+        med_pocket = float(np.median(mU.u_pop0[pocket])) if pocket.any() else 0.0
+        med = float(np.nanmedian(mU.u_pop0))
+        finite = bool(np.isfinite(mH.u_pop0[f1]).all() and (mH.u_pop0[f1] > med_pocket).all())
+        # a clearing that frees them by B (i): free first's, at budget 1
+        held = mH.free_first(budget=1.0, held=np.zeros(mH.n, dtype=bool))
+        L = mH.lenses(held)
+        st = mH.factors(mH.k_of(held))
+        street_pt = st.reach.street[st.sys.cells.cell][np.maximum(mH.fx.ptri, 0)] & (
+            mH.fx.ptri >= 0)
+        joined = []
+        for h in np.flatnonzero(f1):
+            pts = S.indices[S.indptr[h]:S.indptr[h + 1]]
+            share = float(S.data[S.indptr[h]:S.indptr[h + 1]][street_pt[pts]].sum())
+            fell = float(L.u[h] / mH.u_pop0[h])
+            joined.append((int(h), bool(L.live[h]), share, fell,
+                           bool(L.live[h] and share > 0.0 and fell < 1.0 - 0.5 * share)))
+        conn = all(j[-1] for j in joined)
+        ok = (placed and on_own and alone and drain <= ISLAND_TOL and du <= HOMES_TOL
+              and dP <= HOMES_TOL and finite and conn)
+        print(f"{bid}: U's homes without demand {np.flatnonzero(mU.nodem).tolist()}, HOMES places "
+              f"{np.flatnonzero(f1).tolist()} ({placed}), on its own ground {on_own}; its u0 "
+              + ", ".join(f"{float(mH.u_pop0[h]) / med:.4g}" for h in np.flatnonzero(f1))
+              + f" x the median (U's pocket homes' median {med_pocket / med:.4g}) {finite}; "
+              f"{int(sealed.sum())} closed cells, each alone {alone}, drained to {drain:.1e}; the "
+              f"other homes' u0 within {du:.1e} of U's, P0 less theirs {dP:.1e}; free first "
+              f"holds {np.flatnonzero(held).tolist()}: "
+              + ", ".join(f"{h} freed {lv}, {sh:.3f} of its points on the street's ground, u "
+                          f"x{fl:.3f}" for h, lv, sh, fl, _ok in joined)
+              + f" -> {'ok' if ok else 'FAILS'}", flush=True)
+        if not ok:
+            bad.append(bid)
+    return bad
+
+
+_ON_OWN_GROUND = gf.on_own_ground
+
+
+def _own_dropped(dem: gf.PointDemand, own: gf.Ring, homes: np.ndarray, quad: int,
+                 xy: np.ndarray, tri: np.ndarray) -> tuple[gf.PointDemand, np.ndarray]:
+    """gap_flow.on_own_ground placing no one (fault `own-dropped`)."""
+    return dem, np.zeros(0, dtype=np.int64)
+
+
+_PER_CELL = gx.InternalLeak.per_cell
+
+
+def _sealed_unleaked(self: gx.InternalLeak, site: gx.LeakSite) -> np.ndarray:
+    """InternalLeak.per_cell without the sealed cells' buildings' leak (fault `own-unleaked`)."""
+    return np.asarray(_PER_CELL(self, site._replace(sealed=np.zeros_like(site.sealed))))
+
+
 GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "baseline": baseline, "weights": weights, "reach": reach, "gradient": gradient,
     "free": free, "identity": identity, "convex": convex, "pattern": pattern,
@@ -2783,7 +2903,8 @@ GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "no-features": no_features,
     "faces": faces, "lazy-baseline": lazy_baseline, "uniform-control": uniform_control,
     "pocket-escape": pocket_escape, "pocket-gradient": pocket_gradient,
-    "pocket-count": pocket_count, "own-ground": own_ground, "groundless": groundless}
+    "pocket-count": pocket_count, "own-ground": own_ground, "groundless": groundless,
+    "home-demand": home_demand}
 
 
 _GROUNDLESS = gf.groundless
@@ -2850,7 +2971,7 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "pocket-escape": {"pocket-unleaked": lambda: _patched(gx.OpenSites, "cells",
                                                           lambda self, site: site.live),
                       "placement-dropped": lambda: _patched(gcl.PocketDemand, "demand",
-                                                            lambda self, g: gcl._live_demand(g))},
+                                                            lambda self, g: g.live)},
     "pocket-gradient": {"adjoint-unleaked": lambda: _patched(gcl.Relaxation, "value_sgrad",
                                                              _sgrad_unleaked),
                         "pocket-unloaded": lambda: _patched(gcl.Relaxation, "value_sgrad",
@@ -2859,6 +2980,9 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "own-ground": {"ring-reach": lambda: _patched(gf, "own_ring",
                                                   lambda ring, open0, bare: ring)},
     "groundless": {"own-everywhere": lambda: _patched(gf, "groundless", _none_groundless)},
+    "home-demand": {"own-dropped": lambda: _patched(gf, "on_own_ground", _own_dropped),
+                    "own-unleaked": lambda: _patched(gx.InternalLeak, "per_cell",
+                                                     _sealed_unleaked)},
     "lazy-baseline": {"atoms": _baseline_on_atoms,
                       "eager": lambda: _patched(gcl.LazyBaseline, "__init__", _eager)},
     "trip-calibration": {"boundary-trips": lambda: _patched(gap_maps, "leak_drain",

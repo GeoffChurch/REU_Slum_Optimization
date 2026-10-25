@@ -634,7 +634,9 @@ Open:
     .superpowers/sdd/2026-10-24-walled-in/brief.md): T, U and W each with its best optimizer; U
     with F1 (every home has demand: a groundless home's on its own footprint, its building's leak
     there) and less myopic optimizers (free first's crossings as moves, path moves from one
-    solve's potentials, walls translucent first, the Frank-Wolfe bound as a certificate).
+    solve's potentials, walls translucent first, the Frank-Wolfe bound as a certificate). Done
+    (merged 2026-10-25): U + F1 with free first as a track (Ff) fixes both of U's failures; the
+    rule (T, or U + F1 + Ff) and W are the owner's (the walled-in items below).
   - ΔP greedy (here, .superpowers/sdd/2026-10-22-flow-roads/dp_greedy.py): each step's exact
     candidates over 7 forked processes (done: step 100's twelve in 25 s against 153, bit for bit);
     a screen that treats each candidate as a 1D conductor coupled to the present potentials (the
@@ -721,6 +723,24 @@ Open:
     it open), and when its own building is among those cleared (74 of 764). Open: T or U
     (the owner asked what U's two fixes are, and whether a home's source belongs inside its
     footprint rather than on its outline's ring; 2026-10-24: "ideally U").
+  - Round 2 (2026-10-24 -- 25; NOTES, "Walled-in homes, round 2: T, U and W, each with its best
+    optimizer"; research/walled-in). Both of U's failures are fixed by U with every home's demand
+    (F1, `+homes`: a groundless home on its own ground, its building's leak there) and free first
+    as a track, not a rule (Ff, relax `.ft`: SIMP from nothing held and with free first's crossings
+    held, the better by the rule's own exact J kept). On the 121 blocks it leaves exactly T's 28
+    homes walled in (groundless, no crossing within the budget; U 102), ends below T's clearing
+    by its own measure on 7 blocks by at most 0.006 (U 40, by 0.025 mean), frees each person at
+    less D (0.37 a median, T 0.47, U 0.67) and costs the homes T scores L_P -0.0103 [-0.0154,
+    -0.0065] under T's metric (U -0.0114), +0.075 under its own; SIMP's time 2.5x. The brief's
+    optimizers alone do not fix failure 2: crossings and path moves as polish moves (a, b) bend a
+    finished clearing (30 and 29 of the 32 still below), the translucent start (c) loses 0.22 on
+    its own objective, the exact comparison of SIMP's roundings (e) ties, Frank-Wolfe's bound (d)
+    sits 0.066 -- 0.076 above every optimizer, nearly all of it the relaxation's. F1 sees a
+    groundless home in proportion to the ground that opens around it (escape time left 0.18 of its
+    baseline's when Ff frees it). Plain U with its `.f0` optimizer loses to Ff under U's own
+    metric (+0.013 [+0.004, +0.026] for Ff) and on the homes left (102 against 28), ties under
+    T's: on the frontier by SIMP's time alone (2.5x cheaper). Open: the rule (T, or U + F1 + Ff);
+    the controller's to delete what loses (c) or ties (e, T + b).
 - **Walls that leak** (stage 3 measured, the owner's call; owner 2026-10-21: "can't they go through
   other buildings, just slowly?", "everyone would pay to get out of their own home", "walls be
   (imperfect/leaky) diodes", "launch these one at a time so we can be adaptive"; NOTES, "Walls that
@@ -778,6 +798,14 @@ Open:
   metric (11%) and leads by 0.034 under its own, leaving 27 of 327 walled-in homes (SIMP's default
   48). Next: the owner's call (W with GxLr10 as the walls' default, or T); a leaks-in-interiors
   variant later.
+  - Round 2 (2026-10-25; NOTES, "Walled-in homes, round 2"): re-run at the own-ground code on the 80
+    small blocks against T and U + F1 with free first as a track (Ff). W leaves 31 of 327
+    walled-in homes on 14 blocks (T and Ff none); its clearing loses to Ff's under T's metric
+    (+0.036 for Ff), U's (+0.038) and F's (+0.050), and leads it only under its own (-0.026 for
+    Ff); its greedy costs about 17x Ff's SIMP a small block (a core against a GPU). Neither (b) nor
+    (c) applies to W's greedy (no eps world; it already scores every building exactly). On walled-in
+    homes left, T's lens, U's and F's lenses and cost, W is dominated by U + F1 + Ff; on its own
+    metric it is not. The owner's call.
 - **The rate bracket** (`consolidated.RATES_PER_GPU_SECOND`, 2e-6 -- 1.9e-5 Lens A per GPU-second).
   A screen whose call turns on the rate prints an "ask" (this much Lens A for this much more
   time?); the owner's answer moves an end of the bracket to that screen's break-even rate

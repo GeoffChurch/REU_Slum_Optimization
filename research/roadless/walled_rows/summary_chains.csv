@@ -1,0 +1,4 @@
+group,blocks,crossings,one_building,frees_top,frees_any,same_top,same_any
+large,39,295,226,61,87,1,11
+small,77,194,163,114,147,4,19
+all,116,489,389,175,234,5,30

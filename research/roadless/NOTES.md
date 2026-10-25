@@ -9343,6 +9343,223 @@ clearing takes 0.073 of the baseline wall dissipation against T's 0.059, which i
 walls, the thing W should go after. Compute 286 process-s. Scripts and rows:
 .superpowers/sdd/2026-10-21-leaky-walls/ownwall/ (not committed).
 
+### Walled-in homes, round 2: T, U and W, each with its best optimizer (owner 2026-10-24)
+
+**The question.** Three rules for a home walled in at baseline stand on research/roadless: T
+(today's: the internal leak on the cells live at baseline, a walled-in home without demand, free
+first's crossings held, a home freed only when its own ground opens), U (the leak on all open
+ground, every home with open ground given demand there, no free first) and W (walls that leak;
+the owner's default S10, `Wk1l1000`, its optimizer GxLr10). The owner leans to U ("ideally U") and
+asked to try everything that might fix U's two failures, and whether U's optimizer could simply be
+less myopic. The failures (the uniform study): U leaves 100 homes walled in where T leaves 28, 79
+of them among the 84 homes with no open ground within ring_m (the groundless), whom U's demand
+cannot see; and its optimizer ends below T's clearing by its own measure on 32 blocks, a crossing
+that needs several buildings opened together gaining almost nothing from any one of them. The
+brief and its rulings: .superpowers/sdd/2026-10-24-walled-in (progress.md).
+
+**Built** (each a named option in the run's identity, resolved where the run is configured;
+research/walled-in).
+- F1, every home's demand under U (`+homes` in place of `+pockets`: gap_clear.HomeDemand,
+  metrics.HOMES). A groundless home is placed on its own ground as B (i) reads it (Fixed.own:
+  every triangle within ring_m of its outline, its footprint among them; by area,
+  gap_flow.on_own_ground), its building's destination (the internal leak's buildings' part,
+  InternalLeak.per_foot) on those cells (gap_exits.LeakSite.sealed; elsewhere the leak is as it
+  was, so T and U are unchanged bit for bit). At baseline each such cell is closed and alone,
+  live through its leak, so the home escapes into its own building, every island at foot_m^2 (pop
+  / A) / sigma (the same for every groundless home, population being area: 23597's home 93 at
+  508x the block's median home, U's pocket homes there 507x); a clearing that opens ground within
+  ring_m of its outline joins the points there to the rest. Ruling: the ring, not the footprint
+  alone (the brief's words): a standing home's footprint stays closed, so a demand on it would
+  join only when the home itself is cleared, and the ring is exactly the ground whose reaching the
+  street frees the home by B (i). W's placement (cover by area) is cell-level where gap_clear's
+  is point-level, so F1 places by sub-points. Its price: the home is joined only as far as its
+  ring opens. Of the groundless homes a clearing frees by B (i), the escape time left (after over
+  at baseline) is a median 0.68 under T's clearing (its own ground hardly opens), 0.21 under F's,
+  0.18 under Ff's: F1 sees a groundless home's freeing in proportion to the ground that opens, not
+  whole (a whole-home door, its own ground conducting as one body, would carry through-traffic
+  once two sides open: not built). Fixed.of computes the groundless homes before the placement
+  (the same set; gap_flow.groundless reads them from the live demand's homes without demand). No
+  constant changed (CODE 1569a066): RUNTIME's and UNIFORM's cached meshes stand; HOMES's are new.
+- (a) free first's crossings as the polish's moves (`jF<width>` in the polish's part,
+  relax.Crossings, gap_joins.CrossingJoiner): gap_complex.free_first at baseline within the
+  budget (Model.freed), each crossing's every building from the baseline (gap_complex.Crossing:
+  home, new, D, path), offered as one move, never held.
+- (b) path moves (`jV<width>s<sources>`, relax.Chains, gap_joins.chains): from one exact solve at
+  the polish's clearing, regions (components of the state's live cells: the street's, a pocket or
+  a closed cell live through its leak alone), each standing building's contacts (the live cells
+  its clearing alone joins), a shortest path over the buildings' adjacency on the fixed mesh (a
+  passage between two buildings' own triangles, or a triangle in both grown footprints), each
+  building's resistance its footprint's L^2 / (16 A) squares over sigma; a chain's estimate the
+  rank-one change (du)^2 / (R_chain + R_a + R_b), R of a region joined to the street none, of a
+  sealed one 1 / its leak's conductance.
+- The polish's join tiers (search.Swaps, after its singles and pairs, reached only when none is
+  kept): a join's buildings not cleared nor held, and where they break the budget the cleared
+  buildings worth least (the ranking's -g / cost) given back (search._joined); scored exactly.
+- (c) walls translucent first (`.e<eps0>-<eps>`, relax.EpsFrom; relax.Stage carries each
+  continuation stage's eps): SIMP's eps geometric over its four stages from 0.05 to 1e-4.
+- (d) Frank-Wolfe's bound (`fw40`, legal under `.f0`), SIMP then from its x.
+- (e), found on the smoke and added: SIMP's roundings compared exactly (`.k1s1e-06E`,
+  Plan.kexact). The incumbent's eps world at 1e-6 read 3786's F clearing at J 2,680 where its exact
+  J is 2,950 (a sealed pocket's leak is of the order of its walls' eps conductance), so the
+  incumbent could pick a rounding that leaves a pocket sealed for that reason alone.
+- (f) free first as a track, not a rule (`.ft`, relax.FreeTrack; relax.one runs a free stage's
+  tracks): SIMP and its polish from nothing held and with free first's crossings held (T's
+  procedure under the rule's own metric), the better by the exact J kept. Built after the first
+  wave's small blocks showed (a) -- (e) leaving most of failure 2 (below).
+- Every arm's polish scored exactly on every device (`E`): the uniform study's GPU arms scored it
+  in the eps world, which misreads pockets as (e) does.
+- relax.py strict-mypy clean (Model | WallModel through FreeStage, frank_wolfe, the polish's
+  SearchState and the greedy's seed: search.complex_model); relax.Plan has no defaults (plan_of
+  sets every field and refuses a spec that does not spell back).
+
+**Guards** (each both ways). New: gap_clear_check `home-demand` (23597: U's homes without demand,
+the groundless, placed on their own ground with a finite escape time over U's pocket homes'
+median; their 1,001 closed cells each alone, drained to 2e-16; every other home's u0 within 7.1e-9
+of U's, P0 less theirs 5e-10, HOMES_TOL 1e-7: two factorizations of a system whose leaks are ~1e-7
+of its conductances; free first's clearing frees 93 by B (i), joining 7.4% of its points, u x0.93;
+41940: HOMES is U bit for bit; faults own-dropped, own-unleaked); walled_check `join-planted` (a
+synthetic strip, a pocket sealed by two buildings in a row: the best chain at baseline the two, its
+estimate x1.000 of the exact change in P, free first's crossing the same two; faults no-adjacency,
+unsealed: x920), `join-null` (3786, 20269: no null join offered, the clearing's J bit for bit
+before and after a chain search, the polish with null joins ending where it ends without them;
+fault kept-null), `join-budget` (20269, 3786: a clearing filled to the budget, every crossing
+fitting by giving back the least worth, its J the model's afresh; fault no-giveback: D 0.0503,
+0.0526; the first version passed under the fault, its clearing leaving the crossing room: fixed),
+`translucent` (3786: the stages at 0.05, 0.0063, 0.00079, 1e-4, every iterate in its stage's world;
+fault stage-eps-kept), `fw-bound` (3786, 20269: the bound at 6 iterations at or below six exact
+clearings' J; fault empty-step: 1.9% and 10% above them), `free-track` (3786: `.ft` keeps the
+better of the runs its tracks give alone; fault first-only). Step 0, every guard that touches the
+leaks, demand, enclosure, free first, relax and the walls, both ways at the merged code, then all
+again at this study's final code (guard_sweep*.py in the brief's folder): as expected but two
+faults and one known failure. The merge broke leaky_check walled-count's fault through-walls
+(Fixed.ring, which own-ground replaced by Fixed.own: fixed); this study's refactor broke
+pocket-escape's fault placement-dropped (fixed); exits-identity fails without a fault on the region
+study's stored names under v34d40e8a, as since own-ground.
+
+**The measurement** (walled.py: arm, block, job, lenses, wlenses, chains, report; rows
+walled_rows/, parquet ignored; summary_{blocks,homes,sizes,pairs,whom,32,chains}.csv). The 121
+blocks with walled-in homes (792 homes: 77 small with 327, 39 large with 416, 5 oversized with 49)
+and the five controls. Arms at area D 0.05 optimizing P, SIMP's default (`E`), on the cluster's
+GPUs (tesla1): T; U (`.f0`, re-run: own-ground moved its name); F = U + F1 (`.f0`) and Fa (a), Fb
+(b), Fc (c), Fd (d), Fe (e), Ff (f), Fx (a + b + f: the combination of what helped, c lost and d
+and e tied; d cannot run with a held track), Tx (T with (b), the better of (b) and (c)); W (S10x)
+on a core on the 80 small blocks. On the oversized: T, U, F, Fa, Ff, Fx and Fd only (Fb, Fc, Fe and
+Tx tie F or T, or lose, on the 116 others). Every clearing scored under T's, U's and F's metrics
+(and W's on the small blocks): Lens A of P, P_{1/2} and J_2, B (i) (the same under every metric:
+checked), per walled-in home its escape time under F's metric, and the D of the cleared buildings
+whose return alone walls a freed home in again, over the population freed (the fairness measure;
+walled._critical).
+
+**People left walled in** (B (i), of 792 homes; small 327, large 416, oversized 49; 84
+groundless):
+
+                 small   large   oversized   all (blocks)   groundless among them
+    T            0       26      2           28 (6)         28
+    U            26      64      12          102 (33)       79
+    F = U + F1   23      52      2           77 (18)        35
+    Fa           21      44      2           67 (14)        34
+    Fd           19      48      11          78 (20)        36
+    Ff, Fx       0       26      2           28 (6)         28
+    W (small)    31                                         4
+
+Fb, Fe and Tx leave what F, F and T leave (Fb 74 and Fe 75 on the 116); Fc 413 on the 116. Ff
+and Fx leave exactly T's 28: groundless homes for which free first finds no crossing within the
+budget. U leaves 74 homes T frees (51 of them groundless, on 30 blocks), F 49 (7), W 31 of the
+small blocks' 327 (4 groundless); T and Ff leave none that another arm frees. F1 alone moves the
+groundless homes left from 79 to 35, but not the pocket homes (U's 23 to F's 42: F's objective
+now weighs the groundless homes' islands too, and spends on them).
+
+**Lens A**, the arm's clearing less T's, mean [95% Bayesian-bootstrap interval] (ahead / behind)
+over the 121 blocks with walled-in homes:
+
+                       under T's metric                     under the rule's own (U's or F's)
+    U    L_P     -0.0114 [-0.0177, -0.0061] 30/87     +0.0444 [+0.0257, +0.0661] 77/40
+         L_J2    -0.0126 [-0.0199, -0.0068]           +0.1081 [+0.0668, +0.1495]
+    F    L_P     -0.0149 [-0.0231, -0.0075] 23/95     +0.0556 [+0.0346, +0.0800] 78/40
+    Fa   L_P     -0.0142 [-0.0228, -0.0074] 24/94     +0.0621 [+0.0436, +0.0865] 80/38
+    Fd   L_P     -0.0132 [-0.0210, -0.0073] 34/86     +0.0552 [+0.0331, +0.0789] 88/32
+    Ff   L_P     -0.0103 [-0.0154, -0.0065] 19/82     +0.0752 [+0.0564, +0.0985] 94/7
+         L_Pq    -0.0095 [-0.0159, -0.0048]           +0.1629 [+0.1263, +0.2028]
+         L_J2    -0.0097 [-0.0157, -0.0054]           +0.1827 [+0.1449, +0.2237]
+    Fx   L_P     -0.0109 [-0.0159, -0.0070] 18/84     +0.0761 [+0.0565, +0.1018] 95/7
+
+By size, Ff less T under T's metric: small -0.0133 [-0.0205, -0.0076], large -0.0035 [-0.0054,
+-0.0021], oversized -0.0179 [-0.0382, -0.0031] (5 blocks). Ff less F under F's metric +0.0196
+[+0.0115, +0.0313], ahead on 81, behind on none; under T's +0.0046 [-0.0024, +0.0107]. Ff less U
+(U's own optimizer) under U's metric +0.0133 [+0.0041, +0.0259] (73/14), under T's +0.0011
+[-0.0057, +0.0066], under F's +0.0357. Fx less Ff under F's +0.0009 (Fx: a and b on the track).
+Fa less F under F's +0.0065 [+0.0020, +0.0163] (22/0), Fd -0.0004 (68/45: Frank-Wolfe's start
+moves the answer both ways); on the 116 small and large, Fb +0.0062 (7/0), Fe +0.0003 (2/0), Fc
+-0.220 (12/104). Tx
+is T to floating point on every block (T's pockets have no leak, so a chain joins only regions
+the street already grounds). Ff keeps the free-first track on 82 of the 116 small and large
+blocks; where it keeps the other, it frees as many. W on the 77 small blocks: under T's metric
+-0.0490 [-0.0608, -0.0373] against T, under its own +0.0338 [+0.0276, +0.0416]; Ff's clearing
+beats W's under T's (+0.036), U's (+0.038) and F's (+0.050) metrics and loses under W's (-0.026
+[-0.032, -0.022], 3/74).
+
+**The 32 blocks** (the uniform study's, where U's optimizer ended below T's clearing by U's
+measure; all small or large). Still below T's clearing by the rule's own measure: U (re-run) 32,
+F 31 (by 0.028 mean there), Fe 31, Fa 30 (0.014), Fb 29, Fd 18 (0.045), Ff 6 (0.0024, at worst
+0.0058), Fx 6. Over all 121: U 40 blocks, F 40, Fa 38, Fd 32, Ff 7 (by 0.0021 mean), Fx 7. The
+crossings as moves (a) and the path moves (b) close half the shortfall where they act (3786, U's
+worst, from -0.44 to -0.0193; 43304 then their worst at -0.169), the translucent start (c) makes
+it far worse, the exact comparison (e) changes nothing on 114 of 116 blocks, and the free-first
+track (f) closes it but for 7 blocks by at most 0.006: the crossing a single move misses is the one
+SIMP must be built around (held from the start), not one a finished clearing can be bent to take.
+
+**Path moves find free first's crossings** (at baseline under F, 116 blocks): of 489 crossings
+(389 of one building), a chain in Fb's top four frees the crossing's home for 175 (36%), one of
+the best 36 for 234 (48%); the chain is the crossing's path exactly for 5 (30 in the 36). The
+chains take other routes (a neighbour's building, or more than one) to the same pocket.
+
+**The bound** (Fd: Frank-Wolfe's 40 iterations on F's eps world, legal under `.f0`): the bound
+over the arm's L_P under F's metric, median over the 121: F 0.076, Fa 0.074, Fd 0.076, Ff 0.066,
+Fx 0.066 (the bound itself a median 0.770; its own slack, bound less the relaxed optimum, 0.0046,
+so nearly all of the gap is the relaxation's, whose optimum is grey: 54% of buildings partly
+cleared). No optimizer is shown near the 0/1 optimum; Ff and Fx close about a seventh of F's gap.
+
+**D per person freed** (the cleared buildings whose return alone walls a freed home in again,
+their D over the population freed; median over the blocks where the clearing frees anyone, pooled,
+blocks over 1): T 0.47, 0.39, 24 (its free stage's D a mean 0.0048); U 0.67, 0.50, 37; F 0.66,
+0.50, 36; Ff 0.37, 0.34, 21; Fx 0.35, 0.33, 19; W (small) 0.33, 0.33, 18. Ff frees T's homes at
+less D each: the objective keeps the free-first track where its crossings pay, and the other where
+they do not.
+
+**F1's partial door.** Of the groundless homes a clearing frees by B (i), the escape time left
+under F's metric (after over at baseline): a median 0.68 under T's clearing (its own ground hardly
+opens), 0.21 under F's, 0.18 under Ff's, p90 0.66 -- 0.68 under each. F1 sees a groundless home's
+freeing in proportion to the ground that opens around it.
+
+**Compute.** GPU (tesla1, V100, at most 4 cards; d3967470 and de7dcdbf): the first wave 23.8
+task-h (small 3.4 with their lenses, large 20.4), the second 12.8 (small 1.6 with lenses, large
+11.2), the large blocks' lenses 3.1, the oversized arms 14.7 and lenses about 1 (three blocks; two
+here); about 55 task-h over 16 h. SIMP's own time a block, median (small, large, oversized): T 8,
+83, 338 s; U and F 5, 55 -- 58, 231 -- 252 s; Fa 9, 110, 420; Fd 10, 107, 430; Ff 13, 156, 557;
+Fx 21, 248, 916 (Ff about 2.5x F's, Fx 4x). Peak RSS 4.3, 23.8, 46.9 GB; GPU 0.75, 4.3, 7.4 GB.
+Here, single-threaded, at most 2 processes: W's arm 8.2 process-h (median 223 s a small block on
+a core, where Ff's SIMP takes 13 s on a GPU and T's took 39 s on a core in the walls study),
+W's lenses and W's clearing under the others 0.6, two oversized blocks' lenses 0.8, the guards 12.3
+(the merged code's sweep 4.3, the new guards 0.7, the final sweep at d3967470 7.3), the smoke and
+the F1 checks 0.5.
+
+**What it says.** U + F1 with free first as a track (Ff; Fx adds a and b for +0.0009) fixes both
+of U's failures. It leaves exactly T's 28 homes walled in (groundless, no crossing within the
+budget), against U's 102; it ends below T's clearing by its own measure on 7 of 121 blocks by at
+most 0.006, against U's 40 by 0.025; it frees each person at less D than T (0.37 against 0.47); and
+it costs the homes T scores 0.010 of L_P under T's metric (U 0.011, F 0.015), at 2.5x SIMP's time.
+Of the optimizers the brief named, none closes failure 2: the crossings and path moves only bend a
+finished clearing (failure 2 at 30 of the 32 blocks), the translucent start loses on its own
+objective by 0.22, the bound is loose (0.066 -- 0.076 above every optimizer, nearly all of it the
+relaxation's), and the exact comparison ties. What works is the free-first track: T's procedure
+offered to the rule's own metric as a candidate rather than imposed. F1 is needed for it (U alone
+cannot see the 79 groundless homes, and Ff under U's metric would have no reason to free them).
+W (S10, GxLr10) leaves 31 of the small blocks' 327 walled in where Ff and T leave none, loses to
+Ff's clearing under every metric but its own, and its greedy costs about 17x Ff's SIMP a small
+block (a core against a GPU). The owner's call
+(BACKLOG, "A uniform rule for walled-in homes", "Walls that leak"); the variants that lose on
+their own terms (c), tie (e, Tx) or add little (b) are the controller's to keep or delete.
+
 ### Pruning by epistemetry: the move (owner 2026-10-17)
 
 **Why.** The owner's decision of 2026-10-17: the consolidated pass prunes with seqscreen (its

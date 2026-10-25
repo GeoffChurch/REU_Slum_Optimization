@@ -474,7 +474,7 @@ def walled_count(ids: list[str]) -> list[str]:
 
 def _through_walls(self: gw.WallModel, st: gw.WallState) -> np.ndarray:
     """WallModel.street_reach from W's own reach, through walls (fault `through-walls`)."""
-    return np.asarray(self.base.fx.ring.live(st.live[self.sys.cells.cell]))
+    return np.asarray(self.base.fx.own.live(st.live[self.sys.cells.cell]))
 
 
 def sources(ids: list[str]) -> list[str]:
@@ -788,11 +788,12 @@ def relax_warm(ids: list[str]) -> list[str]:
         # from the last design's sides) and cold (from the outward sides)
         xs: list[np.ndarray] = []
 
-        def keep(x: np.ndarray, stage: tuple[float, float], into: list[np.ndarray] = xs) -> None:
+        def keep(x: np.ndarray, stage: relax.Stage, into: list[np.ndarray] = xs) -> None:
             into.append(x.copy())
 
         rel = wm.relaxation(1.0, q=1.0, eps=clear.EPS)
-        relax.simp(rel, relax.start_x(0, wm.cost, BUDGET), BUDGET, ((1.5, 0.0),), WARM_ITERS,
+        relax.simp(rel, relax.start_x(0, wm.cost, BUDGET), BUDGET,
+                   (relax.Stage(q=1.5, beta=0.0, eps=clear.EPS),), WARM_ITERS,
                    relax.DEFAULT_UPDATE, log=lambda s: None, watch=keep)
         rep = wm.relaxation(1.0, q=1.5, eps=clear.EPS)
         worst, wrong, passes = 0.0, 0, []
