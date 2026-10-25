@@ -10089,3 +10089,67 @@ third to a half. lam 5e-6 brings the clutter to the lineup's (7% within 5 m) for
 L_P from D 0.02 up (0.002 at 0.15), still 0.06 -- 0.08 over cycle_native at D 0.05 -- 0.15. 2.5e-5
 costs 0.01 -- 0.03 throughout for the least clutter of the four. Each lam buys clutter with L_P, so
 none is dominated; the price is a preset's, not a constant's.
+
+### A road-placing SIMP on 5810 and 20954 (2026-10-25)
+
+road_simp.py (BACKLOG, "Try everything"): roads as a density on the block's fixed mesh, read
+through a cone filter of radius r on a 1 m raster and projected; a triangle's openness and boost
+move from the eps world's toward a road's. P plus a price on paving (k: the L_P a kilometre of 7 m
+road must buy back), subject to D (each building's covered share through common.MEASURE's ramp)
+at most the plan's; OC with its multiplier bisected on D at the trial update. Two answers, each
+scored as a road network on its own mesh: paved (the triangles at density 1/2, smoothed) and roads
+(the paved pixels' Zhang-Suen skeleton as 7 m roads). Guards (road_simp_check.py): the adjoint
+against finite differences (3.1e-5; faults no-boost and no-open fail) and dD likewise (fault flat
+fails). Rev 1 (job 84074) linearised D at the iterate and overshot (20954's D 0.02 runs ended at
+0.09 -- 0.11), and failed to mesh its raw paved union on 5810 three times; rev 2 bisected D at the
+trial update and smoothed the paved answer; rev 3 read the roads' mask wherever the filter
+reaches a design pixel (rev 2's mask was holed between large triangles' centroids, and the
+skeleton wrapped every hole).
+
+Rev 3 (job 84625; stages q 1, 2, 3, 3, 3 at beta 1, 2, 4, 8, 16, 60 iterations; 31 of 32 passed,
+5810 D 0.15 k 0.08 r 7 killed while scoring its answers). On 5810, against the lazy ΔP greedy
+(lineup pool, cost D) at the same D:
+
+    plan (D, k, r)     paved L_P  D      m^2  | roads L_P  D      km    | lazy L_P  km
+    0.05 0.08 7        0.532   0.035  15k   | 0.451   0.030  1.65  | 0.410   2.27
+    0.05 0.04 7        0.648   0.048  30k   | 0.512   0.034  2.81  | 0.428   2.42
+    0.05 0.02 7        0.724   0.047  50k   | 0.539   0.034  3.58  | 0.428   2.42
+    0.05 0.01 7        0.764   0.046  68k   | 0.565   0.035  4.88  | 0.433   2.42
+    0.15 0.04 7        0.681   0.087  30k   | 0.553   0.075  2.90  | 0.556   4.94
+    0.15 0.02 7        0.775   0.114  52k   | 0.576   0.091  4.46  | 0.588   6.13
+    0.15 0.01 7        0.832   0.144  83k   | 0.634   0.093  5.91  | 0.593   6.13
+    0.05 0.08 3.5      0.556   0.040  15k   | 0.563   0.071  2.91  | 0.549   4.89
+    0.05 0.04 3.5      0.675   0.047  31k   | 0.643   0.081  4.96  | 0.567   5.56
+    0.05 0.02 3.5      0.753   0.048  52k   | 0.699   0.086  7.67  | 0.580   5.98
+    0.05 0.01 3.5      0.803   0.049  78k   | 0.731   0.103  11.25 | 0.615   6.89
+    0.15 0.08 3.5      0.567   0.077  15k   | 0.566   0.113  2.77  | 0.634   7.48
+    0.15 0.04 3.5      0.692   0.104  29k   | 0.646   0.135  4.48  | 0.660   8.27
+    0.15 0.02 3.5      0.779   0.123  52k   | 0.695   0.156  7.15  |
+    0.15 0.01 3.5      0.839   0.144  83k   | 0.746   0.185  11.45 |
+
+(the lazy build's own L_P, which its own mesh reproduces to 1e-5: above). The paved answers are
+dendritic trees from the block's edge, trunks 20 -- 40 m wide; the roads answers combs of dead-end
+spurs, where the greedy's networks join and loop. Ten of the fifteen roads answers beat the lazy
+greedy at their own D, by up to 0.13, most in less road: at r 7, k 0.08 on every axis (L_P 0.451
+against 0.410 at D 0.030 in 1.65 km against 2.27). The skeleton at a road's width is not the
+paved answer: at r 3.5 the paved features can be narrower than 7 m and the roads overshoot D
+(0.05 to 0.07 -- 0.10), at r 7 they land under it (0.030 -- 0.035, wide trunks reduced to one
+road). On 20954 (small and dense) the roads answers fail at r 3.5 (D 0.62 -- 0.84: channels
+threaded between buildings widened to 7 m) and overshoot at r 7 (0.035 to 0.095 -- 0.29); its
+paved answers reach L_P 0.82 -- 0.84 at D 0.04 in 5 -- 8k m^2.
+
+Caveats. The roads answers' skeletons stop a half-width short of the street (thinning eats a
+strip from its ends): only 39 -- 93% of each 5810 roads answer's length lies in pieces within 4 m
+of the street (84 -- 99% within 8 m); the pieces apart still conduct, as a floating plate would.
+Rev 4 (not yet run) joins each end whose inscribed disk reaches past the block to the street, and
+reports the length still apart (roads_floating_m); it also writes the design as <block>_x.parquet
+(the cluster's pull brings only parquet, so rev 3's 5810 designs stayed there). The designs had
+not settled in the max norm (some pixel moved by the 0.2 limit at every iteration), but L_P over
+the last ten iterations moved by at most 0.013.
+
+So on 5810 the price of paving decides the answer's shape: unpriced in D, paved open ground buys
+L_P 0.75 -- 0.84 at D 0.05 -- 0.15 with 50 -- 83k m^2 (ΔP greedy 0.678 at 0.15 in about 64k m^2 of
+7 m corridors), and the 7 m roads keep part of it. Next: SIMP's roads, joined (rev 4), as ΔP
+greedy's candidates, so the greedy orders and cuts them by the exact ΔP / ΔD (which removes the
+overshoot) alone and beside the lineup's pool. Scripts: research/roadless/road_simp.py,
+road_simp_check.py; rows in research/roadless/road_simp_rows/ (not committed).
