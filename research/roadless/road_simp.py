@@ -32,7 +32,10 @@ own mesh by road_state; D by common.MEASURE on the world-frame ground):
     disk (its distance off the mask, and a pixel's diagonal) reaches the street is joined to it by
     the shortest line (rev 4 joined it to the nearest pixel off the design, up to a pixel from the
     street, and off-design pixels also sit inside the block between large triangles' centroids).
-    Pieces still apart from the street are kept, their length reported (roads_floating_m).
+    Only the pieces linked to the street are kept, the length dropped reported (roads_apart_m):
+    the paved answer has islands inside the block (on 5810 at D 0.05, k 0.08, r 3.5, 42 of its 50
+    parts, 47% of its area), which conduct as paving does but are no road a vehicle or ΔP greedy
+    can reach (rev 5 kept them: 54 -- 58% of two 5810 answers' length).
 
     PYTHONPATH=. uv run python research/roadless/road_simp.py run <block> <plan> cpu|gpu [--replace]
     PYTHONPATH=. uv run python research/roadless/road_simp.py rescore <block> <plan> cpu|gpu <rev>
@@ -67,6 +70,7 @@ import shapely
 from numba import njit
 from numpy.typing import NDArray
 from scipy import ndimage
+from scipy.sparse.csgraph import connected_components
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -92,9 +96,10 @@ MOVE = 0.2           # OC's move limit (relax.simp's)
 NU_TOL = 1e-3        # OC: nu bisected to this factor (cannot change the answer beyond it)
 HALF = 0.5           # the answer: the triangles whose road density reaches it
 SMOOTH_M = 0.1       # m: the paved answer's closing, opening and simplification
-REV = 5              # the code's revision, in the plan's name (2: D bisected at the trial update,
+REV = 6              # the code's revision, in the plan's name (2: D bisected at the trial update,
                      # the answers smoothed and doubled; 3: the roads' mask unholed; 4: the
-                     # skeleton's ends joined toward the street; 5: joined to it)
+                     # skeleton's ends joined toward the street; 5: joined to it; 6: the
+                     # pieces apart from the street dropped)
 X_FROM = 4           # the first revision that writes its design (rescore's earliest source)
 OUT = HERE / "road_simp_rows"
 MESHES = HERE / "road_simp_rows" / ".meshes"     # the answers' carved meshes
@@ -418,15 +423,15 @@ def roads(rd: Roads, x: NDArray[np.float64], beta: float) -> Any:
         np.concatenate([shapely.linestrings(xy), joins])))
 
 
-def floating_m(net: gpd.GeoDataFrame, streets: gpd.GeoDataFrame) -> float:
-    """The length of a network's pieces (its lines within a pixel of each other) that come no
-    nearer the street than budget.STREET_TOL."""
-    lines = net.geometry.to_numpy()
-    street = shapely.union_all(streets.geometry.to_numpy())
-    pieces = shapely.get_parts(shapely.union_all(shapely.buffer(lines, PIXEL)))
-    apart = [p for p in pieces if shapely.distance(p, street) > STREET_TOL + PIXEL]
-    return float(shapely.length(shapely.intersection(shapely.union_all(lines),
-                                                     shapely.union_all(apart)))) if apart else 0.0
+def linked(lines: NDArray[np.object_], street: Any) -> NDArray[np.bool_]:
+    """Per line whether its piece (the lines that touch it, and theirs) reaches the street within
+    budget.STREET_TOL."""
+    tree = shapely.STRtree(lines)
+    a, b = tree.query(lines, predicate="dwithin", distance=1e-6)
+    n = len(lines)
+    comp = connected_components(sp.coo_matrix((np.ones(len(a)), (a, b)), shape=(n, n)))[1]
+    near = shapely.distance(lines, street) <= STREET_TOL
+    return np.isin(comp, np.unique(comp[near]))
 
 
 def score(b: Any, metric: gcl.ComplexMetric, ground_world: Any) -> dict[str, float]:
@@ -489,18 +494,18 @@ def answer(b: Any, metric: gcl.ComplexMetric, rd: Roads, x: NDArray[np.float64],
     beta = plan.stages[-1][1]
     geo = rd.m.geo
     ground = geo.utm(paved(rd, x, beta))
-    lines = geo.utm(roads(rd, x, beta))
+    lines = shapely.get_parts(geo.utm(roads(rd, x, beta)))
     del rd                                     # the eps world's model, before two more are built
-    net = gpd.GeoDataFrame(geometry=list(shapely.get_parts(lines)), crs=b.crs).assign(
-        width_m=ROAD_W)
+    on = linked(lines, shapely.union_all(b.streets.geometry.to_numpy()))
+    net = gpd.GeoDataFrame(geometry=list(lines[on]), crs=b.crs).assign(width_m=ROAD_W)
     sc = {f"paved_{k}": v for k, v in score(b, metric, ground).items()}
     sc |= {f"roads_{k}": v for k, v in score(b, metric, road_corridor(net)).items()}
     sc["roads_m"] = float(net.length.sum())
-    sc["roads_floating_m"] = floating_m(net, b.streets)
+    sc["roads_apart_m"] = float(shapely.length(lines[~on]).sum())
     print(f"{bid} {plan.name}: paved L_P {sc['paved_L_P']:.4f}, D {sc['paved_D_exact']:.4f}, "
           f"{sc['paved_paved']:.0f} m^2; roads L_P {sc['roads_L_P']:.4f}, D "
-          f"{sc['roads_D_exact']:.4f}, {sc['roads_m']:.0f} m, {sc['roads_floating_m']:.0f} m "
-          f"apart ({time.time() - t0:.0f}s)", flush=True)
+          f"{sc['roads_D_exact']:.4f}, {sc['roads_m']:.0f} m ({sc['roads_apart_m']:.0f} m apart "
+          f"dropped) ({time.time() - t0:.0f}s)", flush=True)
     out.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame({"x": x}).to_parquet(out.with_name(f"{bid}_x.parquet"))
     gpd.GeoDataFrame(geometry=[ground], crs=b.crs).to_parquet(
