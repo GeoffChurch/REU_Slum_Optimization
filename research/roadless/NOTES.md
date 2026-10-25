@@ -10450,5 +10450,10 @@ bridges and a random blockage cuts off 0.5 -- 1.8% of the served against cycle_n
 bridges): the parallel roads it removes as clutter were the network's loops. On this lens the
 lineup's cycle_native, built for loops, is the frontier; as a term in the ΔP greedy's cost it
 would price the dead ends the walking metric leaves free. Detour is noisy across cuts (cycle_native
-0.146 / 0.050 / 0.025) and not tabulated. SIMP's roads (rev 6, linked) are to be scanned. Script:
-.superpowers/sdd/2026-10-22-flow-roads/damage_scan.py <step_m> <carry_m> (not committed).
+0.146 / 0.050 / 0.025) and not tabulated. SIMP's roads (rev 6, linked) are combs: at r 7, 80 --
+95% of their length is bridges and a blockage cuts off 2.1 -- 4.4% of the served (P_v 59 -- 121
+m, served 76 -- 99%); at r 3.5, 48 -- 78% and 1.0 -- 2.5%. The r 7 roads that lead the greedy on
+L_P at D 0.05 are the most fragile of every network here. The lazy build with SIMP's r 3.5 roads
+in its pool is the lineup-only build's equal (cut 1.6 / 0.7 / 0.4%, bridges 69 / 56 / 48%).
+Script: .superpowers/sdd/2026-10-22-flow-roads/damage_scan.py <step_m> <carry_m> (not
+committed).
