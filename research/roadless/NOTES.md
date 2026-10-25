@@ -10016,3 +10016,42 @@ behind from the start (L_P 0.285 at D 0.062); its log is not kept. Scripts:
 .superpowers/sdd/2026-10-22-flow-roads/dp_greedy.py (`build <pick> <cost>`: `thomson:12 D`,
 `dirichlet:5 D`, `dirichlet:3+thomson:2 D`), not committed; a run's name carries its pick and
 its cost (dp_greedy_thomson_top12_D).
+
+Every screen misses the step's best move (screen_eval.py in the same folder, steps 20, 60, 100 and
+150 of the Dirichlet 3 + Thomson 2 build replayed; 32 candidates solved exactly at each, the top 8
+of each of four screens). Spread is Dirichlet with each stretch through a building a conductance g
+joining two electrodes (5 points across the road 1 m beyond each end), g dU^2 / (1 + g R), R their
+effective resistance in the present state from 24 solves (gap_sketch.py: Spielman and Srivastava's
+sketch; its check against exact solves passes, mean ratio 1.003, and fails under both faults);
+the R 0 limit is Dirichlet's, and for one added conductance the form is exact. Of the best ratio
+among the 32, each screen's top five held:
+
+    step                   20      60      100     150
+    Thomson                0.68    0.62    0.32    0.35
+    Dirichlet              1.00    0.36    0.26    0.35
+    Spread                 0.68    0.54    0.32    0.35
+
+The best moves are the large crossings through buildings (candidates 4, 14, 59 and 56: dP 1.4e4 --
+9.9e4 against a median near 1e3, dD above the median), the same few at every step, never built:
+Thomson reads them 13 -- 25x low, Dirichlet 2.8x high, Spread 0.7 -- 1.0x. Spread still ranks them
+9th -- 22nd, as its open-ground term (Dirichlet's) reads the ordinary candidates 2.2x high; an
+open term halfway (the geometric mean of Thomson's and Dirichlet's) puts every screen's median at
+0.8 -- 1.1x of the exact drop and ranks no better. The miss is the screens' spread, not their bias:
+a factor of 3 -- 5 either way, divided by a small dD, puts small candidates on top. The exact drops
+change slowly from step to step (14's 5.9e4, 3.8e4, 3.3e4 at steps 20, 60, 100; 59's 4.0e4, 2.8e4,
+2.3e4; 56 rose, 1.8e4 to 2.2e4, so a stale drop is not a strict bound): a lazy greedy over stored
+exact drops (every candidate solved once, about 40 min on five processes; each step re-solving the
+queue's head until it is fresh) is the pick this points to. Not built yet.
+
+A price on clutter (Repelled, `rep:<lam>:7`: lam per metre of repulsion from the streets and the
+built roads, added to dD; a 40 m road's duplicate at 0 m scores 87, the median dD 6e-4), the same
+pick:
+
+    D                     0.01    0.02    0.03    0.05    0.075   0.10    0.125   0.15    roads
+    lam 0 (dD alone)      0.199   0.331   0.380   0.465   0.549   0.589   0.623   0.655   192
+    lam 1e-6              0.198   0.320   0.369   0.454   0.539   0.595   0.629   0.656   166
+    lam 2.5e-5            0.198   0.318   0.372   0.457   0.518   0.564   0.597   0.629   152
+
+lam 1e-6 costs about 0.01 below D 0.075 and ties above with 26 roads fewer; 2.5e-5 costs 0.01 --
+0.03 throughout. The clutter (clutter.py) and lam 5e-6 (lost at step 84 when its parent shell
+ended: run again) are to come.
