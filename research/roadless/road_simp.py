@@ -79,8 +79,8 @@ MOVE = 0.2           # OC's move limit (relax.simp's)
 NU_TOL = 1e-3        # OC: nu bisected to this factor (cannot change the answer beyond it)
 HALF = 0.5           # the answer: the triangles whose road density reaches it
 SMOOTH_M = 0.1       # m: the paved answer's closing, opening and simplification
-REV = 2              # the code's revision, in the plan's name (2: D bisected at the trial update,
-                     # the answers smoothed and doubled)
+REV = 3              # the code's revision, in the plan's name (2: D bisected at the trial update,
+                     # the answers smoothed and doubled; 3: the roads' mask unholed)
 OUT = HERE / "road_simp_rows"
 MESHES = HERE / "road_simp_rows" / ".meshes"     # the answers' carved meshes
 
@@ -357,7 +357,12 @@ def paved(rd: Roads, x: NDArray[np.float64], beta: float) -> Any:
 def roads(rd: Roads, x: NDArray[np.float64], beta: float) -> Any:
     """The roads answer's lines (module docstring; the model's local frame)."""
     ra = rd.raster
-    on = (relax.project(ra.filter(x), beta) >= HALF).reshape(ra.shape)
+    # the filter read wherever its kernel reaches a design pixel: where a triangle is larger than
+    # a pixel, the pixels between centroids hold no design and Raster.filter's 0 there holed the
+    # mask (the skeleton wrapped every hole: a lattice)
+    y = ndimage.correlate(np.where(ra.on, x, 0.0).reshape(ra.shape), ra.kernel, mode="constant")
+    norm = ra.norm.reshape(ra.shape)
+    on = (norm > 0) & (relax.project(y / np.where(norm > 0, norm, 1.0), beta) >= HALF)
     skel = skeletonize(on)
     i, j = np.nonzero(skel)
     keep = set(zip(i.tolist(), j.tolist(), strict=True))
