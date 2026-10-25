@@ -1230,7 +1230,20 @@ Not pursued, with what would change that:
   plain mesh's to P0 +1.0e-4 (one home over 1%, 1.4%), the roads guard on 1558 passes (+9.6e-5 /
   +2.4e-4 / +4.4e-4 at stops 1 / 3 / 5; HEAD +1.0e-4 / +2.4e-4 / +5.4e-4). The narrower rule (cut
   exact, a cut piece under LINE_SNAP_M wide opened) left new degeneracies (a clearance of 0) and the
-  killed answer still ran away. Next: the flat rule itself in `_unflat`, then the guards.
+  killed answer still ran away. The flat rule itself in `_unflat` (as a patch, with the cut on the
+  grid) fails the baseline gate: the killed answer meshes and the plain 1558 mesh is bit for bit
+  HEAD's, but the carved baseline leaves the plain mesh's by P0 +4.0e-3 (43 homes over 1%, the
+  worst 98%). Snap-rounding staircases every cut line and zone offset at ~1e-4 m; of the 1650 flats
+  conformity leaves, 151 have a face-boundary longest edge, the rest are made by conformity's
+  splits after `_unflat` (whose 8 passes never converge here: ~2000 dissolved, ~1500 left, each
+  pass); open-ground walls 57 (55 without the rule). Rerun after conformity, its flips broke the
+  Delaunay property across faces (the carving) and the topology ("an edge in three triangles", the
+  plain mesh). Next, if pursued: the passage-weight rule rather than mesh surgery, a flat triangle
+  collapsed onto its longest edge when the weights are assembled (the neighbour across it joined to
+  the two across its short edges, with the weights the collapse implies) in place of T = 0 beside
+  it: the proxy's principled form, and a fix for the walls today's exact carvings already hold (5
+  on 1558). It adds passages between triangles that share no edge, to be checked against the cells
+  and the graph first. The code stays at MESH_REV 3 until a design passes every gate.
   Safeguard (c890ed50): `_conform` refuses a split under the vertex grid (gc.SNAP_M) and raises,
   naming the edge; the cascade doubles its bad edges each round at half their length, passing
   SNAP_M at its 23rd round, where every conforming mesh splits nothing under 8.8e-6 m (1558's
