@@ -1201,8 +1201,14 @@ Not pursued, with what would change that:
   MESH_REV must rise, and with it the code digest and the metric's name (RUNTIME's v65531d75):
   every rows directory keyed by the metric (road_simp_rows, walled_rows, the gap rows) moves to
   the new name, plain results unchanged and carved ones by noise, and every fixed-mesh cache goes
-  cold on every machine. Until then a run that meets such a sliver dies meshing (rare: 1 of ~44
-  road_simp runs; none of the lineup's or ΔP greedy's carvings so far).
+  cold on every machine. Sub-precision gaps alone do not kill: every road_simp paved answer on
+  5810 holds 60 -- 514 vertex-to-edge gaps under LINE_SNAP_M against the footprints (the smallest
+  3e-8 m) and most meshed; the lineup's and ΔP greedy's corridors hold 1 -- 3. What the mesher does
+  with them is unpredictable: 8 of road_simp's 70 cluster runs on 5810 failed meshing an answer
+  (5 killed for memory, 2 "the mesh is not Delaunay", 1 "an edge in three triangles"), one of
+  them confirmed this cause by bisection, the other seven its symptoms but unconfirmed (rev 1's
+  three mesh errors had been put down to the raw union). The mesh checks raise on a broken mesh,
+  so no wrong score is known; the cost is crashes and lost runs.
 - **pyamg is read by no code** (since 2c4f57d0, the consolidated pass: it was fft_homog's solver;
   gap_flow, cluster and clearings_check only name it in comments). It stays in the `gpu` group;
   removing it is a dependency change, the owner's call.
