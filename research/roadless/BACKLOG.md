@@ -651,10 +651,11 @@ Open:
     lineup's for 0.005 -- 0.024), on the lazy pick running; the pool a Strategy (`lineup`,
     `simp:<plan>`, unions), every run's name to carry it (migration after the running build).
   - A road-placing SIMP (research/roadless/road_simp.py; NOTES, "A road-placing SIMP on 5810 and
-    20954"): rev 3's roads answers beat the lazy ΔP greedy at their own D on 9 of 13 plans on
-    5810 (by up to 0.13), but overshoot D at r 3.5 and stopped short of the street; rev 4 joins
-    them (rsimp-c, 12 plans on 5810), then they go to ΔP greedy as its candidates, alone and
-    beside the lineup's, so the exact ΔP / ΔD orders and cuts them.
+    20954"): its L_P is paving's (islands inside the block conduct but no road reaches them):
+    rev 6's roads, only the pieces linked to the street, sit about on the lazy ΔP greedy's frontier
+    (-0.10 to +0.012 at equal D). rsimp-c (12 plans on 5810, rev 4) writes the designs; each is
+    rescored at rev 6, then its roads go to ΔP greedy as candidates, alone and beside the lineup's.
+    The vehicle damage term (research/roadless/damage.py) is the lens for their dead ends.
   - The damage term: expected P over single blockages from one solve and each road piece's
     leverage (Sherman-Morrison); for vehicles on the road graph alone (agenda item 5).
 - **The public package's displacement, and the methods' internal costs, onto the ramped
