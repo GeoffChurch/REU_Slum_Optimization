@@ -10230,9 +10230,9 @@ three on 61 of 174 steps and in Thomson's two on 129 (both on 17). Below D 0.02 
 Dirichlet top five (0.199 against 0.229 at 0.01): the early crossings came later. A first
 Dirichlet run read a stretch's end with no solved cell near as the street (potential 0) and fell
 behind from the start (L_P 0.285 at D 0.062); its log is not kept. Scripts:
-.superpowers/sdd/2026-10-22-flow-roads/dp_greedy.py (`build <pick> <cost>`: `thomson:12 D`,
-`dirichlet:5 D`, `dirichlet:3+thomson:2 D`), not committed; a run's name carries its pick and
-its cost (dp_greedy_thomson_top12_D).
+.superpowers/sdd/2026-10-22-flow-roads/dp_greedy.py (`build <pool> <pick> <cost>`: `lineup
+thomson:12 D`, `lineup dirichlet:5 D`, `lineup dirichlet:3+thomson:2 D`), not committed; a run's
+name carries its pool, pick and cost (dp_greedy_lineup_thomson_top12_D).
 
 Every screen misses the step's best move (screen_eval.py in the same folder, steps 20, 60, 100 and
 150 of the Dirichlet 3 + Thomson 2 build replayed; 32 candidates solved exactly at each, the top 8
@@ -10280,6 +10280,19 @@ Both builds rescored on their own meshes (own_mesh.py: the build's nested prefix
 carved into one mesh, as road_rescore and road_simp score, 7.4M triangles against the pool's
 13.1M) match the pool mesh's L_P to 1.1e-5 at every cut from D 0.05 to 0.15: the pool mesh is no
 confound when the greedy is set against road_simp's answers.
+
+The lazy pick with the repulsion price (`lineup lazy:5 rep:5e-6:7`, 143 roads, 1.6 h) keeps nearly
+all of it and sheds most of the clutter, D 0.05 / 0.10 / 0.15:
+
+                              L_P                     within 5 m     mean-distance median (m)
+    lazy                      0.493 / 0.611 / 0.678   16 / 20 / 18%  12.6 / 11.4 / 12.1
+    lazy, lam 5e-6            0.488 / 0.604 / 0.676    4 /  6 /  8%  16.7 / 16.0 / 14.2
+    Dir. 3 + Th. 2, lam 5e-6  0.461 / 0.584 / 0.653    6 /  7 /  7%  17.1 / 16.2 / 14.4
+    cycle_native (canonical)  0.392 / 0.520 / 0.575    1 /  6 /  9%  34.6 / 21.1 / 18.8
+
+(L_P 0.001 -- 0.007 below plain lazy at every D from 0.01.) At the lineup's clutter it leads
+cycle_native by 0.08 -- 0.10 and the screened pick at the same price by 0.02 -- 0.03. Run names now
+carry the pool (`dp_greedy_<pool>_<pick>_<cost>`; every run so far `lineup`).
 
 A price on clutter (Repelled, `rep:<lam>:7`: lam per metre of repulsion from the streets and the
 built roads, added to dD; a 40 m road's duplicate at 0 m scores 87, the median dD 6e-4), the same
