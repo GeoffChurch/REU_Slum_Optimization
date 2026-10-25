@@ -14,7 +14,8 @@ Z^T's columns A^-1 M^T q, after which every pair's estimate is a dot product.
     PYTHONPATH=. uv run python research/roadless/gap_sketch.py check <block> none|<fault>
 
 check: on the block's baseline state, the sketch at CHECK_K against the exact resistance (a solve
-each) of CHECK_PAIRS random pairs of unknown cells and as many cells to the ground; the mean
+each) of CHECK_PAIRS random pairs of unknown cells and as many cells to the ground, each drawn
+from the cells with a path of their own to it (a street face, a leak, a ground neighbour); the mean
 ratio within CHECK_TOL of 1 and no pair's ratio outside 1 -+ 6 sqrt(2 / k). Faults: `no-excess`
 (the cells' rows left out: the paths to the ground unseen), `no-sqrt` (W in place of sqrt(W)).
 """
@@ -104,14 +105,16 @@ def check(bid: str, fault: str | None) -> None:
                     else r._replace(w=r.w ** 2))
     sk = Sketch.of(st, k=CHECK_K, seed=0)
     cells = np.flatnonzero(st.reach.unknown)
+    edge = np.flatnonzero(_rows(st).x > 0)     # cells with a path of their own to the ground
     rng = np.random.default_rng(1)
     ratios = []
     for t in range(2 * CHECK_PAIRS):
         y = np.zeros(m.c.n)
-        p, q = rng.choice(cells, 2, replace=False)
-        y[p] = 1.0
-        if t < CHECK_PAIRS:                  # a pair; then a cell to the ground
-            y[q] = -1.0
+        if t < CHECK_PAIRS:                  # a pair of cells; then a cell beside the ground
+            p, q = rng.choice(cells, 2, replace=False)
+            y[p], y[q] = 1.0, -1.0
+        else:
+            y[rng.choice(edge)] = 1.0
         exact = float(y @ st.factor.solve(y)) if st.factor is not None else np.nan
         ratios.append(sk.resistance(y) / exact)
     r = np.asarray(ratios)
