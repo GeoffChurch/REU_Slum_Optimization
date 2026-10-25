@@ -421,6 +421,7 @@ def report() -> None:
     groups += [("all walled", wide[~wide.control]), ("control", wide[wide.control])]
     pairs = [(a, "T") for a in arms if a != "T"] + [(a, "U") for a in arms if a[0] == "F"]
     pairs += [(a, "F") for a in arms if a[0] == "F" and a != "F"]
+    pairs += [(a, "W") for a in arms if a != "W" and "W" in arms]
     prow = []
     for name, g in groups:
         if g.empty:
@@ -453,6 +454,8 @@ def report() -> None:
                 continue
             on = hm[lcol].notna()
             left = hm[on & hm[lcol].astype(bool)]
+            row[f"homes_{lb}"] = int(on.sum())
+            row[f"blocks_{lb}"] = int(hm[on].block.nunique())
             row[f"left_{lb}"] = len(left)
             row[f"left_blocks_{lb}"] = int(left.block.nunique())
             row[f"left_groundless_{lb}"] = int(left.groundless.sum())
@@ -518,6 +521,21 @@ def report() -> None:
                             mean=float(d.mean()), median=float(d.median()), worst=float(d.min()),
                             below_mean=float(d[d < -1e-9].mean()) if (d < -1e-9).any() else 0.0))
     pd.DataFrame(r32).to_csv(ROWS / "summary_32.csv", index=False)
+    # do path moves find free first's crossings: at baseline under F, per crossing whether a chain
+    # in Fb's top `width` frees its home, and whether one is its path exactly
+    paths = sorted((ROWS / "chains").glob("*.parquet"))
+    ch = pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True)
+    ch = ch[ch.home >= 0].merge(sz[["size"]].reset_index(), on="block")
+    crow = []
+    for name, g in [*ch.groupby("size"), ("all", ch)]:
+        w = g.width
+        crow.append(dict(group=name, blocks=int(g.block.nunique()), crossings=len(g),
+                         one_building=int((g.n_path == 1).sum()),
+                         frees_top=int(((g.frees_rank >= 0) & (g.frees_rank < w)).sum()),
+                         frees_any=int((g.frees_rank >= 0).sum()),
+                         same_top=int(((g.same_rank >= 0) & (g.same_rank < w)).sum()),
+                         same_any=int((g.same_rank >= 0).sum())))
+    pd.DataFrame(crow).to_csv(ROWS / "summary_chains.csv", index=False)
     pd.set_option("display.width", 220)
     print(t.round(4).T.to_string())
 
