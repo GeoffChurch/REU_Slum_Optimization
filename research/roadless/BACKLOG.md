@@ -1191,32 +1191,36 @@ Not pursued, with what would change that:
   is its own class).
 - **GPU sizing recalibrated**: closed, the raster's sizing (GB_PER_MILLION) went with it; `--gb`
   sizes every card (wiki `pages/reblock/raster-escape-time-metric-retired.md`).
-- **A carved atom has no width floor** (2026-10-25; the owner's call, as it renames the metric).
-  The complex's linework has a precision model (`_faces` nodes it by snap-rounding at
-  LINE_SNAP_M, 1e-4 m), but gap_clear.Carving.of cuts the footprints by exact overlays, the one
-  place geometry is cut outside it, and drops a piece only by area (gap_complex.DUST_M2): a
-  corridor vertex 5.3e-6 m from a footprint's edge leaves an atom with a neck far under the
-  precision, and `_conform`'s rounds (every non-Delaunay face-boundary edge split, up to
-  CONFORM_ROUNDS) cascade on it past 110 GB (road_simp's D 0.15 k 0.08 r 7 paved answer on 5810,
-  part 17 of 28, found by bisection and stage timing; killed three times on the cluster). The
-  fix: the cut done in the precision model, `grid_size=LINE_SNAP_M` on Carving.of's
-  intersection and difference (snap-rounding: no cut piece holds a feature under the precision).
-  Tested on 5810: the killed answer meshes (7.25M triangles, 17 rounds; the smallest piece
-  clearance 7.4e-5 m against 5.3e-6), the pieces' area the buildings' to 5e-7, a working answer's
-  L_P moved 8e-7 and its D not at all. (Rounding the pieces after an exact cut also meshed, but is
-  the pattern `_faces`'s comment warns against.) The cut rule must enter the carving's identity:
-  road_simp's mesh cache, keyed by the corridors alone, served the exact cut's mesh to the grid
-  cut (its atom count caught it). So MESH_REV rises, and with it the code digest and the metric's
-  name (RUNTIME's v65531d75): every rows directory keyed by the metric moves to the new name, plain
-  results unchanged and carved ones by noise, and every fixed-mesh cache goes cold. Optional with
-  it: `_conform` refusing to split below LINE_SNAP_M, naming the spot, so a degenerate input fails
-  at once rather than at the memory limit. Sub-precision gaps alone do not kill: every road_simp
-  paved answer on 5810 holds 60 -- 514 vertex-to-edge gaps under LINE_SNAP_M against the
-  footprints (the smallest 3e-8 m) and most meshed; the lineup's and ΔP greedy's corridors hold
-  1 -- 3. 8 of road_simp's 70 cluster runs on 5810 failed meshing an answer (5 killed for memory,
-  2 "the mesh is not Delaunay", 1 "an edge in three triangles"), one confirmed this cause, the
-  other seven its symptoms but unconfirmed (rev 1's three mesh errors had been put down to the raw
-  union). The mesh checks raise on a broken mesh, so no wrong score is known; the cost is crashes.
+- **A carved atom has no width floor** (2026-10-25; open, the owner approved a fix, none holds
+  yet). A corridor vertex 5.3e-6 m from a footprint's edge (road_simp's D 0.15 k 0.08 r 7 paved
+  answer on 5810, part 17 of 28 by bisection) leaves Carving.of's exact cut an atom with a neck far
+  under the linework's precision (gap_clear.LINE_SNAP_M, 1e-4 m), and `_conform`'s rounds (every
+  non-Delaunay face-boundary edge split, up to CONFORM_ROUNDS) cascade past 110 GB (stage timing:
+  `_faces` 3 s, `_conform` the runaway). 8 of road_simp's 70 cluster runs on 5810 failed meshing an
+  answer (5 killed, 2 "not Delaunay", 1 "an edge in three triangles"), one confirmed this cause.
+  Sub-precision gaps alone do not kill: every road_simp paved answer holds 60 -- 514 under 1e-4 m
+  against the footprints and most mesh; 1558's exact carving holds 1349 atoms under 1e-4 m wide
+  (the footprints' own included) and meshes. No wrong score is known (the mesh checks raise).
+  Tried (each a patch, then the code restored to MESH_REV 3; the diff in
+  .superpowers/sdd/2026-10-25-carving/grid_carving_attempt.diff):
+  - the cut at grid_size LINE_SNAP_M (stop after stop, then one arrangement of every outline noded
+    once): the killed answer meshes (7.25M triangles, 17 rounds), a single-stop answer's L_P moves
+    8e-7, but on 1558's resistance_lp the carved mesh's baseline (every atom standing) leaves the
+    plain mesh's (P 0.4% higher; home 966's escape time 28 -> 49 m with its own atom and every line
+    within 3 m unchanged to 4e-5 m) and the roads guard fails at stop 5 (L_P +2.9e-3 against the
+    rebuild, tolerance 2e-3; +5.4e-4 at HEAD). The rebuild's cut exact or on the grid: the same.
+  - every footprint on the grid as the block enters (gc.geometry): the plain mesh does not care
+    (P 2e-6, no home over 10%), but the carved baseline still leaves it (P +0.17%, 15 homes over
+    10%, one 98%) and the roads guard fails at every stop (L_P +8.7e-3 to +3.2e-2).
+  - the corridor snapped onto the cut footprints' linework within LINE_SNAP_M before the exact cut
+    (outlines kept exact): the killed answer still runs away.
+  So the carved mesh relies on exact coincidence between its vertices and the buildings' outlines
+  (gap_complex.TOL 1e-6: "a vertex on an outline") in places not yet mapped; a precision model for
+  the carving needs those consumers found first. Next: find where the carved baseline reads the
+  outlines (home 966 on 1558 under the grid cut is a reproducible case), then choose between a
+  precision model end to end and a narrower rule (a cut piece with a neck under LINE_SNAP_M merged
+  into its neighbour, outlines kept exact); `_conform` refusing to split below LINE_SNAP_M, naming
+  the spot, would at least turn the kill into an error.
 - **pyamg is read by no code** (since 2c4f57d0, the consolidated pass: it was fft_homog's solver;
   gap_flow, cluster and clearings_check only name it in comments). It stays in the `gpu` group;
   removing it is a dependency change, the owner's call.
