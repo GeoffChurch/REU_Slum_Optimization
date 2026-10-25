@@ -15,7 +15,9 @@ Z^T's columns A^-1 M^T q, after which every pair's estimate is a dot product.
 
 check: on the block's baseline state, the sketch at CHECK_K against the exact resistance (a solve
 each) of CHECK_PAIRS random pairs of unknown cells and as many cells to the ground, each drawn
-from the cells with a path of their own to it (a street face, a leak, a ground neighbour); the mean
+from the cells whose own path to it (a street face, a leak, a ground neighbour) is weak, the
+lowest tenth by its share of the cell's diagonal (where the excess's rows carry the power); the
+mean
 ratio within CHECK_TOL of 1 and no pair's ratio outside 1 -+ 6 sqrt(2 / k). Faults: `no-excess`
 (the cells' rows left out: the paths to the ground unseen), `no-sqrt` (W in place of sqrt(W)).
 """
@@ -100,7 +102,11 @@ def check(bid: str, fault: str | None) -> None:
     m = metric.clearing(b, demand=common.PopulationDemand())
     st = m.state(np.zeros(m.n))
     rows = _rows(st)
-    edge = np.flatnonzero(rows.x > 0)          # cells with a path of their own to the ground
+    # cells whose own path to the ground is weak (its share of their diagonal in the lowest tenth):
+    # a unit current's power drops mostly across it, where a cell beside a strong one sits at ~0
+    assert st.A is not None
+    share = np.where(rows.x > 0, rows.x ** 2 / np.maximum(st.A.diagonal(), 1e-300), np.inf)
+    edge = np.flatnonzero(share <= np.quantile(share[np.isfinite(share)], 0.1))
     if fault == "no-excess":                   # the cells' rows dropped: the ground unseen
         rows = rows._replace(x=np.zeros_like(rows.x))
     elif fault == "no-sqrt":                   # W in place of sqrt(W)
