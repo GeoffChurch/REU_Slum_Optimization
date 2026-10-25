@@ -1214,13 +1214,28 @@ Not pursued, with what would change that:
     10%, one 98%) and the roads guard fails at every stop (L_P +8.7e-3 to +3.2e-2).
   - the corridor snapped onto the cut footprints' linework within LINE_SNAP_M before the exact cut
     (outlines kept exact): the killed answer still runs away.
-  So the carved mesh relies on exact coincidence between its vertices and the buildings' outlines
-  (gap_complex.TOL 1e-6: "a vertex on an outline") in places not yet mapped; a precision model for
-  the carving needs those consumers found first. Next: find where the carved baseline reads the
-  outlines (home 966 on 1558 under the grid cut is a reproducible case), then choose between a
-  precision model end to end and a narrower rule (a cut piece with a neck under LINE_SNAP_M merged
-  into its neighbour, outlines kept exact); `_conform` refusing to split below LINE_SNAP_M, naming
-  the spot, would at least turn the kill into an error.
+  The consumer (traced on 1558, home 966, the grid cut as a patch): not the outlines' coincidence
+  but the flat rule. A passage beside a flat triangle weighs 0 (FullMesh.T), and `_unflat` leaves a
+  flat whose longest edge is a face boundary; the grid cut moves cut points up to 7e-5 m off the
+  footprints' straight edges, and flats form at those kinks on the atoms' outlines and zone offsets:
+  1343 zero-weight passages (exact carving 16, plain mesh 1), 55 of them in open ground, walls. The
+  demand, open ground (1462.43 m^2 both), street faces and zones are the same. Given their
+  neighbours' weight, the 55 bring home 966 back (28.21 m; exact 28.16) and P0 to 1e-4. The exact
+  carving in use has 5 such walls on 1558 too (the plain mesh none).
+  Proposal (the owner's call: MESH_REV, the metric renamed, rows migrated): the cut on the grid
+  (stop after stop, as tried) and the flat rule fixed, a vertex within the linework's precision of a
+  face-boundary edge put on it (the flat dissolved, not left at weight 0). As a patch (the cut on
+  the grid, every zero-weight passage given its 16 nearest weighted passages' median, a proxy for
+  the rule): the killed answer meshes (7.25M triangles, 17 rounds), 1558's carved baseline is the
+  plain mesh's to P0 +1.0e-4 (one home over 1%, 1.4%), the roads guard on 1558 passes (+9.6e-5 /
+  +2.4e-4 / +4.4e-4 at stops 1 / 3 / 5; HEAD +1.0e-4 / +2.4e-4 / +5.4e-4). The narrower rule (cut
+  exact, a cut piece under LINE_SNAP_M wide opened) left new degeneracies (a clearance of 0) and the
+  killed answer still ran away. Next: the flat rule itself in `_unflat`, then the guards.
+  Safeguard (c890ed50): `_conform` refuses a split under the vertex grid (gc.SNAP_M) and raises,
+  naming the edge; the cascade doubles its bad edges each round at half their length, passing
+  SNAP_M at its 23rd round, where every conforming mesh splits nothing under 8.8e-6 m (1558's
+  carving; the plain meshes of 19570 and 1558 and that carving bit for bit as before). Guard
+  conform-floor, the cascade's four atoms meshed alone, fault no-floor.
 - **pyamg is read by no code** (since 2c4f57d0, the consolidated pass: it was fft_homog's solver;
   gap_flow, cluster and clearings_check only name it in comments). It stays in the `gpu` group;
   removing it is a dependency change, the owner's call.
