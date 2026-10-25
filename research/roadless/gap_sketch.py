@@ -95,6 +95,7 @@ def check(bid: str, fault: str | None) -> None:
     [b] = common.build_blocks([bid])
     m = metric.clearing(b, demand=common.PopulationDemand())
     st = m.state(np.zeros(m.n))
+    edge = np.flatnonzero(_rows(st).x > 0)     # cells with a path of their own to the ground
     if fault is not None:
         global _rows
         clean = _rows
@@ -105,7 +106,6 @@ def check(bid: str, fault: str | None) -> None:
                     else r._replace(w=r.w ** 2))
     sk = Sketch.of(st, k=CHECK_K, seed=0)
     cells = np.flatnonzero(st.reach.unknown)
-    edge = np.flatnonzero(_rows(st).x > 0)     # cells with a path of their own to the ground
     rng = np.random.default_rng(1)
     ratios = []
     for t in range(2 * CHECK_PAIRS):
