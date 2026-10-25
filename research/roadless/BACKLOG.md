@@ -625,7 +625,7 @@ Open:
   the road builders"; "How the lineup cuts a network to a budget"; T or U ("A uniform rule for
   walled-in homes"); the consolidated pass's (1) and (2), with the rate bracket; free first's
   stage under the ramped D (in the first item); "A screen continued over real waves". Elsewhere:
-  pyamg's removal and the two mesh speed-ups (Infrastructure). Decided, so not listed: the
+  pyamg's removal, the two mesh speed-ups and a carved atom's width floor (Infrastructure). Decided, so not listed: the
   translucent search is the cheap preset (owner 2026-10-15), and the cheap preset takes S0.005cat
   with the re-run (owner yes, the consolidated pass's (3)).
 - **Try everything** (owner 2026-10-24: "Let's try everything"; the plan, in order within each
