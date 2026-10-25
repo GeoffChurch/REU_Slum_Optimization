@@ -10395,3 +10395,35 @@ street; whether that is the owner's intent is the "paving has no price" question
 linked roads as ΔP greedy's candidates (`simp:<plan>`), alone and beside the lineup's pool, the
 exact ΔP / ΔD ordering and cutting them. Scripts: research/roadless/road_simp.py,
 road_simp_check.py; rows in research/roadless/road_simp_rows/ (not committed).
+
+### The damage term for vehicles, on the road graph alone: a lens on 5810 (2026-10-25)
+
+damage.py (BACKLOG, "Try everything"; agenda item 5): the block's streets as the ground and a
+network's roads cut into pieces of at most 10 m, each of conductance 1 / its length; each standing
+home (area population times the share the roads leave standing) served by the nearest node within
+100 m of its outline (a stretcher's carry), its cost that node's effective resistance to the
+street (P_v the served mean, in metres of road; parallel routes lower it). One blockage removes one
+piece, with probability its share of the length: from one inverse, Sherman-Morrison gives every
+piece's rise g (G[h, a] - G[h, b])^2 / (1 - g R_e) of every home's cost, g R_e its leverage; a
+bridge (leverage 1) cuts the homes behind it off, the others' costs unchanged. Two numbers, no
+price on being cut off: `cut`, the expected share of the served population a blockage cuts off,
+and `detour`, the expected relative rise of P_v over the blockages that cut no one off. Its check
+against fresh solves on 40 pieces of the lazy build's prefix to D 0.05 passes (worst 7.9e-11);
+faults no-denominator and no-bridges fail. The streets alone serve 59% of the standing population.
+
+    D 0.05 / 0.10 / 0.15         P_v (m)            cut (%)           bridges (% of length)
+    cycle_native                 66.5 / 68.8 / 66.5  1.4 / 0.6 / 0.4  40 / 31 / 31
+    clearance_looped             140 / 95 / 92       6.7 / 0.8 / 0.3  100 / 33 / 38
+    ΔP greedy, Dir. 3 + Th. 2    69 / 78 / 77        1.2 / 0.6 / 0.4  57 / 52 / 44
+    ΔP greedy, lazy              82 / 85 / 81        1.8 / 0.9 / 0.5  63 / 51 / 49
+    ΔP greedy, lazy, lam 5e-6    85 / 91 / 90        2.1 / 1.1 / 0.7  73 / 71 / 62
+
+(served 93 -- 100% for every network from D 0.05 up.) The walking metric does not see a road's
+dead end, and the ΔP builds are more tree-like than cycle_native: the lazy pick's network is half
+bridges and a random blockage cuts off 0.5 -- 1.8% of the served against cycle_native's 0.4 --
+1.4%; vehicles' cost is 15 -- 30% higher. Repulsion makes it worse (cut 0.7 -- 2.1%, 62 -- 73%
+bridges): the parallel roads it removes as clutter were the network's loops. On this lens the
+lineup's cycle_native, built for loops, is the frontier; as a term in the ΔP greedy's cost it
+would price the dead ends the walking metric leaves free. Detour is noisy across cuts (cycle_native
+0.146 / 0.050 / 0.025) and not tabulated. SIMP's roads (rev 6, linked) are to be scanned. Script:
+.superpowers/sdd/2026-10-22-flow-roads/damage_scan.py <step_m> <carry_m> (not committed).
