@@ -46,9 +46,13 @@ class Sketch(NamedTuple):
     def of(st: gcl.State, *, k: int, seed: int) -> Sketch:
         """The sketch of `st` (its operator assembled and factored) at k rows, Q drawn from
         `seed`."""
+        return Sketch.of_rows(st, _rows(st), k=k, seed=seed)
+
+    @staticmethod
+    def of_rows(st: gcl.State, rows: Rows, *, k: int, seed: int) -> Sketch:
+        """The sketch of `st` with M's rows `rows` (of's: _rows; the check's faults alter them)."""
         if st.factor is None:
             raise ValueError("a sketch needs the state's factor")
-        rows = _rows(st)
         n, unknown = len(rows.x), st.reach.unknown
         rng = np.random.default_rng(seed)
         Z = np.empty((k, n))
@@ -95,16 +99,13 @@ def check(bid: str, fault: str | None) -> None:
     [b] = common.build_blocks([bid])
     m = metric.clearing(b, demand=common.PopulationDemand())
     st = m.state(np.zeros(m.n))
-    edge = np.flatnonzero(_rows(st).x > 0)     # cells with a path of their own to the ground
-    if fault is not None:
-        global _rows
-        clean = _rows
-
-        def _rows(st: gcl.State) -> Rows:      # the fault: one part of M dropped or mis-scaled
-            r = clean(st)
-            return (r._replace(x=np.zeros_like(r.x)) if fault == "no-excess"
-                    else r._replace(w=r.w ** 2))
-    sk = Sketch.of(st, k=CHECK_K, seed=0)
+    rows = _rows(st)
+    edge = np.flatnonzero(rows.x > 0)          # cells with a path of their own to the ground
+    if fault == "no-excess":                   # the cells' rows dropped: the ground unseen
+        rows = rows._replace(x=np.zeros_like(rows.x))
+    elif fault == "no-sqrt":                   # W in place of sqrt(W)
+        rows = rows._replace(w=rows.w ** 2)
+    sk = Sketch.of_rows(st, rows, k=CHECK_K, seed=0)
     cells = np.flatnonzero(st.reach.unknown)
     rng = np.random.default_rng(1)
     ratios = []
