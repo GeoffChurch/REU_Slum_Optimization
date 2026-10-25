@@ -1191,6 +1191,18 @@ Not pursued, with what would change that:
   is its own class).
 - **GPU sizing recalibrated**: closed, the raster's sizing (GB_PER_MILLION) went with it; `--gb`
   sizes every card (wiki `pages/reblock/raster-escape-time-metric-retired.md`).
+- **A carved atom has no width floor** (2026-10-25; the owner's call, as it renames the metric):
+  gap_clear.Carving.of drops a cut piece only by area (gap_complex.DUST_M2), so a corridor vertex
+  5.3e-6 m from a footprint's edge leaves an atom with a neck far under the linework's precision
+  (LINE_SNAP_M, 1e-4 m), and the mesher refines it past 110 GB (road_simp's D 0.15 k 0.08 r 7
+  paved answer on 5810, part 17 of 28, found by bisection; killed three times on the cluster).
+  Snap-rounding each cut piece to LINE_SNAP_M (`shapely.set_precision` in `_polygons`) meshes it
+  (7.16M triangles, as the others). It moves every carved mesh by at most half of LINE_SNAP_M, so
+  MESH_REV must rise, and with it the code digest and the metric's name (RUNTIME's v65531d75):
+  every rows directory keyed by the metric (road_simp_rows, walled_rows, the gap rows) moves to
+  the new name, plain results unchanged and carved ones by noise, and every fixed-mesh cache goes
+  cold on every machine. Until then a run that meets such a sliver dies meshing (rare: 1 of ~44
+  road_simp runs; none of the lineup's or ΔP greedy's carvings so far).
 - **pyamg is read by no code** (since 2c4f57d0, the consolidated pass: it was fft_homog's solver;
   gap_flow, cluster and clearings_check only name it in comments). It stays in the `gpu` group;
   removing it is a dependency change, the owner's call.
