@@ -40,6 +40,7 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S pocket-count <ids,> [fault]      # fault: leak-seeded
     uv run python $S own-ground <ids,> [fault]        # fault: ring-reach
     uv run python $S groundless <ids,> [fault]        # fault: own-everywhere
+    uv run python $S conform-floor - [fault]          # fault: no-floor
     uv run python $S both-ways <guards,> <ids,|->  # each guard, then under each of its faults
 
 `baseline`: the fixed mesh (the runtime's metric, METRIC) against the complex rebuilt
@@ -189,6 +190,12 @@ current) the pooled median trip at TRIP_LAM is within TRIP_TOL of the method of 
 home's point source less its first images in the square's four edges, integrated on a polar grid,
 the trips inside the square only). Faults: `boundary-trips` (the street faces' drainage counted
 as trips), `wrong-home` (each home's trips measured from the next home's injection).
+`conform-floor` (gap_clear._conform's floor): the four atoms of CONFORM_ATOMS, the 4 m about the
+spot where road_simp's D 0.15 k 0.08 r 7 answer on 5810 cascaded (a corridor vertex 5.3e-6 m from a
+footprint's edge: from the tenth round each round doubled its bad edges at half their length, past
+110 GB by the 30th), meshed alone (gap_clear.full_mesh) within CONFORM_ROUNDS_CAP rounds: the
+conformity refuses the first split under the vertex grid (gap_complex.SNAP_M) and raises, naming
+the edge. Fault `no-floor`: the floor 0 (the cascade runs to the cap and its own error).
 `closed-edge`: on TRIP_BLOCK with its edge closed (gap_exits.ClosedEdge), every live component has
 a leak and the cells live are the open edge's, the street drains nothing and the leaks the
 injection, and the pooled median trip is the method of images' with the images added. Fault
@@ -378,6 +385,29 @@ PER_BLOCK = "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066"   # the per-block metric
                                                           # stored under v34d40e8a is the previous
                                                           # test's)
 PER_BLOCK_CONSTANTS = 29
+CONFORM_ATOMS = (        # conform-floor: the cascade's four atoms (5810's carving, its local frame)
+    "POLYGON ((546.4662255144212 667.5179657656699, 547.0873077790664 665.0049, 545.252525 "
+    "665.0049, 545.252525 667.2180103082314, 546.4662255144212 667.5179657656699))",
+    "POLYGON ((549.252525 668.8901590739019, 549.252525 667.5394483979015, 549.0870388178737 "
+    "668.8695702254772, 549.252525 668.8901590739019))",
+    "POLYGON ((547.2322659544384 667.2540870943884, 547.2320851010736 667.254072310403, "
+    "547.0232254202128 667.4830978233367, 547.2283801410231 667.9901541331783, 547.0206450133701 "
+    "668.349961495027, 546.8283798092743 668.1169490069151, 546.6551747962949 668.1169490674511, "
+    "546.4649824610096 668.3999614920467, 546.0185724682524 668.3999614650384, 545.8283802811056 "
+    "668.1169490199536, 545.6551751845982 668.1169490274042, 545.5206452153507 668.3499618750066, "
+    "545.3283802999649 668.1169488485903, 545.252525 668.1653119105018, 545.252525 669.0049, "
+    "549.252525 669.0049, 549.252525 667.4793085953638, 547.2322659544384 667.2540870943884))",
+    "POLYGON ((545.3283802999649 668.1169488485903, 545.5206452153507 668.3499618750066, "
+    "545.6551751845982 668.1169490274042, 545.8283802811056 668.1169490199536, 546.0185724682524 "
+    "668.3999614650384, 546.4649824610096 668.3999614920467, 546.6551747962949 668.1169490674511, "
+    "546.8283798092743 668.1169490069151, 547.0206450133701 668.349961495027, 547.2283801410231 "
+    "667.9901541331783, 547.0232254202128 667.4830978233367, 547.2320851010736 667.254072310403, "
+    "547.2322659544384 667.2540870943884, 545.252525 667.0333826108318, 545.252525 "
+    "668.1653119105018, 545.3283802999649 668.1169488485903))")
+CONFORM_BOX = (545.252525, 665.0049, 549.252525, 669.0049)   # their square (its south edge the
+                                                              # street)
+CONFORM_ROUNDS_CAP = 26  # conform-floor's rounds (the cascade passes SNAP_M at its 23rd; the 26th
+                         # holds about a million triangles)
 SCALE_L = 800.0          # leak-scale: the open square's side (m)
 SCALE_LAM = 60.0         # ... the uniform leak's lam (the square's half-side over 6.7 lam: its
                          # Dirichlet edge moves the potential within SCALE_R by under 1e-4)
@@ -2196,6 +2226,27 @@ def _two_homes(edge_m: float) -> Block:
                                               _square(c - 1.0, edge_m - 1.0, 2.0)])
 
 
+def conform_floor(_ids: list[str]) -> list[str]:
+    box = shapely.box(*CONFORM_BOX)
+    x0, y0, x1, _y1 = CONFORM_BOX
+    geo = gc.Geometry(boundary=box, polys=np.asarray(shapely.from_wkt(list(CONFORM_ATOMS)),
+                                                     dtype=object),
+                      streets=shapely.LineString([(x0, y0), (x1, y0)]), origin=(0.0, 0.0))
+    with _patched(gcl, "CONFORM_ROUNDS", CONFORM_ROUNDS_CAP):
+        try:
+            fm = gcl.full_mesh(geo, METRIC.spec, METRIC.fs, METRIC.form,
+                               box=gcl.lattice_box(geo, METRIC.spec, METRIC.form))
+            outcome = f"conformed: {fm.nt} triangles, {fm.splits} splits in {fm.rounds} rounds"
+        except RuntimeError as e:
+            outcome = str(e)
+    ok = "under the vertex grid" in outcome
+    print(f"conform-floor: {outcome} -> {'ok' if ok else 'FAILS'}", flush=True)
+    return [] if ok else [f"conform-floor: {outcome[:160]}"]
+
+
+_CONFORM_ROUND = gcl._conform_round
+
+
 def closed_edge(_ids: list[str]) -> list[str]:
     bad = []
     b = _two_homes(CLOSED_EDGE_M)
@@ -2904,7 +2955,7 @@ GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "faces": faces, "lazy-baseline": lazy_baseline, "uniform-control": uniform_control,
     "pocket-escape": pocket_escape, "pocket-gradient": pocket_gradient,
     "pocket-count": pocket_count, "own-ground": own_ground, "groundless": groundless,
-    "home-demand": home_demand}
+    "home-demand": home_demand, "conform-floor": conform_floor}
 
 
 _GROUNDLESS = gf.groundless
@@ -2936,6 +2987,8 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "device": {"perturb": _perturb_one},
     "device-roads": {"perturb": _perturb_one},
     "roads": {"one-face-closed": lambda: _patched(gcl.Carving, "carved", _one_face_closed)},
+    "conform-floor": {"no-floor": lambda: _patched(gcl, "_conform_round",
+                                                   lambda *a: _CONFORM_ROUND(*a[:-1], 0.0))},
     "flux": {"flip-one": _flip_one},
     "leak-assembly": {"drop-one": lambda: _leak_fault(_drop_one),
                       "not-live": lambda: _leak_fault(_not_live)},

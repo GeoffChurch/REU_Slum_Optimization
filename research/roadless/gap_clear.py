@@ -351,16 +351,20 @@ def _unflat(xy, tri, nbr, con, face, nt, flat_rel, tol):
 
 
 @njit(cache=True)
-def _conform_round(xy, tri, nbr, con, face, nt, nv, cand, merge_rel, flat_rel, tol):
+def _conform_round(xy, tri, nbr, con, face, nt, nv, cand, merge_rel, flat_rel, tol, floor):
     """One round: each candidate edge (t, i), still bad when its turn comes (an earlier split or
-    flip may have changed it), split. Returns (nt, nv, splits)."""
+    flip may have changed it), split; one shorter than `floor` is refused and the round stops
+    there. Returns (nt, nv, splits, the refused edge's two vertices: -1, -1 if none)."""
     splits = 0
     for k in range(cand.shape[0]):
         t, i = cand[k, 0], cand[k, 1]
         if _bad(xy, tri, nbr, con, t, i, merge_rel, flat_rel):
+            a, c = tri[t, (i + 1) % 3], tri[t, (i + 2) % 3]
+            if (xy[a, 0] - xy[c, 0]) ** 2 + (xy[a, 1] - xy[c, 1]) ** 2 < floor * floor:
+                return nt, nv, splits, a, c
             nt, nv = _split(xy, tri, nbr, con, face, nt, nv, t, i, tol)
             splits += 1
-    return nt, nv, splits
+    return nt, nv, splits, -1, -1
 
 
 @njit(cache=True)
@@ -413,7 +417,13 @@ UNFLAT_PASSES = 8           # _unflat's passes at most (a dissolution's flips ca
 
 def _conform(a: Arrays) -> Conformed:
     """Conformity (module docstring): the flat triangles dissolved (`_unflat`), then bad
-    face-boundary edges split until none is left."""
+    face-boundary edges split until none is left. An edge shorter than the vertex grid
+    (gap_complex.SNAP_M) is not split: the conformity raises there, naming it. A degenerate input
+    cascades (5810, a road_simp answer's corridor vertex 5.3e-6 m from a footprint's edge: from
+    its tenth round each round doubled its bad edges at half their length, under SNAP_M by the
+    23rd, past 110 GB by the 30th), where every mesh that conforms splits nothing under 8.8e-6 m
+    (1558's resistance_lp carving, the deepest seen; the plain meshes of 19570 and 1558 3.3e-3 and
+    6.1e-3 m)."""
     unflat = left = 0
     for _p in range(UNFLAT_PASSES):
         k, left = _unflat(a.xy, a.tri, a.nbr, a.con, a.face, a.nt, gf.FLAT_REL, gc.DELAUNAY_TOL)
@@ -426,10 +436,17 @@ def _conform(a: Arrays) -> Conformed:
         if len(cand) == 0:
             return Conformed(arrays=a, unflat=unflat, flat_left=left, splits=splits, rounds=r)
         a = _room(a, len(cand))
-        nt, nv, k = _conform_round(a.xy, a.tri, a.nbr, a.con, a.face, a.nt, a.nv, cand,
-                                   gf.MERGE_REL, gf.FLAT_REL, gc.DELAUNAY_TOL)
+        nt, nv, k, p, q = _conform_round(a.xy, a.tri, a.nbr, a.con, a.face, a.nt, a.nv, cand,
+                                         gf.MERGE_REL, gf.FLAT_REL, gc.DELAUNAY_TOL, gc.SNAP_M)
         a = a._replace(nt=nt, nv=nv)
         splits += k
+        if p >= 0:
+            (x0, y0), (x1, y1) = a.xy[p], a.xy[q]
+            raise RuntimeError(f"conformity: round {r + 1} would split the edge ({x0:.9f}, "
+                               f"{y0:.9f}) -- ({x1:.9f}, {y1:.9f}) (the mesh's frame), "
+                               f"{np.hypot(x1 - x0, y1 - y0):.1e} m, under the vertex grid "
+                               f"(gap_complex.SNAP_M): a degenerate input's cascade, refused "
+                               f"({splits} splits so far)")
     left = _find_bad(a.xy, a.tri, a.nbr, a.con, a.nt, gf.MERGE_REL, gf.FLAT_REL)
     if len(left):
         raise RuntimeError(f"conformity: {len(left)} face-boundary edges still not Delaunay after "
