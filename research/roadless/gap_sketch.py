@@ -14,10 +14,10 @@ Z^T's columns A^-1 M^T q, after which every pair's estimate is a dot product.
     PYTHONPATH=. uv run python research/roadless/gap_sketch.py check <block> none|<fault>
 
 check: on the block's baseline state, the sketch at CHECK_K against the exact resistance (a solve
-each) of CHECK_PAIRS random pairs of unknown cells and as many cells to the ground, each drawn
-from the cells whose own path to it (a street face, a leak, a ground neighbour) is weak, the
-lowest tenth by its share of the cell's diagonal (where the excess's rows carry the power); the
-mean
+each) of CHECK_PAIRS random pairs of unknown cells and as many cells to the ground: of 5
+CHECK_PAIRS cells with a path of their own to it (a street face, a leak, a ground neighbour), those
+whose unit current's power drops most across the paths to the ground (the share the excess's rows
+carry, found by a solve each); the mean
 ratio within CHECK_TOL of 1 and no pair's ratio outside 1 -+ 6 sqrt(2 / k). Faults: `no-excess`
 (the cells' rows left out: the paths to the ground unseen), `no-sqrt` (W in place of sqrt(W)).
 """
@@ -102,11 +102,21 @@ def check(bid: str, fault: str | None) -> None:
     m = metric.clearing(b, demand=common.PopulationDemand())
     st = m.state(np.zeros(m.n))
     rows = _rows(st)
-    # cells whose own path to the ground is weak (its share of their diagonal in the lowest tenth):
-    # a unit current's power drops mostly across it, where a cell beside a strong one sits at ~0
-    assert st.A is not None
-    share = np.where(rows.x > 0, rows.x ** 2 / np.maximum(st.A.diagonal(), 1e-300), np.inf)
-    edge = np.flatnonzero(share <= np.quantile(share[np.isfinite(share)], 0.1))
+    # the cells to the ground: of 5 CHECK_PAIRS with a path of their own to it, the CHECK_PAIRS
+    # whose unit current's power drops most across the paths to it (the share the excess's rows
+    # carry: from a cell beside a strong path the current leaves at ~0, a weak one carries little)
+    assert st.factor is not None
+    near = np.random.default_rng(2).choice(np.flatnonzero(rows.x > 0), 5 * CHECK_PAIRS,
+                                           replace=False)
+    carried = []
+    for c in near:
+        e = np.zeros(m.c.n)
+        e[c] = 1.0
+        v = st.factor.solve(e)
+        carried.append(float((rows.x * v) @ (rows.x * v)) / v[c])
+    edge = near[np.argsort(carried)[::-1][:CHECK_PAIRS]]
+    print(f"the excess's share of the cells' resistance to the ground: "
+          f"{np.sort(carried)[::-1][:CHECK_PAIRS].mean():.3f}")
     if fault == "no-excess":                   # the cells' rows dropped: the ground unseen
         rows = rows._replace(x=np.zeros_like(rows.x))
     elif fault == "no-sqrt":                   # W in place of sqrt(W)
@@ -121,7 +131,7 @@ def check(bid: str, fault: str | None) -> None:
             p, q = rng.choice(cells, 2, replace=False)
             y[p], y[q] = 1.0, -1.0
         else:
-            y[rng.choice(edge)] = 1.0
+            y[edge[t - CHECK_PAIRS]] = 1.0
         exact = float(y @ st.factor.solve(y)) if st.factor is not None else np.nan
         ratios.append(sk.resistance(y) / exact)
     r = np.asarray(ratios)
