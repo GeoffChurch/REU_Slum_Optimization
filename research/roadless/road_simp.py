@@ -16,18 +16,25 @@ displacement, so without a price the optimum paves it all). Constraint: the disp
 Plan.D, per building its covered share X_b (its triangles' area times r_t over its own) through
 common.MEASURE's ramp, weighted by population (the real measure reads the largest standing piece,
 which a cut through a long building's middle makes larger than the covered share). The update is
-relax.simp's OC, B = -dP / (price dA + nu dD) per pixel, nu bisected on D linearised at the iterate.
+relax.simp's OC, B = -dP / (price dA + nu dD) per pixel, nu bisected on D at the trial update
+(the projection at a large beta makes D linearised at the iterate overshoot: rev 1 ended 20954's
+D 0.02 runs at 0.11).
 
-The answer: the triangles at r_t >= 1/2, their union the road's paved ground, scored as a road
-network is (Carving.of with one network of one stop: P on its own mesh by road_state; D by
-common.MEASURE on the world-frame ground).
+Two answers, each scored as a road network is (Carving.of with one network of one stop: P on its
+own mesh by road_state; D by common.MEASURE on the world-frame ground):
+  paved: the triangles at r_t >= 1/2, unioned (closed and opened by SMOOTH_M and simplified to it,
+    so the carved mesh meets no sliver: rev 1's raw union failed to mesh on 5810 three times);
+  roads: the skeleton of the pixels at r >= 1/2 (reblock's Zhang-Suen thinning), its 8-neighbour
+    steps merged into lines, each a road ROAD_W wide (road_corridor's rule): the trees' lines at a
+    road's width, where `paved` keeps their trunks' widths.
 
     PYTHONPATH=. uv run python research/roadless/road_simp.py run <block> <plan> cpu|gpu [--replace]
 
 plan: rs.D<D>.k<per_km>.r<radius>.q<q,...>.b<beta,...>.i<iters> (the stages pair q and beta in
 order), e.g. rs.D0.05.k0.01.r3.5.q1,2,3,3,3.b1,2,4,8,16.i30; its name (Plan.name) adds the raster's
 pixel and the eps world's eps (.p<PIXEL>e<EPS>). Rows in road_simp_rows/<metric>/<name>/
-<block>.parquet beside its field (.npz) and its ground (<block>_ground.parquet).
+<block>.parquet beside its field (.npz), its paved ground (<block>_ground.parquet) and its roads
+(<block>_roads.parquet).
 """
 from __future__ import annotations
 
@@ -35,6 +42,7 @@ import re
 import socket
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple, TypeAlias
@@ -59,14 +67,20 @@ import gap_exits as gx  # noqa: E402
 import metrics  # noqa: E402
 import relax  # noqa: E402
 
+from reblock.budget import road_corridor  # noqa: E402
 from reblock.destroyed import IncrementalDestroyed  # noqa: E402
+from reblock.methods.betweenness.thinning import skeletonize  # noqa: E402
 
 PIXEL = 1.0          # m: the design raster's pixel
 ROAD_W = 7.0         # m: a road's width (the lineup's roads', road_corridor's buffer)
 EPS = 1e-4           # the eps world's standing footprint (relax's default plan, `e0.0001`)
 XMIN = relax.XMIN    # the design's floor
 MOVE = 0.2           # OC's move limit (relax.simp's)
+NU_TOL = 1e-3        # OC: nu bisected to this factor (cannot change the answer beyond it)
 HALF = 0.5           # the answer: the triangles whose road density reaches it
+SMOOTH_M = 0.1       # m: the paved answer's closing, opening and simplification
+REV = 2              # the code's revision, in the plan's name (2: D bisected at the trial update,
+                     # the answers smoothed and doubled)
 OUT = HERE / "road_simp_rows"
 MESHES = HERE / "road_simp_rows" / ".meshes"     # the answers' carved meshes
 
@@ -91,7 +105,7 @@ class Plan:
         q = ",".join(f"{q:g}" for q, _ in self.stages)
         b = ",".join(f"{b:g}" for _, b in self.stages)
         return (f"rs.D{self.D:g}.k{self.per_km:g}.r{self.radius:g}.q{q}.b{b}.i{self.iters}"
-                f".p{PIXEL:g}e{EPS:g}")
+                f".p{PIXEL:g}e{EPS:g}v{REV}")
 
     @staticmethod
     def of(spec: str) -> Plan:
@@ -111,8 +125,9 @@ class Plan:
 class Raster(NamedTuple):
     """The design's raster over the mesh: per triangle its pixel (`pix`, flat: the one under its
     centroid), the design pixels (`on`: any triangle's), the cone filter's kernel and per pixel
-    the kernel's sum over the design pixels (`norm`)."""
+    the kernel's sum over the design pixels (`norm`); `lo` the corner of pixel (0, 0)."""
     shape: tuple[int, int]
+    lo: NDArray[np.float64]
     pix: NDArray[np.int64]
     on: NDArray[np.bool_]
     kernel: NDArray[np.float64]
@@ -120,7 +135,8 @@ class Raster(NamedTuple):
 
     @staticmethod
     def of(cen: NDArray[np.float64], *, radius: float) -> Raster:
-        ij = np.floor((cen - cen.min(axis=0)) / PIXEL).astype(np.int64)
+        lo = cen.min(axis=0)
+        ij = np.floor((cen - lo) / PIXEL).astype(np.int64)
         shape = (int(ij[:, 0].max()) + 1, int(ij[:, 1].max()) + 1)
         pix = ij[:, 0] * shape[1] + ij[:, 1]
         on = np.zeros(shape[0] * shape[1], dtype=bool)
@@ -131,7 +147,7 @@ class Raster(NamedTuple):
         kernel = np.maximum(0.0, r - d)
         norm = ndimage.correlate(on.reshape(shape).astype(np.float64), kernel,
                                  mode="constant").ravel()
-        return Raster(shape=shape, pix=pix, on=on, kernel=kernel, norm=norm)
+        return Raster(shape=shape, lo=lo, pix=pix, on=on, kernel=kernel, norm=norm)
 
     def filter(self, x: NDArray[np.float64]) -> NDArray[np.float64]:
         """The cone filter over the design pixels (a pixel off them reads 0)."""
@@ -261,10 +277,13 @@ class Roads:
 
 
 def _oc(x: NDArray[np.float64], on: NDArray[np.bool_], gain: NDArray[np.float64],
-        paving: NDArray[np.float64], gD: NDArray[np.float64], *, D: float,
-        budget: float) -> tuple[NDArray[np.float64], float]:
+        paving: NDArray[np.float64], gD: NDArray[np.float64], *,
+        D_of: Callable[[NDArray[np.float64]], float], budget: float,
+        nu0: float) -> tuple[NDArray[np.float64], float]:
     """One OC update of the design pixels `on`: x (gain / (paving + nu gD))^1/2 within MOVE of x
-    and [XMIN, 1], nu 0 if D linearised at x stays within the budget, else bisected to it."""
+    and [XMIN, 1]; nu 0 if the update's D (D_of) is within the budget, else bisected (from nu0,
+    the last update's, bracketed by factors of 10) to the least nu whose update's D is, to a
+    factor of 1 + NU_TOL (D falls as nu rises: every pixel's update does)."""
     gain = np.maximum(gain, 0.0)
     lo_x, hi_x = np.maximum(XMIN, x - MOVE), np.minimum(1.0, x + MOVE)
 
@@ -272,17 +291,24 @@ def _oc(x: NDArray[np.float64], on: NDArray[np.bool_], gain: NDArray[np.float64]
         B = gain / np.maximum(paving + nu * gD, 1e-300)
         return np.where(on, np.clip(x * np.sqrt(B), lo_x, hi_x), x)
 
-    nu = 0.0
-    xn = trial(nu)
-    if D + float(gD @ (xn - x)) > budget:
-        lo, hi = 1e-300, 1e300
-        for _ in range(200):
-            nu = float(np.sqrt(lo * hi))
-            xn = trial(nu)
-            lo, hi = (nu, hi) if D + float(gD @ (xn - x)) > budget else (lo, nu)
-            if hi / lo < 1 + 1e-9:
-                break
-    return xn, nu
+    xn = trial(0.0)
+    if D_of(xn) <= budget:
+        return xn, 0.0
+    nu = nu0 if nu0 > 0 else 1.0
+    if D_of(trial(nu)) > budget:
+        lo = nu
+        while nu < 1e300 and D_of(trial(nu := nu * 10.0)) > budget:
+            lo = nu                      # (at 1e300 the move limit holds D over: the best kept)
+        hi = nu
+    else:
+        hi = nu
+        while nu > 1e-300 and D_of(trial(nu := nu / 10.0)) <= budget:
+            hi = nu
+        lo = nu
+    while hi / max(lo, 1e-300) > 1.0 + NU_TOL:
+        nu = float(np.sqrt(max(lo, 1e-300) * hi))
+        lo, hi = (nu, hi) if D_of(trial(nu)) > budget else (lo, nu)
+    return trial(hi), hi
 
 
 def simp(rd: Roads, plan: Plan, *,
@@ -292,8 +318,12 @@ def simp(rd: Roads, plan: Plan, *,
     lam = rd.price(plan.per_km)
     on = rd.raster.on
     rows = []
+    nu = 0.0
     t0 = time.time()
     for q, beta in plan.stages:
+        def D_of(xn: NDArray[np.float64], beta: float = beta) -> float:
+            return rd.D(rd.chain(xn, beta)[1])
+
         for it in range(plan.iters):
             xf, r = rd.chain(x, beta)
             s = r ** q
@@ -303,7 +333,7 @@ def simp(rd: Roads, plan: Plan, *,
             gA = rd.back(xf, beta, rd.area)
             gD = rd.back(xf, beta, rd.dD(r))
             A, D = float(rd.area @ r), rd.D(r)
-            xn, nu = _oc(x, on, -gP, lam * gA, gD, D=D, budget=plan.D)
+            xn, nu = _oc(x, on, -gP, lam * gA, gD, D_of=D_of, budget=plan.D, nu0=nu)
             change = float(np.abs(xn - x)[on].max())
             x = xn
             rows.append(dict(q=q, beta=beta, it=it, P=P, L_P=1.0 - P / rd.P0, A=A, D=D, nu=nu,
@@ -314,16 +344,34 @@ def simp(rd: Roads, plan: Plan, *,
     return x, rows
 
 
-def answer(rd: Roads, x: NDArray[np.float64], beta: float) -> Any:
-    """The paved ground (the triangles at r >= HALF, unioned; the model's local frame)."""
+def paved(rd: Roads, x: NDArray[np.float64], beta: float) -> Any:
+    """The paved answer (module docstring; the model's local frame)."""
     _, r = rd.chain(x, beta)
     fm = rd.m.fx.fm
     t = np.flatnonzero(r >= HALF)
-    return shapely.coverage_union_all(shapely.polygons(fm.xy[fm.tri[t]]))
+    g = shapely.coverage_union_all(shapely.polygons(fm.xy[fm.tri[t]]))
+    g = shapely.buffer(shapely.buffer(g, SMOOTH_M, quad_segs=1), -SMOOTH_M, quad_segs=1)
+    return shapely.make_valid(shapely.simplify(g, SMOOTH_M))
+
+
+def roads(rd: Roads, x: NDArray[np.float64], beta: float) -> Any:
+    """The roads answer's lines (module docstring; the model's local frame)."""
+    ra = rd.raster
+    on = (relax.project(ra.filter(x), beta) >= HALF).reshape(ra.shape)
+    skel = skeletonize(on)
+    i, j = np.nonzero(skel)
+    keep = set(zip(i.tolist(), j.tolist(), strict=True))
+    segs = []
+    for a, b in keep:
+        for da, db in ((0, 1), (1, -1), (1, 0), (1, 1)):
+            if (a + da, b + db) in keep:
+                segs.append(((a + 0.5, b + 0.5), (a + da + 0.5, b + db + 0.5)))
+    xy = ra.lo + PIXEL * np.asarray(segs, dtype=np.float64).reshape(-1, 2, 2)
+    return shapely.line_merge(shapely.multilinestrings(shapely.linestrings(xy)))
 
 
 def score(b: Any, metric: gcl.ComplexMetric, ground_world: Any) -> dict[str, float]:
-    """The paved ground scored as a road network (module docstring)."""
+    """A paved ground scored as a road network (module docstring)."""
     geo = gc.geometry(b)
     carving = gcl.Carving.of(geo, [[shapely.make_valid(geo.local(ground_world))]])
     MESHES.mkdir(parents=True, exist_ok=True)
@@ -351,14 +399,23 @@ def run(bid: str, plan: Plan, device: str, *, standing: clearings.Standing) -> N
           f"{rd.P0:.6e} ({time.time() - t0:.0f}s)", flush=True)
     x, rows = simp(rd, plan, log=lambda s: print(s, flush=True))
     beta = plan.stages[-1][1]
-    ground = m.geo.utm(answer(rd, x, beta))
-    sc = score(b, metric, ground)
-    print(f"{bid} {plan.name}: L_P {sc['L_P']:.4f}, D {sc['D_exact']:.4f}, paved "
-          f"{sc['paved']:.0f} m^2 ({time.time() - t0:.0f}s)", flush=True)
+    ground = m.geo.utm(paved(rd, x, beta))
+    lines = m.geo.utm(roads(rd, x, beta))
+    del rd, m                                  # the eps world's model, before two more are built
+    net = gpd.GeoDataFrame(geometry=list(shapely.get_parts(lines)), crs=b.crs).assign(
+        width_m=ROAD_W)
+    sc = {f"paved_{k}": v for k, v in score(b, metric, ground).items()}
+    sc |= {f"roads_{k}": v for k, v in score(b, metric, road_corridor(net)).items()}
+    sc["roads_m"] = float(net.length.sum())
+    print(f"{bid} {plan.name}: paved L_P {sc['paved_L_P']:.4f}, D {sc['paved_D_exact']:.4f}, "
+          f"{sc['paved_paved']:.0f} m^2; roads L_P {sc['roads_L_P']:.4f}, D "
+          f"{sc['roads_D_exact']:.4f}, {sc['roads_m']:.0f} m ({time.time() - t0:.0f}s)",
+          flush=True)
     out.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out.with_suffix(".npz"), x=x)
     gpd.GeoDataFrame(geometry=[ground], crs=b.crs).to_parquet(
         out.with_name(f"{bid}_ground.parquet"))
+    net.to_parquet(out.with_name(f"{bid}_roads.parquet"))
     df = pd.DataFrame(rows).assign(block=bid, plan=plan.name, **sc, device=device,
                                    host=socket.gethostname(), peak_rss_gb=gap_calib.peak_gb(),
                                    t_total=time.time() - t0)
