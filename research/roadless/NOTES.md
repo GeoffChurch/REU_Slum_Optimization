@@ -10416,8 +10416,18 @@ lineup-only build at every D:
     lineup + SIMP r 3.5     0.246   0.346   0.414   0.512   0.585   0.635   0.671   0.695   10.4
 
 in more road (3.8 / 7.3 / 10.4 km at D 0.05 / 0.10 / 0.15 against 3.4 / 6.7 / 9.1) and a little
-more clutter (17 / 23 / 22% within 5 m against 16 / 20 / 18%); 2.0 h. The r 7 pool (D 0.05 k 0.01)
-is running. Scripts: research/roadless/road_simp.py, road_simp_check.py; rows in
+more clutter (17 / 23 / 22% within 5 m against 16 / 20 / 18%); 2.0 h. SIMP's r 7 roads (D 0.05 k
+0.01's 238 linked lines, 4.6 km) do more: the build takes 61 (2.9 of its 11.2 km to D 0.15) and
+leads the lineup-only build by 0.03 -- 0.06 at every D:
+
+    lineup + SIMP r 7       0.274   0.371   0.464   0.550   0.611   0.655   0.693   0.720   11.2
+
+at 4.9 / 8.0 / 11.2 km (at the lineup build's 9.2 km, about D 0.12 and L_P 0.685: ahead at equal
+length too), clutter 18 / 21 / 21% within 5 m, and under the vehicle damage term the lineup
+build's equal (a blockage cuts off 1.4 / 0.9 / 0.5% of the served, 64 / 65 / 55% bridges);
+1.9 h. So SIMP proposes and the exact greedy disposes: its long roads through open ground, which
+the lineup's routing never offers, are what the greedy was missing. Next: two r 7 pools together
+(D 0.05 and D 0.15, k 0.01), running. Scripts: research/roadless/road_simp.py, road_simp_check.py; rows in
 research/roadless/road_simp_rows/ (not committed); the greedy's pool in
 .superpowers/sdd/2026-10-22-flow-roads/dp_greedy.py (Pool: Lineup, Simp, Union).
 
