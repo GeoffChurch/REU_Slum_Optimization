@@ -10050,8 +10050,21 @@ pick:
     D                     0.01    0.02    0.03    0.05    0.075   0.10    0.125   0.15    roads
     lam 0 (dD alone)      0.199   0.331   0.380   0.465   0.549   0.589   0.623   0.655   192
     lam 1e-6              0.198   0.320   0.369   0.454   0.539   0.595   0.629   0.656   166
+    lam 5e-6              0.198   0.319   0.370   0.461   0.525   0.584   0.615   0.653   151
     lam 2.5e-5            0.198   0.318   0.372   0.457   0.518   0.564   0.597   0.629   152
 
-lam 1e-6 costs about 0.01 below D 0.075 and ties above with 26 roads fewer; 2.5e-5 costs 0.01 --
-0.03 throughout. The clutter (clutter.py) and lam 5e-6 (lost at step 84 when its parent shell
-ended: run again) are to come.
+and their clutter (clutter.py, build order), D 0.05 / 0.10 / 0.15:
+
+                          mean distance, median (m)   length within 5 m    km at 0.15
+    lam 0                 10.4 / 10.9 / 11.2          24 / 22 / 21%        9.9
+    lam 1e-6              13.2 / 12.5 / 12.6          13 / 14 / 17%        8.9
+    lam 5e-6              17.1 / 16.2 / 14.4           6 /  7 /  7%        8.3
+    lam 2.5e-5            20.2 / 17.8 / 17.0           2 /  3 /  5%        8.6
+    cycle_native          34.6 / 21.1 / 18.8           1 /  6 /  9%        8.2  (canonical)
+    clearance_looped      13.5 / 14.6 / 12.6          10 /  8 / 10%        7.0
+
+lam 1e-6 costs about 0.01 below D 0.075 and ties above with 26 roads fewer, its clutter cut by a
+third to a half. lam 5e-6 brings the clutter to the lineup's (7% within 5 m) for 0.005 -- 0.024 of
+L_P from D 0.02 up (0.002 at 0.15), still 0.06 -- 0.08 over cycle_native at D 0.05 -- 0.15. 2.5e-5
+costs 0.01 -- 0.03 throughout for the least clutter of the four. Each lam buys clutter with L_P, so
+none is dominated; the price is a preset's, not a constant's.
