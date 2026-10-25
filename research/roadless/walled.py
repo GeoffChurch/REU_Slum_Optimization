@@ -19,6 +19,7 @@ whose leak is of the order of its walls' eps conductance).
     S=research/roadless/walled.py      # from the repo root, PYTHONPATH=., single-threaded
     uv run python $S arm <id> <label> <cpu|gpu> [--replace|--keep-standing]
     uv run python $S block <id> <label,...> <cpu|gpu> [--replace|--keep-standing]
+    uv run python $S job <id> <label|lenses|chains> <cpu|gpu> [--replace|--keep-standing]
     uv run python $S lenses <id> <cpu|gpu> [--replace|--keep-standing]
     uv run python $S chains <id> <cpu|gpu> [--replace|--keep-standing]
     uv run python $S wlenses <id> [--replace|--keep-standing]
@@ -27,7 +28,8 @@ whose leak is of the order of its walls' eps conductance).
 `arm`: the arm's run (relax.one, or leaky_simp's W arm), its row relax's (or leaky_simp's) with the
 device, the host, the wall time and the peak memory (relax_rows/<metric>/<plan>/D0.05/).
 
-`block`: the arms in turn, then `lenses` (a small block's task).
+`block`: the arms in turn, then `lenses` (a small block's task). `job`: one arm, or `lenses`, or
+`chains` (a cluster run's item).
 
 `lenses`: every arm's clearing that stands (and none) scored under T's, U's and F's metrics:
 Lens A of P, P_{1/2} and J_2 on each metric's own baseline and
@@ -528,6 +530,13 @@ def main(argv: list[str]) -> None:
         for label in argv[2].split(","):
             run_arm(label, argv[1], argv[3], standing=standing)
         lenses(argv[1], argv[3], standing=standing)
+    elif len(argv) == 4 and argv[0] == "job" and argv[3] in ("cpu", "gpu"):
+        if argv[2] == "lenses":
+            lenses(argv[1], argv[3], standing=standing)
+        elif argv[2] == "chains":
+            chain_check(argv[1], argv[3], standing=standing)
+        else:
+            run_arm(argv[2], argv[1], argv[3], standing=standing)
     elif len(argv) == 3 and argv[0] == "lenses" and argv[2] in ("cpu", "gpu"):
         lenses(argv[1], argv[2], standing=standing)
     elif len(argv) == 3 and argv[0] == "chains" and argv[2] in ("cpu", "gpu"):
