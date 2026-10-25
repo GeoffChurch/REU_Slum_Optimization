@@ -10041,7 +10041,28 @@ a factor of 3 -- 5 either way, divided by a small dD, puts small candidates on t
 change slowly from step to step (14's 5.9e4, 3.8e4, 3.3e4 at steps 20, 60, 100; 59's 4.0e4, 2.8e4,
 2.3e4; 56 rose, 1.8e4 to 2.2e4, so a stale drop is not a strict bound): a lazy greedy over stored
 exact drops (every candidate solved once, about 40 min on five processes; each step re-solving the
-queue's head until it is fresh) is the pick this points to. Not built yet.
+queue's head until it is fresh) is the pick this points to.
+
+Built (Lazy, `lazy:5 D`: every open candidate solved when it opens, each step re-solving the
+queue's head in fives until the head is fresh), it beats every screened pick at every D:
+
+    D                     0.01    0.02    0.03    0.05    0.075   0.10    0.125   0.15    time
+    lazy, batch 5         0.236   0.340   0.410   0.493   0.556   0.611   0.647   0.678   1.7 h
+    Dirichlet 3 + Th. 2   0.199   0.331   0.380   0.465   0.549   0.589   0.623   0.655   1.7 h
+
+in 159 roads against 192 (9.1 km against 9.9 at 0.15), its clutter lower (length within 5 m 16 /
+20 / 18% at D 0.05 / 0.10 / 0.15 against 24 / 22 / 21%; mean-distance median 12.6 / 11.4 / 12.1 m
+against 10.4 / 10.9 / 11.2). It built the large crossings at steps 10 -- 30 (14, 4, 59, 56). 1143
+exact solves in 145 steps: 123 at the first, 370 for candidates newly opened, a median 5 a step
+(36 s). A re-solved drop came back at a median 0.86 of its kept one; 10% rose (at most 3.05x), so
+the lazy pick is not exact (ΔP is not submodular), and still wins. On 5810 the Dirichlet 3 +
+Thomson 2 pick is dominated on every axis (L_P, length, clutter, time); Dirichlet top 5 stays as
+the fastest (1.4 h).
+
+Both builds rescored on their own meshes (own_mesh.py: the build's nested prefix corridors
+carved into one mesh, as road_rescore and road_simp score, 7.4M triangles against the pool's
+13.1M) match the pool mesh's L_P to 1.1e-5 at every cut from D 0.05 to 0.15: the pool mesh is no
+confound when the greedy is set against road_simp's answers.
 
 A price on clutter (Repelled, `rep:<lam>:7`: lam per metre of repulsion from the streets and the
 built roads, added to dD; a 40 m road's duplicate at 0 m scores 87, the median dD 6e-4), the same
