@@ -10417,7 +10417,7 @@ lineup-only build at every D:
 
 in more road (3.8 / 7.3 / 10.4 km at D 0.05 / 0.10 / 0.15 against 3.4 / 6.7 / 9.1) and a little
 more clutter (17 / 23 / 22% within 5 m against 16 / 20 / 18%); 2.0 h. SIMP's r 7 roads (D 0.05 k
-0.01's 238 linked lines, 4.6 km) do more: the build takes 61 (2.9 of its 11.2 km to D 0.15) and
+0.01's 240 linked lines, 4.6 km) do more: the build takes 61 (2.9 of its 11.2 km to D 0.15) and
 leads the lineup-only build by 0.03 -- 0.06 at every D:
 
     lineup + SIMP r 7       0.274   0.371   0.464   0.550   0.611   0.655   0.693   0.720   11.2
