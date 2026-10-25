@@ -642,9 +642,17 @@ Open:
     host work cut (a state from the candidates' stored triangles, conductances rebuilt only where
     a candidate changes them: 5 of a candidate's 11 s; cold caches accepted); the study code into
     the repo; cuDSS on a cluster card (SuperLU's factorization is 5.9 s of the 11); a repulsion
-    cost term between road pieces, its weight swept; its own candidates.
-  - A road-placing SIMP: a road density per triangle up to the boost, displacement where it
-    covers a building, repulsion or a paving price, a filter at a road's width.
+    cost term between road pieces, its weight swept; its own candidates. Since: every screen
+    misses the step's best move, and the lazy pick (no screen; kept exact drops re-solved at the
+    head) beats every screened pick at every D (0.678 at 0.15 against 0.655, less clutter, the
+    same time: NOTES); repulsion swept on the screened pick (lam 5e-6 brings the clutter to the
+    lineup's for 0.005 -- 0.024), on the lazy pick running; the pool a Strategy (`lineup`,
+    `simp:<plan>`, unions), every run's name to carry it (migration after the running build).
+  - A road-placing SIMP (research/roadless/road_simp.py; NOTES, "A road-placing SIMP on 5810 and
+    20954"): rev 3's roads answers beat the lazy ΔP greedy at their own D on 9 of 13 plans on
+    5810 (by up to 0.13), but overshoot D at r 3.5 and stopped short of the street; rev 4 joins
+    them (rsimp-c, 12 plans on 5810), then they go to ΔP greedy as its candidates, alone and
+    beside the lineup's, so the exact ΔP / ΔD orders and cuts them.
   - The damage term: expected P over single blockages from one solve and each road piece's
     leverage (Sherman-Morrison); for vehicles on the road graph alone (agenda item 5).
 - **The public package's displacement, and the methods' internal costs, onto the ramped
