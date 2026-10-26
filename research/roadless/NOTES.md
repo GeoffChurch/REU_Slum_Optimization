@@ -10609,3 +10609,65 @@ as rev 6's). Candidates for the greedy stage: the linked roads of D 0.05 k 0.01 
 (no clearing) and gamma 1 (U, device), loopy pools the lineup's and SIMP's combs lack. Scripts:
 research/roadless/road_simp.py, road_simp_check.py; .superpowers/sdd/2026-10-25-vote-roads/
 stage2_table.py, stage2_plot.py (not committed); rows in road_simp_rows/<metric>/*v7/.
+
+### Roads from the vote, stage 3: the greedy's pools chosen by epistemetry (2026-10-26)
+
+Stage 3 of docs/superpowers/plans/2026-10-25-roads-from-the-vote.md, epistemetry dogfooded (owner
+2026-10-25: "we can dogfood it just for dogfooding's sake"). Arms: pools beside the lineup's for the
+lazy ΔP greedy (dp_greedy.py `lineup+<pool>`, lazy:5, cost D; a new pool `vote:<run>` reads
+vote_roads' networks), six candidates (stage 1's periodic orig, periodic U kept, frozen U power;
+stage 2's D 0.05 k 0.01 linked roads at gamma 1, gamma 1.5, gamma 1 with U as a device) and the
+three SIMP-pool builds already made as observations. The outcome y: a build's mean L_P gain over
+the lineup-only lazy build at area D 0.05, 0.10 and 0.15. The belief: epistemetry.models'
+latent Gaussian model over the declared factors (stage: simp_oc, adaptive, vote; dyn: oc, g1, g1.5,
+periodic, frozen; source: orig, U; Identity kernels, spreads 0.04, 0.02, 0.01) with two fixed
+effects under normal priors, `lead` (the pool's own L_P over the lazy greedy at its D: road_simp's
+linked roads at their exact D, a vote network's mean over D 0.05 / 0.10 / 0.15) and `km` (its
+length; a vote network's at its D 0.15 cut), misfit sd 0.01; the spreads stated, not fitted (three
+observations). The choice: design.decide.GittinsIndex at 0.0054 L_P per wall-hour (the rate
+bracket's bottom, 2e-6 per GPU-second, a local core-hour an eighth of a GPU-hour, six cores), each
+build about 2 h (2.6 for the large vote pool). research/roadless/vote_select.py; its ledger
+research/roadless/vote_rows/greedy_selection.json.
+
+                         lead     km    first decision: mean  sd     index
+    vote periodic orig   -0.060   6.87                 +0.045 0.061  0.078
+    vote periodic U      -0.053   6.66                 +0.044 0.061  0.078
+    vote frozen U power  -0.108   6.76                 +0.035 0.064  0.062
+    adaptive gamma 1     +0.140   5.69                 +0.072 0.058  0.101
+    adaptive gamma 1.5   +0.164   6.56                 +0.085 0.058  0.115  <- opened
+    adaptive gamma 1, U  +0.153   5.86                 +0.076 0.059  0.107
+    (observed: SIMP r3.5 0.020, lead +0.012, 3.9 km; SIMP r7 0.048, +0.122, 4.6 km; two r7 pools
+    0.103, +0.122, 9.9 km: the best found)
+
+The first decision opened gamma 1.5 (the largest index and the only one above 0.103). Built (277
+roads, 2.3 h), its gain is 0.040, half the prior's mean; with it observed every remaining index
+fell under the best found (vote 0.049 -- 0.065, adaptive 0.037 -- 0.045) and the rule stopped. The
+stop holds unless a build-hour is priced under about 0.3 of the stated price (the vote pools'
+break-even: E[(X - best)^+] per hour, in the ledger), already the bracket's bottom.
+
+    D 0.05 / 0.10 / 0.15     L_P                  km               within 5 m    cut (veh.)
+    lineup (lazy)            .493 / .611 / .678   3.4 / 6.7 / 9.1   16 / 20 / 18%  1.8 / .9 / .5%
+    + SIMP r3.5 (rev 6)      .512 / .635 / .695   3.8 / 7.3 / 10.4  17 / 23 / 22%  1.6 / .7 / .4%
+    + SIMP r7                .550 / .655 / .720   4.7 / 7.8 / 10.9  18 / 21 / 21%  1.4 / .9 / .5%
+    + SIMP r7, two pools     .611 / .715 / .765   6.4 / 10.4 / 14.2 39 / 33 / 30%  1.0 / .6 / .3%
+    + adaptive gamma 1.5     .532 / .653 / .719   4.7 / 8.6 / 11.9  28 / 26 / 25%  1.3 / .7 / .4%
+
+The gamma 1.5 pool ties the OC r7 pool (0.720 at 0.15) with more clutter; its small loops were not
+kept (55 -- 70% bridges, as every build). The best found buys its lead with road and clutter (14.2
+km, a third of it within 5 m of another road): y counts L_P at equal D only, and the rule followed
+y. On this block no vote pool was built: the selection judged them not worth 2 h against that bar.
+
+For epistemetry's owner, what this use showed. Worked: models' Design and ExactGaussian took
+categorical factors and covariate fixed effects with normal priors and gave a joint posterior at
+the unbuilt arms in a few lines; GittinsIndex (pandora_index) is exact and its record round-trips
+into the ledger. Awkward: (1) with three observations the spreads cannot be fitted (fit_reml has
+nothing to restrict them by), so the model is a stated prior; priors on the spreads, integrated
+rather than fixed, would carry that uncertainty into the indices. (2) A normal prior is centred at
+zero; a prior belief that a larger lead helps has no direct spelling. (3) GittinsIndex treats arms
+as independent while the model's posterior is joint: one observation moved every index (all fell
+under the bar at once), which Weitzman's order does not anticipate; kg_star over the joint belief
+would, but ExactGaussian is not a stats.belief.Belief and no adapter exists (LinearGaussian is the
+nearest). (4) The price per hour decided the stop; the readout that mattered was each arm's
+break-even price, which the rule could report itself. Scripts: research/roadless/vote_select.py;
+.superpowers/sdd/2026-10-25-vote-roads/stage3_lenses.py (not committed); the build in
+.superpowers/sdd/2026-10-22-flow-roads/dp_greedy_lineup+simp-...uA1.5.c0...v7_lazy5_D.

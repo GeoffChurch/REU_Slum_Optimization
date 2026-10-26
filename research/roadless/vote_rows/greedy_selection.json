@@ -108,5 +108,117 @@
   },
   "choice": "adapt_g1.5",
   "reason": "the largest index, above the best found"
+ },
+ {
+  "time": "2026-10-26T05:47:49",
+  "observed": {
+   "simp_r3.5": 0.019641435406890673,
+   "simp_r7": 0.04758787879688827,
+   "simp_r7x2": 0.1027507115896616,
+   "adapt_g1.5": 0.04047206427501223
+  },
+  "covariates": {
+   "simp_r3.5": {
+    "lead": 0.011848440284126904,
+    "km": 3.882539532349812
+   },
+   "simp_r7": {
+    "lead": 0.12221070725868166,
+    "km": 4.588671495669774
+   },
+   "simp_r7x2": {
+    "lead": 0.12221070725868166,
+    "km": 9.890108768011896
+   },
+   "vote_per_orig": {
+    "lead": -0.0597111638718509,
+    "km": 6.870098323689693
+   },
+   "vote_per_U": {
+    "lead": -0.052635411705799294,
+    "km": 6.661912079798975
+   },
+   "vote_frozen_U_pow": {
+    "lead": -0.10781536394765805,
+    "km": 6.757446586074275
+   },
+   "adapt_g1": {
+    "lead": 0.13979133952676953,
+    "km": 5.692002072029249
+   },
+   "adapt_g1.5": {
+    "lead": 0.16419771650136883,
+    "km": 6.560352348372437
+   },
+   "adapt_g1_U": {
+    "lead": 0.15262172223463122,
+    "km": 5.858088315582235
+   }
+  },
+  "theta": {
+   "dyn_sd": 0.02,
+   "source_sd": 0.01,
+   "stage_sd": 0.04
+  },
+  "rule": {
+   "type": "epistemetry.GittinsIndex",
+   "price": 0.005399999999999999
+  },
+  "priors": {
+   "intercept": 0.05,
+   "lead": 0.5,
+   "km": 0.01,
+   "misfit": 0.01
+  },
+  "draws": 4000,
+  "seed": 20261026,
+  "best_found": 0.1027507115896616,
+  "arms": {
+   "vote_per_orig": {
+    "mean": 0.031906853005251576,
+    "sd": 0.058063513830219876,
+    "index": 0.06371958351849258,
+    "hours": 2.0,
+    "pool": "lineup+vote:vr.orig.cur.per0.01k.jf300.q0.98,0.95,0.9,0.85,0.8.r1.w7.m5j2s0.5"
+   },
+   "vote_per_U": {
+    "mean": 0.032059474643334696,
+    "sd": 0.05873521376874078,
+    "index": 0.06493088528529464,
+    "hours": 2.0,
+    "pool": "lineup+vote:vr.U.cur.per0.01k.jf300.q0.98,0.95,0.9,0.85,0.8.r1.w7.m5j2s0.5"
+   },
+   "vote_frozen_U_pow": {
+    "mean": 0.023405120694458756,
+    "sd": 0.06173313766853188,
+    "index": 0.0493353607295682,
+    "hours": 2.6,
+    "pool": "lineup+vote:vr.U.pow.frozen.jf300.q0.98,0.95,0.9,0.85,0.8.r1.w7.m5j2s0.5"
+   },
+   "adapt_g1": {
+    "mean": 0.0342256095043246,
+    "sd": 0.03039020663572691,
+    "index": 0.03728438243093693,
+    "hours": 2.0,
+    "pool": "lineup+simp:rs.D0.05.k0.01.r7.q1,1,1,1,1.b1,2,4,8,16.i40.uA1.c0.p1e0.0001v7"
+   },
+   "adapt_g1_U": {
+    "mean": 0.03904561976979118,
+    "sd": 0.033291718234174775,
+    "index": 0.04479798887297407,
+    "hours": 2.0,
+    "pool": "lineup+simp:rs.D0.05.k0.01.r7.q1,1,1,1,1.b1,2,4,8,16.i40.uA1.cUdevice.p1e0.0001v7"
+   }
+  },
+  "choice": null,
+  "reason": "no unbuilt arm's index beats the best found",
+  "breakeven_price_per_hour": {
+   "vote_per_orig": 0.0015627033894931742,
+   "vote_per_U": 0.0016356071092943555,
+   "vote_frozen_U_pow": 0.0011152229156426083,
+   "adapt_g1": 6.34513027863373e-05,
+   "adapt_g1_U": 0.00017763535951870071
+  },
+  "breakeven_note": "the price per wall-hour at which each arm's index equals the best found (normal approximation of its predictive): E[(X - best)^+] / hours; the stop holds above it"
  }
 ]
