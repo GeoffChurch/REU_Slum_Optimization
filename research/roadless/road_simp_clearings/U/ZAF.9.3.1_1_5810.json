@@ -1,0 +1,14 @@
+{
+ "block": "ZAF.9.3.1_1_5810",
+ "metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+pockets+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+ "plan": "fw0.q3.i10.e0.0001.k1s1e-06.p256w8x2E.f0",
+ "arm": "U",
+ "power": 1.0,
+ "demand": "w",
+ "simp_D": 0.049979048574660956,
+ "simp_perm": 0.25936564829187025,
+ "n": 6619,
+ "cleared": 294,
+ "free_D": 0.0,
+ "row": "research/roadless/relax_rows/cx+shy0.5+s0.125r1b1+R0.5g4x2q4+pockets+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75/fw0.q3.i10.e0.0001.k1s1e-06.p256w8x2E.f0/D0.05/ZAF.9.3.1_1_5810_p1.parquet"
+}
