@@ -1644,6 +1644,14 @@ class Model:
             raise ValueError(f"{prefix}: a road prefix has a stop from 1")
         return self._state(self.sys, np.zeros(self.n_), prefix=prefix)
 
+    def cleared_road_state(self, k: NDArray[np.float64], prefix: Prefix) -> State:
+        """The state of the clearing k with a road network's prefix carved: road_state's, the
+        buildings k clears cleared too (a clearing that stands beside the roads; at k 0 it is
+        road_state)."""
+        if prefix.stop < 1:
+            raise ValueError(f"{prefix}: a road prefix has a stop from 1")
+        return self._state(self.sys, k, prefix=prefix)
+
     def _rhs(self, st: State, inj: NDArray[np.float64]) -> NDArray[np.float64]:
         """The right-hand side per cell of the injection `inj` per home (a point in a ground cell
         or the band escapes at once)."""
@@ -1722,6 +1730,10 @@ class Model:
     def road_lenses(self, prefix: Prefix) -> Lenses:
         """The lenses of a road network's prefix (road_state)."""
         return self.lenses_of(self.road_state(prefix))
+
+    def cleared_road_lenses(self, k: NDArray[np.float64], prefix: Prefix) -> Lenses:
+        """The lenses of the clearing k with a road network's prefix (cleared_road_state)."""
+        return self.lenses_of(self.cleared_road_state(k, prefix))
 
     @staticmethod
     def k_of(removed: NDArray[np.bool_]) -> NDArray[np.float64]:

@@ -15,6 +15,7 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S constants - [fault]        # fault: omit
     uv run python $S device <ids,> [fault]      # fault: perturb (on a GPU: cluster.py --complex)
     uv run python $S roads <ids,> [fault]       # fault: one-face-closed
+    uv run python $S cleared-roads <ids,> [fault]   # fault: drop-k
     uv run python $S flux <ids,> [fault]        # fault: flip-one
     uv run python $S device-roads <ids,> [fault]   # fault: perturb (on a GPU)
     uv run python $S leak-assembly <ids,> [fault]  # faults: drop-one, not-live
@@ -110,6 +111,12 @@ state on it, against the complex rebuilt with the prefix carved (gap_compare.Com
 corridor the road rule frees): L_P, L_{P_1/2} and L_J2 within ROAD_TOL, the homes reached
 equal home for home. Fault `one-face-closed`: at every prefix the largest atom it carves left
 standing (a road face left closed).
+`cleared-roads` (a clearing beside the roads, gap_clear.Model.cleared_road_state): on each block, a
+corridor CLEARED_ROAD_W wide across its middle (a network of one stop) and the CLEARED_N largest
+buildings it leaves untouched cleared: at k 0 the state's lenses are road_state's bit for bit, and
+with the clearing they are the complex rebuilt with those buildings cleared and the corridor carved
+(gap_compare.ComplexModel) within ROAD_TOL, home for home reached alike. Fault `drop-k`: the clearing
+ignored (road_state in its place).
 `flux` (phase 2b: the corridor pictures, gap_maps): at the baseline and FLUX_RANDOM random
 clearings, the passages' and street faces' fluxes (gap_maps.flow_of) conserve current at every
 open cell, the net outflow of an unknown cell equal to its injection within FLUX_TOL of the
@@ -370,6 +377,8 @@ PERTURB = 1e-6           # fault `perturb`: the diagonal's relative rise
 ROAD_ROWS = HERE / "road_rows"      # item 4's road networks and their prefixes (road_rescore)
 ROAD_NETWORK = "resistance_lp"      # the network the guard carves: the lineup's leader
 ROAD_STOPS = (1, 3, 5)               # its area prefixes checked (D 0.02, 0.10, 0.20)
+CLEARED_ROAD_W = 7.0                # cleared-roads: the corridor's width (m), a lineup road's
+CLEARED_N = 15                      # cleared-roads: the buildings cleared beside it
 ROAD_TOL = ONE_TOL                   # a prefix's lenses against the rebuild's, as a clearing's
 FLUX_RANDOM = 2
 FLUX_TOL = 1e-9          # a cell's imbalance, of the largest current through a cell (the solves
@@ -1193,6 +1202,44 @@ def roads(ids: list[str]) -> list[str]:
                 bad.append(f"{bid} stop {k}")
         print(f"{bid} {ROAD_NETWORK}, {carving.n} atoms ({int((carving.stop > 0).sum())} carved): "
               + "; ".join(parts), flush=True)
+    return bad
+
+
+def cleared_roads(ids: list[str]) -> list[str]:
+    bad = []
+    for bid in ids:
+        [b] = common.build_blocks([bid])
+        geo = gc.geometry(b)
+        x0, y0, x1, y1 = shapely.bounds(geo.boundary)
+        corridor = shapely.intersection(shapely.buffer(shapely.LineString(
+            [(x0 - 1.0, 0.5 * (y0 + y1)), (x1 + 1.0, 0.5 * (y0 + y1))]), CLEARED_ROAD_W / 2,
+            cap_style="flat"), geo.boundary)
+        with tempfile.TemporaryDirectory() as tmp:
+            fx = METRIC.fixed(b, cache=Path(tmp), carving=gcl.Carving.of(geo, [[corridor]]))
+        m = METRIC.model(b, fx, demand=POP)
+        prefix = gcl.Prefix(net=0, stop=1)
+        apart = shapely.disjoint(geo.polys, corridor)
+        order = np.argsort(-np.where(apart, shapely.area(geo.polys), -1.0))
+        k = np.zeros(m.n)
+        k[order[:CLEARED_N]] = 1.0
+        L0, R0 = m.cleared_road_lenses(np.zeros(m.n), prefix), m.road_lenses(prefix)
+        same = ((L0.P, L0.Pq, L0.J2) == (R0.P, R0.Pq, R0.J2)
+                and bool(np.array_equal(L0.u, R0.u, equal_nan=True)))
+        L = m.cleared_road_lenses(k, prefix)
+        r, _u, live = gcmp.ComplexModel(b, METRIC.fs, METRIC.form).scored(k == 0.0, corridor)
+        d = {"L_P": (1.0 - L.P / m.base.P) - r["L_P"],
+             "L_Pq": (1.0 - L.Pq / m.base.Pq) - r["L_Pq0.5"],
+             "L_J2": (1.0 - (L.J2 / m.base.J2) ** 0.5) - r["L_J2"]}
+        off = np.flatnonzero(L.live ^ live)
+        moved = 1.0 - L.P / m.base.P - (1.0 - R0.P / m.base.P)
+        ok = same and max(abs(v) for v in d.values()) <= ROAD_TOL and not len(off)
+        print(f"cleared-roads {bid}: at k 0 road_state's {'bit for bit' if same else 'NOT'}; "
+              f"{CLEARED_N} buildings cleared beside the corridor move L_P by {moved:+.4f}, against "
+              f"the rebuild " + ", ".join(f"{key} {v:+.1e}" for key, v in d.items())
+              + f", {len(off)} homes apart -> {'ok' if ok else 'FAILS'}", flush=True)
+        if not ok:
+            bad.append(f"{bid}: same {same}, " + ", ".join(f"{key} {v:+.1e}" for key, v in d.items())
+                       + f", {len(off)} apart")
     return bad
 
 
@@ -2955,7 +3002,7 @@ GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "faces": faces, "lazy-baseline": lazy_baseline, "uniform-control": uniform_control,
     "pocket-escape": pocket_escape, "pocket-gradient": pocket_gradient,
     "pocket-count": pocket_count, "own-ground": own_ground, "groundless": groundless,
-    "home-demand": home_demand, "conform-floor": conform_floor}
+    "home-demand": home_demand, "conform-floor": conform_floor, "cleared-roads": cleared_roads}
 
 
 _GROUNDLESS = gf.groundless
@@ -2987,6 +3034,8 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "device": {"perturb": _perturb_one},
     "device-roads": {"perturb": _perturb_one},
     "roads": {"one-face-closed": lambda: _patched(gcl.Carving, "carved", _one_face_closed)},
+    "cleared-roads": {"drop-k": lambda: _patched(
+        gcl.Model, "cleared_road_state", lambda self, k, prefix: self.road_state(prefix))},
     "conform-floor": {"no-floor": lambda: _patched(gcl, "_conform_round",
                                                    lambda *a: _CONFORM_ROUND(*a[:-1], 0.0))},
     "flux": {"flip-one": _flip_one},
