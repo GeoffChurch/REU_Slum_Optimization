@@ -1191,8 +1191,8 @@ Not pursued, with what would change that:
   is its own class).
 - **GPU sizing recalibrated**: closed, the raster's sizing (GB_PER_MILLION) went with it; `--gb`
   sizes every card (wiki `pages/reblock/raster-escape-time-metric-retired.md`).
-- **A carved atom has no width floor** (2026-10-25; open, the owner approved a fix, none holds
-  yet). A corridor vertex 5.3e-6 m from a footprint's edge (road_simp's D 0.15 k 0.08 r 7 paved
+- **A carved atom has no width floor** (2026-10-25; parked by the owner behind the safeguard,
+  c890ed50: the passage-weight rule below is the next attempt when it is taken up). A corridor vertex 5.3e-6 m from a footprint's edge (road_simp's D 0.15 k 0.08 r 7 paved
   answer on 5810, part 17 of 28 by bisection) leaves Carving.of's exact cut an atom with a neck far
   under the linework's precision (gap_clear.LINE_SNAP_M, 1e-4 m), and `_conform`'s rounds (every
   non-Delaunay face-boundary edge split, up to CONFORM_ROUNDS) cascade past 110 GB (stage timing:
