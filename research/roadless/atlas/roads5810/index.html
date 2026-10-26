@@ -1,0 +1,355 @@
+<title>5810 Road Build-out</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+<style>
+/* Layout: one control bar (a shared displacement slider and a view switch) over two map plates
+   side by side, each with its own readout; the plates stack on a phone. Same atlas tokens as the
+   Block 5810 Pipeline page so the two read as one set. */
+:root {
+  --paper: #f6f7f9;
+  --surface: #ffffff;
+  --ink: #17202c;
+  --muted: #586374;
+  --rule: #d8dde5;
+  --flow: #0f4c81;
+  --clear: #c2410c;
+  --greedy: #6d28d9;
+  --scored: #a38a00;
+  --simp: #15803d;
+  --select: #0f766e;
+  --plate-frame: #d8dde5;
+  --chip: #e9edf2;
+  --display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --body: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #10151c; --surface: #17202a; --ink: #e5e9ef; --muted: #9ba6b5; --rule: #2a3442;
+    --flow: #7bb1e0; --clear: #f0895a; --greedy: #9d6ff0; --scored: #f5d76e; --simp: #6fcf8f; --select: #46bdae; --plate-frame: #2f3a49; --chip: #212b37;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #10151c; --surface: #17202a; --ink: #e5e9ef; --muted: #9ba6b5; --rule: #2a3442;
+  --flow: #7bb1e0; --clear: #f0895a; --greedy: #9d6ff0; --scored: #f5d76e; --simp: #6fcf8f; --select: #46bdae; --plate-frame: #2f3a49; --chip: #212b37;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 17px; line-height: 1.55; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--paper); }
+.wrap {
+  max-width: 1280px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+h1, h2 { font-family: var(--display); font-weight: 600; text-wrap: balance; margin: 0; }
+p { margin: 0; }
+.mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+header { padding-block: 36px 20px; display: grid; gap: 12px; }
+.eyebrow { font-family: var(--display); font-size: 15px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+header h1 { font-size: clamp(36px, 6vw, 60px); line-height: 1; font-weight: 700; }
+.lede { max-width: 72ch; font-size: 18px; }
+
+.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: color-mix(in srgb, var(--paper) 94%, transparent); backdrop-filter: blur(6px);
+  border-block: 1px solid var(--rule);
+}
+.bar .wrap { display: grid; gap: 10px; padding-block: 12px; }
+.slider { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; }
+.slider label { font-family: var(--display); font-size: 15px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.slider input { width: 100%; accent-color: var(--clear); }
+.slider output { font-family: var(--mono); font-size: 22px; min-width: 4.5ch; text-align: right; }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--rule); border-radius: 999px; padding: 2px; background: var(--surface); justify-self: start; }
+.seg button {
+  font-family: var(--display); font-size: 14px; letter-spacing: 0.05em; text-transform: uppercase;
+  border: 0; background: transparent; color: var(--muted); padding: 5px 12px; border-radius: 999px; cursor: pointer;
+}
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--select); outline-offset: 2px; }
+
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding-block: 22px; }
+.col { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.pick {
+  font-family: var(--display); font-size: 26px; font-weight: 600; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 4px;
+  padding: 4px 10px; max-width: 100%; justify-self: start; cursor: pointer;
+}
+.pick:focus-visible { outline: 2px solid var(--select); outline-offset: 2px; }
+.chart .cnp { stroke: var(--clear); fill: none; stroke-width: 2.5; stroke-dasharray: 7 5; }
+.chart .clp { stroke: var(--flow); fill: none; stroke-width: 2.5; stroke-dasharray: 7 5; }
+.chart .cna7 { stroke: var(--clear); fill: none; stroke-width: 2.5; stroke-dasharray: 1 5; stroke-linecap: round; }
+.chart .cna14 { stroke: var(--clear); fill: none; stroke-width: 2.5; stroke-dasharray: 10 4 1 4; stroke-linecap: round; }
+.chart .key { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 0; margin: 10px 0 0; max-width: 900px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.chart .key li { display: flex; align-items: center; gap: 8px; }
+.chart .key svg { width: 34px; height: 10px; flex: none; }
+.chart .cndp { stroke: var(--scored); fill: none; stroke-width: 2.5; stroke-dasharray: 1 5; stroke-linecap: round; }
+.chart .cndp7 { stroke: var(--scored); fill: none; stroke-width: 2.5; stroke-dasharray: 7 5; }
+.chart .cndp14 { stroke: var(--scored); fill: none; stroke-width: 2.5; }
+.chart .sel { stroke-width: 4; }
+.col .how { font-size: 15px; color: var(--muted); max-width: 60ch; }
+.plate { background: #ffffff; border: 1px solid var(--plate-frame); border-radius: 3px; overflow: hidden; max-width: 100%; }
+.plate img { display: block; width: 100%; height: auto; }
+.read { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+.read div { padding: 8px 8px 8px 0; display: grid; gap: 0; }
+.read dt { font-family: var(--display); font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.read dd { margin: 0; font-family: var(--mono); font-size: 19px; font-variant-numeric: tabular-nums; }
+.legend-row { display: grid; gap: 6px; padding-block: 4px 18px; }
+.legend { display: block; max-width: 460px; width: 100%; height: auto; background: #ffffff; border-radius: 3px; }
+.caption { font-size: 14.5px; color: var(--muted); max-width: 90ch; }
+
+.chart { padding-block: 10px 24px; display: grid; gap: 10px; }
+.chart h2 { font-size: 26px; }
+.chart svg { width: 100%; height: auto; max-width: 900px; display: block; }
+.chart .axis { stroke: var(--rule); stroke-width: 1; }
+.chart .tick { fill: var(--muted); font-family: var(--mono); font-size: 12px; }
+.chart .lab { fill: var(--muted); font-family: var(--display); font-size: 14px; letter-spacing: 0.04em; }
+.chart .cn { stroke: var(--clear); fill: none; stroke-width: 2.5; }
+.chart .cl { stroke: var(--flow); fill: none; stroke-width: 2.5; }
+.chart .dpg { stroke: var(--greedy); fill: none; stroke-width: 2.5; stroke-dasharray: 7 5; }
+.chart .dpg12 { stroke: var(--greedy); fill: none; stroke-width: 2.5; }
+.chart .sg05 { stroke: var(--simp); fill: none; stroke-width: 2.5; stroke-dasharray: 1 5; stroke-linecap: round; }
+.chart .sg1 { stroke: var(--simp); fill: none; stroke-width: 2.5; stroke-dasharray: 7 5; }
+.chart .sg15 { stroke: var(--simp); fill: none; stroke-width: 2.5; }
+.chart .sgd { fill: var(--simp); }
+.gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 12px; margin: 4px 0 0; }
+.gallery figure { margin: 0; display: grid; gap: 6px; min-width: 0; }
+.gallery img { width: 100%; height: auto; border: 1px solid var(--plate-frame); background: #fff; }
+.gallery figcaption { font-size: 14px; color: var(--muted); }
+.chart .cnd { fill: var(--clear); } .chart .cld { fill: var(--flow); } .chart .dpd { fill: var(--greedy); } .chart .snd { fill: var(--scored); }
+.chart .simp { fill: var(--select); }
+.chart .simpt { fill: var(--select); font-family: var(--display); font-size: 14px; }
+.chart .cursor { stroke: var(--ink); stroke-width: 1; stroke-dasharray: 3 3; }
+.chart .name { font-family: var(--display); font-size: 15px; }
+
+.note { border-left: 3px solid var(--clear); background: var(--surface); padding: 14px 16px; display: grid; gap: 8px; max-width: 90ch; }
+.note b { font-family: var(--display); font-size: 16px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--clear); }
+footer { border-top: 1px solid var(--rule); padding-block: 24px 44px; color: var(--muted); font-size: 14.5px; display: grid; gap: 8px; }
+footer p { max-width: 95ch; }
+
+@media (max-width: 860px) {
+  .pair { grid-template-columns: minmax(0, 1fr); }
+  .read { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Cape Town · block <span class="mono">ZAF.9.3.1_1_5810</span> · research/roadless</div>
+    <h1>Road networks, built out side by side</h1>
+    <p class="lede">Pick a network for each side, then drag the displacement budget and both grow to it, each cut the way the research lineup cuts it: the shortest prefix of the method's roads that displaces at least that share of the homes' floor area. Switch the view to see the roads, or the walking flow they create. Fourteen networks: cycle_native and clearance_looped as they are, each guided by the walking's power, cycle_native with its loop's two legs kept 7 or 14 m apart, cycle_native choosing its loops by how much they lower P (with the loop's two legs anywhere, or kept 7 or 14 m apart), and ΔP greedy, which picks every road by how much it lowers P, solving four or twelve candidates a step. Three more are road SIMP's answers under the adaptive update at γ 0.5, 1 and 1.5: each is one network rather than a build order, so it grows in the lineup's street-first order up to its own displacement and is shown whole beyond it.</p>
+  </header>
+</div>
+
+<div class="bar">
+  <div class="wrap">
+    <div class="slider">
+      <label for="dsl">Displacement</label>
+      <input type="range" id="dsl" min="0" max="15" step="1" value="5" aria-label="Displacement budget, percent of floor area">
+      <output id="dout" for="dsl">5%</output>
+    </div>
+    <div class="seg" role="group" aria-label="View">
+      <button type="button" data-view="network" aria-pressed="true">Network</button>
+      <button type="button" data-view="current" aria-pressed="false">Current</button>
+      <button type="button" data-view="power" aria-pressed="false">Power</button>
+      <button type="button" data-view="current_gain" aria-pressed="false">Current gain</button>
+      <button type="button" data-view="power_gain" aria-pressed="false">Power gain</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="pair">
+    <section class="col" aria-label="Left network">
+      <select class="pick" id="pick-a" aria-label="Left network"></select>
+      <p class="how" id="how-a"></p>
+      <div class="plate"><img id="img-a" src="clearance_looped_050_network.webp" width="1200" height="1086" alt="" loading="eager"></div>
+      <dl class="read">
+        <div><dt>D</dt><dd id="a-d"></dd></div>
+        <div><dt>Roads</dt><dd id="a-n"></dd></div>
+        <div><dt>Length</dt><dd id="a-km"></dd></div>
+        <div><dt>L<sub>P</sub></dt><dd id="a-lp"></dd></div>
+      </dl>
+    </section>
+    <section class="col" aria-label="Right network">
+      <select class="pick" id="pick-b" aria-label="Right network"></select>
+      <p class="how" id="how-b"></p>
+      <div class="plate"><img id="img-b" src="clearance_looped_power_050_network.webp" width="1200" height="1086" alt="" loading="eager"></div>
+      <dl class="read">
+        <div><dt>D</dt><dd id="b-d"></dd></div>
+        <div><dt>Roads</dt><dd id="b-n"></dd></div>
+        <div><dt>Length</dt><dd id="b-km"></dd></div>
+        <div><dt>L<sub>P</sub></dt><dd id="b-lp"></dd></div>
+      </dl>
+    </section>
+  </div>
+
+  <div class="legend-row">
+    <img class="legend" id="legend" src="network_colorbar.png" alt="Colour bar for the network view." loading="eager">
+    <p class="caption" id="cap">Buildings in grey, the new roads drawn as their corridors, and each destroyed building shaded by how much of it the roads take: a building counts as wholly destroyed once a tenth of it is gone, or once a road cuts it in two.</p>
+  </div>
+
+  <section class="chart" aria-labelledby="h-chart">
+    <h2 id="h-chart">P removed against displacement</h2>
+    <svg id="chart" viewBox="0 0 900 380" role="img" aria-label="L_P against displacement from 0 to 15% for the fourteen road networks, with SIMP's clearing at 5% marked."></svg>
+    <ul class="key" id="key" aria-label="Line styles"></ul>
+    <p class="caption">L<sub>P</sub> is the share of the homes' total escape time removed. Orange is cycle_native and blue clearance_looped; dashed lines are the power-guided versions and orange dotted and dash-dotted lines cycle_native with its loop's legs kept 7 and 14 m apart; gold is cycle_native with its loops chosen by ΔP (dotted: legs anywhere, dashed: kept 7 m apart, solid: 14 m), and purple is ΔP greedy (dashed: four solved a step, solid: twelve); the two shown above are drawn thicker. The teal point is SIMP's clearing at 5% under the same metric (it was optimized under the older one). The thin dashed line follows the slider.</p>
+  </section>
+
+  <div class="note">
+    <b>How the power-guided versions differ</b>
+    <p>The baseline's flow is solved once, and the ridges of its power, where the walking spends the most effort, become desire lines. Each method routes its candidate roads along them, the way cycle_desire routes along betweenness, but still chooses roads by its own objective. Guidance helps the tree method a great deal: clearance_looped reaches 0.374 at 5% displacement instead of 0.239, and 0.504 at 15% instead of 0.421. It does not help the loop method: cycle_native is 0.366 at 5% instead of 0.392, and 0.511 at 15% instead of 0.575.</p>
+  </div>
+
+  <div class="note">
+    <b>ΔP greedy</b>
+    <p>Instead of being drawn toward the power, ΔP greedy picks each road by what it does to P. Every road of the two lineup networks is a candidate, all of them carved into one mesh so any set can be solved exactly. A connected candidate that displaces no one is built at once, since added conductance never raises P. Otherwise the power now dissipated in each candidate's corridor, over its displacement, ranks them (a lower bound on the drop it brings), and the top four are solved exactly. It beats every other network at every budget: 0.438 at 5%, 0.575 at 10% and 0.645 at 15%, against cycle_native's 0.392, 0.520 and 0.575. The step's winner was often fourth by the screen, so a second run solves twelve a step: 0.454, 0.583 and 0.652, a little better again, for 8 hours of compute against 3.7, and its winner was still often the twelfth. The screen ignores the ground a road opens through buildings; a screen that counted it would pay more than solving more.</p>
+  </div>
+
+  <div class="note">
+    <b>Road SIMP's adaptive answers</b>
+    <p>Road SIMP lays road density on a 1 m raster and moves it toward where the walking current runs: the adaptive transport network's rule, density growing as the current to the power 2/(1+γ) under a paving budget priced as area to the power γ. Below γ = 1 wide trunks are cheap and the answer is a tree; above it they are dear and the flow spreads over parallel paths and loops. Here at a 5% budget, 0.01 of L<sub>P</sub> per km, with U's clearing as the vote's device. The pictures are each answer's paved ground; the networks above are its skeleton as 7 m roads, kept where it reaches the street, so they stop at 1.6 to 3.7% displacement and lose what the wide paving bought (paved L<sub>P</sub> 0.73 to 0.76). ΔP greedy reaches 0.31 to 0.44 at the same displacements with 1.5 to 2.5 km.</p>
+    <div class="gallery">
+      <figure><img src="simp_gamma0.5_paved.webp" width="1200" height="1086" loading="lazy" alt="Road SIMP's paved ground at γ 0.5 on block 5810."><figcaption>γ 0.5: a tree of wide trunks. Paved L<sub>P</sub> 0.736 at 4.7%; its roads 0.430 at 1.6%, 3.4 km, 1 loop.</figcaption></figure>
+      <figure><img src="simp_gamma1_paved.webp" width="1200" height="1086" loading="lazy" alt="Road SIMP's paved ground at γ 1 on block 5810."><figcaption>γ 1: branching, a few small loops. Paved 0.756 at 3.9%; roads 0.594 at 3.7%, 5.9 km, 25 loops.</figcaption></figure>
+      <figure><img src="simp_gamma1.5_paved.webp" width="1200" height="1086" loading="lazy" alt="Road SIMP's paved ground at γ 1.5 on block 5810."><figcaption>γ 1.5: thinner, spread, more loops. Paved 0.732 at 3.4%; roads 0.574 at 3.6%, 6.6 km.</figcaption></figure>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>cycle_native scored by ΔP, and its loops kept wide</b>
+    <p>This keeps cycle_native's own move, a loop out to one of the eight deepest unserved homes and back, and chooses the loop to build by the exact drop in P per displacement instead of the older permeability. Its roads crowd like ΔP greedy's. So do plain cycle_native's, cut in the order it built them. The way back avoids only the way out's own edges, so in a tight gap it takes the next edge over and the loop is one road laid twice. Most of cycle_native's loops are like that, ΔP-scored or not.</p>
+    <p>The lineup's cut hides this. It orders a network built on to 37% displacement street first, then cuts that, which leaves out one leg of many narrow loops: at 15%, 9% of the road lies within 5 m of another, against 26% in build order. It also scores higher: 0.520 at 10%, against 0.479. The ΔP runs stop at 15% and are cut in build order, so they compare with plain cycle_native's build order. ΔP lifts it from 0.384, 0.479 and 0.571 at 5%, 10% and 15% to 0.405, 0.521 and 0.592.</p>
+    <p>Keeping the way back at least 7 m from the way out, one road width, removes the crowding in both: at most 1% of the road lies within 5 m of another at any budget. It costs P. Plain cycle_native, cut the lineup's way, falls from 0.392, 0.520 and 0.575 to 0.359, 0.462 and 0.554. Scored by ΔP, in build order, it reaches 0.388, 0.496 and 0.570. At 14 m apart, plain cycle_native scores 0.385, 0.470 and 0.545, and ΔP-scored 0.416, 0.489 and 0.565.</p>
+  </div>
+
+  <div class="note">
+    <b>Read before comparing roads and clearing</b>
+    <p>Every picture and score here uses the current metric, which gives a street ten times the conductance of open ground only where it is tagged paved, and gives every new road the same ten times. Almost none of 5810's own lanes are paved, so a new road along a lane counts as paving it. That is why the networks remove far more of P than the research lineup recorded under the older metric (cycle_native 0.392 at 5%, against 0.050), and why they now beat SIMP's clearing (0.235), which opens ground but paves nothing. Left unboosted, cycle_native and clearance_looped score 0.080 and 0.057 at 5%.</p>
+  </div>
+
+  <footer>
+    <p><b>Sources.</b> GeoffChurch/REU_Slum_Optimization, branch research/roadless. The networks are the research lineup's stored proposals for 5810, cut by the ramped destroyed area with area weights. The flow is the gap complex's solve under the current metric (<span class="mono">…S10spaved…</span>), drawn on the same log scales as the clearing plates of the Block 5810 Pipeline page; the gains are each frame over its network's own baseline. Summed power equals P on every frame to within 5e-10.</p>
+  </footer>
+</div>
+
+<script>
+(function () {
+  var DATA = {"cycle_native":[{"f":"010","D":0.0102,"n":3,"km":0.52,"LP":0.146},{"f":"020","D":0.0217,"n":5,"km":0.75,"LP":0.184},{"f":"030","D":0.0301,"n":9,"km":1.06,"LP":0.247},{"f":"040","D":0.0401,"n":15,"km":2.0,"LP":0.342},{"f":"050","D":0.0501,"n":21,"km":2.64,"LP":0.392},{"f":"060","D":0.0611,"n":26,"km":3.22,"LP":0.429},{"f":"070","D":0.0704,"n":30,"km":3.6,"LP":0.437},{"f":"080","D":0.0821,"n":38,"km":4.44,"LP":0.462},{"f":"090","D":0.0906,"n":45,"km":4.97,"LP":0.491},{"f":"100","D":0.1004,"n":53,"km":5.51,"LP":0.52},{"f":"110","D":0.1104,"n":64,"km":6.16,"LP":0.53},{"f":"120","D":0.1202,"n":71,"km":6.61,"LP":0.535},{"f":"130","D":0.1312,"n":80,"km":7.11,"LP":0.556},{"f":"140","D":0.1401,"n":91,"km":7.64,"LP":0.57},{"f":"150","D":0.1506,"n":105,"km":8.32,"LP":0.575}],"clearance_looped":[{"f":"010","D":0.0112,"n":6,"km":0.5,"LP":0.072},{"f":"020","D":0.0209,"n":12,"km":0.85,"LP":0.145},{"f":"030","D":0.0302,"n":20,"km":1.3,"LP":0.161},{"f":"040","D":0.0412,"n":26,"km":1.71,"LP":0.205},{"f":"050","D":0.0506,"n":34,"km":2.09,"LP":0.239},{"f":"060","D":0.0615,"n":43,"km":2.57,"LP":0.271},{"f":"070","D":0.07,"n":51,"km":2.97,"LP":0.298},{"f":"080","D":0.082,"n":57,"km":3.61,"LP":0.337},{"f":"090","D":0.0926,"n":64,"km":3.99,"LP":0.365},{"f":"100","D":0.1008,"n":69,"km":4.45,"LP":0.371},{"f":"110","D":0.1108,"n":78,"km":5.02,"LP":0.389},{"f":"120","D":0.121,"n":89,"km":5.43,"LP":0.398},{"f":"130","D":0.1308,"n":101,"km":6.06,"LP":0.406},{"f":"140","D":0.1408,"n":116,"km":6.69,"LP":0.412},{"f":"150","D":0.1504,"n":128,"km":7.22,"LP":0.421}],"cycle_native_power":[{"f":"010","D":0.011,"n":3,"km":0.52,"LP":0.026},{"f":"020","D":0.0221,"n":6,"km":1.1,"LP":0.128},{"f":"030","D":0.0348,"n":8,"km":1.7,"LP":0.258},{"f":"040","D":0.0403,"n":10,"km":1.92,"LP":0.261},{"f":"050","D":0.0533,"n":13,"km":2.44,"LP":0.366},{"f":"060","D":0.0613,"n":15,"km":2.77,"LP":0.373},{"f":"070","D":0.07,"n":19,"km":3.23,"LP":0.39},{"f":"080","D":0.0803,"n":24,"km":3.84,"LP":0.394},{"f":"090","D":0.0902,"n":28,"km":4.19,"LP":0.407},{"f":"100","D":0.1035,"n":36,"km":4.88,"LP":0.432},{"f":"110","D":0.1106,"n":40,"km":5.11,"LP":0.45},{"f":"120","D":0.1203,"n":44,"km":5.53,"LP":0.476},{"f":"130","D":0.1303,"n":49,"km":5.91,"LP":0.486},{"f":"140","D":0.1402,"n":58,"km":6.56,"LP":0.492},{"f":"150","D":0.1502,"n":67,"km":7.16,"LP":0.511}],"clearance_looped_power":[{"f":"010","D":0.0153,"n":3,"km":0.52,"LP":0.189},{"f":"020","D":0.0206,"n":9,"km":0.89,"LP":0.216},{"f":"030","D":0.03,"n":12,"km":1.44,"LP":0.307},{"f":"040","D":0.0408,"n":16,"km":1.73,"LP":0.337},{"f":"050","D":0.0512,"n":26,"km":2.29,"LP":0.374},{"f":"060","D":0.0607,"n":31,"km":2.7,"LP":0.402},{"f":"070","D":0.0702,"n":38,"km":3.15,"LP":0.41},{"f":"080","D":0.0815,"n":46,"km":3.67,"LP":0.431},{"f":"090","D":0.0923,"n":53,"km":4.08,"LP":0.446},{"f":"100","D":0.1003,"n":59,"km":4.4,"LP":0.455},{"f":"110","D":0.113,"n":67,"km":4.93,"LP":0.471},{"f":"120","D":0.12,"n":72,"km":5.21,"LP":0.475},{"f":"130","D":0.1306,"n":79,"km":5.62,"LP":0.485},{"f":"140","D":0.1405,"n":87,"km":6.03,"LP":0.495},{"f":"150","D":0.1501,"n":100,"km":6.59,"LP":0.504}],"dp_greedy_lineup_thomson_top4_D":[{"f":"010","D":0.0104,"n":21,"km":1.08,"LP":0.193},{"f":"020","D":0.0203,"n":34,"km":1.63,"LP":0.289},{"f":"030","D":0.0317,"n":44,"km":2.35,"LP":0.369},{"f":"040","D":0.0405,"n":60,"km":3.34,"LP":0.409},{"f":"050","D":0.0513,"n":87,"km":4.54,"LP":0.438},{"f":"060","D":0.0604,"n":102,"km":5.31,"LP":0.463},{"f":"070","D":0.0704,"n":114,"km":5.81,"LP":0.514},{"f":"080","D":0.0804,"n":122,"km":6.39,"LP":0.529},{"f":"090","D":0.0903,"n":129,"km":6.81,"LP":0.561},{"f":"100","D":0.1007,"n":142,"km":7.71,"LP":0.575},{"f":"110","D":0.111,"n":158,"km":8.39,"LP":0.596},{"f":"120","D":0.1204,"n":165,"km":8.9,"LP":0.604},{"f":"130","D":0.13,"n":177,"km":9.45,"LP":0.62},{"f":"140","D":0.141,"n":195,"km":10.28,"LP":0.634},{"f":"150","D":0.1518,"n":213,"km":11.24,"LP":0.645}],"cycle_native_apart7":[{"f":"010","D":0.0106,"n":6,"km":0.56,"LP":0.124},{"f":"020","D":0.0238,"n":10,"km":1.46,"LP":0.274},{"f":"030","D":0.0338,"n":13,"km":1.9,"LP":0.32},{"f":"040","D":0.0408,"n":17,"km":2.35,"LP":0.333},{"f":"050","D":0.05,"n":21,"km":2.79,"LP":0.359},{"f":"060","D":0.061,"n":26,"km":3.39,"LP":0.384},{"f":"070","D":0.0737,"n":30,"km":3.7,"LP":0.41},{"f":"080","D":0.0812,"n":35,"km":4.18,"LP":0.427},{"f":"090","D":0.0906,"n":39,"km":4.61,"LP":0.443},{"f":"100","D":0.1004,"n":45,"km":5.0,"LP":0.462},{"f":"110","D":0.1108,"n":52,"km":5.51,"LP":0.472},{"f":"120","D":0.1216,"n":61,"km":6.04,"LP":0.505},{"f":"130","D":0.1306,"n":67,"km":6.45,"LP":0.522},{"f":"140","D":0.1408,"n":75,"km":7.05,"LP":0.547},{"f":"150","D":0.1506,"n":82,"km":7.39,"LP":0.554}],"cycle_native_apart14":[{"f":"010","D":0.0117,"n":4,"km":0.63,"LP":0.128},{"f":"020","D":0.0206,"n":10,"km":1.43,"LP":0.195},{"f":"030","D":0.0301,"n":13,"km":1.75,"LP":0.313},{"f":"040","D":0.0421,"n":19,"km":2.26,"LP":0.343},{"f":"050","D":0.0502,"n":22,"km":2.65,"LP":0.385},{"f":"060","D":0.0604,"n":26,"km":3.05,"LP":0.4},{"f":"070","D":0.0708,"n":31,"km":3.64,"LP":0.428},{"f":"080","D":0.0802,"n":37,"km":4.23,"LP":0.444},{"f":"090","D":0.0904,"n":40,"km":4.5,"LP":0.454},{"f":"100","D":0.1011,"n":49,"km":5.07,"LP":0.47},{"f":"110","D":0.11,"n":56,"km":5.59,"LP":0.477},{"f":"120","D":0.1241,"n":66,"km":6.25,"LP":0.499},{"f":"130","D":0.1319,"n":70,"km":6.59,"LP":0.521},{"f":"140","D":0.1401,"n":77,"km":7.07,"LP":0.535},{"f":"150","D":0.1505,"n":85,"km":7.59,"LP":0.545}],"cycle_native_dp_apart0":[{"f":"010","D":0.0161,"n":4,"km":0.89,"LP":0.224},{"f":"020","D":0.0221,"n":5,"km":1.13,"LP":0.259},{"f":"030","D":0.0324,"n":9,"km":1.84,"LP":0.304},{"f":"040","D":0.0416,"n":14,"km":2.64,"LP":0.361},{"f":"050","D":0.0527,"n":20,"km":3.43,"LP":0.405},{"f":"060","D":0.0627,"n":24,"km":3.92,"LP":0.421},{"f":"070","D":0.0728,"n":29,"km":4.43,"LP":0.478},{"f":"080","D":0.0803,"n":33,"km":4.81,"LP":0.506},{"f":"090","D":0.0914,"n":44,"km":5.76,"LP":0.514},{"f":"100","D":0.1001,"n":51,"km":6.32,"LP":0.521},{"f":"110","D":0.1116,"n":58,"km":6.83,"LP":0.55},{"f":"120","D":0.1202,"n":67,"km":7.47,"LP":0.558},{"f":"130","D":0.1307,"n":78,"km":8.21,"LP":0.573},{"f":"140","D":0.1413,"n":88,"km":8.81,"LP":0.581},{"f":"150","D":0.1504,"n":98,"km":9.37,"LP":0.592}],"cycle_native_dp_apart7":[{"f":"010","D":0.0112,"n":4,"km":0.88,"LP":0.123},{"f":"020","D":0.0235,"n":8,"km":1.69,"LP":0.275},{"f":"030","D":0.0318,"n":10,"km":2.02,"LP":0.333},{"f":"040","D":0.0412,"n":13,"km":2.44,"LP":0.373},{"f":"050","D":0.0502,"n":19,"km":3.21,"LP":0.388},{"f":"060","D":0.0624,"n":22,"km":3.55,"LP":0.427},{"f":"070","D":0.0718,"n":23,"km":3.67,"LP":0.453},{"f":"080","D":0.0814,"n":28,"km":4.21,"LP":0.467},{"f":"090","D":0.0907,"n":35,"km":4.85,"LP":0.479},{"f":"100","D":0.1012,"n":42,"km":5.43,"LP":0.496},{"f":"110","D":0.1102,"n":48,"km":5.91,"LP":0.526},{"f":"120","D":0.1203,"n":57,"km":6.57,"LP":0.539},{"f":"130","D":0.1312,"n":63,"km":6.97,"LP":0.553},{"f":"140","D":0.1404,"n":71,"km":7.48,"LP":0.559},{"f":"150","D":0.1507,"n":81,"km":8.09,"LP":0.57}],"cycle_native_dp_apart14":[{"f":"010","D":0.0112,"n":4,"km":0.88,"LP":0.123},{"f":"020","D":0.0239,"n":8,"km":1.69,"LP":0.171},{"f":"030","D":0.0336,"n":10,"km":2.03,"LP":0.288},{"f":"040","D":0.0422,"n":13,"km":2.46,"LP":0.367},{"f":"050","D":0.055,"n":19,"km":3.19,"LP":0.416},{"f":"060","D":0.0687,"n":21,"km":3.42,"LP":0.443},{"f":"070","D":0.0709,"n":22,"km":3.54,"LP":0.444},{"f":"080","D":0.0809,"n":28,"km":4.18,"LP":0.461},{"f":"090","D":0.0904,"n":34,"km":4.75,"LP":0.477},{"f":"100","D":0.101,"n":41,"km":5.37,"LP":0.489},{"f":"110","D":0.1103,"n":46,"km":5.78,"LP":0.501},{"f":"120","D":0.1206,"n":55,"km":6.45,"LP":0.515},{"f":"130","D":0.133,"n":60,"km":6.78,"LP":0.54},{"f":"140","D":0.1403,"n":64,"km":7.03,"LP":0.554},{"f":"150","D":0.1509,"n":72,"km":7.53,"LP":0.565}],"dp_greedy_lineup_thomson_top12_D":[{"f":"010","D":0.0122,"n":20,"km":1.09,"LP":0.225},{"f":"020","D":0.0202,"n":31,"km":1.54,"LP":0.3},{"f":"030","D":0.0315,"n":42,"km":2.48,"LP":0.373},{"f":"040","D":0.0405,"n":52,"km":2.99,"LP":0.42},{"f":"050","D":0.05,"n":71,"km":3.85,"LP":0.454},{"f":"060","D":0.0605,"n":89,"km":4.69,"LP":0.484},{"f":"070","D":0.0708,"n":109,"km":5.51,"LP":0.516},{"f":"080","D":0.0814,"n":120,"km":6.15,"LP":0.543},{"f":"090","D":0.0903,"n":130,"km":6.85,"LP":0.563},{"f":"100","D":0.1005,"n":145,"km":7.65,"LP":0.583},{"f":"110","D":0.1101,"n":154,"km":8.1,"LP":0.597},{"f":"120","D":0.1218,"n":165,"km":8.66,"LP":0.612},{"f":"130","D":0.1309,"n":176,"km":9.26,"LP":0.625},{"f":"140","D":0.1431,"n":192,"km":10.36,"LP":0.639},{"f":"150","D":0.15,"n":199,"km":10.75,"LP":0.652}],"simp_gamma0.5":[{"f":"010","D":0.0101,"n":47,"km":1.54,"LP":0.323},{"f":"016","full":true,"D":0.0164,"n":165,"km":3.41,"LP":0.43},{"f":"016","full":true,"D":0.0164,"n":165,"km":3.41,"LP":0.43},{"f":"016","full":true,"D":0.0164,"n":165,"km":3.41,"LP":0.43},{"f":"016","full":true,"D":0.0164,"n":165,"km":3.41,"LP":0.43},{"f":"016","full":true,"D":0.0164,"n":165,"km":3.41,"LP":0.43},{"f":"016","full":true,"D":0.0164,"n":165,"km":3.41,"LP":0.43},{"f":"016","full":true,"D":0.0164,"n":165,"km":3.41,"LP":0.43},{"f":"016","full":true,"D":0.0164,"n":165,"km":3.41,"LP":0.43},{"f":"016","full":true,"D":0.0164,"n":165,"km":3.41,"LP":0.43},{"f":"016","full":true,"D":0.0164,"n":165,"km":3.41,"LP":0.43},{"f":"016","full":true,"D":0.0164,"n":165,"km":3.41,"LP":0.43},{"f":"016","full":true,"D":0.0164,"n":165,"km":3.41,"LP":0.43},{"f":"016","full":true,"D":0.0164,"n":165,"km":3.41,"LP":0.43},{"f":"016","full":true,"D":0.0164,"n":165,"km":3.41,"LP":0.43}],"simp_gamma1":[{"f":"010","D":0.0125,"n":85,"km":1.3,"LP":0.352},{"f":"020","D":0.0204,"n":142,"km":2.74,"LP":0.473},{"f":"030","D":0.031,"n":207,"km":4.2,"LP":0.553},{"f":"037","full":true,"D":0.0367,"n":537,"km":5.86,"LP":0.594},{"f":"037","full":true,"D":0.0367,"n":537,"km":5.86,"LP":0.594},{"f":"037","full":true,"D":0.0367,"n":537,"km":5.86,"LP":0.594},{"f":"037","full":true,"D":0.0367,"n":537,"km":5.86,"LP":0.594},{"f":"037","full":true,"D":0.0367,"n":537,"km":5.86,"LP":0.594},{"f":"037","full":true,"D":0.0367,"n":537,"km":5.86,"LP":0.594},{"f":"037","full":true,"D":0.0367,"n":537,"km":5.86,"LP":0.594},{"f":"037","full":true,"D":0.0367,"n":537,"km":5.86,"LP":0.594},{"f":"037","full":true,"D":0.0367,"n":537,"km":5.86,"LP":0.594},{"f":"037","full":true,"D":0.0367,"n":537,"km":5.86,"LP":0.594},{"f":"037","full":true,"D":0.0367,"n":537,"km":5.86,"LP":0.594},{"f":"037","full":true,"D":0.0367,"n":537,"km":5.86,"LP":0.594}],"simp_gamma1.5":[{"f":"010","D":0.0114,"n":68,"km":1.05,"LP":0.306},{"f":"020","D":0.02,"n":108,"km":2.0,"LP":0.411},{"f":"030","D":0.0304,"n":274,"km":4.0,"LP":0.49},{"f":"036","full":true,"D":0.036,"n":816,"km":6.59,"LP":0.574},{"f":"036","full":true,"D":0.036,"n":816,"km":6.59,"LP":0.574},{"f":"036","full":true,"D":0.036,"n":816,"km":6.59,"LP":0.574},{"f":"036","full":true,"D":0.036,"n":816,"km":6.59,"LP":0.574},{"f":"036","full":true,"D":0.036,"n":816,"km":6.59,"LP":0.574},{"f":"036","full":true,"D":0.036,"n":816,"km":6.59,"LP":0.574},{"f":"036","full":true,"D":0.036,"n":816,"km":6.59,"LP":0.574},{"f":"036","full":true,"D":0.036,"n":816,"km":6.59,"LP":0.574},{"f":"036","full":true,"D":0.036,"n":816,"km":6.59,"LP":0.574},{"f":"036","full":true,"D":0.036,"n":816,"km":6.59,"LP":0.574},{"f":"036","full":true,"D":0.036,"n":816,"km":6.59,"LP":0.574},{"f":"036","full":true,"D":0.036,"n":816,"km":6.59,"LP":0.574}]};
+  var SIMP = { D: 0.05, LP: 0.235 };
+  var LEGEND = {
+    network: ["network_colorbar.png", "Buildings in grey, the new roads drawn as their corridors, and each destroyed building shaded by how much of it the roads take: a building counts as wholly destroyed once a tenth of it is gone, or once a road cuts it in two."],
+    current: ["current_colorbar.png", "Current: how many people per metre cross each spot, on a log scale relative to the median open ground at baseline."],
+    power: ["power_colorbar.png", "Power: the walking effort spent at each spot, current squared times resistance, on a log scale relative to the median open ground at baseline. It sums to P."],
+    current_gain: ["gain_colorbar.png", "Current gain: current at this budget over the network's baseline, on a log scale from 1/8× to 8×. Red where the walking was drawn away, blue where it rose; newly opened ground is darkest blue."],
+    power_gain: ["gain_colorbar.png", "Power gain: power at this budget over the network's baseline, on a log scale from 1/8× to 8×. Red where effort was saved, blue where it rose; newly opened ground is darkest blue."]
+  };
+  var NETS = {
+    cycle_native: ["cycle_native", "Builds loops. Each step lays a path from the street to a chosen home and a second path back that shares no edge with the first, and keeps the loop with the most permeability per displacement. No dead ends."],
+    clearance_looped: ["clearance_looped", "Builds a tree, then closes it. Each road runs from the home farthest from any road to the network, along the gaps between buildings; a second pass adds short connectors that turn dead ends into loops."],
+    cycle_native_power: ["cycle_native, power-guided", "cycle_native with its candidate loops routed along the ridges of the baseline's power, the walking's effort, solved once before any road is built."],
+    clearance_looped_power: ["clearance_looped, power-guided", "clearance_looped with its roads routed along the ridges of the baseline's power, the walking's effort, solved once before any road is built."],
+    cycle_native_apart7: ["cycle_native, legs 7 m apart", "cycle_native as it is, its loops still chosen by the older permeability, with the way back also kept at least 7 m, one road width, from the way out except near the loop's two ends, so the two corridors never overlap."],
+    cycle_native_apart14: ["cycle_native, legs 14 m apart", "cycle_native as it is, its loops still chosen by the older permeability, with the way back also kept at least 14 m, two road widths, from the way out except near the loop's two ends."],
+    cycle_native_dp_apart0: ["cycle_native, ΔP-scored", "cycle_native's own loops, to the eight deepest homes each step, with the loop it builds chosen by the exact drop in P per displacement instead of the older permeability. The way back avoids only the way out's own edges, so in a tight gap it often runs right beside it."],
+    cycle_native_dp_apart7: ["cycle_native, ΔP-scored, legs 7 m apart", "cycle_native scored by ΔP, with the way back also kept at least 7 m, one road width, from the way out except near the loop's two ends, so the two corridors never overlap."],
+    cycle_native_dp_apart14: ["cycle_native, ΔP-scored, legs 14 m apart", "cycle_native scored by ΔP, with the way back also kept at least 14 m, two road widths, from the way out except near the loop's two ends."],
+    dp_greedy_lineup_thomson_top4_D: ["ΔP greedy, top 4", "Picks each road by what it does to P. The candidates are every road of the two networks above; a candidate touching the street or a built road and displacing no one is built at once, and otherwise the four with the most power in their corridor per displacement are solved exactly and the one that lowers P most per displacement is built."],
+    dp_greedy_lineup_thomson_top12_D: ["ΔP greedy, top 12", "ΔP greedy solving the twelve best by the screen exactly at each step instead of four."],
+    "simp_gamma0.5": ["road SIMP, γ 0.5", "Road density grown where the walking current runs, paving priced as area to the power γ = 0.5 (concave: wide trunks are cheap, so the answer is a tree); its paved ground's skeleton, linked to the street, as 7 m roads, laid street-first. 3.4 km at 1.6%."],
+    "simp_gamma1": ["road SIMP, γ 1", "The same at γ = 1 (paving priced by area): road density where the current runs, branching and here and there closing small loops; 5.9 km at 3.7%."],
+    "simp_gamma1.5": ["road SIMP, γ 1.5", "The same at γ = 1.5 (convex: wide roads are dear, so the flow spreads over parallel paths and loops); 6.6 km at 3.6%."]
+  };
+  var CLASS = { cycle_native: "cn", clearance_looped: "cl", cycle_native_power: "cnp", clearance_looped_power: "clp", cycle_native_apart7: "cna7", cycle_native_apart14: "cna14", cycle_native_dp_apart0: "cndp", cycle_native_dp_apart7: "cndp7", cycle_native_dp_apart14: "cndp14", dp_greedy_lineup_thomson_top4_D: "dpg", dp_greedy_lineup_thomson_top12_D: "dpg12", "simp_gamma0.5": "sg05", "simp_gamma1": "sg1", "simp_gamma1.5": "sg15" };
+  var DOT = { cycle_native: "cnd", clearance_looped: "cld", cycle_native_power: "cnd", clearance_looped_power: "cld", cycle_native_apart7: "cnd", cycle_native_apart14: "cnd", cycle_native_dp_apart0: "snd", cycle_native_dp_apart7: "snd", cycle_native_dp_apart14: "snd", dp_greedy_lineup_thomson_top4_D: "dpd", dp_greedy_lineup_thomson_top12_D: "dpd", "simp_gamma0.5": "sgd", "simp_gamma1": "sgd", "simp_gamma1.5": "sgd" };
+  var BASE = { network: "baseline_network.webp", current: "baseline_current.webp", power: "baseline_power.webp" };
+  var st = { k: 5, view: "network", a: "clearance_looped", b: "clearance_looped_power" };
+  var dsl = document.getElementById("dsl"), dout = document.getElementById("dout");
+
+  function fmtD(x) { return (x * 100).toFixed(1) + "%"; }
+  function src(method, k, view) {
+    if (k === 0) return BASE[view] || BASE.power;
+    return method + "_" + DATA[method][k - 1].f + "_" + view + ".webp";
+  }
+  function fill(prefix, method, k) {
+    var r = k === 0 ? { D: 0, n: 0, km: 0, LP: 0 } : DATA[method][k - 1];
+    document.getElementById(prefix + "-d").textContent = fmtD(r.D) + (r.full ? " (whole)" : "");
+    document.getElementById(prefix + "-n").textContent = r.n;
+    document.getElementById(prefix + "-km").textContent = r.km.toFixed(1) + " km";
+    document.getElementById(prefix + "-lp").textContent = r.LP.toFixed(3);
+    var img = document.getElementById("img-" + prefix);
+    img.src = src(method, k, st.view);
+    var gainAtZero = k === 0 && (st.view === "current_gain" || st.view === "power_gain");
+    img.alt = NETS[method][0] + (k === 0 ? " baseline, no roads" : " at " + fmtD(r.D) + " displacement" + (r.full ? ", the whole network" : "")) + ", " + st.view.replace("_", " ") + (gainAtZero ? " (no gain without roads; showing power)" : "") + ".";
+    document.getElementById("how-" + prefix).textContent = NETS[method][1];
+  }
+  ["a", "b"].forEach(function (side) {
+    var sel = document.getElementById("pick-" + side);
+    Object.keys(NETS).forEach(function (key) {
+      var o = document.createElement("option"); o.value = key; o.textContent = NETS[key][0]; sel.appendChild(o);
+    });
+    sel.value = st[side];
+    sel.addEventListener("change", function () { st[side] = sel.value; draw(); });
+  });
+  function draw() {
+    dout.textContent = st.k + "%";
+    fill("a", st.a, st.k);
+    fill("b", st.b, st.k);
+    Object.keys(CLASS).forEach(function (key) {
+      var pl = document.getElementById("line-" + key);
+      if (pl) pl.setAttribute("class", CLASS[key] + (key === st.a || key === st.b ? " sel" : ""));
+    });
+    var lg = LEGEND[st.view];
+    document.getElementById("legend").src = lg[0];
+    document.getElementById("cap").textContent = (st.k === 0 && st.view.indexOf("gain") > 0) ? "No roads at 0%, so no gain: showing the baseline's power." : lg[1];
+    cursor();
+  }
+  dsl.addEventListener("input", function () { st.k = +dsl.value; draw(); });
+  document.querySelectorAll("[data-view]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      st.view = b.dataset.view;
+      document.querySelectorAll("[data-view]").forEach(function (o) { o.setAttribute("aria-pressed", o === b ? "true" : "false"); });
+      draw();
+    });
+  });
+
+  // chart: L_P (0 to 0.7) against D (0 to 15%)
+  var svg = document.getElementById("chart"), NS = "http://www.w3.org/2000/svg";
+  var X0 = 64, X1 = 870, Y0 = 318, Y1 = 20, XM = 0.155, YM = 0.7;
+  function x(d) { return X0 + (X1 - X0) * d / XM; }
+  function y(v) { return Y0 - (Y0 - Y1) * v / YM; }
+  function el(tag, attrs, text) { var e = document.createElementNS(NS, tag); for (var a in attrs) e.setAttribute(a, attrs[a]); if (text != null) e.textContent = text; svg.appendChild(e); return e; }
+  [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7].forEach(function (v) {
+    el("line", { x1: X0, x2: X1, y1: y(v), y2: y(v), "class": "axis" });
+    el("text", { x: X0 - 8, y: y(v) + 4, "text-anchor": "end", "class": "tick" }, v.toFixed(1));
+  });
+  [0, 0.05, 0.10, 0.15].forEach(function (d) {
+    el("text", { x: x(d), y: Y0 + 20, "text-anchor": "middle", "class": "tick" }, Math.round(d * 100) + "%");
+  });
+  el("text", { x: (X0 + X1) / 2, y: Y0 + 40, "text-anchor": "middle", "class": "lab" }, "Displacement, share of floor area");
+  el("text", { x: 14, y: (Y0 + Y1) / 2, "text-anchor": "middle", "class": "lab", transform: "rotate(-90 14 " + (Y0 + Y1) / 2 + ")" }, "L_P");
+  function line(method) {
+    var pts = [[0, 0]].concat(DATA[method].map(function (r) { return [r.D, r.LP]; }));
+    el("polyline", { id: "line-" + method, points: pts.map(function (p) { return x(p[0]) + "," + y(p[1]); }).join(" "), "class": CLASS[method] });
+    pts.forEach(function (p) { el("circle", { cx: x(p[0]), cy: y(p[1]), r: 2.5, "class": DOT[method] }); });
+  }
+  Object.keys(CLASS).forEach(line);
+  // legend: an HTML list under the plot, one swatch per network in the chart's own line classes
+  var key = document.getElementById("key");
+  [["cycle_native", "cn"], ["cycle_native, power-guided", "cnp"], ["cycle_native, legs 7 m apart", "cna7"], ["cycle_native, legs 14 m apart", "cna14"], ["cycle_native, ΔP-scored", "cndp"], ["ΔP-scored, legs 7 m apart", "cndp7"], ["ΔP-scored, legs 14 m apart", "cndp14"], ["clearance_looped", "cl"], ["clearance_looped, power-guided", "clp"], ["ΔP greedy, top 4", "dpg"], ["ΔP greedy, top 12", "dpg12"], ["road SIMP, γ 0.5", "sg05"], ["road SIMP, γ 1", "sg1"], ["road SIMP, γ 1.5", "sg15"]].forEach(function (item) {
+    var li = document.createElement("li");
+    li.innerHTML = '<svg viewBox="0 0 34 10" aria-hidden="true"><line x1="1" x2="33" y1="5" y2="5" class="' + item[1] + '"/></svg>';
+    li.appendChild(document.createTextNode(item[0]));
+    key.appendChild(li);
+  });
+  el("circle", { cx: x(SIMP.D), cy: y(SIMP.LP), r: 6, "class": "simp" });
+  el("text", { x: x(SIMP.D) + 10, y: y(SIMP.LP) + 18, "class": "simpt" }, "SIMP clearing 0.235");
+  var cur = el("line", { x1: x(0.05), x2: x(0.05), y1: Y1, y2: Y0, "class": "cursor" });
+  function cursor() { var d = st.k / 100; cur.setAttribute("x1", x(d)); cur.setAttribute("x2", x(d)); }
+
+  draw();
+})();
+</script>
