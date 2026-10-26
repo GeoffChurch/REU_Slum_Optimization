@@ -10544,3 +10544,68 @@ mesh is not Delaunay", BACKLOG's carving item). Next, the greedy stage: the peri
 what the lineup's long interior roads lack. Scripts: research/roadless/vote_roads.py; rows in
 research/roadless/vote_rows/<metric>/ (not committed), the clearings in vote_rows/clearings/;
 .superpowers/sdd/2026-10-22-flow-roads/vote_lenses.py and 2026-10-25-vote/vote_plates.py.
+
+### Roads from the vote, stage 2: road SIMP's adaptive update at gamma 0.5 / 1 / 1.5 (2026-10-26)
+
+docs/superpowers/plans/2026-10-25-roads-from-the-vote.md, stage 2. road_simp rev 7 (8c829921)
+makes the update a Strategy, `.u` in the plan: OC as before, and Adaptive(gamma), the adaptive
+transport network's (Hu and Cai; Bohn and Magnasco). OC's step x B^(1/2), B = -dP/dr / (the
+paving cost's slope + nu dD/dr), has the KKT point of P plus the cost as its fixed point; with the
+cost price sum a r^gamma (a full road costs per_km's price at every gamma) and B's exponent
+1 / (1 + gamma), where the road dominates a triangle (-dP/dr = C / r^2, C going as |j|^2) one step
+lands on r = (C / (price gamma))^(1/(1+gamma)): the density proportional to |j|^(2/(1+gamma)), the
+current recomputed every step, trees for gamma < 1 and loops for gamma > 1. At gamma 1 it is OC at
+q 1, and q stays 1 (a road's conductance is linear in its width; gamma alone sets the regime). The
+starting world is a Strategy too, `.c`: none, or a listed clearing's buildings open in the eps
+world (U's on 5810 at D 0.05, 294 buildings: research/roadless/road_simp_clearings/U/), its role
+`real` (in D from the start, the answers scored with it beside them: gap_clear.Model.
+cleared_road_state) or `device` (only the roads built and counted). Guards (road_simp_check.py):
+adaptive (on a planted road-dominated gain the update settles on the analytic fixed point to
+4e-16, its log-log slope against |j| 1.3333 and 0.8000 at gamma 0.5 and 1.5; fault cost-linear,
+slope 1, fails), clearing (the eps world's P with the 20 largest footprints of 19570 cleared is the
+exact model's to 6.0e-3, the eps world itself 1.6e-2 off at none and the clearing moving P by 0.57;
+fault not-applied, 1.3 off, fails), dD again with a real clearing (3.6e-9; fault flat fails); grad
+and dD unchanged.
+
+The sweep (rsimp-g, job 85028, 27 tasks on 5810, r 7, stages b 1 .. 16 at q 1, 40 updates each; OC
+controls at rev 6's stages): 26 passed; D 0.05 k 0.01 gamma 0.5 with no clearing was refused by
+`_conform`'s split floor (c890ed50) meshing an answer, round 23, the parked carving defect (BACKLOG,
+"A carved atom has no width floor") caught in 2 minutes instead of at the memory limit. The OC
+control with no clearing reproduces rev 6 (linked roads L_P 0.390 at D 0.023 in 1.84 km, both).
+Linked roads against the lazy ΔP greedy (lineup pool) at the roads' own D:
+
+    plan (D, k, update, clearing)   roads L_P  D      km    | lazy  km   | loops  within 5 m  cut
+    0.05 0.01 A1    none            0.600   0.040  5.69  | 0.460 2.79 | 16     14%        1.3%
+    0.05 0.01 A1.5  none            0.597   0.035  6.56  | 0.433 2.42 | 23     26%        1.0%
+    0.05 0.01 A1    U device        0.594   0.037  5.86  | 0.442 2.54 | 25     15%        1.3%
+    0.05 0.01 A1.5  U device        0.574   0.036  6.59  | 0.439 2.45 | 26     27%        1.0%
+    0.05 0.01 A0.5  U device        0.430   0.016  3.41  | 0.310 1.47 |  1      7%        3.1%
+    0.05 0.01 OC    U device        0.510   0.025  4.31  | 0.374 1.84 |  3      7%        2.7%
+    0.05 0.04 A1    none            0.345   0.023  1.43  | 0.360 1.75 |  1     14%        3.7%
+    0.05 0.04 A1.5  none            0.262   0.010  1.42  | 0.239 1.05 |  4     46%        2.3%
+    0.05 0.04 A0.5  none            0.320   0.024  1.09  | 0.371 1.84 |  0      3%        5.1%
+    0.05 0.04 OC    none            0.390   0.023  1.84  | 0.359 1.75 |  0      8%        3.9%
+    0.15 0.01 A0.5  U device        0.516   0.072  3.35  | 0.551 4.89 |  0      4%        3.3%
+    0.15 0.01 A1    none            0.412   0.042  2.47  | 0.467 2.90 |  8     16%        2.5%
+    0.05 0.01 A1    U real          0.460   0.053  2.42  | 0.501 3.57 |  3     18%        1.5%
+    0.05 0.01 A1.5  U real          0.481   0.053  3.51  | 0.501 3.57 |  8     28%        0.9%
+
+(loops: the noded network's faces of 100 m^2 and more; its raw cyclomatic number counts the
+skeleton's rings round 1-pixel holes too, 2 -- 228. The lazy greedy: 2 / 11 / 18 loops at D 0.05 /
+0.10 / 0.15, 0.6 -- 2.0 a km. cut: the vehicle damage term's expected share cut off by a blockage,
+step 10 m, carry 100 m. rev 6's OC at D 0.05 k 0.01 r 7: 0.540 at D 0.032 in 4.59 km.)
+
+The regime is gamma's, as predicted: gamma 0.5 makes trees (0 -- 1 loops, its paving in wide
+trunks the single road keeps little of), gamma 1.5 loops, but mostly small rings round single
+buildings, and the most clutter (26 -- 46% of the length within 5 m); gamma 1 between. At D 0.05 k
+0.01 the gamma 1 and 1.5 roads lead the lazy greedy at their own D by 0.14 -- 0.16 and rev 6's OC by
+0.06 (at D 0.035 -- 0.040 against 0.032), in 2 -- 2.7 times the greedy's road, and with their loops
+they are sturdier for vehicles (a blockage cuts off 1.0 -- 1.3% against the greedy's 1.8% at D
+0.05); at k 0.04 and at D 0.15 there is no steady lead. U's clearing as a vote changes little (as
+a device within -0.02 .. +0.0 of no clearing); as a real clearing it costs: its 0.05 of D, spent on
+open ground, leaves the roads less than the lazy greedy's at the same total D (0.46 -- 0.48 against
+0.50). The designs had not settled in the max norm (the 0.2 limit reached in the last ten updates,
+as rev 6's). Candidates for the greedy stage: the linked roads of D 0.05 k 0.01 gamma 1 and 1.5
+(no clearing) and gamma 1 (U, device), loopy pools the lineup's and SIMP's combs lack. Scripts:
+research/roadless/road_simp.py, road_simp_check.py; .superpowers/sdd/2026-10-25-vote-roads/
+stage2_table.py, stage2_plot.py (not committed); rows in road_simp_rows/<metric>/*v7/.

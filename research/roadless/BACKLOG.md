@@ -656,6 +656,11 @@ Open:
     (-0.10 to +0.012 at equal D). rsimp-c (12 plans on 5810, rev 4) writes the designs; each is
     rescored at rev 6, then its roads go to ΔP greedy as candidates, alone and beside the lineup's.
     The vehicle damage term (research/roadless/damage.py) is the lens for their dead ends.
+    Rev 7 (NOTES, "Roads from the vote, stage 2"): the update a Strategy, Adaptive(gamma) beside
+    OC, and a starting clearing (real or a device); on 5810 gamma 0.5 makes trees and 1.5 loops
+    (mostly rings round single buildings, cluttered); at D 0.05 k 0.01 gamma 1 and 1.5 lead the
+    lazy greedy by 0.14 -- 0.16 at their own D in 2 -- 2.7x its road; U's clearing changes little
+    as a vote and costs as a real clearing. Next: their linked roads as the greedy stage's pools.
   - The damage term: expected P over single blockages from one solve and each road piece's
     leverage (Sherman-Morrison); for vehicles on the road graph alone (agenda item 5).
 - **The public package's displacement, and the methods' internal costs, onto the ramped
