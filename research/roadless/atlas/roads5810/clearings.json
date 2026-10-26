@@ -20,7 +20,7 @@
   0.15
  ],
  "baseline": {
-  "P": 3190933.0570930075,
+  "P": 3190933.057093006,
   "median_j": 1.9324820282693185,
   "median_p": 3.0055620870841886
  },
@@ -29,7 +29,8 @@
   "current",
   "power",
   "current_gain",
-  "power_gain"
+  "power_gain",
+  "time"
  ],
  "note": "each clearing a state of the plain mesh (no carving), scored and drawn as the road frames are; D the cleared buildings' population share (area weights); LP, Pq, J2 the lenses on the plain baseline; own_LP the method's L_P under the metric it optimized; gains over the plain baseline",
  "methods": {
@@ -37,6 +38,7 @@
    "key": "simp",
    "name": "SIMP",
    "how": "Relaxes every building to a fraction cleared, moves the fractions down P's gradient within the budget as the penalty stiffens to whole buildings, rounds, then polishes by exact swaps.",
+   "power": 1.0,
    "run": {
     "optimizer": "relax.py one",
     "plan": "fw0.q3.i10.e0.0001.k1s1e-06.p256w8x2",
@@ -73,7 +75,8 @@
       "current": "simp_010_current.webp",
       "power": "simp_010_power.webp",
       "current_gain": "simp_010_current_gain.webp",
-      "power_gain": "simp_010_power_gain.webp"
+      "power_gain": "simp_010_power_gain.webp",
+      "time": "simp_010_time.webp"
      }
     },
     {
@@ -105,7 +108,8 @@
       "current": "simp_020_current.webp",
       "power": "simp_020_power.webp",
       "current_gain": "simp_020_current_gain.webp",
-      "power_gain": "simp_020_power_gain.webp"
+      "power_gain": "simp_020_power_gain.webp",
+      "time": "simp_020_time.webp"
      }
     },
     {
@@ -137,7 +141,8 @@
       "current": "simp_030_current.webp",
       "power": "simp_030_power.webp",
       "current_gain": "simp_030_current_gain.webp",
-      "power_gain": "simp_030_power_gain.webp"
+      "power_gain": "simp_030_power_gain.webp",
+      "time": "simp_030_time.webp"
      }
     },
     {
@@ -169,7 +174,8 @@
       "current": "simp_040_current.webp",
       "power": "simp_040_power.webp",
       "current_gain": "simp_040_current_gain.webp",
-      "power_gain": "simp_040_power_gain.webp"
+      "power_gain": "simp_040_power_gain.webp",
+      "time": "simp_040_time.webp"
      }
     },
     {
@@ -201,7 +207,8 @@
       "current": "simp_050_current.webp",
       "power": "simp_050_power.webp",
       "current_gain": "simp_050_current_gain.webp",
-      "power_gain": "simp_050_power_gain.webp"
+      "power_gain": "simp_050_power_gain.webp",
+      "time": "simp_050_time.webp"
      }
     },
     {
@@ -233,7 +240,8 @@
       "current": "simp_060_current.webp",
       "power": "simp_060_power.webp",
       "current_gain": "simp_060_current_gain.webp",
-      "power_gain": "simp_060_power_gain.webp"
+      "power_gain": "simp_060_power_gain.webp",
+      "time": "simp_060_time.webp"
      }
     },
     {
@@ -265,7 +273,8 @@
       "current": "simp_070_current.webp",
       "power": "simp_070_power.webp",
       "current_gain": "simp_070_current_gain.webp",
-      "power_gain": "simp_070_power_gain.webp"
+      "power_gain": "simp_070_power_gain.webp",
+      "time": "simp_070_time.webp"
      }
     },
     {
@@ -297,7 +306,8 @@
       "current": "simp_080_current.webp",
       "power": "simp_080_power.webp",
       "current_gain": "simp_080_current_gain.webp",
-      "power_gain": "simp_080_power_gain.webp"
+      "power_gain": "simp_080_power_gain.webp",
+      "time": "simp_080_time.webp"
      }
     },
     {
@@ -329,7 +339,8 @@
       "current": "simp_090_current.webp",
       "power": "simp_090_power.webp",
       "current_gain": "simp_090_current_gain.webp",
-      "power_gain": "simp_090_power_gain.webp"
+      "power_gain": "simp_090_power_gain.webp",
+      "time": "simp_090_time.webp"
      }
     },
     {
@@ -361,7 +372,8 @@
       "current": "simp_100_current.webp",
       "power": "simp_100_power.webp",
       "current_gain": "simp_100_current_gain.webp",
-      "power_gain": "simp_100_power_gain.webp"
+      "power_gain": "simp_100_power_gain.webp",
+      "time": "simp_100_time.webp"
      }
     },
     {
@@ -393,7 +405,8 @@
       "current": "simp_110_current.webp",
       "power": "simp_110_power.webp",
       "current_gain": "simp_110_current_gain.webp",
-      "power_gain": "simp_110_power_gain.webp"
+      "power_gain": "simp_110_power_gain.webp",
+      "time": "simp_110_time.webp"
      }
     },
     {
@@ -425,7 +438,8 @@
       "current": "simp_120_current.webp",
       "power": "simp_120_power.webp",
       "current_gain": "simp_120_current_gain.webp",
-      "power_gain": "simp_120_power_gain.webp"
+      "power_gain": "simp_120_power_gain.webp",
+      "time": "simp_120_time.webp"
      }
     },
     {
@@ -457,7 +471,8 @@
       "current": "simp_130_current.webp",
       "power": "simp_130_power.webp",
       "current_gain": "simp_130_current_gain.webp",
-      "power_gain": "simp_130_power_gain.webp"
+      "power_gain": "simp_130_power_gain.webp",
+      "time": "simp_130_time.webp"
      }
     },
     {
@@ -489,7 +504,8 @@
       "current": "simp_140_current.webp",
       "power": "simp_140_power.webp",
       "current_gain": "simp_140_current_gain.webp",
-      "power_gain": "simp_140_power_gain.webp"
+      "power_gain": "simp_140_power_gain.webp",
+      "time": "simp_140_time.webp"
      }
     },
     {
@@ -521,7 +537,517 @@
       "current": "simp_150_current.webp",
       "power": "simp_150_power.webp",
       "current_gain": "simp_150_current_gain.webp",
-      "power_gain": "simp_150_power_gain.webp"
+      "power_gain": "simp_150_power_gain.webp",
+      "time": "simp_150_time.webp"
+     }
+    }
+   ]
+  },
+  "j2": {
+   "key": "j2",
+   "name": "SIMP, far homes weighted (J\u2082)",
+   "how": "SIMP minimizing J\u2082, each home's escape time squared times its people, so a home twice as far counts four times, not twice; the default's settings otherwise. Scored here by P like the rest.",
+   "power": 2.0,
+   "run": {
+    "optimizer": "relax.py one",
+    "plan": "fw0.q3.i10.e0.0001.k1s1e-06.p256w8x2",
+    "metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+    "rows": "research/roadless/relax_rows/cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75/fw0.q3.i10.e0.0001.k1s1e-06.p256w8x2/D<target>/ZAF.9.3.1_1_5810_p2.parquet"
+   },
+   "rows": [
+    {
+     "f": "010",
+     "target": 0.01,
+     "D": 0.009976769902193015,
+     "n": 73,
+     "m2": 1455.2555976631877,
+     "LP": 0.12053919595248863,
+     "Pq": 0.11811361222707906,
+     "J2": 0.1145068628667335,
+     "P": 2806300.5520527987,
+     "D_opt": 0.009976769902193015,
+     "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+     "own_LP": 0.12053919595248863,
+     "own_opt": 0.1145068628664907,
+     "enclosed": 0.0,
+     "n_enclosed": 0,
+     "top5_power": 0.39004457724148134,
+     "top5_current": 0.18347384004686285,
+     "energy_rel_err": -1.0124310371179321e-11,
+     "kirchhoff_max": 2.131684382696215e-11,
+     "t_opt": 286.1999340057373,
+     "run": "j2_010",
+     "run_wall_s": 345.49,
+     "run_peak_rss_gb": 18.131778717041016,
+     "files": {
+      "clearing": "j2_010_clearing.webp",
+      "current": "j2_010_current.webp",
+      "power": "j2_010_power.webp",
+      "current_gain": "j2_010_current_gain.webp",
+      "power_gain": "j2_010_power_gain.webp",
+      "time": "j2_010_time.webp"
+     }
+    },
+    {
+     "f": "020",
+     "target": 0.02,
+     "D": 0.019947213508403568,
+     "n": 137,
+     "m2": 2909.588413932076,
+     "LP": 0.1681012157377122,
+     "Pq": 0.16514631933244583,
+     "J2": 0.16002399469998052,
+     "P": 2654533.3308580173,
+     "D_opt": 0.019947213508403568,
+     "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+     "own_LP": 0.1681012157377122,
+     "own_opt": 0.16002399469453576,
+     "enclosed": 0.0,
+     "n_enclosed": 0,
+     "top5_power": 0.3683747824363101,
+     "top5_current": 0.17615094826137914,
+     "energy_rel_err": -4.7142679617676005e-12,
+     "kirchhoff_max": 2.1989422179518723e-11,
+     "t_opt": 285.8203887939453,
+     "run": "j2_020",
+     "run_wall_s": 345.11,
+     "run_peak_rss_gb": 18.07098388671875,
+     "files": {
+      "clearing": "j2_020_clearing.webp",
+      "current": "j2_020_current.webp",
+      "power": "j2_020_power.webp",
+      "current_gain": "j2_020_current_gain.webp",
+      "power_gain": "j2_020_power_gain.webp",
+      "time": "j2_020_time.webp"
+     }
+    },
+    {
+     "f": "030",
+     "target": 0.03,
+     "D": 0.029998808734907297,
+     "n": 195,
+     "m2": 4375.758362945212,
+     "LP": 0.20178365558166478,
+     "Pq": 0.19832705839057274,
+     "J2": 0.1929345477752833,
+     "P": 2547054.920116402,
+     "D_opt": 0.029998808734907297,
+     "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+     "own_LP": 0.20178365558166478,
+     "own_opt": 0.1929345477790939,
+     "enclosed": 0.0,
+     "n_enclosed": 0,
+     "top5_power": 0.3540074749557495,
+     "top5_current": 0.17150480355786235,
+     "energy_rel_err": -1.0136095962051661e-11,
+     "kirchhoff_max": 2.1418052434364016e-11,
+     "t_opt": 296.0655541419983,
+     "run": "j2_030",
+     "run_wall_s": 359.6,
+     "run_peak_rss_gb": 18.27260971069336,
+     "files": {
+      "clearing": "j2_030_clearing.webp",
+      "current": "j2_030_current.webp",
+      "power": "j2_030_power.webp",
+      "current_gain": "j2_030_current_gain.webp",
+      "power_gain": "j2_030_power_gain.webp",
+      "time": "j2_030_time.webp"
+     }
+    },
+    {
+     "f": "040",
+     "target": 0.04,
+     "D": 0.03998918609072799,
+     "n": 224,
+     "m2": 5832.998803724534,
+     "LP": 0.22784169026239032,
+     "Pq": 0.22064620903206877,
+     "J2": 0.21532670956162037,
+     "P": 2463905.475850799,
+     "D_opt": 0.039989186090728,
+     "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+     "own_LP": 0.22784169026239032,
+     "own_opt": 0.21532670955630617,
+     "enclosed": 0.0,
+     "n_enclosed": 0,
+     "top5_power": 0.3450700005860555,
+     "top5_current": 0.1684385490353877,
+     "energy_rel_err": -1.5255150068582494e-11,
+     "kirchhoff_max": 2.2352735412921367e-11,
+     "t_opt": 303.0812327861786,
+     "run": "j2_040",
+     "run_wall_s": 367.03,
+     "run_peak_rss_gb": 18.145130157470703,
+     "files": {
+      "clearing": "j2_040_clearing.webp",
+      "current": "j2_040_current.webp",
+      "power": "j2_040_power.webp",
+      "current_gain": "j2_040_current_gain.webp",
+      "power_gain": "j2_040_power_gain.webp",
+      "time": "j2_040_time.webp"
+     }
+    },
+    {
+     "f": "050",
+     "target": 0.05,
+     "D": 0.04999875399568248,
+     "n": 294,
+     "m2": 7293.038462519604,
+     "LP": 0.2531007113703503,
+     "Pq": 0.24600328688576312,
+     "J2": 0.23994109985932943,
+     "P": 2383305.6304075997,
+     "D_opt": 0.04999875399568248,
+     "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+     "own_LP": 0.2531007113703503,
+     "own_opt": 0.23994109985388434,
+     "enclosed": 0.0,
+     "n_enclosed": 0,
+     "top5_power": 0.3335361586456619,
+     "top5_current": 0.16408575511055334,
+     "energy_rel_err": -3.333007777285366e-11,
+     "kirchhoff_max": 2.318884605259515e-11,
+     "t_opt": 343.39507603645325,
+     "run": "j2_050",
+     "run_wall_s": 409.90999999999997,
+     "run_peak_rss_gb": 18.476417541503906,
+     "files": {
+      "clearing": "j2_050_clearing.webp",
+      "current": "j2_050_current.webp",
+      "power": "j2_050_power.webp",
+      "current_gain": "j2_050_current_gain.webp",
+      "power_gain": "j2_050_power_gain.webp",
+      "time": "j2_050_time.webp"
+     }
+    },
+    {
+     "f": "060",
+     "target": 0.06,
+     "D": 0.05999952383875565,
+     "n": 367,
+     "m2": 8751.794797260203,
+     "LP": 0.2735439611461701,
+     "Pq": 0.26755643803890206,
+     "J2": 0.26113405102438336,
+     "P": 2318072.5889035272,
+     "D_opt": 0.05999952383875565,
+     "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+     "own_LP": 0.2735439611461701,
+     "own_opt": 0.261134051022342,
+     "enclosed": 0.0,
+     "n_enclosed": 0,
+     "top5_power": 0.32508025409936453,
+     "top5_current": 0.16097997610125805,
+     "energy_rel_err": -1.2723324151018523e-11,
+     "kirchhoff_max": 2.0967831301286494e-11,
+     "t_opt": 309.4326391220093,
+     "run": "j2_060",
+     "run_wall_s": 373.4,
+     "run_peak_rss_gb": 18.347274780273438,
+     "files": {
+      "clearing": "j2_060_clearing.webp",
+      "current": "j2_060_current.webp",
+      "power": "j2_060_power.webp",
+      "current_gain": "j2_060_current_gain.webp",
+      "power_gain": "j2_060_power_gain.webp",
+      "time": "j2_060_time.webp"
+     }
+    },
+    {
+     "f": "070",
+     "target": 0.07,
+     "D": 0.06999704937716181,
+     "n": 408,
+     "m2": 10210.077903433496,
+     "LP": 0.2978807377856636,
+     "Pq": 0.29194607225554425,
+     "J2": 0.2854139352922279,
+     "P": 2240415.5638214783,
+     "D_opt": 0.0699970493771618,
+     "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+     "own_LP": 0.2978807377856636,
+     "own_opt": 0.2854139352737226,
+     "enclosed": 0.0,
+     "n_enclosed": 0,
+     "top5_power": 0.3142839686499621,
+     "top5_current": 0.15662700960761441,
+     "energy_rel_err": -3.852279075684705e-11,
+     "kirchhoff_max": 2.4246846870177863e-11,
+     "t_opt": 349.7454149723053,
+     "run": "j2_070",
+     "run_wall_s": 413.58,
+     "run_peak_rss_gb": 20.256664276123047,
+     "files": {
+      "clearing": "j2_070_clearing.webp",
+      "current": "j2_070_current.webp",
+      "power": "j2_070_power.webp",
+      "current_gain": "j2_070_current_gain.webp",
+      "power_gain": "j2_070_power_gain.webp",
+      "time": "j2_070_time.webp"
+     }
+    },
+    {
+     "f": "080",
+     "target": 0.08,
+     "D": 0.079996653411746,
+     "n": 484,
+     "m2": 11668.664188213435,
+     "LP": 0.3149249508423676,
+     "Pq": 0.3096386730291427,
+     "J2": 0.30276629125817367,
+     "P": 2186028.6209467053,
+     "D_opt": 0.07999665341174601,
+     "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+     "own_LP": 0.3149249508423676,
+     "own_opt": 0.30276629123808163,
+     "enclosed": 0.0,
+     "n_enclosed": 0,
+     "top5_power": 0.30626526733306525,
+     "top5_current": 0.15337298284894876,
+     "energy_rel_err": -2.778103979284268e-11,
+     "kirchhoff_max": 2.2417523215212327e-11,
+     "t_opt": 408.8213138580322,
+     "run": "j2_080",
+     "run_wall_s": 473.3,
+     "run_peak_rss_gb": 20.416675567626953,
+     "files": {
+      "clearing": "j2_080_clearing.webp",
+      "current": "j2_080_current.webp",
+      "power": "j2_080_power.webp",
+      "current_gain": "j2_080_current_gain.webp",
+      "power_gain": "j2_080_power_gain.webp",
+      "time": "j2_080_time.webp"
+     }
+    },
+    {
+     "f": "090",
+     "target": 0.09,
+     "D": 0.08999156470255826,
+     "n": 566,
+     "m2": 13126.565968719002,
+     "LP": 0.3294924113751587,
+     "Pq": 0.32448735568153764,
+     "J2": 0.31735442268373726,
+     "P": 2139544.8295747247,
+     "D_opt": 0.08999156470255824,
+     "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+     "own_LP": 0.3294924113751587,
+     "own_opt": 0.3173544226956173,
+     "enclosed": 0.0,
+     "n_enclosed": 0,
+     "top5_power": 0.3006451063982342,
+     "top5_current": 0.15127237604357244,
+     "energy_rel_err": -1.1448998880011919e-11,
+     "kirchhoff_max": 2.2425315973326137e-11,
+     "t_opt": 371.2715051174164,
+     "run": "j2_090",
+     "run_wall_s": 434.17,
+     "run_peak_rss_gb": 20.35556411743164,
+     "files": {
+      "clearing": "j2_090_clearing.webp",
+      "current": "j2_090_current.webp",
+      "power": "j2_090_power.webp",
+      "current_gain": "j2_090_current_gain.webp",
+      "power_gain": "j2_090_power_gain.webp",
+      "time": "j2_090_time.webp"
+     }
+    },
+    {
+     "f": "100",
+     "target": 0.1,
+     "D": 0.09999227281367375,
+     "n": 637,
+     "m2": 14585.313298964378,
+     "LP": 0.3437975189579552,
+     "Pq": 0.33899423546011964,
+     "J2": 0.3313683651135366,
+     "P": 2093898.1889035073,
+     "D_opt": 0.09999227281367375,
+     "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+     "own_LP": 0.3437975189579552,
+     "own_opt": 0.331368365116832,
+     "enclosed": 0.0,
+     "n_enclosed": 0,
+     "top5_power": 0.2919005966766465,
+     "top5_current": 0.14780456126108235,
+     "energy_rel_err": -1.012451124812023e-11,
+     "kirchhoff_max": 2.4277753227687746e-11,
+     "t_opt": 366.41938829421997,
+     "run": "j2_100",
+     "run_wall_s": 430.34,
+     "run_peak_rss_gb": 20.489532470703125,
+     "files": {
+      "clearing": "j2_100_clearing.webp",
+      "current": "j2_100_current.webp",
+      "power": "j2_100_power.webp",
+      "current_gain": "j2_100_current_gain.webp",
+      "power_gain": "j2_100_power_gain.webp",
+      "time": "j2_100_time.webp"
+     }
+    },
+    {
+     "f": "110",
+     "target": 0.11,
+     "D": 0.10997765110842787,
+     "n": 713,
+     "m2": 16041.824554679642,
+     "LP": 0.35570754520734116,
+     "Pq": 0.3511146347853441,
+     "J2": 0.34340066833731664,
+     "P": 2055894.0924334964,
+     "D_opt": 0.10997765110842787,
+     "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+     "own_LP": 0.35570754520734116,
+     "own_opt": 0.34340066833872696,
+     "enclosed": 0.0,
+     "n_enclosed": 0,
+     "top5_power": 0.28660478594846744,
+     "top5_current": 0.14578915302697876,
+     "energy_rel_err": -9.91257314894742e-12,
+     "kirchhoff_max": 2.051393861604401e-11,
+     "t_opt": 294.1394774913788,
+     "run": "j2_110",
+     "run_wall_s": 354.6,
+     "run_peak_rss_gb": 18.84844207763672,
+     "files": {
+      "clearing": "j2_110_clearing.webp",
+      "current": "j2_110_current.webp",
+      "power": "j2_110_power.webp",
+      "current_gain": "j2_110_current_gain.webp",
+      "power_gain": "j2_110_power_gain.webp",
+      "time": "j2_110_time.webp"
+     }
+    },
+    {
+     "f": "120",
+     "target": 0.12,
+     "D": 0.11999803144353183,
+     "n": 783,
+     "m2": 17503.44136215646,
+     "LP": 0.3670625076899382,
+     "Pq": 0.36279727036332576,
+     "J2": 0.35499564852519583,
+     "P": 2019661.1672857264,
+     "D_opt": 0.11999803144353181,
+     "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+     "own_LP": 0.3670625076899382,
+     "own_opt": 0.35499564853139065,
+     "enclosed": 0.0,
+     "n_enclosed": 0,
+     "top5_power": 0.282414170492994,
+     "top5_current": 0.14415426009030677,
+     "energy_rel_err": -8.271716372060643e-12,
+     "kirchhoff_max": 2.166908143088139e-11,
+     "t_opt": 309.97438526153564,
+     "run": "j2_120",
+     "run_wall_s": 371.02,
+     "run_peak_rss_gb": 18.560653686523438,
+     "files": {
+      "clearing": "j2_120_clearing.webp",
+      "current": "j2_120_current.webp",
+      "power": "j2_120_power.webp",
+      "current_gain": "j2_120_current_gain.webp",
+      "power_gain": "j2_120_power_gain.webp",
+      "time": "j2_120_time.webp"
+     }
+    },
+    {
+     "f": "130",
+     "target": 0.13,
+     "D": 0.12998464515789854,
+     "n": 853,
+     "m2": 18960.13282161746,
+     "LP": 0.3779913632699581,
+     "Pq": 0.37406282513304734,
+     "J2": 0.3657947012304844,
+     "P": 1984787.9207392456,
+     "D_opt": 0.12998464515789857,
+     "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+     "own_LP": 0.3779913632699581,
+     "own_opt": 0.3657947012149725,
+     "enclosed": 0.0,
+     "n_enclosed": 0,
+     "top5_power": 0.2768333155200144,
+     "top5_current": 0.14187858156537098,
+     "energy_rel_err": -3.081904422209592e-11,
+     "kirchhoff_max": 2.9464334592972095e-11,
+     "t_opt": 302.4919822216034,
+     "run": "j2_130",
+     "run_wall_s": 367.57,
+     "run_peak_rss_gb": 18.09890365600586,
+     "files": {
+      "clearing": "j2_130_clearing.webp",
+      "current": "j2_130_current.webp",
+      "power": "j2_130_power.webp",
+      "current_gain": "j2_130_current_gain.webp",
+      "power_gain": "j2_130_power_gain.webp",
+      "time": "j2_130_time.webp"
+     }
+    },
+    {
+     "f": "140",
+     "target": 0.14,
+     "D": 0.13999722434694614,
+     "n": 922,
+     "m2": 20420.611719572662,
+     "LP": 0.3882267225891851,
+     "Pq": 0.3843790872853353,
+     "J2": 0.3760286211654684,
+     "P": 1952127.5743362992,
+     "D_opt": 0.13999722434694617,
+     "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+     "own_LP": 0.3882267225891851,
+     "own_opt": 0.37602862115400426,
+     "enclosed": 0.0,
+     "n_enclosed": 0,
+     "top5_power": 0.2736822479692932,
+     "top5_current": 0.14063166626416077,
+     "energy_rel_err": -3.953807086480976e-11,
+     "kirchhoff_max": 2.6440207994857675e-11,
+     "t_opt": 338.4105076789856,
+     "run": "j2_140",
+     "run_wall_s": 403.93,
+     "run_peak_rss_gb": 19.815277099609375,
+     "files": {
+      "clearing": "j2_140_clearing.webp",
+      "current": "j2_140_current.webp",
+      "power": "j2_140_power.webp",
+      "current_gain": "j2_140_current_gain.webp",
+      "power_gain": "j2_140_power_gain.webp",
+      "time": "j2_140_time.webp"
+     }
+    },
+    {
+     "f": "150",
+     "target": 0.15,
+     "D": 0.14999775661277834,
+     "n": 983,
+     "m2": 21879.333400250558,
+     "LP": 0.39701291262736027,
+     "Pq": 0.39336266292112254,
+     "J2": 0.3851565458720264,
+     "P": 1924091.4300975848,
+     "D_opt": 0.14999775661277837,
+     "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
+     "own_LP": 0.39701291262736027,
+     "own_opt": 0.38515654586802306,
+     "enclosed": 0.0,
+     "n_enclosed": 0,
+     "top5_power": 0.27163140813654374,
+     "top5_current": 0.13971316006187645,
+     "energy_rel_err": -1.1726168694327736e-11,
+     "kirchhoff_max": 2.2926953447946992e-11,
+     "t_opt": 375.197726726532,
+     "run": "j2_150",
+     "run_wall_s": 440.24,
+     "run_peak_rss_gb": 20.001949310302734,
+     "files": {
+      "clearing": "j2_150_clearing.webp",
+      "current": "j2_150_current.webp",
+      "power": "j2_150_power.webp",
+      "current_gain": "j2_150_current_gain.webp",
+      "power_gain": "j2_150_power_gain.webp",
+      "time": "j2_150_time.webp"
      }
     }
    ]
@@ -530,6 +1056,7 @@
    "key": "greedy",
    "name": "Greedy",
    "how": "Clears a batch at a time, each to the next 1% of the people, the buildings whose clearing lowers P most per person to first order, spread over different catchments; one run cut at each budget.",
+   "power": 1.0,
    "run": {
     "optimizer": "clear5810.py greedy (polish_greedy.run's greedy, nested)",
     "picker": "S0.01cat",
@@ -566,7 +1093,8 @@
       "current": "greedy_010_current.webp",
       "power": "greedy_010_power.webp",
       "current_gain": "greedy_010_current_gain.webp",
-      "power_gain": "greedy_010_power_gain.webp"
+      "power_gain": "greedy_010_power_gain.webp",
+      "time": "greedy_010_time.webp"
      }
     },
     {
@@ -598,7 +1126,8 @@
       "current": "greedy_020_current.webp",
       "power": "greedy_020_power.webp",
       "current_gain": "greedy_020_current_gain.webp",
-      "power_gain": "greedy_020_power_gain.webp"
+      "power_gain": "greedy_020_power_gain.webp",
+      "time": "greedy_020_time.webp"
      }
     },
     {
@@ -630,7 +1159,8 @@
       "current": "greedy_030_current.webp",
       "power": "greedy_030_power.webp",
       "current_gain": "greedy_030_current_gain.webp",
-      "power_gain": "greedy_030_power_gain.webp"
+      "power_gain": "greedy_030_power_gain.webp",
+      "time": "greedy_030_time.webp"
      }
     },
     {
@@ -662,7 +1192,8 @@
       "current": "greedy_040_current.webp",
       "power": "greedy_040_power.webp",
       "current_gain": "greedy_040_current_gain.webp",
-      "power_gain": "greedy_040_power_gain.webp"
+      "power_gain": "greedy_040_power_gain.webp",
+      "time": "greedy_040_time.webp"
      }
     },
     {
@@ -694,7 +1225,8 @@
       "current": "greedy_050_current.webp",
       "power": "greedy_050_power.webp",
       "current_gain": "greedy_050_current_gain.webp",
-      "power_gain": "greedy_050_power_gain.webp"
+      "power_gain": "greedy_050_power_gain.webp",
+      "time": "greedy_050_time.webp"
      }
     },
     {
@@ -726,7 +1258,8 @@
       "current": "greedy_060_current.webp",
       "power": "greedy_060_power.webp",
       "current_gain": "greedy_060_current_gain.webp",
-      "power_gain": "greedy_060_power_gain.webp"
+      "power_gain": "greedy_060_power_gain.webp",
+      "time": "greedy_060_time.webp"
      }
     },
     {
@@ -758,7 +1291,8 @@
       "current": "greedy_070_current.webp",
       "power": "greedy_070_power.webp",
       "current_gain": "greedy_070_current_gain.webp",
-      "power_gain": "greedy_070_power_gain.webp"
+      "power_gain": "greedy_070_power_gain.webp",
+      "time": "greedy_070_time.webp"
      }
     },
     {
@@ -790,7 +1324,8 @@
       "current": "greedy_080_current.webp",
       "power": "greedy_080_power.webp",
       "current_gain": "greedy_080_current_gain.webp",
-      "power_gain": "greedy_080_power_gain.webp"
+      "power_gain": "greedy_080_power_gain.webp",
+      "time": "greedy_080_time.webp"
      }
     },
     {
@@ -822,7 +1357,8 @@
       "current": "greedy_090_current.webp",
       "power": "greedy_090_power.webp",
       "current_gain": "greedy_090_current_gain.webp",
-      "power_gain": "greedy_090_power_gain.webp"
+      "power_gain": "greedy_090_power_gain.webp",
+      "time": "greedy_090_time.webp"
      }
     },
     {
@@ -854,7 +1390,8 @@
       "current": "greedy_100_current.webp",
       "power": "greedy_100_power.webp",
       "current_gain": "greedy_100_current_gain.webp",
-      "power_gain": "greedy_100_power_gain.webp"
+      "power_gain": "greedy_100_power_gain.webp",
+      "time": "greedy_100_time.webp"
      }
     },
     {
@@ -886,7 +1423,8 @@
       "current": "greedy_110_current.webp",
       "power": "greedy_110_power.webp",
       "current_gain": "greedy_110_current_gain.webp",
-      "power_gain": "greedy_110_power_gain.webp"
+      "power_gain": "greedy_110_power_gain.webp",
+      "time": "greedy_110_time.webp"
      }
     },
     {
@@ -918,7 +1456,8 @@
       "current": "greedy_120_current.webp",
       "power": "greedy_120_power.webp",
       "current_gain": "greedy_120_current_gain.webp",
-      "power_gain": "greedy_120_power_gain.webp"
+      "power_gain": "greedy_120_power_gain.webp",
+      "time": "greedy_120_time.webp"
      }
     },
     {
@@ -950,7 +1489,8 @@
       "current": "greedy_130_current.webp",
       "power": "greedy_130_power.webp",
       "current_gain": "greedy_130_current_gain.webp",
-      "power_gain": "greedy_130_power_gain.webp"
+      "power_gain": "greedy_130_power_gain.webp",
+      "time": "greedy_130_time.webp"
      }
     },
     {
@@ -982,7 +1522,8 @@
       "current": "greedy_140_current.webp",
       "power": "greedy_140_power.webp",
       "current_gain": "greedy_140_current_gain.webp",
-      "power_gain": "greedy_140_power_gain.webp"
+      "power_gain": "greedy_140_power_gain.webp",
+      "time": "greedy_140_time.webp"
      }
     },
     {
@@ -1014,7 +1555,8 @@
       "current": "greedy_150_current.webp",
       "power": "greedy_150_power.webp",
       "current_gain": "greedy_150_current_gain.webp",
-      "power_gain": "greedy_150_power_gain.webp"
+      "power_gain": "greedy_150_power_gain.webp",
+      "time": "greedy_150_time.webp"
      }
     }
    ]
@@ -1023,6 +1565,7 @@
    "key": "cheap",
    "name": "Greedy + polish",
    "how": "The greedy to the budget, then up to 64 exact swaps of a cleared building for a standing one, each the best of eight ranked by P's gradient.",
+   "power": 1.0,
    "run": {
     "optimizer": "polish_greedy.py",
     "preset": "S0.01cat.P64w8E",
@@ -1059,7 +1602,8 @@
       "current": "cheap_010_current.webp",
       "power": "cheap_010_power.webp",
       "current_gain": "cheap_010_current_gain.webp",
-      "power_gain": "cheap_010_power_gain.webp"
+      "power_gain": "cheap_010_power_gain.webp",
+      "time": "cheap_010_time.webp"
      }
     },
     {
@@ -1091,7 +1635,8 @@
       "current": "cheap_020_current.webp",
       "power": "cheap_020_power.webp",
       "current_gain": "cheap_020_current_gain.webp",
-      "power_gain": "cheap_020_power_gain.webp"
+      "power_gain": "cheap_020_power_gain.webp",
+      "time": "cheap_020_time.webp"
      }
     },
     {
@@ -1123,7 +1668,8 @@
       "current": "cheap_030_current.webp",
       "power": "cheap_030_power.webp",
       "current_gain": "cheap_030_current_gain.webp",
-      "power_gain": "cheap_030_power_gain.webp"
+      "power_gain": "cheap_030_power_gain.webp",
+      "time": "cheap_030_time.webp"
      }
     },
     {
@@ -1155,7 +1701,8 @@
       "current": "cheap_040_current.webp",
       "power": "cheap_040_power.webp",
       "current_gain": "cheap_040_current_gain.webp",
-      "power_gain": "cheap_040_power_gain.webp"
+      "power_gain": "cheap_040_power_gain.webp",
+      "time": "cheap_040_time.webp"
      }
     },
     {
@@ -1187,7 +1734,8 @@
       "current": "cheap_050_current.webp",
       "power": "cheap_050_power.webp",
       "current_gain": "cheap_050_current_gain.webp",
-      "power_gain": "cheap_050_power_gain.webp"
+      "power_gain": "cheap_050_power_gain.webp",
+      "time": "cheap_050_time.webp"
      }
     },
     {
@@ -1219,7 +1767,8 @@
       "current": "cheap_060_current.webp",
       "power": "cheap_060_power.webp",
       "current_gain": "cheap_060_current_gain.webp",
-      "power_gain": "cheap_060_power_gain.webp"
+      "power_gain": "cheap_060_power_gain.webp",
+      "time": "cheap_060_time.webp"
      }
     },
     {
@@ -1251,7 +1800,8 @@
       "current": "cheap_070_current.webp",
       "power": "cheap_070_power.webp",
       "current_gain": "cheap_070_current_gain.webp",
-      "power_gain": "cheap_070_power_gain.webp"
+      "power_gain": "cheap_070_power_gain.webp",
+      "time": "cheap_070_time.webp"
      }
     },
     {
@@ -1283,7 +1833,8 @@
       "current": "cheap_080_current.webp",
       "power": "cheap_080_power.webp",
       "current_gain": "cheap_080_current_gain.webp",
-      "power_gain": "cheap_080_power_gain.webp"
+      "power_gain": "cheap_080_power_gain.webp",
+      "time": "cheap_080_time.webp"
      }
     },
     {
@@ -1315,7 +1866,8 @@
       "current": "cheap_090_current.webp",
       "power": "cheap_090_power.webp",
       "current_gain": "cheap_090_current_gain.webp",
-      "power_gain": "cheap_090_power_gain.webp"
+      "power_gain": "cheap_090_power_gain.webp",
+      "time": "cheap_090_time.webp"
      }
     },
     {
@@ -1347,7 +1899,8 @@
       "current": "cheap_100_current.webp",
       "power": "cheap_100_power.webp",
       "current_gain": "cheap_100_current_gain.webp",
-      "power_gain": "cheap_100_power_gain.webp"
+      "power_gain": "cheap_100_power_gain.webp",
+      "time": "cheap_100_time.webp"
      }
     },
     {
@@ -1379,7 +1932,8 @@
       "current": "cheap_110_current.webp",
       "power": "cheap_110_power.webp",
       "current_gain": "cheap_110_current_gain.webp",
-      "power_gain": "cheap_110_power_gain.webp"
+      "power_gain": "cheap_110_power_gain.webp",
+      "time": "cheap_110_time.webp"
      }
     },
     {
@@ -1411,7 +1965,8 @@
       "current": "cheap_120_current.webp",
       "power": "cheap_120_power.webp",
       "current_gain": "cheap_120_current_gain.webp",
-      "power_gain": "cheap_120_power_gain.webp"
+      "power_gain": "cheap_120_power_gain.webp",
+      "time": "cheap_120_time.webp"
      }
     },
     {
@@ -1443,7 +1998,8 @@
       "current": "cheap_130_current.webp",
       "power": "cheap_130_power.webp",
       "current_gain": "cheap_130_current_gain.webp",
-      "power_gain": "cheap_130_power_gain.webp"
+      "power_gain": "cheap_130_power_gain.webp",
+      "time": "cheap_130_time.webp"
      }
     },
     {
@@ -1475,7 +2031,8 @@
       "current": "cheap_140_current.webp",
       "power": "cheap_140_power.webp",
       "current_gain": "cheap_140_current_gain.webp",
-      "power_gain": "cheap_140_power_gain.webp"
+      "power_gain": "cheap_140_power_gain.webp",
+      "time": "cheap_140_time.webp"
      }
     },
     {
@@ -1507,7 +2064,8 @@
       "current": "cheap_150_current.webp",
       "power": "cheap_150_power.webp",
       "current_gain": "cheap_150_current_gain.webp",
-      "power_gain": "cheap_150_power_gain.webp"
+      "power_gain": "cheap_150_power_gain.webp",
+      "time": "cheap_150_time.webp"
      }
     }
    ]
@@ -1516,6 +2074,7 @@
    "key": "ff",
    "name": "SIMP, every home counted",
    "how": "SIMP optimized under the rule that counts every walled-in home's trip from its own ground, the better of starting from nothing and from the cheapest crossings that free them; scored here under the page's metric.",
+   "power": 1.0,
    "run": {
     "optimizer": "relax.py one",
     "plan": "fw0.q3.i10.e0.0001.k1s1e-06.p256w8x2E.ft",
@@ -1529,19 +2088,19 @@
      "D": 0.009990377955587281,
      "n": 73,
      "m2": 1457.2405282639177,
-     "LP": 0.12113795483435663,
-     "Pq": 0.11681510045156462,
+     "LP": 0.12113795483435585,
+     "Pq": 0.11681510045156474,
      "J2": 0.11341965816675137,
-     "P": 2804389.9525434193,
+     "P": 2804389.9525434216,
      "D_opt": 0.009990377955587281,
      "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+homes+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
-     "own_LP": 0.1261516368276302,
+     "own_LP": 0.12615163682763086,
      "own_opt": 0.12615163683272002,
      "enclosed": 0.0,
      "n_enclosed": 0,
      "top5_power": 0.3884061537031066,
      "top5_current": 0.1833142424842071,
-     "energy_rel_err": -6.711630533374408e-13,
+     "energy_rel_err": -6.719932896725929e-13,
      "kirchhoff_max": 1.9193263511738165e-11,
      "t_opt": 410.96614027023315,
      "run": "ff_010",
@@ -1552,7 +2111,8 @@
       "current": "ff_010_current.webp",
       "power": "ff_010_power.webp",
       "current_gain": "ff_010_current_gain.webp",
-      "power_gain": "ff_010_power_gain.webp"
+      "power_gain": "ff_010_power_gain.webp",
+      "time": "ff_010_time.webp"
      }
     },
     {
@@ -1561,19 +2121,19 @@
      "D": 0.01999014098803991,
      "n": 136,
      "m2": 2915.850005173207,
-     "LP": 0.16869846465244398,
-     "Pq": 0.16350146877132987,
+     "LP": 0.1686984646524441,
+     "Pq": 0.1635014687713301,
      "J2": 0.15860064880602154,
-     "P": 2652627.549552688,
+     "P": 2652627.5495526874,
      "D_opt": 0.01999014098803991,
      "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+homes+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
-     "own_LP": 0.17344670426681186,
+     "own_LP": 0.17344670426681252,
      "own_opt": 0.1734467042690131,
      "enclosed": 0.0,
      "n_enclosed": 0,
      "top5_power": 0.3659905560084436,
      "top5_current": 0.1755293467461225,
-     "energy_rel_err": 4.201897313053846e-12,
+     "energy_rel_err": 4.202072860234372e-12,
      "kirchhoff_max": 1.7799459212930423e-11,
      "t_opt": 401.7445185184479,
      "run": "ff_020",
@@ -1584,7 +2144,8 @@
       "current": "ff_020_current.webp",
       "power": "ff_020_power.webp",
       "current_gain": "ff_020_current_gain.webp",
-      "power_gain": "ff_020_power_gain.webp"
+      "power_gain": "ff_020_power_gain.webp",
+      "time": "ff_020_time.webp"
      }
     },
     {
@@ -1593,19 +2154,19 @@
      "D": 0.02998835131871807,
      "n": 194,
      "m2": 4374.232998163257,
-     "LP": 0.2027892296726208,
-     "Pq": 0.19672966057877583,
+     "LP": 0.20278922967262025,
+     "Pq": 0.19672966057877594,
      "J2": 0.1913117543137386,
-     "P": 2543846.2005082155,
+     "P": 2543846.2005082173,
      "D_opt": 0.029988351318718062,
      "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+homes+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
-     "own_LP": 0.20730808665688372,
+     "own_LP": 0.20730808665688427,
      "own_opt": 0.20730808664322986,
      "enclosed": 0.0,
      "n_enclosed": 0,
      "top5_power": 0.34987701463374515,
      "top5_current": 0.16984233186901637,
-     "energy_rel_err": -3.3998624159899204e-12,
+     "energy_rel_err": -3.4005946320919994e-12,
      "kirchhoff_max": 1.9332639726887003e-11,
      "t_opt": 402.8058023452759,
      "run": "ff_030",
@@ -1616,7 +2177,8 @@
       "current": "ff_030_current.webp",
       "power": "ff_030_power.webp",
       "current_gain": "ff_030_current_gain.webp",
-      "power_gain": "ff_030_power_gain.webp"
+      "power_gain": "ff_030_power_gain.webp",
+      "time": "ff_030_time.webp"
      }
     },
     {
@@ -1625,19 +2187,19 @@
      "D": 0.03999638185243326,
      "n": 224,
      "m2": 5834.048409218467,
-     "LP": 0.22981472608608622,
-     "Pq": 0.21932715827909455,
+     "LP": 0.229814726086086,
+     "Pq": 0.21932715827909532,
      "J2": 0.2139977112900444,
-     "P": 2457609.65061814,
+     "P": 2457609.650618141,
      "D_opt": 0.03999638185243327,
      "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+homes+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
-     "own_LP": 0.23417765533715051,
+     "own_LP": 0.23417765533715096,
      "own_opt": 0.23417765532887902,
      "enclosed": 0.0,
      "n_enclosed": 0,
      "top5_power": 0.34029662085651924,
      "top5_current": 0.1665366059461449,
-     "energy_rel_err": -1.0015202640921586e-11,
+     "energy_rel_err": -1.0015581595559224e-11,
      "kirchhoff_max": 1.8790185483882613e-11,
      "t_opt": 428.23419547080994,
      "run": "ff_040",
@@ -1648,7 +2210,8 @@
       "current": "ff_040_current.webp",
       "power": "ff_040_power.webp",
       "current_gain": "ff_040_current_gain.webp",
-      "power_gain": "ff_040_power_gain.webp"
+      "power_gain": "ff_040_power_gain.webp",
+      "time": "ff_040_time.webp"
      }
     },
     {
@@ -1657,19 +2220,19 @@
      "D": 0.049979048574660956,
      "n": 294,
      "m2": 7290.16414302271,
-     "LP": 0.2551510308221888,
-     "Pq": 0.24472290352180615,
+     "LP": 0.25515103082218904,
+     "Pq": 0.2447229035218068,
      "J2": 0.23879501923257274,
-     "P": 2376763.1982911285,
+     "P": 2376763.1982911276,
      "D_opt": 0.049979048574660956,
      "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+homes+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
-     "own_LP": 0.25936564830414743,
+     "own_LP": 0.2593656483041482,
      "own_opt": 0.25936564829045294,
      "enclosed": 0.0,
      "n_enclosed": 0,
      "top5_power": 0.3286491261200362,
      "top5_current": 0.1623785724980692,
-     "energy_rel_err": -1.844903823437703e-11,
+     "energy_rel_err": -1.844864638946153e-11,
      "kirchhoff_max": 2.932594823338171e-11,
      "t_opt": 462.5516793727875,
      "run": "ff_050",
@@ -1680,7 +2243,8 @@
       "current": "ff_050_current.webp",
       "power": "ff_050_power.webp",
       "current_gain": "ff_050_current_gain.webp",
-      "power_gain": "ff_050_power_gain.webp"
+      "power_gain": "ff_050_power_gain.webp",
+      "time": "ff_050_time.webp"
      }
     },
     {
@@ -1689,19 +2253,19 @@
      "D": 0.059995553447415,
      "n": 372,
      "m2": 8751.215658492845,
-     "LP": 0.2764247831886827,
-     "Pq": 0.26626529986011516,
+     "LP": 0.2764247831886826,
+     "Pq": 0.2662652998601158,
      "J2": 0.25977920591096115,
-     "P": 2308880.0786164724,
+     "P": 2308880.078616473,
      "D_opt": 0.059995553447415,
      "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+homes+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
-     "own_LP": 0.28051545114879395,
+     "own_LP": 0.2805154511487955,
      "own_opt": 0.28051545114183285,
      "enclosed": 0.0,
      "n_enclosed": 0,
      "top5_power": 0.3196672909899179,
      "top5_current": 0.15896094495035926,
-     "energy_rel_err": -1.860805739114264e-11,
+     "energy_rel_err": -1.8608259073894213e-11,
      "kirchhoff_max": 2.3732587513808413e-11,
      "t_opt": 442.8772895336151,
      "run": "ff_060",
@@ -1712,7 +2276,8 @@
       "current": "ff_060_current.webp",
       "power": "ff_060_power.webp",
       "current_gain": "ff_060_current_gain.webp",
-      "power_gain": "ff_060_power_gain.webp"
+      "power_gain": "ff_060_power_gain.webp",
+      "time": "ff_060_time.webp"
      }
     },
     {
@@ -1721,19 +2286,19 @@
      "D": 0.06999213701045726,
      "n": 408,
      "m2": 10209.361363990905,
-     "LP": 0.30064583590505367,
-     "Pq": 0.2902476731240715,
+     "LP": 0.3006458359050538,
+     "Pq": 0.29024767312407185,
      "J2": 0.28344533878527856,
-     "P": 2231592.320826212,
+     "P": 2231592.3208262115,
      "D_opt": 0.06999213701045726,
      "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+homes+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
-     "own_LP": 0.3045990554148825,
+     "own_LP": 0.3045990554148834,
      "own_opt": 0.30459905542200727,
      "enclosed": 0.0,
      "n_enclosed": 0,
      "top5_power": 0.3080839436896267,
      "top5_current": 0.15413447138917574,
-     "energy_rel_err": -2.729540745488807e-11,
+     "energy_rel_err": -2.72951987871655e-11,
      "kirchhoff_max": 2.1251795801379686e-11,
      "t_opt": 500.88931369781494,
      "run": "ff_070",
@@ -1744,7 +2309,8 @@
       "current": "ff_070_current.webp",
       "power": "ff_070_power.webp",
       "current_gain": "ff_070_current_gain.webp",
-      "power_gain": "ff_070_power_gain.webp"
+      "power_gain": "ff_070_power_gain.webp",
+      "time": "ff_070_time.webp"
      }
     },
     {
@@ -1754,12 +2320,12 @@
      "n": 478,
      "m2": 11666.935348524246,
      "LP": 0.31682323021274295,
-     "Pq": 0.306113036906831,
+     "Pq": 0.3061130369068321,
      "J2": 0.29895623680572336,
      "P": 2179971.338552178,
      "D_opt": 0.07998480103625641,
      "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+homes+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
-     "own_LP": 0.32069989684796474,
+     "own_LP": 0.3206998968479655,
      "own_opt": 0.3206998968391541,
      "enclosed": 0.0,
      "n_enclosed": 0,
@@ -1776,7 +2342,8 @@
       "current": "ff_080_current.webp",
       "power": "ff_080_power.webp",
       "current_gain": "ff_080_current_gain.webp",
-      "power_gain": "ff_080_power_gain.webp"
+      "power_gain": "ff_080_power_gain.webp",
+      "time": "ff_080_time.webp"
      }
     },
     {
@@ -1785,19 +2352,19 @@
      "D": 0.08999101575967974,
      "n": 554,
      "m2": 13126.485897493085,
-     "LP": 0.3319965971396339,
-     "Pq": 0.32210805027949596,
+     "LP": 0.3319965971396346,
+     "Pq": 0.32210805027949674,
      "J2": 0.314562689040792,
-     "P": 2131554.14043776,
+     "P": 2131554.1404377576,
      "D_opt": 0.08999101575967973,
      "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+homes+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
-     "own_LP": 0.3357896298260826,
+     "own_LP": 0.33578962982608296,
      "own_opt": 0.3357896298223807,
      "enclosed": 0.0,
      "n_enclosed": 0,
      "top5_power": 0.2922302085443075,
      "top5_current": 0.14795795017480734,
-     "energy_rel_err": -2.4997391241136953e-11,
+     "energy_rel_err": -2.4996298936516434e-11,
      "kirchhoff_max": 2.200490322399071e-11,
      "t_opt": 593.4503633975983,
      "run": "ff_090",
@@ -1808,7 +2375,8 @@
       "current": "ff_090_current.webp",
       "power": "ff_090_power.webp",
       "current_gain": "ff_090_current_gain.webp",
-      "power_gain": "ff_090_power_gain.webp"
+      "power_gain": "ff_090_power_gain.webp",
+      "time": "ff_090_time.webp"
      }
     },
     {
@@ -1817,19 +2385,19 @@
      "D": 0.0999950241334073,
      "n": 621,
      "m2": 14585.714618578086,
-     "LP": 0.3457046227676136,
+     "LP": 0.34570462276761416,
      "Pq": 0.3353695803742386,
      "J2": 0.32734263114293816,
-     "P": 2087812.7483139613,
+     "P": 2087812.7483139597,
      "D_opt": 0.0999950241334073,
      "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+homes+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
-     "own_LP": 0.3494280018203416,
+     "own_LP": 0.34942800182034217,
      "own_opt": 0.3494280018310102,
      "enclosed": 0.0,
      "n_enclosed": 0,
      "top5_power": 0.2835746403440293,
      "top5_current": 0.14443299186878464,
-     "energy_rel_err": -2.6875058450573253e-11,
+     "energy_rel_err": -2.6874277818063538e-11,
      "kirchhoff_max": 3.1004555078546624e-11,
      "t_opt": 486.21748757362366,
      "run": "ff_100",
@@ -1840,7 +2408,8 @@
       "current": "ff_100_current.webp",
       "power": "ff_100_power.webp",
       "current_gain": "ff_100_current_gain.webp",
-      "power_gain": "ff_100_power_gain.webp"
+      "power_gain": "ff_100_power_gain.webp",
+      "time": "ff_100_time.webp"
      }
     },
     {
@@ -1849,19 +2418,19 @@
      "D": 0.10997727110229062,
      "n": 693,
      "m2": 16041.769125310842,
-     "LP": 0.35873587953672503,
-     "Pq": 0.3489294465435201,
+     "LP": 0.3587358795367256,
+     "Pq": 0.34892944654352054,
      "J2": 0.3408001331838578,
-     "P": 2046230.8803139366,
+     "P": 2046230.880313935,
      "D_opt": 0.10997727110229062,
      "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+homes+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
-     "own_LP": 0.3623390661680832,
+     "own_LP": 0.3623390661680841,
      "own_opt": 0.36233906616279854,
      "enclosed": 0.0,
      "n_enclosed": 0,
      "top5_power": 0.27879531934819335,
      "top5_current": 0.14269728161784204,
-     "energy_rel_err": -2.3632488478342042e-11,
+     "energy_rel_err": -2.3631691982442572e-11,
      "kirchhoff_max": 2.7330760042601844e-11,
      "t_opt": 402.8910973072052,
      "run": "ff_110",
@@ -1872,7 +2441,8 @@
       "current": "ff_110_current.webp",
       "power": "ff_110_power.webp",
       "current_gain": "ff_110_current_gain.webp",
-      "power_gain": "ff_110_power_gain.webp"
+      "power_gain": "ff_110_power_gain.webp",
+      "time": "ff_110_time.webp"
      }
     },
     {
@@ -1881,19 +2451,19 @@
      "D": 0.1199972820123271,
      "n": 760,
      "m2": 17503.332046820295,
-     "LP": 0.3705995009189792,
-     "Pq": 0.36079058211892223,
+     "LP": 0.37059950091897975,
+     "Pq": 0.36079058211892256,
      "J2": 0.3522673410975671,
-     "P": 2008374.8586684663,
+     "P": 2008374.8586684647,
      "D_opt": 0.1199972820123271,
      "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+homes+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
-     "own_LP": 0.3741388916989965,
+     "own_LP": 0.37413889169899706,
      "own_opt": 0.37413889169294634,
      "enclosed": 0.0,
      "n_enclosed": 0,
      "top5_power": 0.27284499732737905,
      "top5_current": 0.1402020715672735,
-     "energy_rel_err": -2.6776786641794092e-11,
+     "energy_rel_err": -2.67759751326784e-11,
      "kirchhoff_max": 1.914914346161635e-11,
      "t_opt": 465.3157980442047,
      "run": "ff_120",
@@ -1904,7 +2474,8 @@
       "current": "ff_120_current.webp",
       "power": "ff_120_power.webp",
       "current_gain": "ff_120_current_gain.webp",
-      "power_gain": "ff_120_power_gain.webp"
+      "power_gain": "ff_120_power_gain.webp",
+      "time": "ff_120_time.webp"
      }
     },
     {
@@ -1913,19 +2484,19 @@
      "D": 0.12999202933443912,
      "n": 844,
      "m2": 18961.209910129095,
-     "LP": 0.38129937963223315,
-     "Pq": 0.3710803970440597,
+     "LP": 0.38129937963223337,
+     "Pq": 0.37108039704406015,
      "J2": 0.36263600909207383,
-     "P": 1974232.2619754586,
+     "P": 1974232.261975458,
      "D_opt": 0.12999202933443915,
      "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+homes+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
-     "own_LP": 0.38477794751256333,
+     "own_LP": 0.3847779475125641,
      "own_opt": 0.38477794750559435,
      "enclosed": 0.0,
      "n_enclosed": 0,
      "top5_power": 0.2691020380157749,
      "top5_current": 0.13876506748786105,
-     "energy_rel_err": -4.2191756524656355e-11,
+     "energy_rel_err": -4.219140272032219e-11,
      "kirchhoff_max": 2.439360082268235e-11,
      "t_opt": 476.6855444908142,
      "run": "ff_130",
@@ -1936,7 +2507,8 @@
       "current": "ff_130_current.webp",
       "power": "ff_130_power.webp",
       "current_gain": "ff_130_current_gain.webp",
-      "power_gain": "ff_130_power_gain.webp"
+      "power_gain": "ff_130_power_gain.webp",
+      "time": "ff_130_time.webp"
      }
     },
     {
@@ -1946,18 +2518,18 @@
      "n": 911,
      "m2": 20420.370560671967,
      "LP": 0.39119240491077245,
-     "Pq": 0.38105475725737814,
+     "Pq": 0.3810547572573788,
      "J2": 0.3723380102374998,
-     "P": 1942664.2805795108,
+     "P": 1942664.2805795106,
      "D_opt": 0.13999557103816251,
      "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+homes+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
-     "own_LP": 0.39460915343085623,
+     "own_LP": 0.39460915343085656,
      "own_opt": 0.3946091534395624,
      "enclosed": 0.0,
      "n_enclosed": 0,
      "top5_power": 0.2640536896985229,
      "top5_current": 0.13664095711951424,
-     "energy_rel_err": -2.9455829225285164e-11,
+     "energy_rel_err": -2.945570937408598e-11,
      "kirchhoff_max": 2.8616568743457213e-11,
      "t_opt": 366.9981310367584,
      "run": "ff_140",
@@ -1968,7 +2540,8 @@
       "current": "ff_140_current.webp",
       "power": "ff_140_power.webp",
       "current_gain": "ff_140_current_gain.webp",
-      "power_gain": "ff_140_power_gain.webp"
+      "power_gain": "ff_140_power_gain.webp",
+      "time": "ff_140_time.webp"
      }
     },
     {
@@ -1977,19 +2550,19 @@
      "D": 0.14999570890523317,
      "n": 971,
      "m2": 21879.0347126095,
-     "LP": 0.4008665442602791,
-     "Pq": 0.39095317725756995,
+     "LP": 0.40086654426027934,
+     "Pq": 0.3909531772575704,
      "J2": 0.3817644944266696,
-     "P": 1911794.7495302458,
+     "P": 1911794.7495302449,
      "D_opt": 0.1499957089052332,
      "own_metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+homes+v1569a066+xB8c3Lpo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75",
-     "own_LP": 0.4042260715396556,
+     "own_LP": 0.4042260715396555,
      "own_opt": 0.4042260715351156,
      "enclosed": 0.0,
      "n_enclosed": 0,
      "top5_power": 0.25953199631100377,
      "top5_current": 0.1348100288043155,
-     "energy_rel_err": -1.7559531797121292e-11,
+     "energy_rel_err": -1.755904465143014e-11,
      "kirchhoff_max": 2.6337181310911147e-11,
      "t_opt": 337.89426922798157,
      "run": "ff_150",
@@ -2000,7 +2573,8 @@
       "current": "ff_150_current.webp",
       "power": "ff_150_power.webp",
       "current_gain": "ff_150_current_gain.webp",
-      "power_gain": "ff_150_power_gain.webp"
+      "power_gain": "ff_150_power_gain.webp",
+      "time": "ff_150_time.webp"
      }
     }
    ]

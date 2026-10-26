@@ -1,19 +1,26 @@
 """Plates from compute.py's rasters, drawn as flow5810/render.py draws the clearing's (its plate,
 colour maps, scales and colour bars, reused): per frame the network, the current |j|, the power
-per m^2, and their gains over the baseline; then frames.json.
+per m^2, their gains over the baseline and each home's escape time over the baseline's (Time);
+then frames.json.
 
     S=research/roadless/atlas/roads5810/render.py      # from the repo root
     PYTHONPATH=. uv run python $S plates baseline
-    PYTHONPATH=. uv run python $S plates <method> <pass>  # cycle_native|clearance_looped, a pass
+    PYTHONPATH=. uv run python $S plates <method> <pass> <data dir>  # compute.DATA, or a study's
     PYTHONPATH=. uv run python $S index                   # frames.json, the colour bars
+    PYTHONPATH=. uv run python $S times <method> <pass> <data dir>  # the Time plates
 
 Scales: |j| and the power density on flow5810's log scales relative to the PLAIN mesh's baseline
 (the shared D 0: the area-weighted medians of its open ground). Gains (owner 2026-10-22: "can it
 show decreases in e.g. red?"): log2 of a frame over its own mesh's baseline (the network's carved
-mesh with no road, so no mesh difference reads as a gain), from -3 (1/8x, red: the flow or power
-drawn away) through 1x (a pale neutral) to +3 (8x and more, blue; newly open ground at the top),
-no colour off the open ground. The network: every building grey, shaded to the clearing plates'
-orange by its ramped destroyed share c_i (0 to 1), the roads' corridor over them. Each plate is
+mesh with no road, so no mesh difference reads as a gain), from -1 (1/2x, red: the flow or power
+drawn away) through 1x (a pale neutral) to +1 (2x and more, blue; newly open ground at the top),
+no colour off the open ground (owner 2026-10-26: the range narrowed from 1/8x -- 8x, so the
+interior's changes register). Time (owner 2026-10-26): each home shaded by its escape time over
+its baseline's on the gains' scale (red: faster), since the current and the power barely change
+where a clearing or road far off lowers a home's potential; the baseline's own plate its escape
+time, linear to the 99th percentile; a home with none (cleared, destroyed, or no demand) open.
+The network: every building grey, shaded to the clearing plates' orange by its ramped destroyed
+share c_i (0 to 1), the roads' corridor over them. Each plate is
 written as lossy WebP into `plates` (PLATES, beside the page: every plate it names, local.py's
 check); a network's rasters are read from `data` (compute.DATA, or a study's own folder), the
 plain baseline always from compute.DATA.
@@ -50,7 +57,7 @@ STORED = (cp.LINEUP / ("cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a+xB8c3Lo6214b56
                        "motorway-primary-residential-secondary-service-tertiary-trunk-"
                        "unclassifiedva03a092b") / "cpu/area_D0.02-0.05-0.1-0.15-0.2")
 DESTROYED = mcolors.LinearSegmentedColormap.from_list("destroyed", [rnd.BUILDING, rnd.CLEARED])
-LIM = 3.0                 # the gains' log2 range: 1/8x to 8x
+LIM = 1.0                 # the gains' log2 range: 1/2x to 2x
 DIV = mcolors.LinearSegmentedColormap.from_list(
     "gain_div", ["#b2182b", "#ef8a62", "#fddbc7", "#ebe9e4", "#d1e5f0", "#67a9cf", "#2166ac"])
 GAIN = mcolors.Normalize(-LIM, LIM, clip=True)
@@ -132,6 +139,66 @@ def network_plate(fr, polys, c, corridor, *, boundary, streets, out: Path) -> No
     small(tmp, out)
 
 
+def time_plate(fr, polys, value, *, norm, ramp, gone, corridor, boundary, streets,  # type: ignore[no-untyped-def]
+               out: Path) -> None:
+    """Each home filled by `value` on `ramp` (nan: no home, drawn open with an outline), the
+    `gone` buildings (cleared or destroyed) in ROAD's grey, the corridor, the edge and the
+    streets as network_plate draws them."""
+    f = fr.frame
+    fig = plt.figure(figsize=(f.nx / 100, f.ny / 100), dpi=100)
+    ax = fig.add_axes((0, 0, 1, 1))
+    polys = np.asarray(polys, dtype=object)
+    has = np.isfinite(value) & ~gone
+    gpd.GeoSeries(list(polys[has])).plot(ax=ax, color=ramp(norm(value[has])), lw=0)
+    gpd.GeoSeries(list(polys[~has & ~gone])).boundary.plot(ax=ax, color=rnd.BUILDING, lw=0.4)
+    gpd.GeoSeries(list(polys[gone])).plot(ax=ax, color=ROAD, lw=0)
+    if corridor is not None:
+        gpd.GeoSeries([corridor]).plot(ax=ax, color=ROAD, lw=0)
+    gpd.GeoSeries([boundary]).boundary.plot(ax=ax, color=rnd.EDGE, lw=1.0)
+    gpd.GeoSeries([streets]).plot(ax=ax, color=rnd.STREET, lw=2.0)
+    ax.set_xlim(fr.lim[0], fr.lim[1])
+    ax.set_ylim(fr.lim[2], fr.lim[3])
+    ax.set_axis_off()
+    tmp = scratch(out)
+    fig.savefig(tmp, dpi=100, facecolor="white")
+    plt.close(fig)
+    small(tmp, out)
+
+
+def time_ratio(after: np.ndarray, before: np.ndarray) -> np.ndarray:
+    """log2 of each home's escape time over its baseline's, clipped to the gains' range; a home
+    freed (no finite time before, one after) at -LIM; nan where it has no time after."""
+    with np.errstate(invalid="ignore", divide="ignore"):
+        g = np.where(np.isfinite(before) & (before > 0), np.log2(after / before), -LIM)
+    return np.where(np.isfinite(after), np.clip(g, -LIM, LIM), np.nan)
+
+
+def time_norm(u: np.ndarray) -> mcolors.Normalize:
+    """The baseline Time plate's scale: linear from 0 to the homes' 99th percentile."""
+    return mcolors.Normalize(0.0, float(np.percentile(u[np.isfinite(u)], 99)), clip=True)
+
+
+def plates_times(method: str, run: str, *, data: Path, plates: Path) -> None:
+    """The Time plate of each of <method>_<run>'s frames (compute.times_of's escape times over
+    its own mesh's baseline), the corridor over the homes, into `plates`."""
+    info = json.loads((data / f"{method}_{run}.json").read_text())
+    d = np.load(data / f"{method}_{run}.npz", allow_pickle=True)          # our own file: WKB
+    t = np.load(data / f"{method}_{run}_times.npz")
+    b = np.load(cp.DATA / "baseline.npz", allow_pickle=True)
+    if not np.array_equal(t["stops"], d["stops"]):
+        raise AssertionError(f"{method}_{run}: the escape times' stops are not the frames'")
+    fr = frame_from(d)
+    polys = shapely.from_wkb(b["polys"])
+    [boundary] = shapely.from_wkb(b["boundary"])
+    [streets] = shapely.from_wkb(b["streets"])
+    names = frame_names(info)
+    for mm in [int(s) for s in d["stops"]]:
+        [corridor] = shapely.from_wkb(d[f"corridor_{mm}"])
+        time_plate(fr, polys, time_ratio(t[f"u_{mm}"], t["u_base"]), norm=GAIN, ramp=DIV,
+                   gone=d[f"c_{mm}"] >= 1.0, corridor=corridor, boundary=boundary,
+                   streets=streets, out=plates / f"{method}_{names[mm]}_time.{EXT}")
+
+
 def divgain(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """log2(a / b) where both are open; newly open ground (b not open, a open) at +LIM; NaN where
     a is not open ground."""
@@ -168,6 +235,10 @@ def plates_baseline(*, plates: Path) -> None:
     for name, key, norm in (("current", "j", jn), ("power", "p", pn)):
         flow_plate(d[key], norm, fr, polys, k, ramp=rnd.RAMP, outline=False, boundary=boundary,
                    streets=streets, out=plates / f"baseline_{name}.{EXT}")
+    u = np.load(cp.DATA / "baseline_times.npz")["u"]
+    time_plate(fr, polys, u, norm=time_norm(u), ramp=rnd.RAMP, gone=np.zeros(len(polys), bool),
+               corridor=None, boundary=boundary, streets=streets,
+               out=plates / f"baseline_time.{EXT}")
 
 
 def plates_method(method: str, run: str, *, data: Path, plates: Path) -> None:
@@ -222,11 +293,16 @@ def index(*, data: Path, plates: Path) -> None:
     else:
         raise SystemExit(f"the baseline's medians {base['median_j']}, {base['median_p']} are not "
                          f"flow5810's: draw new bars")
-    colorbar_with(DIV, GAIN, [-3, -2, -1, 0, 1, 2, 3],
-                  ["1/8x", "1/4x", "1/2x", "1x", "2x", "4x", "8x+ or new"],
-                  "after over before (log): red drawn away, blue raised",
+    colorbar_with(DIV, GAIN, [-1, -0.5, 0, 0.5, 1], ["1/2x", "0.71x", "1x", "1.41x", "2x+ or new"],
+                  "after over before (log): red drawn away or faster, blue raised or slower",
                   plates / "gain_colorbar.png")
-    bars["gain"] = "new: log2 of the frame over its baseline, diverging"
+    u = np.load(data / "baseline_times.npz")["u"]
+    un = time_norm(u)
+    colorbar_with(rnd.RAMP, un, [0, un.vmax / 2, un.vmax], ["0", f"{un.vmax / 2:.0f}",
+                  f"{un.vmax:.0f}+"], "a home's escape time with nothing built or cleared",
+                  plates / "time_colorbar.png")
+    bars["gain"] = "new: log2 of the frame over its baseline, diverging, 1/2x to 2x"
+    bars["time"] = "new: the baseline's escape time per home, linear to its 99th percentile"
     colorbar_with(DESTROYED, mcolors.Normalize(0.0, 1.0), [0, 0.25, 0.5, 0.75, 1.0],
                   ["0", "0.25", "0.5", "0.75", "1"],
                   "a building's ramped destroyed share c_i (destroyed area / 0.10, at most 1)",
@@ -291,7 +367,7 @@ def index(*, data: Path, plates: Path) -> None:
                      "does; a frame is named by its target, the whole network by its own D"),
         scales=dict(median_j=base["median_j"], median_p=base["median_p"],
                     j_range=[rnd.J_LO, rnd.J_HI], p_range=[rnd.P_LO, rnd.P_HI],
-                    gain_log2_range=[-LIM, LIM],
+                    gain_log2_range=[-LIM, LIM], time_log2_range=[-LIM, LIM],
                     note="log, relative to the plain baseline's area-weighted median open ground "
                          "(flow5810's); gains log2 over each network's own carved-mesh baseline"),
         colorbars=bars,
@@ -310,8 +386,9 @@ if __name__ == "__main__":
         index(data=cp.DATA, plates=PLATES)
     elif sys.argv[1:] == ["plates", "baseline"]:
         plates_baseline(plates=PLATES)
-    elif (len(sys.argv) == 4 and sys.argv[1] == "plates" and sys.argv[2] in METHODS
-          and sys.argv[3] in PASSES):
-        plates_method(sys.argv[2], sys.argv[3], data=cp.DATA, plates=PLATES)
+    elif len(sys.argv) == 5 and sys.argv[1] == "plates":
+        plates_method(sys.argv[2], sys.argv[3], data=Path(sys.argv[4]), plates=PLATES)
+    elif len(sys.argv) == 5 and sys.argv[1] == "times":
+        plates_times(sys.argv[2], sys.argv[3], data=Path(sys.argv[4]), plates=PLATES)
     else:
         raise SystemExit(__doc__)

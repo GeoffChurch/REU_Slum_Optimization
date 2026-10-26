@@ -10719,3 +10719,23 @@ nested greedy 16.5 min (11.9 GB); frames ~5 -- 9 min a method (7 -- 10 GB), plat
 relax_rows/<RUNTIME>/<SIMP default>/D<b>, polish_rows/<RUNTIME>@e0.05/S0.01cat.P64w8E/D<b>,
 relax_rows/<HOMES>/<SIMP default>E.ft/D<b>; scratch (the greedy's order, rasters, logs,
 progress.md) in .superpowers/sdd/2026-10-26-clearings5810/.
+
+**The Time view, the narrower gains, and J_2 (owner 2026-10-26: "we're only clearing buildings at
+the periphery, and I only see flow/power gain there as well"; "let's try J_2 as the objective to
+see if it clears further in").** The gain plates were already log ratios (1/8x -- 8x); now 1/2x --
+2x (render.LIM 1), and a Time view: each home's escape time over its baseline's on that scale
+(compute.times_of re-solves every road frame on its carving rebuilt from the stored corridors, the
+mesh cache hitting, each state's P checked against the frame's to 1e-9; clear5810's frames save
+u_<fff>). Under fixed injection the current in a far gap barely moves when a bottleneck clears,
+so the current and power plates cannot show the far homes' gain; Time does. Re-rendered, every
+network, current and power plate is byte-identical (528), every gain plate changed. A sixth
+clearing, j2: SIMP's default at power 2 under RUNTIME, 15 budgets (GPU, ~8 min each; its own
+score L_J2 equal to the rescoring). Depth (depth5810.py, depth.json): a building's depth is its
+home's baseline escape time as an area-weighted quantile. Under P every method clears the middle:
+the cleared area's median depth 0.36 -- 0.44, 6 -- 14% of it in the shallowest quarter, 0 -- 5% in
+the deepest; j2 0.40 -- 0.49, deepest quarter 3 -- 9% (9% at 0.15 against SIMP's 5%). The
+deepest quarter's median escape time falls to x0.659 at 0.15 under j2, x0.672 under P; the middle
+half's x0.642 against x0.624. j2 gives up 0.002 -- 0.004 of L_P (0.397 against 0.401 at 0.15) for
+0.002 -- 0.003 of L_J2 (0.385 against 0.382): on 5810 the objective moves the clearing slightly.
+Roads at D 0.10 bring nearly every home under x0.5 (the Time plates saturate); clearings x0.6 --
+0.9 but near the cleared band.

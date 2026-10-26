@@ -13,7 +13,7 @@ from pathlib import Path
 
 PAGE = Path(__file__).resolve().parent
 PLATES = PAGE / "plates"           # render.PLATES (this script runs without render's imports)
-FLOWS = ("current", "power", "current_gain", "power_gain")
+FLOWS = ("current", "power", "current_gain", "power_gain", "time")
 VIEWS = {"DATA": ("network",) + FLOWS, "CDATA": ("clearing",) + FLOWS}   # the modes' frames
 HEAD = ('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'

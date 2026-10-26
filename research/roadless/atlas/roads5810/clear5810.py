@@ -13,7 +13,9 @@ frames are (NOTES, "Clearings on 5810 at fifteen budgets, for the build-out page
   track; NOTES, "Walled-in homes, round 2"), one run per budget (relax.py one, GPU), scored here
   under RUNTIME and under its own metric.
 
-Each run at the presets' power (road_rescore.CX_POWER: P). Each clearing a state of the plain mesh
+Each run at the presets' power (road_rescore.CX_POWER: P), but j2: SIMP's default at power 2
+(J_2, the far homes weighted by their escape time: owner 2026-10-26, "let's try J_2 as the
+objective to see if it clears further in"). Each clearing a state of the plain mesh
 (no carving), the road frames' baseline model (compute.py's): its lenses (road_rescore._lens_row),
 its current and power painted (compute.paint_state), and checked loudly (the baseline's P against
 the page's, D from the cleared set against the optimizer's, the state's clearing against the
@@ -69,11 +71,12 @@ BID = "ZAF.9.3.1_1_5810"
 TARGETS = tuple(round(0.01 * i, 2) for i in range(1, 16))     # the page's slider
 CHECK_AT = 0.05            # the budget a run's rows path is shown at (`run`)
 POWER = rr.CX_POWER        # the presets' objective: P (relax_rows' and polish_rows' `_p1`)
+OWN_LENS = {1.0: "L_P", 2.0: "L_J2"}      # an objective's power -> its lens (Lens A's form)
 POP = common.PopulationDemand()
 SCRATCH = ROOT / ".superpowers" / "sdd" / "2026-10-26-clearings5810"
 LOGS = SCRATCH / "logs"    # the queue's: <job>.log, <job>.time (/usr/bin/time -v)
 OUT = HERE / "clearings.json"
-VIEWS = ("clearing", "current", "power", "current_gain", "power_gain")
+VIEWS = ("clearing", "current", "power", "current_gain", "power_gain", "time")
 P_TOL = 1e-9               # the baseline's P against the page's, relative
 D_TOL = 1e-12              # D from the cleared set against the optimizer's
 ENERGY_TOL = 1e-8          # summed power against P, relative (the road frames' within 5e-10)
@@ -122,6 +125,9 @@ class Method(Protocol):
     @property
     def own(self) -> str: ...
 
+    @property
+    def power(self) -> float: ...
+
     def run(self) -> dict[str, str]: ...
 
     def at(self, target: float) -> Cleared: ...
@@ -133,16 +139,17 @@ def _rel(p: Path) -> str:
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class RelaxRun:
-    """SIMP (relax.py one) at each budget, its rows relax.rows_of's."""
+    """SIMP (relax.py one) at each budget at `power`, its rows relax.rows_of's."""
     key: str
     name: str
     how: str
     plan: str
     own: str
+    power: float
 
     def rows(self, target: float) -> Path:
         return (relax.rows_of(relax.plan_of(self.plan), self.own, target)
-                / f"{BID}_p{POWER:g}.parquet")
+                / f"{BID}_p{self.power:g}.parquet")
 
     def run(self) -> dict[str, str]:
         return dict(optimizer="relax.py one", plan=self.plan, metric=self.own,
@@ -150,7 +157,7 @@ class RelaxRun:
 
     def at(self, target: float) -> Cleared:
         r = pd.read_parquet(self.rows(target)).iloc[0]
-        if (r["plan"], r["along"], float(r["power"])) != (self.plan, self.own, POWER):
+        if (r["plan"], r["along"], float(r["power"])) != (self.plan, self.own, self.power):
             raise RuntimeError(f"{self.rows(target)}: plan {r['plan']}, metric {r['along']}, "
                                f"power {r['power']}")
         return Cleared(ids=np.asarray(r["simp_cleared"], dtype=np.int64), D=float(r["simp_D"]),
@@ -167,12 +174,13 @@ class PolishRun:
     preset: polish_greedy.Preset
     scoring: search.PolishScoring
     own: str
+    power: float
     search: str
 
     def rows(self, target: float) -> Path:
         p = self.preset
         return (polish_greedy.rows_of(p.picker, p.tries, p.width, p.pairs, self.scoring,
-                                      self.search, target) / f"{BID}_p{POWER:g}.parquet")
+                                      self.search, target) / f"{BID}_p{self.power:g}.parquet")
 
     def run(self) -> dict[str, str]:
         return dict(optimizer="polish_greedy.py", preset=self.rows(CHECK_AT).parent.parent.name,
@@ -199,6 +207,7 @@ class GreedyCut:
     how: str
     preset: polish_greedy.Preset
     own: str
+    power: float
     search: str
 
     def run(self) -> dict[str, str]:
@@ -213,7 +222,7 @@ class GreedyCut:
 
 
 def methods() -> dict[str, Method]:
-    """The four, resolved here (the command line picks one by key)."""
+    """The five, resolved here (the command line picks one by key)."""
     cheap = polish_greedy.CHEAP
     searched = cheap.on(metrics.metric_of(metrics.RUNTIME, device="cpu")).name
     ff = walled.ARMS["Ff"]
@@ -222,22 +231,28 @@ def methods() -> dict[str, Method]:
                  how="Relaxes every building to a fraction cleared, moves the fractions down P's "
                      "gradient within the budget as the penalty stiffens to whole buildings, "
                      "rounds, then polishes by exact swaps.",
-                 plan=relax.SIMP_DEFAULT, own=metrics.RUNTIME),
+                 plan=relax.SIMP_DEFAULT, own=metrics.RUNTIME, power=POWER),
+        RelaxRun(key="j2", name="SIMP, far homes weighted (J₂)",
+                 how="SIMP minimizing J₂, each home's escape time squared times its people, so a "
+                     "home twice as far counts four times, not twice; the default's settings "
+                     "otherwise. Scored here by P like the rest.",
+                 plan=relax.SIMP_DEFAULT, own=metrics.RUNTIME, power=2.0),
         GreedyCut(key="greedy", name="Greedy",
                   how="Clears a batch at a time, each to the next 1% of the people, the "
                       "buildings whose clearing lowers P most per person to first order, spread "
                       "over different catchments; one run cut at each budget.",
-                  preset=cheap, own=metrics.RUNTIME, search=searched),
+                  preset=cheap, own=metrics.RUNTIME, power=POWER, search=searched),
         PolishRun(key="cheap", name="Greedy + polish",
                   how="The greedy to the budget, then up to 64 exact swaps of a cleared "
                       "building for a standing one, each the best of eight ranked by P's "
                       "gradient.",
-                  preset=cheap, scoring=search.Exactly(), own=metrics.RUNTIME, search=searched),
+                  preset=cheap, scoring=search.Exactly(), own=metrics.RUNTIME, power=POWER,
+                  search=searched),
         RelaxRun(key="ff", name="SIMP, every home counted",
                  how="SIMP optimized under the rule that counts every walled-in home's trip "
                      "from its own ground, the better of starting from nothing and from the "
                      "cheapest crossings that free them; scored here under the page's metric.",
-                 plan=ff.plan, own=walled.RULES[ff.rule]),
+                 plan=ff.plan, own=walled.RULES[ff.rule], power=POWER),
     ]
     return {m.key: m for m in out}
 
@@ -368,8 +383,9 @@ def frames(method: Method) -> None:
     """Per target the method's clearing as a state of the plain mesh under RUNTIME (the road
     frames' baseline model), its lenses, its current and power painted (compute.paint_state on
     compute.frame_of's frame), every check loud; for a method optimized under another metric, its
-    lenses under that one too. Writes SCRATCH/<key>.npz (per frame the cleared set `x_<fff>` and
-    the rasters `j_<fff>`, `p_<fff>`) and SCRATCH/<key>.json."""
+    lenses under that one too. Writes SCRATCH/<key>.npz (per frame the cleared set `x_<fff>`, the
+    rasters `j_<fff>`, `p_<fff>` and each home's escape time `u_<fff>`, the Time plates', with the
+    baseline's `u_base`) and SCRATCH/<key>.json."""
     cp = load("compute", HERE / "compute.py")
     t0 = time.time()
     base = json.loads((cp.DATA / "baseline.json").read_text())
@@ -393,7 +409,7 @@ def frames(method: Method) -> None:
     W = common.POPULATIONS["area"].weights(np.asarray(b.buildings.outlines))
     share = W / W.sum()
     area = shapely.area(m.geo.polys)
-    out: dict[str, NDArray[Any]] = dict(frame=bnpz["frame"], lim=bnpz["lim"])
+    out: dict[str, NDArray[Any]] = dict(frame=bnpz["frame"], lim=bnpz["lim"], u_base=m.base.u)
     rows = []
     for target in TARGETS:
         ts = time.time()
@@ -420,18 +436,20 @@ def frames(method: Method) -> None:
                                f"{s['P_energy']!r}")
         lens = rr._lens_row(m, L)
         own_lens = lens if own is None else rr._lens_row(own, own.lenses(x))
-        if abs(own_lens["L_P"] - c.own) > OWN_TOL:
-            raise RuntimeError(f"{method.key} {target}: the optimizer's own L_P {c.own!r}, "
-                               f"rescored {own_lens['L_P']!r} under {method.own}")
+        own_score = own_lens[OWN_LENS[method.power]]
+        if abs(own_score - c.own) > OWN_TOL:
+            raise RuntimeError(f"{method.key} {target}: the optimizer's own score {c.own!r}, "
+                               f"rescored {own_score!r} ({OWN_LENS[method.power]} under "
+                               f"{method.own})")
         f = tag(target)
         rows.append(dict(
             f=f, target=target, D=D, D_opt=c.D, n=int(x.sum()), m2=float(area[x].sum()),
             P=L.P, LP=lens["L_P"], Pq=lens["L_Pq"], J2=lens["L_J2"], enclosed=lens["enclosed"],
             n_enclosed=lens["n_enclosed"], own_metric=method.own, own_LP=own_lens["L_P"],
             own_Pq=own_lens["L_Pq"], own_J2=own_lens["L_J2"], own_opt=c.own,
-            own_diff=own_lens["L_P"] - c.own, t_opt=c.t, job=c.job,
+            own_diff=own_score - c.own, own_power=method.power, t_opt=c.t, job=c.job,
             **{k: s[k] for k in cp.SCALARS}, t_state=time.time() - ts))
-        out[f"x_{f}"], out[f"j_{f}"], out[f"p_{f}"] = x, s["j"], s["p"]
+        out[f"x_{f}"], out[f"j_{f}"], out[f"p_{f}"], out[f"u_{f}"] = x, s["j"], s["p"], L.u
         print(f"{method.key} {f}: {json.dumps(rows[-1])}", flush=True)
         del s
     np.savez(SCRATCH / f"{method.key}.npz", **out)
@@ -446,11 +464,12 @@ def frames(method: Method) -> None:
 # ------------------------------------------------------------------ the plates
 
 def plates(method: Method) -> None:
-    """Per frame the five views (VIEWS) into render.PLATES as `<key>_<fff>_<view>.webp`: the
+    """Per frame the six views (VIEWS) into render.PLATES as `<key>_<fff>_<view>.webp`: the
     clearing (render.network_plate, each cleared building at c 1, no corridor), the current and
     the power (render.flow_plate on the plain baseline's log scales, the cleared outlined), their
-    gains over the plain baseline (render.divgain on the diverging scale). The clearing drawn and
-    the flow's are the same saved set (`x_<fff>`)."""
+    gains over the plain baseline (render.divgain on the diverging scale), and each home's escape
+    time over the plain baseline's (render.time_ratio, the cleared in grey). The clearing drawn
+    and the flow's are the same saved set (`x_<fff>`)."""
     rd = load("roads5810_render", HERE / "render.py")
     plates_dir: Path = rd.PLATES
     cp = rd.cp
@@ -478,6 +497,9 @@ def plates(method: Method) -> None:
             rd.flow_plate(rd.divgain(img, bnpz[key]), rd.GAIN, fr, polys, x, ramp=rd.DIV,
                           outline=True, boundary=boundary, streets=streets,
                           out=plates_dir / f"{stem}_{view}_gain.{rd.EXT}")
+        rd.time_plate(fr, polys, rd.time_ratio(d[f"u_{f}"], d["u_base"]), norm=rd.GAIN,
+                      ramp=rd.DIV, gone=x > 0, corridor=None, boundary=boundary,
+                      streets=streets, out=plates_dir / f"{stem}_time.{rd.EXT}")
 
 
 # ------------------------------------------------------------------ the page's data
@@ -532,7 +554,8 @@ def page() -> None:
                 files={v: f"{key}_{r['f']}_{v}.webp" for v in VIEWS}))
         if [r["target"] for r in rows] != list(TARGETS):
             raise RuntimeError(f"{key}: frames {[r['target'] for r in rows]}")
-        out["methods"][key] = dict(key=key, name=m.name, how=m.how, run=m.run(), rows=rows)
+        out["methods"][key] = dict(key=key, name=m.name, how=m.how, power=m.power, run=m.run(),
+                                   rows=rows)
     OUT.write_text(json.dumps(out, indent=1) + "\n")
     print(OUT, flush=True)
 

@@ -4,6 +4,7 @@ render.py's paint at 1200 px over the same extent), the lenses and the energy id
 
     S=research/roadless/atlas/roads5810/compute.py     # from the repo root
     PYTHONPATH=. uv run python $S baseline            # the plain mesh's baseline (the shared D 0)
+    PYTHONPATH=. uv run python $S times <method> <pass> <data dir>   # each home's escape time
     PYTHONPATH=. uv run python $S <method> <pass>     # cycle_native|clearance_looped coarse|fine
 
 A method's frames are the lineup's canonical prefixes (road_rescore.prefix_len under
@@ -134,6 +135,7 @@ def baseline(*, data: Path) -> None:
                 P=m.base.P, Pq=m.base.Pq, J2=m.base.J2, n_enclosed=m.base.n_enclosed,
                 **{k: s[k] for k in SCALARS}, t_model=t_model, t_total=time.time() - t0)
     (data / "baseline.json").write_text(json.dumps(info, indent=1))
+    np.savez(data / "baseline_times.npz", u=m.base.u, live=m.base.live)     # the Time plates'
     print(json.dumps(info, indent=1), flush=True)
 
 
@@ -228,10 +230,40 @@ def frames_of(name: str, run: str, b, ordered: gpd.GeoDataFrame, t0: float, *,  
     print(f"{name}: done in {time.time() - t0:.0f}s, peak {info['peak_rss_gb']:.1f} GB", flush=True)
 
 
+def times_of(name: str, run: str, *, data: Path, meshes: Path) -> None:
+    """Each home's escape time (Lenses.u, nan without demand) at <name>_<run>'s baseline and
+    stops, for the Time plates: the carving rebuilt from the corridors frames_of stored (its input,
+    exactly: the mesh cache's digest), each state's P checked against the frame's. Writes
+    <name>_<run>_times.npz into `data`."""
+    t0 = time.time()
+    d = np.load(data / f"{name}_{run}.npz", allow_pickle=True)          # our own file: WKB
+    info = json.loads((data / f"{name}_{run}.json").read_text())
+    stops = [int(s) for s in d["stops"]]
+    metric = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())
+    [b] = common.build_blocks([BID])
+    geo = gc.geometry(b)
+    carving = gcl.Carving.of(geo, [[shapely.from_wkb(d[f"corridor_{mm}"])[0] for mm in stops]])
+    fx = metric.fixed(b, cache=meshes, carving=carving)
+    m = metric.model(b, fx, demand=common.PopulationDemand())
+    out: dict[str, np.ndarray] = dict(stops=np.asarray(stops))
+    checks = [("base", m.lenses_of(m.state(np.zeros(m.n))), info["base"]["P"])]
+    rows = {r["m"]: r for r in info["frames"]}
+    for k, mm in enumerate(stops, start=1):
+        checks.append((str(mm), m.road_lenses(gcl.Prefix(net=0, stop=k)), rows[mm]["P"]))
+    for key, L, P in checks:
+        if abs(L.P - P) > 1e-9 * P:
+            raise AssertionError(f"{name}_{run} {key}: P {L.P} against the frame's {P}")
+        out[f"u_{key}"], out[f"live_{key}"] = L.u, L.live
+    np.savez(data / f"{name}_{run}_times.npz", **out)
+    print(f"{name}_{run}: {len(stops)} stops' escape times in {time.time() - t0:.0f}s", flush=True)
+
+
 if __name__ == "__main__":
     arg, *rest = sys.argv[1:]
     if arg == "baseline":
         baseline(data=DATA)
+    elif arg == "times" and len(rest) == 3:      # times <name> <run> <data dir>: meshes beside it
+        times_of(rest[0], rest[1], data=Path(rest[2]), meshes=Path(rest[2]) / ".meshes")
     elif arg in ("cycle_native", "clearance_looped") and len(rest) == 1 and rest[0] in PASSES:
         network(arg, rest[0], frames=PASSES[rest[0]], networks=LINEUP / "scratch/networks" / BID,
                 data=DATA, meshes=DATA / ".meshes")
