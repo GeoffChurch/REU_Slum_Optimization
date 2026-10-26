@@ -10671,3 +10671,51 @@ nearest). (4) The price per hour decided the stop; the readout that mattered was
 break-even price, which the rule could report itself. Scripts: research/roadless/vote_select.py;
 .superpowers/sdd/2026-10-25-vote-roads/stage3_lenses.py (not committed); the build in
 .superpowers/sdd/2026-10-22-flow-roads/dp_greedy_lineup+simp-...uA1.5.c0...v7_lazy5_D.
+
+### Clearings on 5810 at fifteen budgets, for the build-out page (2026-10-26)
+
+**Why.** The owner asked for the clearing methods beside the roads on the 5810 build-out page
+(now research/roadless/atlas/roads5810: moved out of the site's scratch the same day), as its own
+mode on the same slider, area D 0.01 to 0.15 by 0.01, under RUNTIME. Under RUNTIME only the
+stored SIMP clearing at D 0.05 existed, optimized under the metric before the paved-only boost.
+
+**Built.** atlas/roads5810/clear5810.py (greedy | frames | plates | page) and clearings.json
+beside the page. Four methods at power 1 (road_rescore.CX_POWER): simp, SIMP's default under
+RUNTIME, one run a budget (GPU); greedy, the cheap preset's greedy alone (S0.01cat under
+CHEAP.on(RUNTIME)), one nested run to 0.15 cut at each budget as polish_greedy cuts its
+greedy_perm; cheap, the cheap preset (its polish scored exactly), one run a budget (a core); ff,
+walled.ARMS["Ff"] (SIMP under HOMES, free first as a track), one run a budget (GPU), scored under
+RUNTIME and its own metric. Each clearing a state of the plain mesh, scored and painted as the road
+frames are (compute.paint_state, road_rescore._lens_row), five plates a frame into the page's
+plates/. Checks (raising): RUNTIME's baseline P on 5810 equals the page's to 0.0 relative (its
+name's v34d40e8a is v1569a066 now, no score moved); D from the cleared set equals the optimizer's
+to 1e-12; the state's clearing is the plates'; summed power equals P to 4.2e-11 relative; the
+optimizer's own L_P equals the rescoring to 1.4e-11 (simp), 1e-15 (cheap) and, under HOMES, 1.4e-11
+(ff; ff at 0.05 0.2594, the walled-in study's Ff on 5810 0.259366). The greedy's cut equals the
+cheap run's own greedy_perm clearing at all 15 budgets (held crossings, D, buildings, score); fault
+cut-whole-order (the nested order cut whole, not at the step a run to the budget ends on) raises at
+D 0.01 (0.009982 against 0.009717).
+
+**Results** (L_P under RUNTIME; floor area about D x 145,900 m^2):
+
+    D      simp    ff      cheap   greedy (its D)
+    0.01   0.121   0.121   0.110   0.101 (0.0097)
+    0.02   0.169   0.169   0.148   0.130 (0.0142)
+    0.05   0.255   0.255   0.246   0.245
+    0.10   0.346   0.346   0.337   0.337
+    0.15   0.401   0.401   0.393   0.393
+
+SIMP leads the cheap preset at every budget by 0.007 -- 0.021. The polish adds 0.009 and 0.018 at
+0.01 and 0.02, at most 0.004 above (0 -- 3 moves, 8 -- 24 scorings). The greedy's cut at 0.02 stops
+at 0.0142: its second batch overshoots and the cut drops the batch's large buildings. ff ends
+within -0.0001 .. +0.0007 of simp under RUNTIME (ahead at 13 of 15). Every clearing frees both
+walled-in homes; every method's L_P is monotone in D. Against the roads at equal D (the page's
+lineup, the same metric): SIMP 0.255 at 0.05 against cycle_native 0.392 and ΔP greedy top 12
+0.454; 0.401 at 0.15 against 0.575 and 0.652: a road is boosted as paved, a clearing is not.
+
+**Compute.** simp 8 -- 10 min wall a budget (GPU, ~20 GB peak); ff 6 -- 10 min (GPU, 24 GB); cheap
+12 -- 22 min a budget on a core (~12 GB; the small budgets slowest, the polish moving more); the
+nested greedy 16.5 min (11.9 GB); frames ~5 -- 9 min a method (7 -- 10 GB), plates ~1.5 min. Rows:
+relax_rows/<RUNTIME>/<SIMP default>/D<b>, polish_rows/<RUNTIME>@e0.05/S0.01cat.P64w8E/D<b>,
+relax_rows/<HOMES>/<SIMP default>E.ft/D<b>; scratch (the greedy's order, rasters, logs,
+progress.md) in .superpowers/sdd/2026-10-26-clearings5810/.
