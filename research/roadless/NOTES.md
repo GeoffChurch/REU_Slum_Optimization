@@ -10474,3 +10474,73 @@ L_P at D 0.05 are the most fragile of every network here. The lazy build with SI
 in its pool is the lineup-only build's equal (cut 1.6 / 0.7 / 0.4%, bridges 69 / 56 / 48%).
 Script: .superpowers/sdd/2026-10-22-flow-roads/damage_scan.py <step_m> <carry_m> (not
 committed).
+
+### Roads from the vote, stage 1: current ridges, frozen and periodic, on 5810 (2026-10-25)
+
+The owner's idea (plan docs/superpowers/plans/2026-10-25-roads-from-the-vote.md): clear some
+buildings, hypothetically or for real, solve the walking flow under RUNTIME, and lay roads along
+the ridges of its current, a vote for where people move. vote_roads.py: the vote painted on the
+block's 1 m BlockRaster, per quantile level (0.98, 0.95, 0.90, 0.85, 0.80, the highest first) the
+skeleton of the cells at or above it, merged into lines, the stretches inside built corridors
+dropped, each end joined to the street (its inscribed disk reaching it within 2 m) or to a built
+road (within 5.5 m); within a level the lines linked to the street go in by mean vote, the
+highest first (road_simp.linked's rule, one line at a time). A line left floating is dropped
+(`jr`) or traced downstream along the current, 0.5 m steps up to 300 m, to the street or a road
+(`jf300`). Frozen: one vote; periodic: the vote solved again each 0.01 of D with the roads built
+carved (the clearing kept, `k`, or dropped after the first vote, `d`). Sources: the block as it
+stands (`orig`); U's clearing at D 0.05 (metrics.UNIFORM, `.f0`, under P; 294 buildings: `U`);
+U under P_{1/2} (297 buildings, 205 shared: `Uq0.5`, relax.one with PriorityDemand(0.5), 46 min
+on a core). Scored on one carved mesh per network, its nested prefixes at area D: `dev`, the
+roads alone; `real`, the clearing kept in the state (gap_clear.Model.cleared_road_state, its
+guard cleared-roads: at k 0 road_state's bit for bit, beside a corridor the rebuild's to 2.9e-4,
+fault drop-k fails by 0.30) and in D. L_P at area D (dev unless marked):
+
+    D                         0.01  0.02  0.03  0.05  0.075 0.10  0.125 0.15  km 0.05/0.10/0.15
+    frozen, orig, current     0.091 0.154 0.197 0.301 0.415 0.503 0.567 0.604 1.9 / 4.5 / 7.7
+    frozen, orig, power       0.107 0.155 0.200 0.289 0.427 0.486 0.563 0.614 1.6 / 4.3 / 7.6
+    frozen, U, current        0.106 0.131 0.231 0.335 0.423 0.504 0.557 0.598 1.6 / 3.6 / 6.4
+    frozen, U, power          0.050 0.157 0.251 0.339 0.429 0.506 0.570 0.614 1.5 / 3.6 / 6.8
+    frozen, Uq0.5, current    0.035 0.157 0.256 0.317 0.388 0.493 0.559 0.590 1.6 / 3.8 / 6.8
+    periodic, orig            0.091 0.148 0.226 0.361 0.489 0.580 0.630 0.662 1.7 / 4.6 / 6.9
+    periodic, U kept          0.106 0.162 0.249 0.396 0.482 0.576 0.621 0.653 2.0 / 4.4 / 6.7
+    periodic, U dropped       0.106 0.158 0.237 0.369 0.495 0.575 0.628 0.660 1.9 / 4.5 / 7.0
+    periodic, U kept, real                            0.392 0.507 0.591 0.640 (from D 0.05)
+    lazy ΔP greedy (lineup)   0.236 0.340 0.410 0.493 0.556 0.611 0.647 0.678 3.4 / 6.7 / 9.1
+    cycle_native (canonical)  0.146 0.184        0.392        0.520        0.575 2.6 / 5.5 / 8.3
+
+(all `jf300`; L_{P_1/2} follows L_P, periodic U kept 0.391 / 0.579 / 0.653 at 0.05 / 0.10 / 0.15.)
+- `jr` fragments: the vote's ridges at these levels skeletonize to 18 km on the block, but most
+  pieces lie inside it apart from the street, and only 2.3 km (D 0.045, orig, current) is linked;
+  with the traces every network runs to 27 -- 38 km, and the build order cuts it.
+- Current or power: a tie (power ahead by 0.01 -- 0.02 at D 0.15, behind at 0.10 from orig).
+- The vote's source: U's clearing leads the block as it stands by 0.03 -- 0.05 at D 0.03 -- 0.05
+  and ties above; under P_{1/2} it does not (nor on L_{P_1/2}: 0.301 / 0.476 / 0.566 against U's
+  0.323 / 0.486 / 0.579).
+- Frozen or periodic: periodic leads by 0.06 -- 0.08 from D 0.05 (orig 0.361 / 0.580 / 0.662
+  against 0.301 / 0.503 / 0.604), in no more road; the clearing kept or dropped in the recompute
+  ties (U kept ahead at 0.05, dropped at 0.15, by 0.007 -- 0.03). A step's mesh and vote ~5.5 min
+  on 5810: 15 steps, 83 min.
+- Real or device: at equal total D the clearing as a device leads (0.576 against 0.507 at 0.10):
+  the clearing alone is 0.255 at D 0.050, a road's D buys more.
+- Against the lineup: periodic leads cycle_native by 0.06 -- 0.09 from D 0.10 in less road (6.9
+  against 8.3 km at 0.15), ties it at 0.05; it trails the lazy ΔP greedy by 0.10 -- 0.13 at D 0.05,
+  0.03 at 0.10 and 0.02 at 0.15, in 2.2 km less road at 0.15.
+Shape (clutter.py's measure; damage.py at step 10 m, carry 100 m), D 0.05 / 0.10 / 0.15:
+
+                              within 5 m (%)   bridges (%)    cut (%)          served
+    frozen, orig, current     35 / 26 / 28     93 / 95 / 92   1.4 / 1.5 / 1.0  0.66 / 0.76 / 0.81
+    frozen, U, power          12 / 21 / 24     97 / 97 / 96   2.8 / 1.6 / 1.1  0.72 / 0.75 / 0.78
+    periodic, orig            38 / 38 / 42     95 / 92 / 87   2.2 / 2.0 / 1.7  0.69 / 0.84 / 0.91
+    periodic, U kept          40 / 38 / 43     89 / 88 / 80   2.9 / 2.2 / 1.6  0.74 / 0.88 / 0.92
+    lazy ΔP greedy (lineup)   16 / 20 / 18     63 / 51 / 49   1.8 / 0.9 / 0.5  0.96 / 0.98 / 1.00
+
+The vote's roads are combs of short feeders where the current concentrates, near the exits (the
+east edge above all); the interior gets none to D 0.10 (pictures:
+.superpowers/sdd/2026-10-25-vote/vote_D0.10.png): the current is diluted there, as the owner
+foresaw. Periodic votes grow feeders beside the roads already built, and clutter doubles (40%
+within 5 m against the frozen 20 -- 30%). One scoring failed meshing (frozen U current `jr`: "the
+mesh is not Delaunay", BACKLOG's carving item). Next, the greedy stage: the periodic networks
+(orig and U kept) and frozen U power as candidate pools beside the lineup's, their feeders being
+what the lineup's long interior roads lack. Scripts: research/roadless/vote_roads.py; rows in
+research/roadless/vote_rows/<metric>/ (not committed), the clearings in vote_rows/clearings/;
+.superpowers/sdd/2026-10-22-flow-roads/vote_lenses.py and 2026-10-25-vote/vote_plates.py.
