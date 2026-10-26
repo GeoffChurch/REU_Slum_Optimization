@@ -493,11 +493,12 @@ def build(bid: str, source: Source, signal: Signal, dyn: Dynamics, join: Join) -
 # ------------------------------------------------------------------ the score
 
 def cuts(world: World, net: gpd.GeoDataFrame, k0: NDArray[np.float64]) -> list[tuple[float, int]]:
-    """(D, prefix length) at each target D the roads reach, D counting the clearing k0's buildings
-    too (a real clearing; zeros: the roads alone)."""
+    """(D, prefix length) at each target D the roads reach past the clearing k0's own, D counting
+    its buildings too (a real clearing; zeros: the roads alone)."""
     inc = IncrementalDestroyed(common.MEASURE, world.b.buildings)
     if k0.any():
         inc.add(shapely.union_all(np.asarray(world.b.buildings.outlines)[k0 > 0]))
+    d0 = float((inc.c() * world.W).sum() / world.W.sum())     # the clearing alone (its own row)
     Ds = []
     for i in range(len(net)):
         inc.add(road_corridor(cast("gpd.GeoDataFrame", net.iloc[[i]])))
@@ -506,7 +507,7 @@ def cuts(world: World, net: gpd.GeoDataFrame, k0: NDArray[np.float64]) -> list[t
     out = []
     for t in TARGETS:
         j = int(np.searchsorted(D, t))
-        if j < len(D):
+        if t > d0 and j < len(D):
             out.append((t, j + 1))
     return out
 
