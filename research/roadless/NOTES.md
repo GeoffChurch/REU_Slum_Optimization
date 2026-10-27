@@ -10802,3 +10802,27 @@ halos land near the street as well as inside. So conductance by free space shift
 way the owner expected, but modestly, and how much it helps is a property of the width form,
 which RUNTIME's shy0.5 settled before (the earlier s 0.5 ramp scoring above, levels 0.362 against
 shy's 0.277, method order unchanged). The clearings still take the middle, not the core.
+
+### Conductance added: the roads' and the clearings' cost in one unit, on 5810 (2026-10-27)
+
+Owner: the build-out page's chart with its axes chosen, and the change in conductance as a common
+unit for buildings displaced and roads added, "some monotone function (ideally the identity) of
+conductivity added", since a footprint's resistance may be infinite. gap_clear.Model.sheet: a
+state's sheet conductance, per triangle area x factor (kt) x boost (boost_of, mesh_of's: the ways',
+and a proposed road's 10 on a road prefix's corridor), summed, in m^2 of open ground (sigma 1).
+Additive and finite whatever a footprint's resistance (a standing one holds none). A frame's
+conductance added `C` is its sheet less its own mesh's baseline's (atlas/roads5810/sheet.py; the
+carved meshes' baselines equal the plain mesh's 462,221 m^2 to 0.001 m^2). A clearing adds its
+footprints and the shy zones only they held shut (SIMP at 5%: 8,176 m^2 for 7,291 m^2 of floor);
+a road adds its carved buildings and nine or ten per m^2 of corridor (cycle_native at 5%: 164,344
+m^2 for 2.64 km), so at equal displacement the roads add 15 -- 40 times the clearings'
+conductance, and at 15% the best network (0.765) adds 1.6 times the block's whole baseline.
+At equal conductance the clearings win by far: 25,000 m^2 clears 15% for L_P 0.40, where no road
+network's first frame (30,000 m^2 and up) passes 0.23 and the best reach 0.38 only at 100,000. Among
+the roads the order mostly holds at equal C, the spread narrower (L_P 0.17 -- 0.38 at 100,000 m^2,
+0.32 -- 0.50 at 200,000, against 0.24 -- 0.63 at D 5%): road SIMP (gamma 1) and the exact ΔP
+greedy lead, its SIMP-pool runs at 300,000 (0.59), clearance_looped last. On a log C axis each
+road network's L_P is close to linear in log C. The page's chart now picks its axes (L_P,
+displacement, conductance added on a linear or log scale, road length), rings marking the
+slider's frame on each line; the artifact republished (version 3). The 16 flow-roads carved
+meshes deleted that morning were rebuilt for this (8 -- 12 GB peak each).

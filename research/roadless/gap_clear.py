@@ -1584,9 +1584,26 @@ class Model:
         road (gap_exits.Boost.road; a triangle on a way too takes the larger factor)."""
         if prefix.stop == 0:
             return self.fm
+        return self.exits.edge.mesh(gx.boosted(self.fx.fm, self.boost_of(prefix)))
+
+    def boost_of(self, prefix: Prefix) -> NDArray[np.float64]:
+        """Per triangle the sheet conductance's factor at `prefix` (mesh_of's): the ways' boost,
+        and on a road prefix's corridor the larger of it and a proposed road's."""
+        if prefix.stop == 0:
+            return self.b_ways
         on = self.carving.paved(prefix, self.cen_)
-        b = np.where(on, np.maximum(self.b_ways, self.exits.boost.road), self.b_ways)
-        return self.exits.edge.mesh(gx.boosted(self.fx.fm, b))
+        return np.where(on, np.maximum(self.b_ways, self.exits.boost.road), self.b_ways)
+
+    def sheet(self, st: State) -> float:
+        """The sheet conductance `st` holds over the mesh, in m^2 of open ground (sigma 1): per
+        triangle its area times its factor (kt) times its boost (boost_of), summed. Additive
+        and finite whatever a footprint's resistance (it holds none), so a clearing's and a road's
+        additions are one quantity (the 5810 build-out page's chart)."""
+        xy, tri = self.fx.fm.xy, self.fx.fm.tri
+        a, b, c = xy[tri[:, 0]], xy[tri[:, 1]], xy[tri[:, 2]]
+        area = 0.5 * np.abs((b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1])
+                            - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0]))
+        return float(area @ (st.kt * self.boost_of(st.prefix)))
 
     def _factors(self, sys: System, k: NDArray[np.float64], *, prefix: Prefix) -> State:
         t = time.time()

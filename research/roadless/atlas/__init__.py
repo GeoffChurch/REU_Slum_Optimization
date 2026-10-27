@@ -11,6 +11,7 @@ roads5810/ (5810 Road Build-out, moved here from the site's scratch 2026-10-26):
 and building clearings on block 5810 side by side on a displacement slider, under RUNTIME. Its
 page (index.html), local.py (plates/index.html, the page to open from disk), compute.py and
 render.py (the road frames and every plate; the flow-roads study's scripts call them),
+sheet.py (each frame's conductance added, the chart's `C`),
 artifact.py (the page as a claude.ai artifact, https://claude.ai/artifact/UnDkhPymCPcmxWXbHASys3:
 each method's frames of a view one sprite sheet, in plates/artifact/), and plates/ (git-ignored:
 every plate the page names). The rasters stay in the site's scratch
