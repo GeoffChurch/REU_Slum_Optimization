@@ -443,11 +443,12 @@ class Roads:
         """The eps world's state with SIMP's share s per triangle of a road."""
         m = self.m
         kt = self.kt0 + s * (1.0 - self.kt0)
-        fm = m.exits.edge.mesh(gx.boosted(m.fx.fm, self.bw + s * self.db))
+        b = self.bw + s * self.db
+        fm = m.exits.edge.mesh(gx.boosted(m.fx.fm, b))
         kp, binds = gcl._passage_factors(fm, kt, self.ka, m.fill)
         r = m.sys.graph.reach(fm, kt, kp)
         f = m.sys.planned.factor(m.sys.graph.values(r), r.unknown)
-        return gcl.State(sys=m.sys, prefix=gcl._NO_ROADS, fm=fm, k=self.ka, kt=kt, kp=kp,
+        return gcl.State(sys=m.sys, prefix=gcl._NO_ROADS, b=b, fm=fm, k=self.ka, kt=kt, kp=kp,
                          binds=binds, reach=r, A=None, factor=f)
 
     def P_grad(self, s: NDArray[np.float64]) -> tuple[float, NDArray[np.float64]]:

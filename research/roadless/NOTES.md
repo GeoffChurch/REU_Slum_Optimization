@@ -10826,3 +10826,26 @@ road network's L_P is close to linear in log C. The page's chart now picks its a
 displacement, conductance added on a linear or log scale, road length), rings marking the
 slider's frame on each line; the artifact republished (version 3). The 16 flow-roads carved
 meshes deleted that morning were rebuilt for this (8 -- 12 GB peak each).
+
+### The uniform baselines: conductance added evenly, on 5810 (2026-10-27)
+
+Owner: "a baseline pseudo-method that just increases the conductance of everything (or e.g. just
+the open ground), so you can see how much P decreases per unit of homogeneously increased
+conductance". atlas/roads5810/uniform.py: no building cleared, every triangle's boost scaled by 1 +
+eps (`all`: the sheet itself, paved ways too, 462,221 m^2) or only those off the paved ways (`open`:
+384,653 m^2 of it), eps chosen for conductance added C of 2k -- 1M m^2 (gap_clear.Model
+.boosted_state; State now carries its boost `b`, which Model.sheet reads, the baseline unchanged to
+the m^2). P does not fall as 1 / (1 + eps): the leaks to ground are per cell and fixed (at C 100k,
+`all` 0.165 against 0.178 without them).
+
+    C (m^2)    2k      10k     20k     50k     100k    200k    500k    1M
+    all        0.004   0.019   0.038   0.090   0.165   0.283   0.497   0.664
+    open       0.005   0.023   0.045   0.105   0.190   0.319   0.538   0.698
+
+Against `open` at each frame's own C (log-interpolated): the clearings take 13x its L_P at D 0.05
+(SIMP 0.255 at 8k, uniform 0.020), 6.7x at 0.15 (0.401 at 25k, 0.060). The road networks take 1.0
+-- 1.6x at D 0.05 and 0.8 -- 1.2x at 0.15: the best, the lazy ΔP greedy on the lineup + SIMP r7
+pools, 0.765 at 730k against 0.625; the lazy greedy 1.6x at 0.05; clearance_looped 1.0x at 0.05 and
+0.10 and below it at 0.15 (0.421 at 434k, uniform 0.503). So most of a road's conductance does what
+the same conductance spread evenly would: a road is a placement worth 1 -- 1.6x evenness, a
+clearing 7 -- 13x. The page draws both lines wherever C is an axis.

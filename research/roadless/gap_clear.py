@@ -1417,12 +1417,14 @@ class System:
 
 class State(NamedTuple):
     """A clearing's state on one System of the fixed mesh: the road prefix carved (`prefix`: none,
-    or a Carving's network at a stop), the mesh it conducts on (`fm`: Model.mesh_of), the factors
-    (per atom `k`, per triangle `kt`, per passage `kp`, whether its fill binds), its reach and,
-    once factored, its operator on the pattern (cells x cells) and the operator's
-    factorization."""
+    or a Carving's network at a stop), the sheet conductance's boost per triangle (`b`:
+    Model.boost_of's, or a caller's) and the mesh it conducts on (`fm`: the fixed mesh boosted by
+    `b`, Model.mesh_of's), the factors (per atom `k`, per triangle `kt`, per passage `kp`, whether
+    its fill binds), its reach and, once factored, its operator on the pattern (cells x cells) and
+    the operator's factorization."""
     sys: System
     prefix: Prefix
+    b: NDArray[np.float64]
     fm: FullMesh
     k: NDArray[np.float64]
     kt: NDArray[np.float64]
@@ -1542,7 +1544,8 @@ class Model:
         a, b, c = (self.fm.xy[self.fm.tri[:, k]] for k in range(3))
         tri_area = 0.5 * np.abs((b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1])
                                 - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0]))
-        f0 = self._factors(bare, np.zeros(self.n_), prefix=_NO_ROADS)
+        self.tri_area = tri_area
+        f0 = self._factors(bare, np.zeros(self.n_), prefix=_NO_ROADS, b=self.b_ways)
         r0 = bare.graph.reach(fm_open, f0.kt, f0.kp)
         open0 = (np.bincount(cells.cell, weights=f0.kt > 0, minlength=cells.n) > 0) & ~r0.ground
         if (r0.unknown & ~open0).any():
@@ -1582,9 +1585,14 @@ class Model:
         """The mesh a state of `prefix` conducts on: the exits' (`fm`) with no road; a road
         prefix's with its corridor's triangles (by centroid) boosted as the exits boost a proposed
         road (gap_exits.Boost.road; a triangle on a way too takes the larger factor)."""
-        if prefix.stop == 0:
+        return self._mesh(self.boost_of(prefix))
+
+    def _mesh(self, b: NDArray[np.float64]) -> FullMesh:
+        """The mesh whose sheet conductance is boosted by `b` per triangle (the exits' `fm` for the
+        ways' own)."""
+        if b is self.b_ways:
             return self.fm
-        return self.exits.edge.mesh(gx.boosted(self.fx.fm, self.boost_of(prefix)))
+        return self.exits.edge.mesh(gx.boosted(self.fx.fm, b))
 
     def boost_of(self, prefix: Prefix) -> NDArray[np.float64]:
         """Per triangle the sheet conductance's factor at `prefix` (mesh_of's): the ways' boost,
@@ -1596,18 +1604,15 @@ class Model:
 
     def sheet(self, st: State) -> float:
         """The sheet conductance `st` holds over the mesh, in m^2 of open ground (sigma 1): per
-        triangle its area times its factor (kt) times its boost (boost_of), summed. Additive
+        triangle its area times its factor (kt) times its boost (State.b), summed. Additive
         and finite whatever a footprint's resistance (it holds none), so a clearing's and a road's
         additions are one quantity (the 5810 build-out page's chart)."""
-        xy, tri = self.fx.fm.xy, self.fx.fm.tri
-        a, b, c = xy[tri[:, 0]], xy[tri[:, 1]], xy[tri[:, 2]]
-        area = 0.5 * np.abs((b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1])
-                            - (b[:, 1] - a[:, 1]) * (c[:, 0] - a[:, 0]))
-        return float(area @ (st.kt * self.boost_of(st.prefix)))
+        return float(self.tri_area @ (st.kt * st.b))
 
-    def _factors(self, sys: System, k: NDArray[np.float64], *, prefix: Prefix) -> State:
+    def _factors(self, sys: System, k: NDArray[np.float64], *, prefix: Prefix,
+                 b: NDArray[np.float64]) -> State:
         t = time.time()
-        fm = self.mesh_of(prefix)
+        fm = self._mesh(b)
         ka = self.carving.atom_k(k, prefix=prefix)
         kt = self.terms.value(ka)
         kp, binds = _passage_factors(fm, kt, ka, self.fill)
@@ -1615,11 +1620,12 @@ class Model:
         t = time.time()
         r = sys.graph.reach(fm, kt, kp)
         self.timing.add("reach", time.time() - t)
-        return State(sys=sys, prefix=prefix, fm=fm, k=ka, kt=kt, kp=kp, binds=binds, reach=r,
+        return State(sys=sys, prefix=prefix, b=b, fm=fm, k=ka, kt=kt, kp=kp, binds=binds, reach=r,
                      A=None, factor=None)
 
-    def _state(self, sys: System, k: NDArray[np.float64], *, prefix: Prefix) -> State:
-        st = self._factors(sys, k, prefix=prefix)
+    def _state(self, sys: System, k: NDArray[np.float64], *, prefix: Prefix,
+               b: NDArray[np.float64]) -> State:
+        st = self._factors(sys, k, prefix=prefix, b=b)
         t = time.time()
         data = sys.graph.values(st.reach)
         p = sys.graph.pattern
@@ -1633,11 +1639,17 @@ class Model:
     def factors(self, k: NDArray[np.float64]) -> State:
         """The state of the clearing k (no road carved): its factors and reach (no operator: the
         enclosed homes need no solve)."""
-        return self._factors(self.sys, k, prefix=_NO_ROADS)
+        return self._factors(self.sys, k, prefix=_NO_ROADS, b=self.boost_of(_NO_ROADS))
 
     def state(self, k: NDArray[np.float64]) -> State:
         """The state of the clearing k (no road carved), its operator assembled and factored."""
-        return self._state(self.sys, k, prefix=_NO_ROADS)
+        return self._state(self.sys, k, prefix=_NO_ROADS, b=self.boost_of(_NO_ROADS))
+
+    def boosted_state(self, k: NDArray[np.float64], b: NDArray[np.float64]) -> State:
+        """The state of the clearing k (no road carved) with the sheet conductance boosted by `b`
+        per triangle in place of the ways' (b_ways): the uniform baselines (b_ways scaled), which
+        add conductance without displacing anyone (atlas/roads5810/uniform.py)."""
+        return self._state(self.sys, k, prefix=_NO_ROADS, b=b)
 
     def leaked_state(self, leak: gx.Leak, k: NDArray[np.float64]) -> State:
         """The state of the clearing k (no road carved) with `leak` in place of the exits' own,
@@ -1645,21 +1657,23 @@ class Model:
         built again (region_leaks' trip calibration)."""
         sys = self.sys.with_graph(self.sys.graph.with_leak(leak.per_cell(self.leak_site),
                                                            live0=self.leak_site.live))
-        return self._state(sys, k, prefix=_NO_ROADS)
+        return self._state(sys, k, prefix=_NO_ROADS, b=self.boost_of(_NO_ROADS))
 
     def road_factors(self, prefix: Prefix) -> State:
         """A road network's prefix's factors and reach (no operator: the homes it reaches need no
         solve)."""
         if prefix.stop < 1:
             raise ValueError(f"{prefix}: a road prefix has a stop from 1")
-        return self._factors(self.sys, np.zeros(self.n_), prefix=prefix)
+        return self._factors(self.sys, np.zeros(self.n_), prefix=prefix,
+                             b=self.boost_of(prefix))
 
     def road_state(self, prefix: Prefix) -> State:
         """The state of a road network's prefix (the carving's), no building cleared: the atoms it
         carves open (the road rule: exactly its corridor), its operator assembled and factored."""
         if prefix.stop < 1:
             raise ValueError(f"{prefix}: a road prefix has a stop from 1")
-        return self._state(self.sys, np.zeros(self.n_), prefix=prefix)
+        return self._state(self.sys, np.zeros(self.n_), prefix=prefix,
+                           b=self.boost_of(prefix))
 
     def cleared_road_state(self, k: NDArray[np.float64], prefix: Prefix) -> State:
         """The state of the clearing k with a road network's prefix carved: road_state's, the
@@ -1667,7 +1681,7 @@ class Model:
         road_state)."""
         if prefix.stop < 1:
             raise ValueError(f"{prefix}: a road prefix has a stop from 1")
-        return self._state(self.sys, k, prefix=prefix)
+        return self._state(self.sys, k, prefix=prefix, b=self.boost_of(prefix))
 
     def _rhs(self, st: State, inj: NDArray[np.float64]) -> NDArray[np.float64]:
         """The right-hand side per cell of the injection `inj` per home (a point in a ground cell
