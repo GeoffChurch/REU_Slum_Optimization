@@ -10758,3 +10758,47 @@ the middle half x0.374 against x0.356, the shallowest x0.984 against x0.939; by 
 are level (x0.299 / x0.305) and J_2 still costs the shallow (x0.934 against x0.824 at 0.15). As
 with the clearings, the objective shifts the build a little toward the deep homes; P's roads
 already bring the deepest quarter to x0.25 at 0.15 (clearings x0.67).
+
+### Conductance that grows with the distance from buildings, on 5810 (2026-10-27)
+
+Owner: "clearing a building would increase conductivity around it as well, rather than just
+within its footprint". The gap complex's Ramp width form (gap_flow.Ramp, phi(d) = clip((d - w/2) /
+s, 0, 1), d the distance to the nearest standing footprint, w 0.5 m as shy0.5's) in RUNTIME's
+place (`ramp0.5s<s>`), SIMP's default under it (relax.py one, P) at s 1, 2, 4 m and D 0.05, 0.10,
+0.15 (nine GPU runs, 7 -- 15 min each with the mesh, 25 GB peak). Scored by
+.superpowers/sdd/2026-10-27-ramp5810/ramp5810.py: each clearing under its own ramp and under
+RUNTIME, RUNTIME's SIMP clearing (the build-out page's simp) under each ramp, the cleared area's
+depth (depth5810's, RUNTIME baseline escape-time quantile, area-weighted), and the area-weighted
+median time ratio per depth band (deepest quarter / middle half / shallowest quarter of homes),
+under RUNTIME and under the clearing's own ramp against that ramp's baseline.
+
+| D | s | n | depth | deep share | L_P own (simp) | L_P RUNTIME | Jaccard | own deep / mid / shallow (simp's) |
+|---|---|---|---|---|---|---|---|---|
+| 0.05 | shy | 296 | 0.376 | 1.7% | | 0.255 | | x0.805 / 0.753 / 0.998 under RUNTIME |
+| 0.05 | 1 | 366 | 0.420 | 2.7% | 0.336 (0.321) | 0.249 | 0.58 | x0.735 / 0.717 / 0.906 (0.756 / 0.691 / 0.993) |
+| 0.05 | 2 | 383 | 0.435 | 3.0% | 0.380 (0.344) | 0.241 | 0.44 | x0.697 / 0.671 / 0.889 (0.744 / 0.677 / 0.985) |
+| 0.05 | 4 | 396 | 0.463 | 3.6% | 0.429 (0.357) | 0.225 | 0.31 | x0.646 / 0.600 / 0.863 (0.740 / 0.657 / 0.971) |
+| 0.10 | shy | 621 | 0.427 | 3.8% | | 0.346 | | x0.720 / 0.642 / 0.982 under RUNTIME |
+| 0.10 | 1 | 666 | 0.441 | 4.7% | 0.438 (0.429) | 0.339 | 0.61 | x0.643 / 0.548 / 0.856 (0.653 / 0.554 / 0.957) |
+| 0.10 | 2 | 729 | 0.442 | 5.2% | 0.486 (0.466) | 0.325 | 0.52 | x0.598 / 0.520 / 0.817 (0.628 / 0.503 / 0.939) |
+| 0.10 | 4 | 722 | 0.450 | 5.9% | 0.544 (0.496) | 0.314 | 0.42 | x0.543 / 0.450 / 0.798 (0.608 / 0.458 / 0.926) |
+| 0.15 | shy | 974 | 0.441 | 5.0% | | 0.401 | | x0.668 / 0.574 / 0.944 under RUNTIME |
+| 0.15 | 1 | 1033 | 0.463 | 7.1% | 0.499 (0.491) | 0.394 | 0.67 | x0.577 / 0.490 / 0.814 (0.593 / 0.481 / 0.880) |
+| 0.15 | 2 | 1069 | 0.472 | 7.5% | 0.554 (0.535) | 0.387 | 0.56 | x0.529 / 0.429 / 0.744 (0.563 / 0.431 / 0.841) |
+| 0.15 | 4 | 1071 | 0.487 | 8.5% | 0.614 (0.574) | 0.375 | 0.45 | x0.468 / 0.360 / 0.749 (0.534 / 0.372 / 0.817) |
+
+The ramp moves the clearings a little inward and makes them more, smaller buildings: median depth
+0.376 to 0.42 -- 0.46 at 0.05 and 0.441 to 0.46 -- 0.49 at 0.15, the deepest quarter's share of the
+cleared area 1.7% to 2.7 -- 3.6% and 5.0% to 7.1 -- 8.5%, the count up 4 -- 34%, growing with s. The
+objectives part with s (Jaccard with RUNTIME's SIMP 0.58 / 0.44 / 0.31 at 0.05): under its own ramp
+each clearing beats RUNTIME's SIMP by 0.015 / 0.036 / 0.073 at 0.05 (0.008 / 0.019 / 0.040 at
+0.15), and under RUNTIME it trails by 0.006 / 0.014 / 0.030 (0.007 / 0.014 / 0.026). Under RUNTIME
+the deepest quarter does not gain (x0.668 / 0.676 / 0.674 / 0.682 for shy, s 1, 2, 4 at 0.15): the
+halo that drew the clearing inward is not in the metric. Under its own ramp the deepest quarter
+does gain over RUNTIME's SIMP scored the same way (x0.468 against x0.534 at s 4, 0.15; x0.646
+against x0.740 at 0.05), the middle half about level, but the largest difference is the shallowest
+quarter (x0.749 against x0.817; x0.863 against x0.971): the extra, smaller clearings that open
+halos land near the street as well as inside. So conductance by free space shifts the answer the
+way the owner expected, but modestly, and how much it helps is a property of the width form,
+which RUNTIME's shy0.5 settled before (the earlier s 0.5 ramp scoring above, levels 0.362 against
+shy's 0.277, method order unchanged). The clearings still take the middle, not the core.
