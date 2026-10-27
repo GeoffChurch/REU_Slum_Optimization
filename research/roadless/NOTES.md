@@ -10739,3 +10739,22 @@ half's x0.642 against x0.624. j2 gives up 0.002 -- 0.004 of L_P (0.397 against 0
 0.002 -- 0.003 of L_J2 (0.385 against 0.382): on 5810 the objective moves the clearing slightly.
 Roads at D 0.10 bring nearly every home under x0.5 (the Time plates saturate); clearings x0.6 --
 0.9 but near the cleared band.
+
+### ΔP greedy under J_2 on 5810 (2026-10-26)
+
+Owner: "J_2 might be interesting for roads." The flow-roads study's dp_greedy.py takes its
+objective as a Strategy (`P`, or `J:<p>`, J_p = sum of pop * u_home^p; a run's name ends `_J<p>`,
+P's carry no suffix), the lazy pick only (the screens bound the drop in P). Two builds at lazy:5,
+cost D, each beside its P twin, frames at D 0.01 -- 0.15 under RUNTIME (L_J2 the Lens A form):
+the lineup pool (2.3 h) and the lineup + two SIMP r7 pools (stage 3's best, 3.3 h). Under P every
+road network already scores L_J2 within ~0.01 of L_P (the clearings trail it by ~0.02): roads
+help far homes in proportion. Lineup: J_2 loses on its own lens at most budgets (-0.019 -- +0.013
+L_J2, -0.022 -- +0.001 L_P; 0.665 / 0.668 against 0.670 / 0.678 at 0.15): the myopic greedy's
+J_2 drops do not add up to a better J_2 network on a thin pool. Two SIMP pools: J_2 leads on L_J2
+at most budgets (-0.002 -- +0.028; +0.028 at 0.05, +0.005 at 0.15, 0.766 against 0.762) for
+-0.008 -- +0.019 of L_P (0.764 against 0.765 at 0.15). By depth (baseline escape-time quarters,
+area-weighted median time ratio): at 0.05 the deepest quarter x0.379 under J_2 against x0.416,
+the middle half x0.374 against x0.356, the shallowest x0.984 against x0.939; by 0.10 the deepest
+are level (x0.299 / x0.305) and J_2 still costs the shallow (x0.934 against x0.824 at 0.15). As
+with the clearings, the objective shifts the build a little toward the deep homes; P's roads
+already bring the deepest quarter to x0.25 at 0.15 (clearings x0.67).
