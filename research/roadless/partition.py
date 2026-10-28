@@ -87,6 +87,7 @@ from numpy.typing import NDArray
 from scipy import ndimage, signal
 from scipy.cluster.vq import kmeans2
 from scipy.spatial import cKDTree
+from skimage.measure import label
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -119,6 +120,7 @@ RAA = 1e-6               # MMA: p and q's floor, relative to the largest |deriva
 TW_TOL = 1e-4            # Plan.tw: T_w bisected to this, relative
 TW_N = 200               # Plan.tw: the synthetic step's raster (pixels a side)
 KNN = 8                  # Spectral: each building's nearest neighbours (by centroid)
+MIN_REGION_M2 = 400.0    # m^2: a start's region under this is merged into a neighbour (merged)
 NODAL_FLOOR = 0.01       # Nodal: the mass's share spread by area (the open ground's cells
                          # hold no demand: M positive definite)
 KMEANS_ITER = 50         # Voronoi, Spectral: k-means iterations
@@ -129,7 +131,8 @@ REACH_M = 50.0           # m: a home "reached": within this of a road (the growt
 DEEP_Q = 0.75            # the deepest quarter: homes at depth quantile >= this
 DAMAGE_STEP_M = 10.0     # the damage term's piece length (NOTES, "Roads from the vote, stage 2")
 DAMAGE_CARRY_M = 100.0   # the damage term's carry
-REV = 1
+REV = 2                  # 2: the start's cells split into connected regions before colouring,
+                         # those under MIN_REGION_M2 merged (`merged`)
 OUT = HERE / "partition_rows"
 
 
@@ -722,9 +725,33 @@ def partition_of(b: Any, metric: gcl.ComplexMetric, plan: Plan) -> Partition:
     return Partition(rd, K=plan.K, T_w=tw(plan.radius, plan.K))
 
 
+def merged(cells: I64) -> I64:
+    """The cells' connected regions (4-connected), each under MIN_REGION_M2 merged into the
+    neighbour it shares the most pixel edges with, smallest first, until none is (the nodal
+    start's row-normalized eigenvectors scatter fragments where every eigenfunction is near 0,
+    beside the street); renumbered 0 .. n-1."""
+    reg = np.asarray(label(cells + 1, background=0, connectivity=1), dtype=np.int64) - 1
+    small = MIN_REGION_M2 / PIXEL ** 2
+    while True:
+        size = np.bincount(reg.ravel())
+        live = np.flatnonzero((size > 0) & (size < small))
+        if not len(live) or (size > 0).sum() == 1:
+            break
+        r = int(live[np.argmin(size[live])])
+        m = reg == r
+        ring = ndimage.binary_dilation(m) & ~m
+        nb = np.bincount(reg[ring], minlength=len(size))
+        nb[r] = 0
+        reg[m] = int(np.argmax(nb))
+    _, out = np.unique(reg, return_inverse=True)
+    return np.asarray(out.reshape(cells.shape), dtype=np.int64)
+
+
 def fields_of(pt: Partition, start: Start) -> tuple[F64, int]:
-    """The start's fields (K, pixels): each pixel's label 1, the rest 0; and its cells' count."""
-    cells = start.cells(pt.rd.raster, pt.rd.m)
+    """The start's fields (K, pixels): each pixel's label 1, the rest 0; and its cells' count
+    (each start's cell split into its connected regions first: a k-means cluster can lie in
+    several, and coloured whole their adjacencies add up; `merged`)."""
+    cells = merged(start.cells(pt.rd.raster, pt.rd.m).reshape(pt.rd.raster.shape)).ravel()
     lab = colour(cells, pt.rd.raster.shape, pt.K)[cells]
     f = np.zeros((pt.K, pt.npx))
     f[lab, np.arange(pt.npx)] = 1.0
