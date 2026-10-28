@@ -27,12 +27,12 @@ owner 2026-10-28), the separatrices of the persistence-simplified Morse-Smale co
 face (the function `divides`, pure in its pixel inputs so other optimizers can seed from it; the
 persistence threshold `tau` in the name; the harmonic-measure split where the strict basins
 degenerate along the continuous street ring), the most persistent `pairs` costed; the brief's
-`ridge` is `divides` at its strictest. Each step: every
-candidate's first-order gain per cost, the top `exact` rescored by the restricted solve, the best
-exact gain per cost built (greedy, one ear a step). The grown corridor must split its face (the
-ungrown triangles' components rise by at least one): an ear that does not is refused and logged
-(the no-dead-end invariant; check `ends`). Every DEC_EVERY ears the decoupling gap (the global P
-less the faces' sum, over P) goes into the state's row.
+`ridge` is `divides` at its strictest. Each step: every candidate's first-order gain per cost; in
+that order each must split its face (its faces of FACE_M2 and more rise by at least one), an ear
+that does not refused and logged (the no-dead-end invariant; check `ends`), until `exact` split;
+those rescored by the restricted solve, the best exact gain per cost built (greedy, one ear a
+step). Every DEC_EVERY ears the decoupling gap (the global P less the faces' sum, over P) goes into
+the state's row.
 
     E=research/roadless/ears.py                        # from the repo root, PYTHONPATH=.
     uv run python $E run <block> <plan>
@@ -92,6 +92,7 @@ MIN_EAR_M = 30.0       # m: an ear's ends at least this far apart in a straight 
 MIN_FACE_M2 = 2000.0   # m^2: a face this small is not split further
 STRETCH_M = 40.0       # m: divides' harmonic split: the face's boundary in stretches this wide
 BLD_G = 0.01           # divides' harmonic split: a pixel edge's conductance through a building
+END_R = gr.PATCH_R + 2.0 * PIX   # m: an ear's corridor at its ends (EarWorld.corridor)
 CHUNK = 32             # sources per Dijkstra call (its distance and predecessor rows held)
 REV = 1
 TOL_DEC = 1e-2         # decouple: relative (19570, 3 ears at h 0.25: 2.4e-3; at h 25, 0.24)
@@ -540,8 +541,14 @@ class EarWorld:
         return Face(lab=lab, area=area)
 
     def corridor(self, pts: F64) -> I64:
+        """The ungrown triangles within growth.PATCH_R of the path's pixel centres, and within
+        END_R of its two ends: a boundary pixel's centre lies up to a pixel's diagonal from the
+        road or street it touches, and a strip of ungrown triangles left there joins the two
+        halves (5810: every top ear of the first runs split nothing)."""
         g = self.g
-        lists = g.tree.query_ball_point(pts, r=gr.PATCH_R)
+        r = np.full(len(pts), gr.PATCH_R)
+        r[[0, -1]] = END_R
+        lists = [g.tree.query_ball_point(p, r=float(x)) for p, x in zip(pts, r, strict=True)]
         t = np.unique(np.concatenate([np.asarray(x, dtype=np.int64) for x in lists]))
         return t[g.step[t] < 0]
 
@@ -612,28 +619,32 @@ def build(e: EarWorld, plan: Plan, *, out: Path, log: Any, steps: int | None = N
             break
         cands.sort(key=lambda q: -q.first / q.cost)
         on = g.step >= 0
+        # the splitting ones only (no dead end), best first order per cost first, `exact` of them
+        split: list[tuple[Ear, Face]] = []
+        for q in cands:
+            if len(split) == plan.exact:
+                break
+            g.step[q.tris] = step
+            nf = e.faces()
+            g.step[q.tris] = -1
+            if nf.n > faces.n:
+                split.append((q, nf))
+            else:
+                log(f"  refused an ear in face {q.face}: it splits nothing")
         before: dict[int, float] = {}
         scored = []
-        for q in cands[:plan.exact]:
+        for q, nf in split:
             cells = e.face_cells(faces, q.face)
             if q.face not in before:
                 before[q.face] = e.P_face(on, cells)
             on2 = on.copy()
             on2[q.tris] = True
-            scored.append(q._replace(exact=before[q.face] - e.P_face(on2, cells)))
-        scored.sort(key=lambda q: -q.exact / q.cost)
-        built = None
-        for q in scored:
-            g.step[q.tris] = step
-            nf = e.faces()
-            if nf.n > faces.n:
-                built, faces = q, nf
-                break
-            g.step[q.tris] = -1                       # a dead end: refused
-            log(f"  refused an ear in face {q.face}: it split nothing")
-        if built is None:
-            log("no ear among the rescored splits a face: stopped")
+            scored.append((q._replace(exact=before[q.face] - e.P_face(on2, cells)), nf))
+        if not scored:
+            log("no candidate ear splits a face: stopped")
             break
+        built, faces = max(scored, key=lambda qn: qn[0].exact / qn[0].cost)
+        g.step[built.tris] = step
         xy = e.ra.xy[built.path]
         picks.append(dict(step=step, face=built.face, ax=float(xy[0, 0]), ay=float(xy[0, 1]),
                           bx=float(xy[-1, 0]), by=float(xy[-1, 1]),
