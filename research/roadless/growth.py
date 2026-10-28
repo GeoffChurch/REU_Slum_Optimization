@@ -28,9 +28,11 @@ The method. A step solves the state once (u, P, the per-triangle first-order gai
     seed), dielectric breakdown's dial, probability proportional to score^eta, seeded), each
     draw removing every site within `sep` of it (patches apart: a batch grows that many fingers
     by one patch each, not one blob);
-  bridges (Bridges: none, or Straight): from each front site a straight road-width bridge to the
-    attached set within `reach` m; a conductance g = sigma (kappa - 1) ROAD_W / L between the cells
-    at its ends lowers P by exactly g (u_a - u_b)^2 / (1 + g R_ab) (rank one, Sherman-Morrison;
+  bridges (Bridges: none, or Straight): between two points of the attached set's open edge (on
+    the road, never inside a building at EPS, where u is no road's) within `reach` m, a straight
+    road-width bridge across a gap (GAP_SHARE of its interior off the attached set); a
+    conductance g = sigma (kappa - 1) ROAD_W / L between the cells at its ends lowers P by
+    exactly g (u_a - u_b)^2 / (1 + g R_ab) (rank one, Sherman-Morrison;
     R_ab by one dipole solve with the state's factor): the pairs screened by the R 0 bound g du^2
     per cost, the best `screen` by this estimate, the best `top` of those whose estimate beats the
     bar rescored exactly (the corridor itself carved in a solve), and built if the exact gain per
@@ -47,8 +49,9 @@ The bridge's rank-one gain is guarded by growth_check.py.
 
 plan: gr.<k<kappa>|grounded>.<att|free>.<greedy|e<eta>s<seed>>.N<batch>.sep<m>.n<nu>s<price>
 .<B0|B<reach>m<screen>k<top>>.K<exact>.D<D>, e.g. gr.k10.att.greedy.N32.sep14.n2s0.1.B21m8k2.K0
-.D0.15. Rows in growth_rows/<block>/<plan>/: steps.parquet (a row per state), picks.parquet (the
-patches built), bridges.parquet (the bridges offered past the screen, built or not), tri_step.npy
+.D0.15; its name (Plan.name) adds the code's revision (.v<REV>). Rows in growth_rows/<block>/
+<name>/: steps.parquet (a row per state), picks.parquet (the patches built), bridges.parquet
+(the bridges offered past the screen, built or not), tri_step.npy
 (per triangle the step it was grown in, -1 never), written after every step.
 """
 from __future__ import annotations
@@ -85,6 +88,11 @@ EPS = rs.EPS             # the eps world's standing footprint
 FRONT_M = 1.0            # m: the front's sites, one per square this wide
 BRIDGE_FRONT_M = 2.0     # m: the bridges' ends, one per square this wide (each end's site)
 BRIDGE_STEP_M = 1.0      # m: a bridge corridor's sample spacing along its centreline
+GAP_SHARE = 0.5          # Straight: a bridge's interior samples off the attached set, at least
+GAP_SAMPLES = 9          # Straight: interior samples a pair is tested at
+OPEN_KT = 0.5            # a triangle on open ground: its eps-world openness at least this
+REV = 2                  # the code's revision, in the plan's name (2: the bridges' ends on the
+                         # road's open edge, across a gap; 1: from the front, its u read there)
 MIN_NEW_M2 = 2.0         # m^2: a patch adds at least this much ground not yet grown
 FACE_M2 = 100.0          # m^2: a loop is a face of the region this large (road SIMP's count)
 GROUND_KAPPA = 1e4       # Grounded's contrast
@@ -277,8 +285,9 @@ class NoBridges:
 
 @dataclass(frozen=True, kw_only=True)
 class Straight:
-    """Straight road-width bridges from the front to the attached set within `reach` m (module
-    docstring): `screen` estimated by Sherman-Morrison, the best `top` past the bar rescored."""
+    """Straight road-width bridges between two points of the attached set's open edge within
+    `reach` m, across a gap (GAP_SHARE of the segment off the attached set) (module docstring):
+    `screen` estimated by Sherman-Morrison, the best `top` past the bar rescored."""
     reach: float
     screen: int
     top: int
@@ -295,17 +304,24 @@ class Straight:
               cost: Cost) -> list[Bridge]:
         if not np.isfinite(bar) or bar <= 0:
             return []
-        A = g.thin(g.front(), BRIDGE_FRONT_M)
-        Bt = g.thin(g.attached_edge(), BRIDGE_FRONT_M)
-        if not len(A) or not len(Bt):
+        # both ends on the road: open attached triangles beside the unattached ground (a front
+        # triangle may lie inside a building at EPS, where u is no road's: rev 1 read it there
+        # and its estimates ran 30x the exact gain)
+        E = g.thin(g.attached_open_edge(), BRIDGE_FRONT_M)
+        if len(E) < 2:
             return []
         cen = g.cen
-        nb = cKDTree(cen[Bt]).query_ball_point(cen[A], r=self.reach)
-        ia = np.repeat(np.arange(len(A)), [len(x) for x in nb])
+        nb = cKDTree(cen[E]).query_ball_point(cen[E], r=self.reach)
+        ia = np.repeat(np.arange(len(E)), [len(x) for x in nb])
         ib = np.concatenate([np.asarray(x, dtype=np.int64) for x in nb])
-        a, b = A[ia], Bt[ib]
+        keep = ia < ib
+        a, b = E[ia[keep]], E[ib[keep]]
         L = np.hypot(*(cen[a] - cen[b]).T)
         ok = L > ROAD_W
+        a, b, L = a[ok], b[ok], L[ok]
+        if not len(a):
+            return []
+        ok = g.gap_share(a, b) >= GAP_SHARE        # across a gap, not along a road
         a, b, L = a[ok], b[ok], L[ok]
         if not len(a):
             return []
@@ -315,7 +331,7 @@ class Straight:
         bound = gab * du * du
         rough = bound / cost.of(np.zeros(len(L)), (g.contrast.kappa - 1.0) * ROAD_W * L,
                                 P0=g.P0)
-        # the best pair per front site, then the best pairs overall
+        # the best pair per end, then the best pairs overall
         o = np.lexsort((-rough, a))
         first = np.ones(len(o), dtype=bool)
         first[1:] = a[o][1:] != a[o][:-1]
@@ -370,7 +386,7 @@ class Plan:
     def name(self) -> str:
         return (f"gr.{self.contrast.name}.{self.connectivity.name}.{self.pick.name}.N{self.batch}"
                 f".sep{self.sep:g}.{self.cost.name}.{self.bridges.name}.K{self.exact}"
-                f".D{self.D:g}")
+                f".D{self.D:g}.v{REV}")
 
     @staticmethod
     def of(spec: str) -> Plan:
@@ -465,6 +481,20 @@ class Growth:
         s = self.attached()
         near = np.asarray(self.adj @ (~s).astype(np.int8)).ravel() > 0
         return np.flatnonzero(near & s)
+
+    def attached_open_edge(self) -> I64:
+        """attached_edge's triangles on open ground (kt0 >= OPEN_KT)."""
+        e = self.attached_edge()
+        return e[self.kt0[e] >= OPEN_KT]
+
+    def gap_share(self, a: I64, b: I64) -> F64:
+        """Per pair of triangles the share of GAP_SAMPLES points strictly inside the segment
+        between their centroids whose nearest triangle is not attached."""
+        t = np.arange(1, GAP_SAMPLES + 1) / (GAP_SAMPLES + 1)
+        pts = self.cen[a][:, None, :] + t[None, :, None] * (self.cen[b] - self.cen[a])[:, None, :]
+        _, near = self.tree.query(pts.reshape(-1, 2), k=1)
+        off = ~self.attached()[near].reshape(len(a), GAP_SAMPLES)
+        return np.asarray(off.mean(axis=1), dtype=np.float64)
 
     def thin(self, t: I64, cell_m: float) -> I64:
         """One of `t` per square `cell_m` wide (the first by index)."""
