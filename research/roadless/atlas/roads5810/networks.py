@@ -27,7 +27,10 @@ its source (Source, a Strategy):
     SIMP's: proj(y) >= 1/2 at the last beta); one frame, its own mesh (road_simp.scored's
     carving, so road_simp.MESHES caches it), its L_P and D checked against the optimizer's own
     score. Diamonds on the chart; the plates hold the answer below the slider's budget, the
-    baseline below the first.
+    baseline below the first. Its runs (Runs, resolved once from the spec): the rows' folders
+    whose names the spec matches, {D} each one's budget and any other field ({n}) a number bound
+    per budget by the one run there (the partition SIMP's start, its size changing with D); the
+    method's key the spec without D{D}., each other field its values joined (spec20,40,64s0).
 n is a frame's road pieces (its lines; else its ground's skeleton on a 1 m raster, merged between
 junctions, as road_simp's roads answer is read), km their length. C is sheet.added's (the stop's
 sheet less its own mesh's baseline).
@@ -41,7 +44,8 @@ families and specs:
   growth <plan>                               growth_rows/<block>/<plan> (growth.Plan's name)
   ears <plan>                                 the same folder (ears.Plan's name)
   joint paved|roads <plan with D{D}>          road_simp_rows/<RUNTIME>/<plan> at each D it holds
-  partition band|cut <plan with D{D}>         partition_rows/<RUNTIME>/<plan>, the same
+  partition band|cut <plan with D{D}[, {n}]>  partition_rows/<RUNTIME>/<plan>, the same ({n}: the
+                                              start's size, one run a budget)
   templates <plan with D{D}>                  templates_rows/<RUNTIME>/<plan>, the same
 
 On the page (2026-10-28), each one `add`:
@@ -58,8 +62,10 @@ On the page (2026-10-28), each one `add`:
       that scores best under RUNTIME, the growth study's frames.py score: 0.492 at D 0.15, 0.01's
       0.458, 0.003's 0.465)
   ears ears.divides.p0.1.gl0.25Croad.n2s0.1.M16.K4.D0.15.v1
-Pending (`ready` lists each once its rows are finished; each one `add`, its style in place):
-  partition cut 'pt.<...>.D{D}.s0.1.<start>.p1e0.0001v1'        (and band; none on 5810 yet)
+  partition cut 'pt.K5.R10.t2,1.5,1.2,1,1.b1,2,4,8,16.q1,2,3,3,3.i40.D{D}.s0.1.spec{n}s0.p1e0.0001v2'
+  partition band (the same spec; the spectral start's 20, 40 and 64 clusters at D 0.05, 0.10, 0.15)
+`ready` lists the finished runs not on the page, each once, with the spec naming the most budgets
+(D{D} alone, or with {n}); each one `add`, its style in place.
 A combination with no style here (STYLES, the families' `entry`) is refused: give it a class in
 index.html and a row here.
 """
@@ -362,11 +368,42 @@ class Design(Protocol):
     def meshes(self) -> Path: ...
 
 
-def budgets_of(rows: Path, plan: str) -> list[float]:
-    """The budgets D whose run of `plan` (its D as {D}) holds 5810's rows."""
-    pat = re.compile(re.escape(plan).replace(re.escape("{D}"), r"([0-9.]+)"))
-    return sorted(float(m[1]) for p in rows.glob(plan.replace("{D}", "*"))
-                  if (m := pat.fullmatch(p.name)) and (p / f"{BID}.parquet").exists())
+FIELD = re.compile(r"\{([A-Za-z]+)\}")       # a spec's field: {D}, {n}, ...
+
+
+class Runs:
+    """A spec's runs (module docstring), resolved once: the folders of `rows` that hold 5810's rows
+    and whose names the spec's template matches, each field a number ({D} the run's budget, any
+    other bound per budget by the one run there: a start's size, which changes with D), at most
+    one run a budget. `key` is the template without its `D{D}.`, each other field its values in
+    budget order joined by commas (spec{n}s0 -> spec20,40,64s0)."""
+
+    def __init__(self, *, rows: Path, template: str) -> None:
+        names = FIELD.findall(template)
+        if "D" not in names or len(set(names)) != len(names):
+            raise SystemExit(f"{template}: a spec holds D{{D}}, each field once")
+        parts = FIELD.split(template)              # literal, field, literal, ...
+        pat = re.compile("".join(re.escape(t) if i % 2 == 0 else rf"(?P<{t}>[0-9.]+)"
+                                 for i, t in enumerate(parts)))
+        found: dict[float, re.Match[str]] = {}
+        for d in sorted(rows.iterdir()):
+            if (m := pat.fullmatch(d.name)) and (d / f"{BID}.parquet").exists():
+                D = float(m["D"])
+                if D in found:
+                    raise SystemExit(f"{template}: two runs at D {D:g}, {found[D].string} and "
+                                     f"{d.name}")
+                found[D] = m
+        if not found:
+            raise SystemExit(f"{template}: no run in {rows}")
+        ms = [found[D] for D in sorted(found)]
+        self.dirs: dict[float, Path] = {D: rows / found[D].string for D in sorted(found)}
+        self.key = "".join(t if i % 2 == 0 else ",".join(m[t] for m in ms)
+                           for i, t in enumerate(FIELD.split(template.replace("D{D}.", ""))))
+
+
+def plan_names(runs: Runs) -> list[str]:
+    """The runs' plans: their folders' names without the code's `.p<pixel>e<eps>v<rev>`."""
+    return [re.sub(r"\.p[0-9.e-]+v[0-9]+$", "", d.name) for d in runs.dirs.values()]
 
 
 def last_row(path: Path) -> pd.Series:
@@ -377,17 +414,16 @@ class Joint:
     """The joint SIMP's answer `kind` (paved: its paved ground; roads: its linked roads, 7 m)
     beside its clearing (road_simp.answer's)."""
 
-    def __init__(self, kind: str, plan: str) -> None:
+    def __init__(self, *, kind: str, runs: Runs) -> None:
         if kind not in ("paved", "roads"):
             raise SystemExit(f"{kind}: a joint answer is paved or roads")
-        self.kind, self.plan = kind, plan
-        self.rows = rs.OUT / metrics.RUNTIME
+        self.kind, self.runs = kind, runs
 
     def budgets(self) -> list[float]:
-        return budgets_of(self.rows, self.plan)
+        return list(self.runs.dirs)
 
     def dir(self, budget: float) -> Path:
-        return self.rows / self.plan.format(D=f"{budget:g}")
+        return self.runs.dirs[budget]
 
     def ready(self, budget: float) -> bool:
         f = self.dir(budget) / f"{BID}.parquet"
@@ -416,14 +452,14 @@ class Lined:
     """A partition or template answer: <block>[_<answer>]_ground.parquet and _lines.parquet, its
     score in the row's `<answer>_` columns; no clearing."""
 
-    def __init__(self, rows: Path, plan: str, answer: str) -> None:
-        self.rows, self.plan, self.ans = rows, plan, answer
+    def __init__(self, *, runs: Runs, answer: str) -> None:
+        self.runs, self.ans = runs, answer
 
     def budgets(self) -> list[float]:
-        return budgets_of(self.rows, self.plan)
+        return list(self.runs.dirs)
 
     def dir(self, budget: float) -> Path:
-        return self.rows / self.plan.format(D=f"{budget:g}")
+        return self.runs.dirs[budget]
 
     def stem(self) -> str:
         return BID if self.ans == "best" else f"{BID}_{self.ans}"
@@ -601,17 +637,16 @@ class JointFamily:
     """The joint SIMP's paved or roads answer beside its clearing."""
 
     def __init__(self, kind: str, plan: str) -> None:
-        if "{D}" not in plan:
-            raise SystemExit(f"{plan}: the plan with its budget as D{{D}}")
-        self.design = Joint(kind, plan)
+        runs = Runs(rows=rs.OUT / metrics.RUNTIME, template=plan)
+        self.design = Joint(kind=kind, runs=runs)
         self.kind = kind
-        price = rs.Plan.of(re.sub(r"\.p[0-9.e-]+v[0-9]+$", "", plan.format(D="0.05"))).price
+        [price] = {rs.Plan.of(p).price for p in plan_names(runs)}
         if not isinstance(price, rs.SheetPrice):
             raise SystemExit(f"{plan}: the joint SIMP priced by the sheet (`.s<price>`)")
         self.price = price
 
     def entry(self) -> Entry:
-        key = self.design.plan.replace("D{D}.", "") + f".{self.kind}"
+        key = self.design.runs.key + f".{self.kind}"
         what = "paved" if self.kind == "paved" else "roads"
         name = f"joint SIMP, {what} + clearing, price {self.price.price:g}"
         how = ("Road SIMP with each building's clearing a second design variable, paving and "
@@ -630,24 +665,38 @@ class JointFamily:
 
 
 class PartitionFamily:
-    """A partition SIMP answer (band or cut)."""
+    """A partition SIMP answer (band or cut), its start named per budget where its size changes
+    with D (Runs)."""
     CLS = {"cut": "ptc", "band": "ptb"}
+    LABEL = {"cut": "partition SIMP, cut", "band": "partition SIMP, band, dead ends"}
 
     def __init__(self, answer: str, plan: str) -> None:
         if answer not in self.CLS:
             raise SystemExit(f"{answer}: a page partition answer is {' or '.join(self.CLS)}")
         import partition  # noqa: PLC0415  (its own study, still changing)
-        self.design = Lined(partition.OUT / metrics.RUNTIME, plan, answer)
+        runs = Runs(rows=partition.OUT / metrics.RUNTIME, template=plan)
+        self.design = Lined(runs=runs, answer=answer)
         self.answer = answer
+        plans = [partition.Plan.of(p) for p in plan_names(runs)]
+        [self.price] = {p.price.price for p in plans}
+        starts = [p.start for p in plans]
+        if not all(isinstance(t, partition.Spectral) for t in starts):
+            raise SystemExit(f"{plan}: no page words for its start (PartitionFamily: spectral)")
+        at = [f"{t.n} at {D:.0%}" for t, D in zip(starts, runs.dirs, strict=True)
+              if isinstance(t, partition.Spectral)]
+        self.start = ("the spectral normalized cut of the buildings into clusters ("
+                      + (", ".join(at[:-1]) + " and " + at[-1] if len(at) > 1 else at[0]) + ")")
 
     def entry(self) -> Entry:
-        key = self.design.plan.replace("D{D}.", "") + f".{self.answer}"
-        name = f"partition SIMP, {self.answer}"
+        key = self.design.runs.key + f".{self.answer}"
+        name = self.LABEL[self.answer]
         how = ("Partitions the block into labelled sub-blocks and lays the roads where the labels "
-               "change, so every road is on a loop: "
-               + ("the label boundaries as 7 m roads" if self.answer == "cut" else
-                  "the band where the labels mix, as a road at ten times")
-               + ", solved at each budget shown.")
+               f"change, so every road is on a loop: started from {self.start}, each sub-block a "
+               "label (five, no two neighbours alike), the labels moved down the gradient of P "
+               f"under the budget ({price_words(self.price)}), solved at each budget shown; "
+               + ("the label boundaries as 7 m roads." if self.answer == "cut" else
+                  "the band where the labels mix, as a road at ten times: the optimizer's own "
+                  "roads, whose thin stretches break, leaving dead ends."))
         return Entry(key=key, name=name, how=how, cls=self.CLS[self.answer], dot="", label=name)
 
     def source(self) -> Source:
@@ -659,10 +708,11 @@ class TemplatesFamily:
 
     def __init__(self, plan: str) -> None:
         import templates  # noqa: PLC0415  (its own study, still changing)
-        self.design = Lined(templates.OUT / metrics.RUNTIME, plan, "best")
+        self.design = Lined(runs=Runs(rows=templates.OUT / metrics.RUNTIME, template=plan),
+                            answer="best")
 
     def entry(self) -> Entry:
-        key = self.design.plan.replace("D{D}.", "")
+        key = self.design.runs.key
         name = "grid templates"
         how = ("The baseline for reblocking top-down: parallel or crossing lines at a spacing, "
                "angle and offset, each snapped to the cheapest path through the gaps and built as "
@@ -735,6 +785,22 @@ def page(fam: Family) -> None:
     print(f"{e.key}: rows and entries into the page", flush=True)
 
 
+def specs_of(d: Path) -> dict[str, Runs]:
+    """The specs (with their runs) that name run folder `d`: its D as {D}, alone or with one other
+    number as {n} (a start's size that changes with D), each that resolves to one run a budget."""
+    spec = re.sub(r"\.D[0-9.]+\.", ".D{D}.", d.name, count=1)
+    out: dict[str, Runs] = {}
+    for t in [spec] + [spec[:m.start()] + "{n}" + spec[m.end():]
+                       for m in re.finditer(r"[0-9]+(?:\.[0-9]+)?", spec)]:
+        try:
+            runs = Runs(rows=d.parent, template=t)
+        except SystemExit:                  # two runs at one budget: not a spec
+            continue
+        if d in runs.dirs.values():
+            out[t] = runs
+    return out
+
+
 def ready() -> None:
     """The finished runs of the families' folders not yet on the page, each with its command."""
     import ears  # noqa: PLC0415
@@ -760,11 +826,15 @@ def ready() -> None:
             print(f"finished: add {kind} {run.name}   {lp}")
     for kind, rows_dir in (("partition", partition.OUT), ("templates", templates.OUT),
                            ("joint", rs.OUT)):
+        told: set[str] = set()
         for d in sorted((rows_dir / metrics.RUNTIME).glob("*")):
             if (d / f"{BID}.parquet").exists() and (kind != "joint" or ".cjoint." in d.name):
-                spec = re.sub(r"\.D[0-9.]+\.", ".D{D}.", d.name, count=1)
-                if not any(k.startswith(spec.replace("D{D}.", "")) for k in on):
-                    print(f"finished ({kind}): {d.name} -> add {kind} ... '{spec}'")
+                specs = specs_of(d)
+                if not any(k.startswith(r.key) for r in specs.values() for k in on):
+                    spec = max(specs, key=lambda t: len(specs[t].dirs))    # D{D}'s on a tie
+                    if spec not in told:
+                        told.add(spec)
+                        print(f"finished ({kind}): {d.name} -> add {kind} ... '{spec}'")
 
 
 def main(argv: list[str]) -> None:
