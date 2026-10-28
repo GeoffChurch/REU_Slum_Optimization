@@ -25,7 +25,10 @@ The method. A step solves the state once (u, P, the per-triangle first-order gai
     nu P0 dD + lambda dC (Cost: dD by common.MEASURE's ramp over each building's covered share,
     as road_simp.Roads.D; dC its added sheet, gap_clear.Model.sheet's; lambda = price P0 /
     road_simp.SHEET_M2), its score the first-order gain over the cost; the plan's top `exact`
-    patches rescored by an exact solve each;
+    patches rescored by an exact solve each (with Free, the top islands, and an island is taken
+    only so: its first-order gain overstates it by its leak times its own resistance to ground;
+    its exact score put on the batch's scale, times the last batch's first-order over realized
+    drop);
   the batch: `batch` patches drawn one at a time by the pick (Pick: Greedy, the best; or Dbm(eta,
     seed), dielectric breakdown's dial, probability proportional to score^eta, seeded), each
     draw removing every site within `sep` of it (patches apart: a batch grows that many fingers
@@ -209,9 +212,15 @@ class Connectivity(Protocol):
         """The patches' sites (triangles), thinned."""
         ...
 
+    def nucleating(self, g: Growth, Pm: sp.csr_matrix) -> B:
+        """Per patch (row of Pm) whether it starts an island."""
+        ...
+
     def charge(self, g: Growth, Pm: sp.csr_matrix) -> F64:
         """Per patch (row of Pm) its extra cost in P."""
         ...
+
+    def check(self, exact: int) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -223,8 +232,14 @@ class Attached:
     def sites(self, g: Growth) -> I64:
         return g.thin(g.front(), FRONT_M)
 
+    def nucleating(self, g: Growth, Pm: sp.csr_matrix) -> B:
+        return np.zeros(Pm.shape[0], dtype=bool)
+
     def charge(self, g: Growth, Pm: sp.csr_matrix) -> F64:
         return np.zeros(Pm.shape[0])
+
+    def check(self, exact: int) -> None:
+        return None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -246,11 +261,19 @@ class Free:
         return np.union1d(g.thin(g.front(), FRONT_M),
                           g.thin(np.flatnonzero(g.step < 0), FREE_M))
 
-    def charge(self, g: Growth, Pm: sp.csr_matrix) -> F64:
+    def nucleating(self, g: Growth, Pm: sp.csr_matrix) -> B:
         s = g.attached()
         near = (np.asarray(g.adj @ s.astype(np.int8)).ravel() > 0) | s
-        touch = np.asarray(Pm @ near.astype(np.float64)).ravel() > 0
-        return np.where(touch, 0.0, self.island * g.P0)
+        return np.asarray(Pm @ near.astype(np.float64)).ravel() == 0
+
+    def charge(self, g: Growth, Pm: sp.csr_matrix) -> F64:
+        return np.where(self.nucleating(g, Pm), self.island * g.P0, 0.0)
+
+    def check(self, exact: int) -> None:
+        if exact < 1:
+            raise ValueError("free: an island is taken only on an exact solve (K >= 1): a lone "
+                             "patch's first-order gain overstates it by its leak times its own "
+                             "resistance to ground")
 
 
 class Pick(Protocol):
@@ -460,6 +483,7 @@ class Plan:
         if not (self.batch >= 1 and self.sep >= 0 and self.exact >= 0 and self.D > 0):
             raise ValueError(f"{self}: a batch, sep >= 0, exact >= 0 and a budget")
         self.bridges.check(self.contrast)
+        self.connectivity.check(self.exact)
 
     @property
     def name(self) -> str:
@@ -734,6 +758,7 @@ def grow(g: Growth, plan: Plan, *, out: Path, log: Any) -> None:
     faces_p = faces0
     bar = np.nan
     last_cost = np.nan
+    last_fo = np.nan
     n_p = n_b = 0
     P_prev = np.nan
     step = 0
@@ -769,9 +794,19 @@ def grow(g: Growth, plan: Plan, *, out: Path, log: Any) -> None:
         cost = plan.cost.of(dD, dC, P0=g.P0) + plan.connectivity.charge(g, Pm)
         score = np.where(new >= MIN_NEW_M2, fo / cost, 0.0)
         exact = np.full(len(sites), np.nan)
-        for i in np.argsort(-score)[:plan.exact]:
+        isl = plan.connectivity.nucleating(g, Pm)
+        # the top `exact` rescored: with islands, the islands' (and only theirs): a lone patch's
+        # first-order gain overstates it by its leak times its own resistance to ground, far more
+        # than a front patch's, so an island is taken only on an exact solve, its gain put on the
+        # batch's first-order scale (times the last batch's first-order over realized drop)
+        pool = np.flatnonzero(isl if isl.any() else score > 0)
+        top = pool[np.argsort(-score[pool])[:plan.exact]]
+        infl = last_fo / (P_prev - P) if np.isfinite(last_fo) and P_prev > P else np.nan
+        score[isl] = 0.0
+        for i in top:
             exact[i] = P - g.P_of(np.union1d(g.grown(), Pm[i].indices))
-            score[i] = exact[i] / cost[i]
+            score[i] = exact[i] / cost[i] * (infl if isl[i] else 1.0)
+        score = np.nan_to_num(score, nan=0.0)
         # the batch
         live = score > 0
         tree = cKDTree(g.cen[sites])
@@ -789,7 +824,8 @@ def grow(g: Growth, plan: Plan, *, out: Path, log: Any) -> None:
             picks.append(dict(step=step, site=int(sites[i]), x=float(g.cen[sites[i], 0]),
                               y=float(g.cen[sites[i], 1]), score=float(score[i]),
                               first_order=float(fo[i]), exact=float(exact[i]), dD=float(dD[i]),
-                              dC=float(dC[i]), cost=float(cost[i]), new_m2=float(new[i])))
+                              dC=float(dC[i]), cost=float(cost[i]), new_m2=float(new[i]),
+                              island=bool(isl[i])))
         faces_p = g.faces()
         built = [br for br in brs if br.built]
         for br in built:
@@ -800,6 +836,7 @@ def grow(g: Growth, plan: Plan, *, out: Path, log: Any) -> None:
                                 n_tris=len(br.tris), dD=br.dD, dC=br.dC, bound=br.bound,
                                 sm=br.sm, exact=br.exact, cost=br.cost, built=br.built))
         last_cost = float(cost[chosen].sum()) + sum(br.cost for br in built)
+        last_fo = float(fo[chosen].sum())
         P_prev = P
         n_p, n_b = len(chosen), len(built)
         if not chosen and not built:
