@@ -1,24 +1,28 @@
 """Block 5810's road networks built out by displacement, under RUNTIME, painted for the page's
 slider: per frame the current |j| and the power dissipated per m^2 (flow5810/compute.py's energy,
-render.py's paint at 1200 px over the same extent), the lenses and the energy identity.
+render.py's paint at 1200 px over the same extent), the lenses, each home's escape time, the sheet
+conductance and the energy identity.
 
     S=research/roadless/atlas/roads5810/compute.py     # from the repo root
     PYTHONPATH=. uv run python $S baseline            # the plain mesh's baseline (the shared D 0)
-    PYTHONPATH=. uv run python $S times <method> <pass> <data dir>   # each home's escape time
     PYTHONPATH=. uv run python $S <method> <pass>     # cycle_native|clearance_looped coarse|fine
 
-A method's frames are the lineup's canonical prefixes (road_rescore.prefix_len under
-common.MEASURE, area weights: the SHORTEST prefix whose D reaches the target) at its pass's
-targets (PASSES) where the whole network reaches them, and (coarse) the whole network. Its
-corridors are carved into one fixed mesh as road_rescore.network_rows carves the lineup's (built
-in `meshes`, kept for a rerun), each prefix a road state (Model.road_state: the corridor's atoms
-open, its triangles at the proposed road's boost), and the mesh's own baseline (no road) the
-gains' denominator. Writes
-<method>_<pass>.npz (the rasters, the atoms, the corridors, each building's ramped share) and
-<method>_<pass>.json into `data`: DATA for the baseline and the lineup's two networks, a study's
-own folder for its networks (the flow-roads study's scripts call `network` and `frames_of`).
-The rasters stay in the site's scratch (DATA); only the plates render.py draws from them live
-beside the page.
+A network (Network, a Strategy: Roads here, the lineup's and the studies' road networks; a grown
+region's steps and an optimizer's answer per budget in networks.py) is its prefixes in build
+order, each a paved ground and the buildings cleared beside it. Its frames are the canonical
+prefixes (Network.prefix_len under common.MEASURE, area weights: the SHORTEST prefix whose D
+reaches the target) at its pass's targets (PASSES) where the whole network reaches them, and
+(`full`) the whole network. Its corridors are carved into one fixed mesh as
+road_rescore.network_rows carves the lineup's (built in `meshes`, kept for a rerun), each prefix
+a road state (Model.road_state, or Model.cleared_road_state beside a clearing: the corridor's
+atoms open, its triangles at the proposed road's boost), and the mesh's own baseline (no road)
+the gains' denominator. Writes into `data` (DATA for the baseline and the lineup's two networks,
+a study's own folder for its networks):
+<method>_<run>.npz (the rasters, the atoms and per atom the stop from which it is open, carved or
+its building cleared, the corridors, each building's ramped share), <method>_<run>.json,
+<method>_<run>_times.npz (each home's escape time, the Time plates') and <method>_<run>_sheet.json
+(the sheet conductance per stop, sheet.py's `C`). The rasters stay in the site's scratch (DATA);
+only the plates render.py draws from them live beside the page.
 """
 from __future__ import annotations
 
@@ -28,10 +32,11 @@ import sys
 import time
 from pathlib import Path
 from types import ModuleType
-from typing import NamedTuple
+from typing import Any, NamedTuple, Protocol
 
 import numpy as np
 import shapely
+from numpy.typing import NDArray
 
 ROOT = Path(__file__).resolve().parents[4]
 SITE = ROOT / ".superpowers" / "sdd" / "2026-10-22-site"     # the site's scratch
@@ -139,6 +144,75 @@ def baseline(*, data: Path) -> None:
     print(json.dumps(info, indent=1), flush=True)
 
 
+class Network(Protocol):
+    """A page network: its prefixes 1 .. `size` in build order, each a paved ground (world frame,
+    carved as a proposed road) and the buildings cleared beside it (nested in the prefix)."""
+
+    @property
+    def size(self) -> int:
+        """The whole network's prefix."""
+        ...
+
+    def prefix_len(self, target: float) -> int:
+        """The shortest prefix whose D (area weights, common.MEASURE) reaches `target`, or
+        `size`."""
+        ...
+
+    def corridor(self, mm: int) -> Any:
+        """Prefix mm's paved ground, world frame; nested in mm."""
+        ...
+
+    def cleared(self, mm: int) -> NDArray[np.bool_]:
+        """Per building whether it is cleared beside prefix mm; nested in mm."""
+        ...
+
+    def c(self, mm: int) -> NDArray[np.float64]:
+        """Per building its ramped destroyed share under prefix mm and its clearing
+        (common.MEASURE)."""
+        ...
+
+    def roads(self, mm: int) -> tuple[int, float]:
+        """Prefix mm's roads: (pieces, metres)."""
+        ...
+
+
+class Roads:
+    """A road network already in its build order (the lineup's canonical order, or a re-solved
+    build's own: each stage's roads after the last's): prefix mm its first mm roads, their
+    corridor (road_rescore.corridor_of), no clearing."""
+
+    def __init__(self, b, ordered: gpd.GeoDataFrame) -> None:  # type: ignore[no-untyped-def]
+        self.b, self.ordered = b, ordered
+        self.W = common.POPULATIONS["area"].weights(np.asarray(b.buildings.outlines))
+
+    @property
+    def size(self) -> int:
+        return len(self.ordered)
+
+    def prefix_len(self, target: float) -> int:
+        return rr.prefix_len(self.b, self.ordered, target, self.W, measure=common.MEASURE)
+
+    def corridor(self, mm: int) -> Any:
+        return rr.corridor_of(self.ordered, mm)
+
+    def cleared(self, mm: int) -> NDArray[np.bool_]:
+        return np.zeros(len(self.W), dtype=bool)
+
+    def c(self, mm: int) -> NDArray[np.float64]:
+        """common.MEASURE's shares under the prefix's corridor, its D checked against
+        common.displacement's."""
+        pre = self.ordered.iloc[:mm]
+        cdes = np.asarray(common.MEASURE.c(self.b.buildings, road_corridor(pre)), dtype=float)
+        D = float((cdes * self.W).sum() / self.W.sum())
+        D_ref = common.displacement(self.b, pre, self.W, measure=common.MEASURE)
+        if abs(D - D_ref) > 1e-12:
+            raise AssertionError(f"prefix {mm}: D {D} against common.displacement's {D_ref}")
+        return cdes
+
+    def roads(self, mm: int) -> tuple[int, float]:
+        return mm, float(self.ordered.iloc[:mm].geometry.length.sum())
+
+
 def network(name: str, run: str, *, frames: Pass, networks: Path, data: Path,
             meshes: Path) -> None:
     """The frames of the network `name` stored in `networks` (<name>.parquet and its canonical
@@ -151,26 +225,40 @@ def network(name: str, run: str, *, frames: Pass, networks: Path, data: Path,
     if len(again) != len(ordered) or not again.geometry.geom_equals_exact(
             ordered.geometry, tolerance=0.0).all():
         raise AssertionError(f"{name}: the stored order is not common.canonical_order's")
-    frames_of(name, run, b, ordered, t0, frames=frames, data=data, meshes=meshes)
+    frames_of(name, run, b, Roads(b, ordered), t0, frames=frames, data=data, meshes=meshes)
 
 
-def frames_of(name: str, run: str, b, ordered: gpd.GeoDataFrame, t0: float, *,  # type: ignore[no-untyped-def]
+def opened(carved: NDArray[np.int64], parent: NDArray[np.int64],
+           cleared: list[NDArray[np.bool_]]) -> NDArray[np.int64]:
+    """Per atom the first stop (1 ..) from which it is open: carved by the stop's corridor
+    (`carved`, the carving's stop, 0 never) or its building (`parent`) cleared beside it; 0
+    never. Refuses clearings that are not nested."""
+    for k in range(1, len(cleared)):
+        if (cleared[k - 1] & ~cleared[k]).any():
+            raise ValueError(f"stop {k + 1}'s clearing drops a building stop {k} cleared")
+    out = carved.copy()
+    for k in range(len(cleared), 0, -1):
+        hit = cleared[k - 1][parent]
+        out[hit & ((out == 0) | (out > k))] = k
+    return out
+
+
+def frames_of(name: str, run: str, b, net: Network, t0: float, *,  # type: ignore[no-untyped-def]
               frames: Pass, data: Path, meshes: Path) -> None:
-    """`network`'s frames of roads already in their build order (the lineup's canonical order, or a
-    re-solved build's own: each stage's roads after the last's), at `frames`' targets."""
+    """`network`'s frames of the Network `net` at `frames`' targets: per stop its rasters, lenses,
+    escape times and sheet (module docstring)."""
     metric = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())
     W = common.POPULATIONS["area"].weights(np.asarray(b.buildings.outlines))
-    D_full = common.displacement(b, ordered, W, measure=common.MEASURE)
-    want = [(t, rr.prefix_len(b, ordered, t, W, measure=common.MEASURE))
-            for t in frames.targets if D_full >= t]
+    D_full = float((net.c(net.size) * W).sum() / W.sum())
+    want = [(t, net.prefix_len(t)) for t in frames.targets if D_full >= t]
     if frames.full:
-        want.append((None, len(ordered)))
+        want.append((None, net.size))
     stops = sorted({mm for _t, mm in want})
     t_cut = time.time() - t0
     print(f"{name}: D_full {D_full:.4f}, stops {stops} ({t_cut:.0f}s)", flush=True)
 
     geo = gc.geometry(b)
-    carving = gcl.Carving.of(geo, [[geo.local(rr.corridor_of(ordered, mm)) for mm in stops]])
+    carving = gcl.Carving.of(geo, [[geo.local(net.corridor(mm)) for mm in stops]])
     meshes.mkdir(exist_ok=True)
     fx = metric.fixed(b, cache=meshes, carving=carving)
     t_mesh = time.time() - t0 - t_cut
@@ -181,33 +269,38 @@ def frames_of(name: str, run: str, b, ordered: gpd.GeoDataFrame, t0: float, *,  
     print(f"{name}: mesh {fx.fm.nt} triangles, {carving.n} atoms, mesh {t_mesh:.0f}s, "
           f"model {t_model:.0f}s, P0 {m.base.P:.6e}", flush=True)
     fr = frame_of(m)
+    cleared = [net.cleared(mm) for mm in stops]
     out: dict[str, np.ndarray] = dict(
         atoms=shapely.to_wkb(np.asarray(m.carving.polys, dtype=object)),
-        atom_stop=m.carving.stop[:, 0], stops=np.asarray(stops),
+        atom_stop=opened(m.carving.stop[:, 0], m.carving.parent, cleared),
+        stops=np.asarray(stops),
         frame=np.asarray(fr.frame, dtype=float), lim=np.asarray(fr.lim, dtype=float))
+    times: dict[str, np.ndarray] = dict(stops=np.asarray(stops), u_base=m.base.u,
+                                        live_base=m.base.live)
     ts = time.time()
-    s0 = paint_state(m, m.state(np.zeros(m.n)), fr)
+    st0 = m.state(np.zeros(m.n))
+    sheets: dict[str, Any] = dict(base=m.sheet(st0), stops={})
+    s0 = paint_state(m, st0, fr)
+    del st0
     out["j_base"], out["p_base"] = s0["j"], s0["p"]
     base = dict(P=m.base.P, Pq=m.base.Pq, J2=m.base.J2, **{k: s0[k] for k in SCALARS},
                 t=time.time() - ts)
     print(f"{name} base: {json.dumps(base)}", flush=True)
     del s0
     rows = []
-    for k, mm in enumerate(stops, start=1):
+    for k, (mm, cl) in enumerate(zip(stops, cleared, strict=True), start=1):
         ts = time.time()
-        pre = ordered.iloc[:mm]
-        corridor = road_corridor(pre)
-        cdes = common.MEASURE.c(b.buildings, corridor)
+        cdes = net.c(mm)
         D = float((cdes * W).sum() / W.sum())
-        D_ref = common.displacement(b, pre, W, measure=common.MEASURE)
-        if abs(D - D_ref) > 1e-12:
-            raise AssertionError(f"{name} {mm}: D {D} against common.displacement's {D_ref}")
-        st = m.road_state(gcl.Prefix(net=0, stop=k))
+        prefix = gcl.Prefix(net=0, stop=k)
+        st = m.cleared_road_state(m.k_of(cl), prefix) if cl.any() else m.road_state(prefix)
         L = m.lenses_of(st)
+        sheets["stops"][str(mm)] = m.sheet(st)
         s = paint_state(m, st, fr)
         del st
+        n_roads, road_m = net.roads(mm)
         targets = [t for t, x in want if x == mm]
-        row = dict(m=mm, targets=targets, n_roads=mm, road_m=float(pre.geometry.length.sum()),
+        row = dict(m=mm, targets=targets, n_roads=n_roads, road_m=road_m, n_cleared=int(cl.sum()),
                    D_area=D, P=L.P, Pq=L.Pq, J2=L.J2,
                    **{kk: v for kk, v in rr._lens_row(m, L).items()},
                    **{kk: s[kk] for kk in SCALARS if kk != "unknowns"}, t=time.time() - ts)
@@ -216,12 +309,15 @@ def frames_of(name: str, run: str, b, ordered: gpd.GeoDataFrame, t0: float, *,  
         out[f"c_{mm}"] = cdes
         out[f"corridor_{mm}"] = shapely.to_wkb(np.asarray([m.carving.corridors[0][k - 1]],
                                                           dtype=object))
+        times[f"u_{mm}"], times[f"live_{mm}"] = L.u, L.live
         print(f"{name} m {mm}: {json.dumps(row)}", flush=True)
         del s
     np.savez(data / f"{name}_{run}.npz", **out)
+    np.savez(data / f"{name}_{run}_times.npz", **times)
+    (data / f"{name}_{run}_sheet.json").write_text(json.dumps(sheets, indent=1))
     info = dict(method=name, metric=metric.name, block=BID, D_full=D_full,
-                rule="road_rescore.prefix_len: the shortest canonical prefix whose D_area reaches "
-                     "the target (the lineup's)",
+                rule="the shortest prefix whose D_area reaches the target (Network.prefix_len: "
+                     "the lineup's road_rescore.prefix_len for roads)",
                 want=[dict(target=t, m=mm) for t, mm in want], nt=int(fx.fm.nt),
                 atoms=int(carving.n), base=base, frames=rows, t_cut=t_cut, t_mesh=t_mesh,
                 t_model=t_model, t_total=time.time() - t0,
@@ -230,40 +326,10 @@ def frames_of(name: str, run: str, b, ordered: gpd.GeoDataFrame, t0: float, *,  
     print(f"{name}: done in {time.time() - t0:.0f}s, peak {info['peak_rss_gb']:.1f} GB", flush=True)
 
 
-def times_of(name: str, run: str, *, data: Path, meshes: Path) -> None:
-    """Each home's escape time (Lenses.u, nan without demand) at <name>_<run>'s baseline and
-    stops, for the Time plates: the carving rebuilt from the corridors frames_of stored (its input,
-    exactly: the mesh cache's digest), each state's P checked against the frame's. Writes
-    <name>_<run>_times.npz into `data`."""
-    t0 = time.time()
-    d = np.load(data / f"{name}_{run}.npz", allow_pickle=True)          # our own file: WKB
-    info = json.loads((data / f"{name}_{run}.json").read_text())
-    stops = [int(s) for s in d["stops"]]
-    metric = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())
-    [b] = common.build_blocks([BID])
-    geo = gc.geometry(b)
-    carving = gcl.Carving.of(geo, [[shapely.from_wkb(d[f"corridor_{mm}"])[0] for mm in stops]])
-    fx = metric.fixed(b, cache=meshes, carving=carving)
-    m = metric.model(b, fx, demand=common.PopulationDemand())
-    out: dict[str, np.ndarray] = dict(stops=np.asarray(stops))
-    checks = [("base", m.lenses_of(m.state(np.zeros(m.n))), info["base"]["P"])]
-    rows = {r["m"]: r for r in info["frames"]}
-    for k, mm in enumerate(stops, start=1):
-        checks.append((str(mm), m.road_lenses(gcl.Prefix(net=0, stop=k)), rows[mm]["P"]))
-    for key, L, P in checks:
-        if abs(L.P - P) > 1e-9 * P:
-            raise AssertionError(f"{name}_{run} {key}: P {L.P} against the frame's {P}")
-        out[f"u_{key}"], out[f"live_{key}"] = L.u, L.live
-    np.savez(data / f"{name}_{run}_times.npz", **out)
-    print(f"{name}_{run}: {len(stops)} stops' escape times in {time.time() - t0:.0f}s", flush=True)
-
-
 if __name__ == "__main__":
     arg, *rest = sys.argv[1:]
     if arg == "baseline":
         baseline(data=DATA)
-    elif arg == "times" and len(rest) == 3:      # times <name> <run> <data dir>: meshes beside it
-        times_of(rest[0], rest[1], data=Path(rest[2]), meshes=Path(rest[2]) / ".meshes")
     elif arg in ("cycle_native", "clearance_looped") and len(rest) == 1 and rest[0] in PASSES:
         network(arg, rest[0], frames=PASSES[rest[0]], networks=LINEUP / "scratch/networks" / BID,
                 data=DATA, meshes=DATA / ".meshes")

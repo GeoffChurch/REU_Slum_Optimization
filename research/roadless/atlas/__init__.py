@@ -12,7 +12,8 @@ and building clearings on block 5810 side by side on a displacement slider, unde
 page (index.html), local.py (plates/index.html, the page to open from disk), compute.py and
 render.py (the road frames and every plate; the flow-roads study's scripts call them),
 sheet.py (each frame's conductance added, the chart's `C`), uniform.py (the uniform baselines,
-the chart's `UDATA`),
+the chart's `UDATA`), networks.py (the pilots of 2026-10-27 on the page: Laplacian growth, the
+joint SIMP's answers, and one command each for ears, the partition SIMP and the grid templates),
 artifact.py (the page as a claude.ai artifact, https://claude.ai/artifact/UnDkhPymCPcmxWXbHASys3:
 each method's frames of a view one sprite sheet, in plates/artifact/), and plates/ (git-ignored:
 every plate the page names). The rasters stay in the site's scratch

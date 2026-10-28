@@ -4,7 +4,11 @@ so each method's frames of one view become one sprite sheet (s/<its chart class>
 distinct frames in slider order, stacked, at WIDTH px), which the page crops to the frame the
 slider picks (SHEET, SID); the baselines and the gallery are scaled the same, the colour bars
 copied. Refuses on a missing plate (local.py's check). Rerun after editing index.html, then
-publish plates/artifact/index.html with s/, base/ and the bars as its files.
+publish plates/artifact/index.html with s/, base/ and the bars as its files: one publish sends at
+most 255 files and 64 MB, so in batches (BATCH_MB, BATCH_FILES), written to
+plates/artifact_publish.json (outside the artifact): the first publish the page with the first
+batch as its `files`, each later one the same page to the same url with the next batch (files
+left out are kept). https://claude.ai/artifact/UnDkhPymCPcmxWXbHASys3 (atlas/__init__.py).
 
     PYTHONPATH=. uv run python research/roadless/atlas/roads5810/artifact.py
 """
@@ -25,17 +29,14 @@ OUT = local.PLATES / "artifact"
 WIDTH = 800           # px: a plate's width on the artifact (the page shows two ~480 px columns)
 QUALITY = 80          # lossy WebP's
 CLASSES = {"DATA": "CLASS", "CDATA": "CCLASS"}     # a mode's frames -> its chart classes
+BATCH_MB = 60.0       # a publish's files at most (the limit 64 MB, the page and headroom beside)
+BATCH_FILES = 250     # a publish's files at most (the limit 255)
+LIMIT_FILES, LIMIT_MB = 511, 256.0     # an artifact version's
 
 
 def scaled(path: Path) -> Image.Image:
     im = Image.open(path)
     return im.resize((WIDTH, round(im.height * WIDTH / im.width)), Image.LANCZOS)
-
-
-def classes(html: str, var: str) -> dict[str, str]:
-    """A JS object literal of method -> chart class (keys bare or quoted)."""
-    body = re.search(rf"var {var} = \{{(.*?)\}};\n", html)[1]  # type: ignore[index]
-    return {k.strip('"'): v for k, v in re.findall(r'("[^"]+"|[\w.]+): "(\w+)"', body)}
 
 
 def patch(html: str, old: str, new: str) -> str:
@@ -54,9 +55,9 @@ def main() -> None:
     sheet: dict[str, list[str]] = {}
     sid: dict[str, str] = {}
     for var, views in local.VIEWS.items():
-        cls = classes(html, CLASSES[var])
-        for m, rows in json.loads(re.search(rf"var {var} = (\{{.*?\}});\n", html)[1]).items():  # type: ignore[index]
-            fs = list(dict.fromkeys(r["f"] for r in rows))
+        cls = local.js(html, CLASSES[var])
+        for m, rows in local.js(html, var).items():
+            fs = local.frames(rows)
             sheet[m], sid[m] = fs, cls[m]
             for v in views:
                 frames = [scaled(local.PLATES / f"{m}_{f}_{v}.webp") for f in fs]
@@ -94,13 +95,31 @@ def main() -> None:
                  '''    if (k === 0) return { file: BASE[view] || BASE.power, i: 0, n: 1 };
     var fs = SHEET[method], f = M().data[method][k - 1].f;
     return { file: "s/" + SID[method] + "_" + view + ".webp", i: fs.indexOf(f), n: fs.length };''')
-    html = patch(html, "    img.src = src(method, k, view);",
-                 '    var s = src(method, k, view);\n    img.src = s.file;\n'
+    html = patch(html, "    img.src = src(method, kk, view);",
+                 '    var s = src(method, kk, view);\n    img.src = s.file;\n'
                  '    img.style.transform = "translateY(" + (-100 * s.i / s.n) + "%)";')
     (OUT / "index.html").write_text(html)
     files = sorted(p for p in OUT.rglob("*") if p.is_file())
     mb = sum(p.stat().st_size for p in files) / 1e6
     print(f"{len(files)} files, {mb:.1f} MB in {OUT}")
+    if len(files) > LIMIT_FILES or mb > LIMIT_MB:
+        raise SystemExit(f"over an artifact version's {LIMIT_FILES} files and {LIMIT_MB} MB")
+    batches: list[dict[str, str]] = [{}]
+    size = 0.0
+    for f in files:
+        if f.name == "index.html" and f.parent == OUT:
+            continue
+        mbf = f.stat().st_size / 1e6
+        if batches[-1] and (size + mbf > BATCH_MB or len(batches[-1]) >= BATCH_FILES):
+            batches.append({})
+            size = 0.0
+        batches[-1][str(f.relative_to(OUT))] = str(f)
+        size += mbf
+    (local.PLATES / "artifact_publish.json").write_text(json.dumps(
+        dict(page=str(OUT / "index.html"), batches=batches), indent=1))
+    for i, batch in enumerate(batches, start=1):
+        bmb = sum(Path(v).stat().st_size for v in batch.values()) / 1e6
+        print(f"publish {i}: {len(batch)} files, {bmb:.1f} MB")
 
 
 if __name__ == "__main__":

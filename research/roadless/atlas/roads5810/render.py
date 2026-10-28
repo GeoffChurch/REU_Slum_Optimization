@@ -20,10 +20,10 @@ its baseline's on the gains' scale (red: faster), since the current and the powe
 where a clearing or road far off lowers a home's potential; the baseline's own plate its escape
 time, linear to the 99th percentile; a home with none (cleared, destroyed, or no demand) open.
 The network: every building grey, shaded to the clearing plates' orange by its ramped destroyed
-share c_i (0 to 1), the roads' corridor over them. Each plate is
-written as lossy WebP into `plates` (PLATES, beside the page: every plate it names, local.py's
-check); a network's rasters are read from `data` (compute.DATA, or a study's own folder), the
-plain baseline always from compute.DATA.
+share c_i (0 to 1; a building cleared beside the roads 1), the roads' corridor over them.
+Each plate is written as lossy WebP into `plates` (PLATES, beside the page: every plate it
+names, local.py's check); a network's rasters are read from `data` (compute.DATA, or a study's
+own folder), the plain baseline always from compute.DATA.
 """
 from __future__ import annotations
 
@@ -179,7 +179,7 @@ def time_norm(u: np.ndarray) -> mcolors.Normalize:
 
 
 def plates_times(method: str, run: str, *, data: Path, plates: Path) -> None:
-    """The Time plate of each of <method>_<run>'s frames (compute.times_of's escape times over
+    """The Time plate of each of <method>_<run>'s frames (compute.frames_of's escape times over
     its own mesh's baseline), the corridor over the homes, into `plates`."""
     info = json.loads((data / f"{method}_{run}.json").read_text())
     d = np.load(data / f"{method}_{run}.npz", allow_pickle=True)          # our own file: WKB
@@ -254,21 +254,21 @@ def plates_method(method: str, run: str, *, data: Path, plates: Path) -> None:
     [boundary] = shapely.from_wkb(b["boundary"])
     [streets] = shapely.from_wkb(b["streets"])
     atoms = shapely.from_wkb(d["atoms"])
-    astop = d["atom_stop"]
+    astop = d["atom_stop"]          # per atom the stop from which it is open: carved or cleared
     jn, pn = norms(base)
     names = frame_names(info)
     for k, mm in enumerate([int(s) for s in d["stops"]], start=1):
         DDD = names[mm]
-        carved = ((astop >= 1) & (astop <= k)).astype(float)
+        gone = ((astop >= 1) & (astop <= k)).astype(float)
         [corridor] = shapely.from_wkb(d[f"corridor_{mm}"])
         stem = f"{method}_{DDD}"
         network_plate(fr, polys, d[f"c_{mm}"], corridor, boundary=boundary, streets=streets,
                       out=plates / f"{stem}_network.{EXT}")
         for name, key, norm in (("current", "j", jn), ("power", "p", pn)):
             img = d[f"{key}_{mm}"]
-            flow_plate(img, norm, fr, atoms, carved, ramp=rnd.RAMP, outline=True,
+            flow_plate(img, norm, fr, atoms, gone, ramp=rnd.RAMP, outline=True,
                        boundary=boundary, streets=streets, out=plates / f"{stem}_{name}.{EXT}")
-            flow_plate(divgain(img, d[f"{key}_base"]), GAIN, fr, atoms, carved, ramp=DIV,
+            flow_plate(divgain(img, d[f"{key}_base"]), GAIN, fr, atoms, gone, ramp=DIV,
                        outline=True, boundary=boundary, streets=streets,
                        out=plates / f"{stem}_{name}_gain.{EXT}")
 
