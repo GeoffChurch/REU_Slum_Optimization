@@ -272,10 +272,12 @@ class InternalLeak:
 class BarrierParts(NamedTuple):
     """A region's barriers (OsmBarriers.parts), in the block's CRS: `barrier` what is cut from the
     region (the strips and areas less the crossings' gaps), `strips` and `areas` before the gaps,
-    `gaps` the crossings' gaps, `crossings` each crossing's way piece (bridges and tunnels whole,
-    a crossing node's piece within line_m of it) and its kind (`bridge`, `tunnel`, `node`)."""
+    `rails` the railways' strips among them (the rest of the strips are waterways'), `gaps` the
+    crossings' gaps, `crossings` each crossing's way piece (bridges and tunnels whole, a crossing
+    node's piece within line_m of it) and its kind (`bridge`, `tunnel`, `node`)."""
     barrier: Any
     strips: Any
+    rails: Any
     areas: Any
     gaps: Any
     crossings: list[tuple[str, Any]]
@@ -283,10 +285,13 @@ class BarrierParts(NamedTuple):
 
 class Barriers(Protocol):
     """Obstacles never cleared (module docstring): its name's part, the block its mesh is built
-    on, and what is cut from it (`obstacle`: nothing passes through it but at its gaps)."""
+    on, what is cut from it (`obstacle`: nothing passes through it but at its gaps) and its parts
+    (`parts`: what a plate draws, gap_maps.edge_of)."""
 
     @property
     def name(self) -> str: ...
+
+    def parts(self, block: Block) -> BarrierParts: ...
 
     def block(self, block: Block) -> Block: ...
 
@@ -298,6 +303,12 @@ class NoBarriers:
     @property
     def name(self) -> str:
         return ""
+
+    def parts(self, block: Block) -> BarrierParts:
+        """No barrier: every part empty."""
+        none = shapely.Polygon()
+        return BarrierParts(barrier=none, strips=none, rails=none, areas=none, gaps=none,
+                            crossings=[])
 
     def block(self, block: Block) -> Block:
         return block
@@ -323,8 +334,9 @@ class OsmBarriers:
         osm = osm_in(block)
         ways, nodes, areas = osm.ways, osm.nodes, osm.areas
         lines = ways[ways.railway.isin(RAIL) | (ways.waterway.isin(WATERWAYS) & ~ways.tunnel)]
-        strips = shapely.union_all(shapely.buffer(lines.geometry.to_numpy(), self.line_m / 2.0,
-                                                  cap_style="flat"))
+        strip = shapely.buffer(lines.geometry.to_numpy(), self.line_m / 2.0, cap_style="flat")
+        strips = shapely.union_all(strip)
+        rails = shapely.union_all(strip[lines.railway.isin(RAIL).to_numpy()])
         water = areas[areas.natural.isin(WATER_NATURAL) | areas.landuse.isin(WATER_LANDUSE)
                       | areas.waterway.isin(WATER_WATERWAY)]
         wet = shapely.union_all(shapely.make_valid(water.geometry.to_numpy()))
@@ -352,8 +364,8 @@ class OsmBarriers:
             crossings.append(("node-across", _across(track[0], node, self.line_m)))
         gaps = shapely.union_all(shapely.buffer(np.asarray([g for _k, g in crossings],
                                                            dtype=object), self.cross_m / 2.0))
-        return BarrierParts(barrier=shapely.difference(whole, gaps), strips=strips, areas=wet,
-                            gaps=gaps, crossings=crossings)
+        return BarrierParts(barrier=shapely.difference(whole, gaps), strips=strips, rails=rails,
+                            areas=wet, gaps=gaps, crossings=crossings)
 
     def obstacle(self, block: Block) -> Any:
         """What is cut from `block` (BarrierParts.barrier: the strips and areas less the

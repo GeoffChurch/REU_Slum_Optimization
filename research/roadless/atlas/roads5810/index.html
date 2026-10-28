@@ -137,6 +137,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--select); ou
 .legend-row { display: grid; gap: 6px; padding-block: 4px 18px; }
 .legend { display: block; max-width: 460px; width: 100%; height: auto; background: #ffffff; border-radius: 3px; }
 .caption { font-size: 14.5px; color: var(--muted); max-width: 90ch; }
+/* the edge's key: each mark as the plates draw it, on the plates' own white */
+.edge-key svg { display: inline-block; vertical-align: -3px; width: 40px; height: 14px; margin-inline-end: 4px; background: #ffffff; border: 1px solid var(--plate-frame); border-radius: 2px; }
 
 .chart { padding-block: 10px 24px; display: grid; gap: 10px; }
 .chart h2 { font-size: 26px; }
@@ -261,6 +263,7 @@ footer p { max-width: 95ch; }
   <div class="legend-row">
     <img class="legend" id="legend" src="network_colorbar.png" alt="Colour bar for the network view." loading="eager">
     <p class="caption" id="cap">Buildings in grey, the new roads drawn as their corridors, and each destroyed building shaded by how much of it the roads take: a building counts as wholly destroyed once a tenth of it is gone, or once a road cuts it in two.</p>
+    <p class="caption edge-key">The block's edge, on every plate: <svg viewBox="0 0 40 14" aria-hidden="true"><path d="M3 7H37" stroke="#1e293b" stroke-width="2.8"/></svg>street, where people walk out; <svg viewBox="0 0 40 14" aria-hidden="true"><path d="M3 7H37M6 3.5V10.5M13 3.5V10.5M20 3.5V10.5M27 3.5V10.5M34 3.5V10.5" stroke="#1e293b" stroke-width="1.6" fill="none"/></svg>railway, closed except at its crossings (all three at its two ends, where it meets the street); <svg viewBox="0 0 40 14" aria-hidden="true"><rect x="3" y="4" width="34" height="6" rx="2" fill="#bfdbf3" stroke="#94a3b8" stroke-width="1"/></svg>a ditch, cut out of the ground like the railway.</p>
   </div>
 
   <section class="chart" aria-labelledby="h-chart">

@@ -480,26 +480,23 @@ def plates(method: Method) -> None:
         raise RuntimeError("the frames' extent is not the baseline plates'")
     fr = rd.frame_from(bnpz)
     polys = shapely.from_wkb(bnpz["polys"])
-    [boundary] = shapely.from_wkb(bnpz["boundary"])
-    [streets] = shapely.from_wkb(bnpz["streets"])
+    e = rd.edge(bnpz)
     jn, pn = rd.norms(base)
     for target in TARGETS:
         f = tag(target)
         x = d[f"x_{f}"].astype(np.float64)
         stem = f"{method.key}_{f}"
-        rd.network_plate(fr, polys, x, None, boundary=boundary, streets=streets,
+        rd.network_plate(fr, polys, x, None, edge=e,
                          out=plates_dir / f"{stem}_clearing.{rd.EXT}")
         for view, key, norm in (("current", "j", jn), ("power", "p", pn)):
             img = d[f"{key}_{f}"]
-            rd.flow_plate(img, norm, fr, polys, x, ramp=rd.rnd.RAMP, outline=True,
-                          boundary=boundary, streets=streets,
+            rd.flow_plate(img, norm, fr, polys, x, ramp=rd.rnd.RAMP, outline=True, edge=e,
                           out=plates_dir / f"{stem}_{view}.{rd.EXT}")
             rd.flow_plate(rd.divgain(img, bnpz[key]), rd.GAIN, fr, polys, x, ramp=rd.DIV,
-                          outline=True, boundary=boundary, streets=streets,
-                          out=plates_dir / f"{stem}_{view}_gain.{rd.EXT}")
+                          outline=True, edge=e, out=plates_dir / f"{stem}_{view}_gain.{rd.EXT}")
         rd.time_plate(fr, polys, rd.time_ratio(d[f"u_{f}"], d["u_base"]), norm=rd.GAIN,
-                      ramp=rd.DIV, gone=x > 0, corridor=None, boundary=boundary,
-                      streets=streets, out=plates_dir / f"{stem}_time.{rd.EXT}")
+                      ramp=rd.DIV, gone=x > 0, corridor=None, edge=e,
+                      out=plates_dir / f"{stem}_time.{rd.EXT}")
 
 
 # ------------------------------------------------------------------ the page's data

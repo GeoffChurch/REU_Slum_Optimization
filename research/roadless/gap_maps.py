@@ -39,7 +39,7 @@ from __future__ import annotations
 import sys
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import numpy as np
 import shapely
@@ -53,6 +53,7 @@ import clearings  # noqa: E402
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
 import gap_complex as gc  # noqa: E402
+import gap_exits as gx  # noqa: E402
 import gap_factor  # noqa: E402
 import metrics  # noqa: E402
 
@@ -256,6 +257,101 @@ def escape_image(m: gcl.Model, st: gcl.State, fl: CellFlow, frame: Frame) -> NDA
     c = st.sys.cells
     open_ = st.reach.live[c.cell]
     return paint(m, np.where(open_, fl.u[c.cell], np.nan), frame)
+
+
+# ------------------------------------------------------------------ the edge
+
+# The edge as a plate draws it (draw_edge): drawing only, no score reads these. A railway is the
+# map's idiom, a line with short cross-ticks, RAIL_EVERY_PX apart and RAIL_HALF_PX either side (at
+# the plate's own pixels: 14 and 5 still read as ticks on the 5810 page's 1200 px plates shown
+# 480 px wide, where 10 and 3.5 blur into a dotted line); it stops CROSSING_PX short of a
+# crossing's gap on either side, so a 3 m gap reads as a break at a metre or two a pixel. Water is
+# light blue: its areas filled, the edge along it a blue line.
+RAIL_EVERY_PX = 14.0
+RAIL_HALF_PX = 5.0
+RAIL_LW = 1.4            # points: the railway's line (its ticks RAIL_TICK_LW)
+RAIL_TICK_LW = 1.2
+CROSSING_PX = 3.0
+WATER_FILL, WATER_LINE = "#bfdbf3", "#3b82c4"
+
+
+class Edge(NamedTuple):
+    """A block's outline as a plate draws it (`edge_of`), in its model's local frame (gap_complex
+    .geometry of the block as its barriers cut it). `boundary` the cut polygon (the mesh's edge);
+    the street line in three parts: `street` where the edge is an exit (off every barrier, and
+    through a crossing's gap), `rail` along a railway, `water_line` along water (a waterway's strip
+    or a water area), each of the last two less the crossings' gaps; `crossings` the street line
+    within a crossing's gap; `water` the water within the block's own polygon (holes in the cut)."""
+    boundary: Any
+    street: Any
+    rail: Any
+    water_line: Any
+    crossings: Any
+    water: Any
+
+
+def _lines(g: Any) -> Any:
+    """The line parts of `g` (an intersection's points dropped), merged where they meet."""
+    parts = [q for q in shapely.get_parts(g) if shapely.get_type_id(q) in (1, 2, 5)]
+    return shapely.line_merge(shapely.union_all(parts)) if parts else shapely.LineString()
+
+
+def edge_of(block: Block, *, barriers: gx.Barriers) -> Edge:
+    """`block`'s Edge under `barriers` (a metric's own: ComplexMetric.exits.barriers), in the local
+    frame of the block they cut (gap_clear.ComplexMetric.model's, so Model.geo's)."""
+    p = barriers.parts(block)
+    geo = gc.geometry(barriers.block(block))
+    s: Any = geo.streets         # Geometry types its fields `object`
+    rails, gaps = geo.local(p.rails), geo.local(p.gaps)
+    wet = geo.local(shapely.union(shapely.difference(p.strips, p.rails), p.areas))
+    return Edge(boundary=geo.boundary,
+                street=shapely.difference(s, geo.local(p.barrier)),
+                rail=_lines(shapely.difference(shapely.intersection(s, rails), gaps)),
+                water_line=_lines(shapely.difference(shapely.intersection(s, wet),
+                                                     shapely.union(rails, gaps))),
+                crossings=_lines(shapely.intersection(s, gaps)),
+                water=shapely.intersection(wet, geo.local(block.boundary)))
+
+
+def _ticks(lines: Any, *, every: float, half: float) -> NDArray[np.float64]:
+    """Cross-ticks on `lines` (local metres): each part's evenly spaced about `every` apart, the
+    first and last half a step in from its ends, `half` either side; (n, 2, 2) segments."""
+    out = []
+    for part in shapely.get_parts(lines):
+        n = max(1, round(part.length / every))
+        d = (np.arange(n) + 0.5) * part.length / n
+        step = 0.25 * every
+        a = shapely.get_coordinates(shapely.line_interpolate_point(part, np.maximum(d - step, 0.0)))
+        b = shapely.get_coordinates(shapely.line_interpolate_point(
+            part, np.minimum(d + step, part.length)))
+        c = shapely.get_coordinates(shapely.line_interpolate_point(part, d))
+        t = b - a
+        nrm = np.stack([-t[:, 1], t[:, 0]], axis=1) / np.hypot(t[:, 0], t[:, 1])[:, None]
+        out.append(np.stack([c - half * nrm, c + half * nrm], axis=1))
+    return np.concatenate(out) if out else np.zeros((0, 2, 2))
+
+
+def draw_edge(ax: Any, edge: Edge, *, px: float, ink: str, faint: str, street_lw: float) -> None:
+    """`edge` on `ax` (local metres, `px` metres a pixel): the water filled, the cut polygon's
+    outline in `faint`, the street where it is an exit in `ink` at `street_lw`, along water a blue
+    line as wide, along a railway a thinner `ink` line with its cross-ticks (the module's RAIL_*),
+    stopped CROSSING_PX short of each crossing either side."""
+    import geopandas as gpd
+    from matplotlib.collections import LineCollection
+
+    if not shapely.is_empty(edge.water):
+        gpd.GeoSeries([edge.water]).plot(ax=ax, color=WATER_FILL, lw=0)
+    gpd.GeoSeries([edge.boundary]).boundary.plot(ax=ax, color=faint, lw=1.0)
+    gpd.GeoSeries([edge.street]).plot(ax=ax, color=ink, lw=street_lw)
+    if not shapely.is_empty(edge.water_line):
+        gpd.GeoSeries([edge.water_line]).plot(ax=ax, color=WATER_LINE, lw=street_lw)
+    rail = _lines(shapely.difference(edge.rail, shapely.buffer(edge.crossings, CROSSING_PX * px)))
+    if shapely.is_empty(rail):
+        return
+    gpd.GeoSeries([rail]).plot(ax=ax, color=ink, lw=RAIL_LW)
+    ax.add_collection(LineCollection(
+        list(_ticks(rail, every=RAIL_EVERY_PX * px, half=RAIL_HALF_PX * px)), colors=ink,
+        linewidths=RAIL_TICK_LW, capstyle="butt"))
 
 
 # ------------------------------------------------------------------ the arms

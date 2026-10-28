@@ -21,6 +21,9 @@ where a clearing or road far off lowers a home's potential; the baseline's own p
 time, linear to the 99th percentile; a home with none (cleared, destroyed, or no demand) open.
 The network: every building grey, shaded to the clearing plates' orange by its ramped destroyed
 share c_i (0 to 1; a building cleared beside the roads 1), the roads' corridor over them.
+The block's edge on every plate as gap_maps.draw_edge draws it (owner 2026-10-28: the north edge
+is a railway): the street dark, a railway along it a line with cross-ticks, broken at its
+crossings, water blue; from the page metric's own barriers (`edge`).
 Each plate is written as lossy WebP into `plates` (PLATES, beside the page: every plate it
 names, local.py's check); a network's rasters are read from `data` (compute.DATA, or a study's
 own folder), the plain baseline always from compute.DATA.
@@ -86,6 +89,24 @@ def scratch(out: Path) -> Path:
     return out.with_name(f".{out.stem}.png")
 
 
+def edge(stored) -> gm.Edge:  # type: ignore[no-untyped-def]
+    """The block's edge as the plates draw it (gm.edge_of) under the page metric's own
+    barriers (metrics.RUNTIME's); raises unless its polygon is the `stored` baseline's (the
+    plates' frame: baseline.npz)."""
+    [b] = cp.common.build_blocks([cp.BID])
+    e = gm.edge_of(b, barriers=cp.gcl.complex_of(
+        cp.metrics.RUNTIME, factorization=cp.gap_factor.SuperLU()).exits.barriers)
+    [boundary] = shapely.from_wkb(stored["boundary"])
+    if not shapely.equals(e.boundary, boundary):
+        raise AssertionError("the metric's cut block is not the stored baseline's")
+    return e
+
+
+def draw_edge(ax, fr, e: gm.Edge) -> None:  # type: ignore[no-untyped-def]
+    """`e` on a plate of frame `fr`, in flow5810's colours (rnd.STREET, rnd.EDGE)."""
+    gm.draw_edge(ax, e, px=fr.frame.h, ink=rnd.STREET, faint=rnd.EDGE, street_lw=2.0)
+
+
 def frame_from(d) -> rnd.Frame:  # type: ignore[no-untyped-def]
     x0, y0, h, ny, nx = d["frame"]
     f = gm.Frame(x0=float(x0), y0=float(y0), h=float(h), ny=int(ny), nx=int(nx))
@@ -100,8 +121,7 @@ def norms(base: dict) -> tuple:  # type: ignore[type-arg]
 
 @contextmanager
 def ramp_of(cmap) -> Iterator[None]:  # type: ignore[no-untyped-def]
-    """flow5810's plate and colour bar draw with its module's RAMP: `cmap` in its place
-    meanwhile."""
+    """flow5810's colour bar draws with its module's RAMP: `cmap` in its place meanwhile."""
     saved = rnd.RAMP
     rnd.RAMP = cmap
     try:
@@ -110,26 +130,18 @@ def ramp_of(cmap) -> Iterator[None]:  # type: ignore[no-untyped-def]
         rnd.RAMP = saved
 
 
-def flow_plate(img, norm, fr, polys, k, *, ramp, outline, boundary, streets, out: Path) -> None:  # type: ignore[no-untyped-def]
-    """rnd.plate's figure of `img` on `ramp` (rnd.RAMP for a flow, DIV for a gain) at `out`."""
-    tmp = scratch(out)
-    with ramp_of(ramp):
-        rnd.plate(img, norm, fr, polys, k, outline=outline, boundary=boundary, streets=streets,
-                  path=tmp)
-    small(tmp, out)
-
-
-def network_plate(fr, polys, c, corridor, *, boundary, streets, out: Path) -> None:  # type: ignore[no-untyped-def]
-    """rnd.plate's figure with no flow: the buildings shaded by c, the corridor, the edge and the
-    streets as rnd.plate draws them."""
+def flow_plate(img, norm, fr, polys, k, *, ramp, outline, edge: gm.Edge, out: Path) -> None:  # type: ignore[no-untyped-def]
+    """rnd.plate's figure of `img` on `ramp` (rnd.RAMP for a flow, DIV for a gain) at `out`: the
+    standing buildings grey, the cleared (k 1) outlined if `outline`, the edge (draw_edge)."""
     f = fr.frame
     fig = plt.figure(figsize=(f.nx / 100, f.ny / 100), dpi=100)
     ax = fig.add_axes((0, 0, 1, 1))
-    gpd.GeoSeries(list(polys)).plot(ax=ax, color=DESTROYED(np.clip(c, 0.0, 1.0)), lw=0)
-    if corridor is not None:
-        gpd.GeoSeries([corridor]).plot(ax=ax, color=ROAD, lw=0)
-    gpd.GeoSeries([boundary]).boundary.plot(ax=ax, color=rnd.EDGE, lw=1.0)
-    gpd.GeoSeries([streets]).plot(ax=ax, color=rnd.STREET, lw=2.0)
+    ax.imshow(img, origin="lower", extent=f.extent, interpolation="nearest", cmap=ramp,
+              norm=norm)
+    gpd.GeoSeries(list(polys[k < 1.0])).plot(ax=ax, color=rnd.BUILDING, lw=0)
+    if outline:
+        gpd.GeoSeries(list(polys[k >= 1.0])).boundary.plot(ax=ax, color=rnd.CLEARED, lw=0.7)
+    draw_edge(ax, fr, edge)
     ax.set_xlim(fr.lim[0], fr.lim[1])
     ax.set_ylim(fr.lim[2], fr.lim[3])
     ax.set_axis_off()
@@ -139,11 +151,29 @@ def network_plate(fr, polys, c, corridor, *, boundary, streets, out: Path) -> No
     small(tmp, out)
 
 
-def time_plate(fr, polys, value, *, norm, ramp, gone, corridor, boundary, streets,  # type: ignore[no-untyped-def]
+def network_plate(fr, polys, c, corridor, *, edge: gm.Edge, out: Path) -> None:  # type: ignore[no-untyped-def]
+    """rnd.plate's figure with no flow: the buildings shaded by c, the corridor, the edge
+    (draw_edge)."""
+    f = fr.frame
+    fig = plt.figure(figsize=(f.nx / 100, f.ny / 100), dpi=100)
+    ax = fig.add_axes((0, 0, 1, 1))
+    gpd.GeoSeries(list(polys)).plot(ax=ax, color=DESTROYED(np.clip(c, 0.0, 1.0)), lw=0)
+    if corridor is not None:
+        gpd.GeoSeries([corridor]).plot(ax=ax, color=ROAD, lw=0)
+    draw_edge(ax, fr, edge)
+    ax.set_xlim(fr.lim[0], fr.lim[1])
+    ax.set_ylim(fr.lim[2], fr.lim[3])
+    ax.set_axis_off()
+    tmp = scratch(out)
+    fig.savefig(tmp, dpi=100, facecolor="white")
+    plt.close(fig)
+    small(tmp, out)
+
+
+def time_plate(fr, polys, value, *, norm, ramp, gone, corridor, edge: gm.Edge,  # type: ignore[no-untyped-def]
                out: Path) -> None:
     """Each home filled by `value` on `ramp` (nan: no home, drawn open with an outline), the
-    `gone` buildings (cleared or destroyed) in ROAD's grey, the corridor, the edge and the
-    streets as network_plate draws them."""
+    `gone` buildings (cleared or destroyed) in ROAD's grey, the corridor, the edge (draw_edge)."""
     f = fr.frame
     fig = plt.figure(figsize=(f.nx / 100, f.ny / 100), dpi=100)
     ax = fig.add_axes((0, 0, 1, 1))
@@ -154,8 +184,7 @@ def time_plate(fr, polys, value, *, norm, ramp, gone, corridor, boundary, street
     gpd.GeoSeries(list(polys[gone])).plot(ax=ax, color=ROAD, lw=0)
     if corridor is not None:
         gpd.GeoSeries([corridor]).plot(ax=ax, color=ROAD, lw=0)
-    gpd.GeoSeries([boundary]).boundary.plot(ax=ax, color=rnd.EDGE, lw=1.0)
-    gpd.GeoSeries([streets]).plot(ax=ax, color=rnd.STREET, lw=2.0)
+    draw_edge(ax, fr, edge)
     ax.set_xlim(fr.lim[0], fr.lim[1])
     ax.set_ylim(fr.lim[2], fr.lim[3])
     ax.set_axis_off()
@@ -189,14 +218,13 @@ def plates_times(method: str, run: str, *, data: Path, plates: Path) -> None:
         raise AssertionError(f"{method}_{run}: the escape times' stops are not the frames'")
     fr = frame_from(d)
     polys = shapely.from_wkb(b["polys"])
-    [boundary] = shapely.from_wkb(b["boundary"])
-    [streets] = shapely.from_wkb(b["streets"])
+    e = edge(b)
     names = frame_names(info)
     for mm in [int(s) for s in d["stops"]]:
         [corridor] = shapely.from_wkb(d[f"corridor_{mm}"])
         time_plate(fr, polys, time_ratio(t[f"u_{mm}"], t["u_base"]), norm=GAIN, ramp=DIV,
-                   gone=d[f"c_{mm}"] >= 1.0, corridor=corridor, boundary=boundary,
-                   streets=streets, out=plates / f"{method}_{names[mm]}_time.{EXT}")
+                   gone=d[f"c_{mm}"] >= 1.0, corridor=corridor, edge=e,
+                   out=plates / f"{method}_{names[mm]}_time.{EXT}")
 
 
 def divgain(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -226,19 +254,16 @@ def plates_baseline(*, plates: Path) -> None:
     d = np.load(cp.DATA / "baseline.npz", allow_pickle=True)          # our own file: WKB as objects
     fr = frame_from(d)
     polys = shapely.from_wkb(d["polys"])
-    [boundary] = shapely.from_wkb(d["boundary"])
-    [streets] = shapely.from_wkb(d["streets"])
+    e = edge(d)
     jn, pn = norms(base)
     k = np.zeros(len(polys))
-    network_plate(fr, polys, k, None, boundary=boundary, streets=streets,
-                  out=plates / f"baseline_network.{EXT}")
+    network_plate(fr, polys, k, None, edge=e, out=plates / f"baseline_network.{EXT}")
     for name, key, norm in (("current", "j", jn), ("power", "p", pn)):
-        flow_plate(d[key], norm, fr, polys, k, ramp=rnd.RAMP, outline=False, boundary=boundary,
-                   streets=streets, out=plates / f"baseline_{name}.{EXT}")
+        flow_plate(d[key], norm, fr, polys, k, ramp=rnd.RAMP, outline=False, edge=e,
+                   out=plates / f"baseline_{name}.{EXT}")
     u = np.load(cp.DATA / "baseline_times.npz")["u"]
     time_plate(fr, polys, u, norm=time_norm(u), ramp=rnd.RAMP, gone=np.zeros(len(polys), bool),
-               corridor=None, boundary=boundary, streets=streets,
-               out=plates / f"baseline_time.{EXT}")
+               corridor=None, edge=e, out=plates / f"baseline_time.{EXT}")
 
 
 def plates_method(method: str, run: str, *, data: Path, plates: Path) -> None:
@@ -251,8 +276,7 @@ def plates_method(method: str, run: str, *, data: Path, plates: Path) -> None:
     if not np.allclose(d["frame"], b["frame"]) or not np.allclose(d["lim"], b["lim"]):
         raise AssertionError("the method's frame is not the baseline's")
     polys = shapely.from_wkb(b["polys"])
-    [boundary] = shapely.from_wkb(b["boundary"])
-    [streets] = shapely.from_wkb(b["streets"])
+    e = edge(b)
     atoms = shapely.from_wkb(d["atoms"])
     astop = d["atom_stop"]          # per atom the stop from which it is open: carved or cleared
     jn, pn = norms(base)
@@ -262,15 +286,14 @@ def plates_method(method: str, run: str, *, data: Path, plates: Path) -> None:
         gone = ((astop >= 1) & (astop <= k)).astype(float)
         [corridor] = shapely.from_wkb(d[f"corridor_{mm}"])
         stem = f"{method}_{DDD}"
-        network_plate(fr, polys, d[f"c_{mm}"], corridor, boundary=boundary, streets=streets,
+        network_plate(fr, polys, d[f"c_{mm}"], corridor, edge=e,
                       out=plates / f"{stem}_network.{EXT}")
         for name, key, norm in (("current", "j", jn), ("power", "p", pn)):
             img = d[f"{key}_{mm}"]
-            flow_plate(img, norm, fr, atoms, gone, ramp=rnd.RAMP, outline=True,
-                       boundary=boundary, streets=streets, out=plates / f"{stem}_{name}.{EXT}")
+            flow_plate(img, norm, fr, atoms, gone, ramp=rnd.RAMP, outline=True, edge=e,
+                       out=plates / f"{stem}_{name}.{EXT}")
             flow_plate(divgain(img, d[f"{key}_base"]), GAIN, fr, atoms, gone, ramp=DIV,
-                       outline=True, boundary=boundary, streets=streets,
-                       out=plates / f"{stem}_{name}_gain.{EXT}")
+                       outline=True, edge=e, out=plates / f"{stem}_{name}_gain.{EXT}")
 
 
 def colorbar_with(cmap, norm, ticks, labels, text: str, path: Path) -> None:  # type: ignore[no-untyped-def]
