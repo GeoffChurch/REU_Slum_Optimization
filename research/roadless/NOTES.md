@@ -10941,3 +10941,148 @@ proj^q), an incumbent of rounded iterates as relax.simp keeps, or MMA would each
 Rows: road_simp_rows/<RUNTIME>/rs.D*.s*.r7.q1,2,3,3,3.b1,2,4,8,16.i60.uOC.cjoint.p1e0.0001v8/
 (not committed); the table and the rescue in .superpowers/sdd/2026-10-27-joint/ (table.py,
 table.csv, split.csv, rescue.py).
+
+### Roads grown as a front, and reblocking by ears: a pilot on 5810 (2026-10-27 -- 28)
+
+Owner 2026-10-27: the street "pulling in" toward the demand as a front, and the less aggressive
+form where the grown road "would just have the 10x conductivity we give it elsewhere"; then the
+pure leak, "so that it's really like the boundary growing inwards", hoping for deeper intrusions;
+and on 10-28 a third arm, "literal reblocking, where we partition the region (so every road is a
+loop)". Briefs .superpowers/sdd/2026-10-27-growth/brief.md and 2026-10-27-ears/brief.md.
+
+growth.py (1bbec131 .. 7ff61c5b): road SIMP's eps world (every standing footprint at EPS, one mesh
+and one pattern for every state). The contrast is a Strategy: `k10` (Road), a grown triangle open
+and boosted to the metric's road; `gl0.25Croad` (GroundedLeak), open and joined to ground by sigma
+/ h^2 per m^2 on its cell's diagonal (Graph.with_leak: the street itself moves inward), its C
+charged as the same corridor's as a kappa-10 road. At h 0.25 m on 19570 the grown cells' u is at
+most 2.4 against a median 16 off them, P within 0.3% of h 0.05's, the solve's relative residual
+2.3e-10. A step solves once and grows a batch of 48 road-width patches (the triangles within 3.5 m
+of a front site, one site a square metre) at least 14 m apart, each scored by its first-order gain
+(road_simp._grad's dP/dkt and dP/db; the leak's dP/d(leak_c) = -u_c^2) over nu P0 dD + lambda dC
+(nu 2; lambda the joint's sheet price, 0.1 or 0.3); the pick greedy or dielectric breakdown's eta
+(seeded). Bridges (`B21m8k2`, rev 2): straight road-width links between two points of the attached
+set's open edge across a gap, screened by the rank-one gain g du^2 / (1 + g R_ab) (R_ab from one
+dipole solve), the best two rescored exactly and built if their gain per cost beats the last
+batch's. Connectivity is a Strategy: attached, or free with a charge per new island. Every step a
+prefix; each frame (the first state past D 0.05 / 0.10 / 0.15) scored on its own carved mesh with
+the region as a kappa-10 road (RUNTIME), the grounded runs also in their own world. Guard
+growth_check.py bridge (19570): the rank-one gain against a re-solve, 2.1e-8 for a passage's two
+cells (the pattern refactored), 1.7e-10 for a pair 15 m apart (preconditioned CG); the fault
+no-denominator fails it (1.0).
+
+ears.py (fb11bcf2 .. 362846a5): the same grounded world; a road is added only as an ear, from a
+sink (the street's faces or a grown road) to another sink of the same face, and must split it
+(faces: the ungrown triangles' components of 100 m^2 and more). A face's P is one solve with the
+plan's factorization restricted to its cells (the roads' cells held at 0), so an ear's exact gain
+is a face's P less its two halves'. Candidates are a Strategy: `paths` (cheapest paths on a 2 m
+raster, a metre through a building costing 21, per source the target with the most first-order
+gain per path cost) and `divides` (the persistence-simplified Morse-Smale divides of u, with the
+harmonic-measure split, each home to the boundary stretch taking most of its current, where the
+strict basins degenerate along the street ring: on 5810 they did, and the harmonic split made
+every cut; the function ears.divides is pure in its pixel inputs, the partition agent's start).
+The top four candidates that split their face, by first order per cost, are rescored by the
+restricted solve and the best is built. Guards (ears.py check, 19570, each failing under its
+fault): decouple, the global P against the faces' sum, 2.4e-3 (weak-leak, h 25 m: 0.24); first,
+sum u^2 l against the exact drop at a small leak, 3.3e-4 (abs-u: 0.99); ends, the top ears each
+split their face (spur, the last third dropped: a dead end). On 5810 the decoupling gap is 0.37 /
+0.60 / 0.67% at 10 / 20 / 30 ears.
+
+At D 0.05 / 0.10 / 0.15 (L_P under RUNTIME; the deepest quarter: homes at depth quantile 0.75 and
+up by the baseline's escape time, depth5810's; C in thousands of m^2; hours to D 0.15):
+
+    run                              L_P                 deepest quarter    C (k m^2)      h
+    k10 greedy, bridges (rev 1)      0.561 0.809 0.864   0.454 0.802 0.861  316  832 1273  2.9
+    k10 greedy, bridges (rev 2)      0.564 0.803 0.864   0.454 0.792 0.860  324  787 1224  2.2
+      price 0.3                      0.487 0.729 0.832   0.377 0.674 0.827  245  542  920  4.2
+    k10 eta 1 seed 0, bridges        0.255 0.467 0.621   0.188 0.359 0.515  176  365  577  1.1
+      no bridges (rev 1)             0.272 0.453 0.610   0.200 0.348 0.506  197  360  561  0.5
+    k10 eta 1 seed 1, bridges        0.238 0.419 0.593   0.170 0.312 0.484  173  331  541  1.0
+      no bridges                     0.229 0.456 0.601   0.159 0.344 0.487  178  361  547  0.5
+    grounded greedy                  0.462 0.678 0.760   0.355 0.610 0.744  249  533  848  1.4
+      price 0.3                      0.395 0.616 0.726   0.294 0.523 0.681  196  414  653  1.3
+    grounded eta 1                   0.257 0.418 0.541   0.181 0.313 0.438  164  307  460  0.8
+    grounded free, island 0.03       0.310 0.432 0.492   0.246 0.380 0.449  182  351  507  3.1
+    ears, paths                      0.431 0.504 0.586   0.421 0.504 0.590  176  357  512  0.5
+      price 0.3                      0.430 0.490 0.575   0.423 0.495 0.573  175  330  483  0.5
+    ears, divides (tau 0.1)          0.175 0.332 0.383   0.194 0.330 0.386  125  199  284  0.4
+    lazy ΔP greedy (lineup pool)     0.495 0.612 0.678                      193  376  517  1.7
+
+(exact D within 0.006 of each target; price 0.1 unless named; the joint SIMP's paved answer at
+price 0.1: 0.600 at D 0.053 with 192k, 0.643 at 0.158 with 188k.) How deep the roads reach and
+their shape, the same frames (reach: a grown triangle's distance from the original street, its
+largest, and the tips' median / 90th percentile at D 0.15; within 50 m: the share of the deepest
+quarter's homes, then of all homes; loops: faces of 100 m^2 and more less one):
+
+    run                        reach (m)     tips (m)   deepest <= 50 m   all <= 50 m    loops
+    k10 greedy (rev 2)         124 279 371   115 / 292   6  70 100%        49 84 99%     1 13 45
+      price 0.3                 92 204 333   119 / 274   3  30  95%        43 68 94%     1  5 11
+    grounded greedy             92 195 313   100 / 245   3  25  76%        45 70 92%     0  2  2
+      price 0.3                 71 152 239    87 / 191   1  15  43%        40 60 80%     0  2  2
+    k10 eta 1 (seed 0, rev 2)   48  93 123    25 /  89   0   2  10%        39 48 56%     0  0  6
+    grounded eta 1              49  80 108    24 /  86   0   2   9%        39 47 56%     0  0  1
+    ears, paths                377 377 377    67 / 221  53  97 100%        53 81 94%     0  8 21
+    ears, divides              378 378 378    85 / 222  68  69  76%        40 53 56%     2  6 16
+
+Grounded growth is not deeper. At every D the kappa-10 greedy reaches further (371 m against 313
+at D 0.15) and serves more of the deepest quarter (100% within 50 m against 76%), at 1.3 -- 1.5x
+the grounded greedy's C; under RUNTIME it leads by 0.10 -- 0.13. The grounded tips do not stall:
+each advances about one patch (3.5 m) a step until D runs out, and the median patch of a batch
+stays deep to the end (125 -- 147 m from the block's edge from step 40 on). With the grown cells
+held at 0 there is no current along a road to widen it into the kappa-10 run's fans, and the
+budget goes into more, thinner fingers (441 tips against 307 at D 0.15). The reach is set by the
+batch, 48 fingers advancing in parallel per solve, and by the D budget, not by screening. In its
+own world the grounded greedy reaches L_P 0.980 at D 0.15: grounding a road ends every trip that
+reaches it.
+
+The ears are the deep option and they cost L_P. Every ear crosses the block, so the reach is the
+block's from the first frame, and from D 0.10 nearly every home of the deepest quarter is within
+50 m of a road, its L_P equal to the block's. At D 0.15 the 31 paths ears cut 22 faces (median
+10,000 m^2; the largest, 306,000 m^2, the uncut north-east strip), every road on a loop. The price
+of the no-dead-end constraint, ears against the grounded greedy: under RUNTIME 0.03 / 0.17 / 0.17
+at equal D, and about 0.04 at 357k m^2 and 0.07 at 512k at equal C (the greedy interpolated
+between its frames). In the grounded world the ears win (0.918 / 0.969 / 0.983 against 0.583 /
+0.873 / 0.980 at equal D, more at equal C): the batched first-order front is myopic where each ear
+is rescored exactly, and grounding rewards the long cut. `divides` cuts curved cells east of the
+centre for little C and trails `paths` throughout. Price 0.3 changes the ears little. Under P, for
+one fixed demand, trees win (Corson 2010), and here a loop costs 0.17 of L_P at D 0.10 -- 0.15:
+loops need the varying loads to earn their place.
+
+Bridges matter less than the seed. Rev 1 read a bridge's end potential at a front triangle,
+possibly inside a building at EPS, and its estimates ran about 30x the exact gain; rev 2 (ends on
+the road's open edge, across a gap) brings exact over estimate to 1.22 -- 1.85 (median 1.56, on 12
+bridges at pass 1's greedy states 31 and 85). The greedy then builds 84 bridges (23 in rev 1),
+closing 7 of its 66 loops on the triangle count, at an unchanged L_P. At eta 1 the bridges close 6
+of 12 such loops (seed 0) and 2 of 4 (seed 1), but the no-bridge runs grow 9 and 8 by themselves,
+and the two seeds' L_P differ by up to 0.05 at a frame: within that noise the bridges add no loops.
+
+The islands are destinations, not roads. Free grounded growth with a charge per new island (an
+island taken only on an exact solve: a lone grounded patch's first-order gain u^2 l overstates its
+exact u^2 / (R + 1/l) by l R, and at charges up to 0.1 L_P the first-order pick made 42 of every
+48 patches islands): 57 / 36 / 14 islands by D 0.15 at charges 0.003 / 0.01 / 0.03, a few hundred
+m^2 each (up to 3,000), carrying 40 / 42 / 35% of the grounded-world drop (59 / 60 / 54% at D 0.05).
+In their own world these runs reach L_P 0.99; under RUNTIME, where an island is a plaza, 0.46 --
+0.49 at D 0.15, below every attached run. A grounded island ends the trips that reach it, which
+a facility does for its own trips only; the brief's refusal of free + grounded was right for road
+building, and the charge 0.03 is the one that lets islands form without swamping the run.
+
+What the brief got wrong. A price of 0 on C does not work: every patch on open ground then costs
+nothing (dD 0) and the front would pave all the attached open ground before spending any D (Cost
+refuses it; the runs use the joint's sheet price). One patch per solve is not affordable (a
+factorization of the eps world's 6.8M unknowns takes about 25 s on a core, and D 0.15 is several
+thousand patches), so a step grows a batch, and the greedy limit is the top 48 patches 14 m apart,
+not the single best; the exact rescoring of patches was dropped for the same reason (25 s each).
+The first-order gain overestimates: about 7x for an open-ground patch (a boost of 1 to 10 is no
+small change), and by l R for a grounded one, far more for a lone patch than for a front patch.
+It is an upper bound (P is convex in the conductances), so it ranks, but its scores are not gains.
+Ears on 5810 first split nothing: their ends were taken at walls with no exit and at the paved way
+along the north edge (ungrown open ground of the face), and open-ground triangles wider than a
+road joined an ear's two sides (362846a5: sinks on the street's faces and grown roads only; every
+triangle the centreline crosses grown).
+
+Open: a pick that favours tips (a smaller batch, or a score that weights a finger's tip), for
+fewer, longer fingers; the paved way along the north edge in ears (today ungrown open ground,
+where it should be a road an ear can end on); the free (paving) connectivity at kappa 10, against
+road SIMP's paved answer; and varying loads (internal trips, single blockages), which now matter:
+under P the loops cost 0.17. Rows: research/roadless/growth_rows/ZAF.9.3.1_1_5810/ (not committed);
+plates, tables (table2.txt) and scripts (frames.py, table2.py, bridge_check.py) in
+.superpowers/sdd/2026-10-27-growth/; every run on the 5810 build-out page (934ac25c).

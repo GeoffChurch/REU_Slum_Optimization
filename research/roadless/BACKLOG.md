@@ -1068,19 +1068,25 @@ Not pursued, with what would change that:
   8480, 38616) and 5810, with resistance_lp, cycle_desire and SIMP alongside. Under the paved-only
   boost the corridors are the flow's own (on 5810 unboosted, the lanes hold 18% of the power on
   15.5% of the open ground).
-- **Roads grown as a front: Laplacian growth** (owner 2026-10-27; in progress, growth.py,
-  .superpowers/sdd/2026-10-27-growth/brief.md): the street pulled inward toward the demand,
-  road-width patches grown at the front by their first-order gain per unit cost (D and C priced),
-  DBM's eta the tree / loop dial, bridges scored by the exact rank-one gain; contrast a Strategy
-  (kappa 10 roads, or the grown cells grounded through the leak so the street itself moves in),
-  connectivity a Strategy (attached; free, islands paying a fixed charge). Pass 1 on 5810 (kappa
-  10 attached, price 0.1): the greedy grows a dendritic network into the deep core, L_P 0.561 /
-  0.809 / 0.864 at D 0.05 / 0.10 / 0.15 with C 316k / 832k / 1,273k m^2 (above C ~350k it
-  matches the lazy greedy at half the D; the joint SIMP's paved answer, 0.600 at D 0.053 and
-  192k, dominates its D 0.05 frame); eta 1 grows a fringe along the street. Open: the bridges
-  re-run after rev 2's fix (pass 1's estimates ran ~30x the exact gain), a second seed, the
-  grounded runs (depth of intrusion the headline), price 0.3 beside 0.1, the free (paving)
-  connectivity, and then varying loads (Corson 2010; Katifori et al. 2010) if bridges leave trees.
+- **Roads grown as a front: Laplacian growth, and reblocking by ears** (owner 2026-10-27 -- 28;
+  piloted on 5810, NOTES "Roads grown as a front, and reblocking by ears"; growth.py, ears.py,
+  .superpowers/sdd/2026-10-27-growth/ and 2026-10-27-ears/): road-width patches grown at the
+  street's front by first-order gain per cost (nu 2, the joint's sheet price 0.1 or 0.3), 48 a
+  solve; contrast a Strategy (kappa-10 roads, or grounded through the leak), connectivity a
+  Strategy (attached, or free with a charge per island); ears add only roads that split a face
+  (every road on a loop), `paths` or `divides` candidates rescored by a face's restricted solve.
+  Findings: the kappa-10 greedy leads (0.564 / 0.803 / 0.864 at D 0.05 / 0.10 / 0.15, C 324k /
+  787k / 1,224k m^2); grounded growth is not deeper (313 m against 371 at D 0.15, 76% of the
+  deepest quarter within 50 m against 100%; 0.10 -- 0.13 lower under RUNTIME), its tips not
+  stalled but the budget spread over 48 parallel fingers; the ears reach the whole block and serve
+  the deepest quarter from D 0.10 but trail the grounded greedy by 0.17 at D 0.10 -- 0.15 (about
+  0.04 -- 0.07 at equal C): the price of no dead ends; bridges (rev 2, estimates now within 1.2 --
+  1.9x the exact) add no loops beyond seed noise; free grounded islands are destinations (0.99 in
+  their own world, 0.49 under RUNTIME). Open: a tip-favouring pick (a smaller batch, or a score
+  weighting a finger's tip) for fewer, longer fingers; the north paved way in ears (ungrown open
+  ground today, where it should be a road an ear can end on); the free (paving) connectivity at
+  kappa 10, against road SIMP's paved answer; and varying loads (internal trips, single
+  blockages; Corson 2010, Katifori et al. 2010), which now matter: under P the loops cost 0.17.
 - **Add/remove subset search** (built 2026-10-09; NOTES "The add/remove search as one
   Strategy"). search.py: a Round (rank, refine, build, evaluate, accept) under a schedule; the
   greedy's pickers, exchange (the polish), grow-then-prune and floating search are its
