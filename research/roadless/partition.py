@@ -74,8 +74,11 @@ measures `measures` gives (sub-blocks, road length, dead ends, the depth measure
 term's cut share):
   start: the start's own cut answer (below), before the update;
   band: the triangles at r >= 1/2 (road_simp.paved_of);
-  cut: the label boundaries (argmax phi on the raster, each pixel edge between two labels, merged
-    and simplified) as roads ROAD_W wide (road_corridor), clipped to the block.
+  cut: the label boundaries (argmax phi on the raster, each region narrower than a road merged
+    into a neighbour, `thick`; each pixel edge between two labels, merged and simplified) as roads
+    ROAD_W wide (road_corridor), clipped to the block.
+Each answer's ground is snapped to a 1 mm grid in the block's local frame (`gridded`) before it
+is stored and scored.
 
 Speed (5810: 7.2M triangles, 6.8M cells, 519k design pixels of 2.2M, K 5; this machine, one
 thread): an update is the factorization (SuperLU 23 s, cuDSS 0.1 s after its 36 s plan), the
@@ -160,15 +163,20 @@ NODAL_FLOOR = 0.01       # Nodal: the mass's share spread by area (the open grou
                          # hold no demand: M positive definite)
 KMEANS_ITER = 50         # Voronoi, Spectral: k-means iterations
 SNAP_TOL = 1.0           # m: the cut answer's boundaries simplified to this
+GRID_M = 1e-3            # m: every answer's ground snapped to this grid in the block's local
+                         # frame before it is stored and scored (`gridded`: the 5810 page's
+                         # networks.GRID_M)
 FACE_M2 = 100.0          # m^2: a sub-block is a face of the block less the roads this large
 TIP_STREET_M = 5.0       # m: a skeleton end farther than this from the street is a dead end
 REACH_M = 50.0           # m: a home "reached": within this of a road (the growth pilot's)
 DEEP_Q = 0.75            # the deepest quarter: homes at depth quantile >= this
 DAMAGE_STEP_M = 10.0     # the damage term's piece length (NOTES, "Roads from the vote, stage 2")
 DAMAGE_CARRY_M = 100.0   # the damage term's carry
-REV = 3                  # 2: the start's cells split into connected regions before colouring,
+REV = 4                  # 2: the start's cells split into connected regions before colouring,
                          # those under MIN_REGION_M2 merged (`merged`); 3: the banded road
-                         # (`.band`), the ramp's tail (`.e`), the ears start, mu by least_mu
+                         # (`.band`), the ramp's tail (`.e`), the ears start, mu by least_mu;
+                         # 4: the answers' grounds on the GRID_M grid (`gridded`), the cut's
+                         # regions narrower than a road merged (`thick`): the update is rev 3's
 TAU = common.MEASURE.tau                 # the ramp's knee (the ramp's tail, Partition.D)
 EARS_RUN = "ears.paths.b20.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1"   # the ears start's run
                          # (growth_rows/<block>/: the ears arm's paths on 5810)
@@ -993,10 +1001,45 @@ def simp(pt: Partition, f: F64, plan: Plan, *, log: Any) -> tuple[F64, list[Iter
 # ---------------------------------------------------------------- answers and measures
 
 
-def cut_lines(pt: Partition, f: F64) -> Any:
-    """The label boundaries (module docstring), merged and simplified (local frame)."""
-    ra = pt.rd.raster
-    lab = pt.lab.argmax(f).reshape(ra.shape)
+def thick(lab: I64) -> I64:
+    """The label raster (2-D) with each connected region (4-connected) narrower than a road merged
+    into the neighbour it shares the most pixel edges with, the narrowest first, until none is.
+    A region's width is twice its largest distance to another region (a pixel's distance to the
+    nearest pixel on a region's edge, plus the half pixel to the boundary): under ROAD_W, every
+    pixel of it is road once its boundary is built ROAD_W wide, so it is no sub-block. The argmax
+    leaves such islands and slivers where fields nearly tie; their boundaries' corridors are blobs
+    whose skeletons are spurs off the network (rev 3's cuts' 1 -- 4 dead ends, every one) or
+    floating loops."""
+    lab = lab.copy()
+    reg = np.asarray(label(lab + 1, background=0, connectivity=1), dtype=np.int64) - 1
+    n = int(reg.max()) + 1
+    while True:
+        edge = np.zeros(reg.shape, dtype=bool)
+        dx, dy = reg[1:, :] != reg[:-1, :], reg[:, 1:] != reg[:, :-1]
+        edge[1:, :] |= dx
+        edge[:-1, :] |= dx
+        edge[:, 1:] |= dy
+        edge[:, :-1] |= dy
+        depth = ndimage.distance_transform_edt(~edge)
+        half = np.full(n, -1.0)
+        live = np.flatnonzero(np.bincount(reg.ravel(), minlength=n) > 0)
+        half[live] = np.asarray(ndimage.maximum(depth, reg, index=live)) + 0.5
+        thin = live[2.0 * half[live] * PIXEL < ROAD_W]
+        if not len(thin) or len(live) == 1:
+            return lab
+        r = int(thin[np.argmin(half[thin])])
+        m = reg == r
+        ring = ndimage.binary_dilation(m) & ~m
+        nb = np.bincount(reg[ring], minlength=n)
+        nb[r] = 0
+        to = int(np.argmax(nb))
+        lab[m] = lab[ring & (reg == to)][0]
+        reg[m] = to
+
+
+def boundary_lines(ra: rs.Raster, lab: I64) -> Any:
+    """The boundaries of a label raster (2-D): each pixel edge between two labels, merged and
+    simplified (local frame)."""
     segs = []
     i, j = np.nonzero(lab[1:, :] != lab[:-1, :])           # an edge at x = i + 1
     segs.append(np.stack([np.stack([i + 1, j], 1), np.stack([i + 1, j + 1], 1)], 1))
@@ -1007,14 +1050,41 @@ def cut_lines(pt: Partition, f: F64) -> Any:
     return shapely.simplify(merged, SNAP_TOL)
 
 
+def cut_lines(pt: Partition, f: F64) -> Any:
+    """The label boundaries (module docstring) of the argmax labels less their regions narrower
+    than a road (`thick`), merged and simplified (local frame)."""
+    ra = pt.rd.raster
+    return boundary_lines(ra, thick(pt.lab.argmax(f).reshape(ra.shape)))
+
+
+def gridded(geo: Any, ground: Any) -> Any:
+    """An answer's ground (world frame) with its vertices on the GRID_M grid of the block's local
+    frame, the carved mesh's, its polygons kept (a collapsed sliver dropped). Off the grid the
+    band's smoothed outline left two vertices 7.6e-10 m apart, which the carved mesh's conformity
+    refused (rev 3's ears start at D 0.15; the parked "A carved atom has no width floor"); the 5810
+    page's islands run unioned its stops on the same grid for the same refusal."""
+    g = shapely.set_precision(geo.local(ground), GRID_M)
+    parts = shapely.get_parts(g)
+    return geo.utm(shapely.union_all(parts[np.isin(shapely.get_type_id(parts), (3, 6))]))
+
+
 def cut_of(b: Any, pt: Partition, f: F64) -> tuple[Any, Any]:
-    """(the cut answer's lines, its ground), world frame, clipped to the block."""
-    cut = shapely.intersection(pt.rd.m.geo.utm(cut_lines(pt, f)), b.boundary)
+    """(the cut answer's lines, its ground on the grid: `gridded`), world frame, clipped to the
+    block."""
+    geo = pt.rd.m.geo
+    cut = shapely.intersection(geo.utm(cut_lines(pt, f)), b.boundary)
     cut = shapely.line_merge(shapely.union_all(shapely.get_parts(cut)))
     ground = shapely.intersection(
         road_corridor(gpd.GeoDataFrame(geometry=list(shapely.get_parts(cut)), crs=b.crs)
                       .assign(width_m=ROAD_W)), b.boundary)
-    return cut, ground
+    return cut, gridded(geo, ground)
+
+
+def band_of(pt: Partition, w: rs.World) -> Any:
+    """The band answer's ground (the triangles at r >= 1/2, road_simp.paved_of), world frame, on
+    the grid (`gridded`)."""
+    geo = pt.rd.m.geo
+    return gridded(geo, geo.utm(rs.paved_of(pt.rd, w.r)))
 
 
 def depth_quantiles(u: F64, area: F64) -> F64:
@@ -1074,8 +1144,6 @@ def _branch(keep: set[tuple[int, int]], deg: I64, end: tuple[int, int]) -> int:
 def measures(b: Any, m: gcl.Model, lens: gcl.Lenses, ground: Any, lines: Any) -> dict[str, Any]:
     """An answer's network measures (module docstring): `ground` its carved ground and `lines`
     its centrelines (world frame), `m` and `lens` its scored model and state's lenses."""
-    faces = shapely.get_parts(shapely.difference(b.boundary, ground))
-    fa = np.sort(shapely.area(faces)[shapely.area(faces) >= FACE_M2])[::-1]
     sk_lines, ends, d = skeleton(b, ground)
     street = shapely.union_all(b.streets.geometry.to_numpy())
     parts = shapely.get_parts(lines)
@@ -1088,17 +1156,27 @@ def measures(b: Any, m: gcl.Model, lens: gcl.Lenses, ground: Any, lines: Any) ->
     ok = deep & np.isfinite(u) & np.isfinite(u0)
     net = gpd.GeoDataFrame(geometry=list(parts), crs=b.crs).assign(width_m=ROAD_W)
     dm = damage.damage(damage.Graph.of(b, net, step_m=DAMAGE_STEP_M, carry_m=DAMAGE_CARRY_M))
+    return faces_of(b, ground) | dict(
+        road_m=float(shapely.length(parts).sum()),
+        floating_m=float(shapely.length(floating).sum()),
+        skeleton_m=float(shapely.length(sk_lines)), dead_ends=ends,
+        depth_max=float(d.max(initial=0.0)),
+        homes_within50=float(near[np.isfinite(q)].mean()),
+        deep_within50=float(near[deep].mean()),
+        L_P_deep=1.0 - float(m.pop[ok] @ u[ok]) / float(m.pop[ok] @ u0[ok]),
+        damage_cut=dm.cut, damage_detour=dm.detour)
+
+
+def faces_of(b: Any, ground: Any) -> dict[str, Any]:
+    """The sub-blocks of an answer's ground (world frame): the faces of the block less it of
+    FACE_M2 and more, their count and areas. The ground is grown by the grid's step first: on the
+    grid (`gridded`) a road's end at the block's edge can stop half a millimetre short of it,
+    which joined two sub-blocks through the gap (spec20's start: 15 faces for its 21)."""
+    faces = shapely.get_parts(shapely.difference(b.boundary, shapely.buffer(ground, GRID_M)))
+    fa = np.sort(shapely.area(faces)[shapely.area(faces) >= FACE_M2])[::-1]
     return dict(faces=int(len(fa)), face_largest_m2=float(fa[0]) if len(fa) else 0.0,
                 face_median_m2=float(np.median(fa)) if len(fa) else 0.0,
-                face_p90_m2=float(np.quantile(fa, 0.9)) if len(fa) else 0.0,
-                road_m=float(shapely.length(parts).sum()),
-                floating_m=float(shapely.length(floating).sum()),
-                skeleton_m=float(shapely.length(sk_lines)), dead_ends=ends,
-                depth_max=float(d.max(initial=0.0)),
-                homes_within50=float(near[np.isfinite(q)].mean()),
-                deep_within50=float(near[deep].mean()),
-                L_P_deep=1.0 - float(m.pop[ok] @ u[ok]) / float(m.pop[ok] @ u0[ok]),
-                damage_cut=dm.cut, damage_detour=dm.detour)
+                face_p90_m2=float(np.quantile(fa, 0.9)) if len(fa) else 0.0)
 
 
 def score_answer(b: Any, metric: gcl.ComplexMetric, ground: Any,
@@ -1179,41 +1257,62 @@ def run(bid: str, plan: Plan, device: str, *, standing: clearings.Standing) -> N
     print(f"{bid}: {pt.rd.m.fx.fm.nt} triangles, {int(pt.rd.raster.on.sum())} design pixels, "
           f"K {plan.K}, start {plan.start.name}: {n} cells ({time.time() - t0:.0f}s)",
           flush=True)
-    start_cut = cut_of(b, pt, f)
-    f, rows = simp(pt, f, plan, log=lambda s: print(s, flush=True))
+    f0 = f
+    f, rows = simp(pt, f0, plan, log=lambda s: print(s, flush=True))
     out.parent.mkdir(parents=True, exist_ok=True)
     on = pt.rd.raster.on
     pd.DataFrame({f"psi{k}": f[k, on].astype(np.float32) for k in range(plan.K)}).to_parquet(
         out.with_name(f"{bid}_psi.parquet"))
-    last = plan.stages[-1]
-    w = pt.world(f, pt.lab.band.T(last.t), last.beta, last.q)[0]
-    geo = pt.rd.m.geo
-    band = geo.utm(rs.paved_of(pt.rd, w.r))
-    band_lines = skeleton(b, band)[0] if not band.is_empty else shapely.MultiLineString()
-    cut, cut_ground = cut_of(b, pt, f)
+    ans = answers(b, pt, plan, start=f0, f=f)
     del pt
-    sc: dict[str, Any] = {}
-    for name, ground, lines in (("start", start_cut[1], start_cut[0]), ("band", band, band_lines),
-                                ("cut", cut_ground, cut)):
-        gpd.GeoDataFrame(geometry=[ground], crs=b.crs).to_parquet(
-            out.with_name(f"{bid}_{name}_ground.parquet"))
-        gpd.GeoDataFrame(geometry=list(shapely.get_parts(lines)), crs=b.crs).to_parquet(
-            out.with_name(f"{bid}_{name}_lines.parquet"))
-        if ground.is_empty:
-            print(f"{name}: empty", flush=True)
-            continue
-        s = score_answer(b, metric, ground, lines)
-        sc |= {f"{name}_{k}": v for k, v in s.items()}
-        print(f"{bid} {plan.name} {name}: L_P {s['L_P']:.4f}, L_J2 {s['L_J2']:.4f}, D "
-              f"{s['D_exact']:.4f}, C {s['C']:.0f} m^2, {s['faces']} sub-blocks (largest "
-              f"{s['face_largest_m2']:.0f} m^2), road {s['road_m']:.0f} m, dead ends "
-              f"{s['dead_ends']}, deep within 50 m {s['deep_within50']:.2f}, L_P deep "
-              f"{s['L_P_deep']:.4f}, cut {s['damage_cut']:.4f} ({time.time() - t0:.0f}s)",
-              flush=True)
+    sc = scores(b, metric, ans, out=out, log=lambda s: print(f"{s} ({time.time() - t0:.0f}s)",
+                                                            flush=True))
     df = pd.DataFrame(rows).assign(block=bid, plan=plan.name, **sc, device=device,
                                    host=socket.gethostname(), peak_rss_gb=gap_calib.peak_gb(),
                                    t_total=time.time() - t0)
     standing.write(df, out)
+
+
+class Answer(NamedTuple):
+    """An answer's ground and lines (world frame)."""
+    ground: Any
+    lines: Any
+
+
+def answers(b: Any, pt: Partition, plan: Plan, *, start: F64, f: F64) -> dict[str, Answer]:
+    """The run's three answers (module docstring) from the start's fields and the last ones."""
+    last = plan.stages[-1]
+    w = pt.world(f, pt.lab.band.T(last.t), last.beta, last.q)[0]
+    band = band_of(pt, w)
+    band_lines = skeleton(b, band)[0] if not band.is_empty else shapely.MultiLineString()
+    s_lines, s_ground = cut_of(b, pt, start)
+    c_lines, c_ground = cut_of(b, pt, f)
+    return dict(start=Answer(s_ground, s_lines), band=Answer(band, band_lines),
+                cut=Answer(c_ground, c_lines))
+
+
+def scores(b: Any, metric: gcl.ComplexMetric, ans: dict[str, Answer], *, out: Path,
+           log: Callable[[str], None]) -> dict[str, Any]:
+    """Each answer stored beside the rows `out` (<block>_<answer>_ground and _lines) and scored
+    (`score_answer`); the scores as the rows' columns, <answer>_<measure>."""
+    bid = b.block_id
+    sc: dict[str, Any] = {}
+    for name, a in ans.items():
+        gpd.GeoDataFrame(geometry=[a.ground], crs=b.crs).to_parquet(
+            out.with_name(f"{bid}_{name}_ground.parquet"))
+        gpd.GeoDataFrame(geometry=list(shapely.get_parts(a.lines)), crs=b.crs).to_parquet(
+            out.with_name(f"{bid}_{name}_lines.parquet"))
+        if a.ground.is_empty:
+            log(f"{name}: empty")
+            continue
+        s = score_answer(b, metric, a.ground, a.lines)
+        sc |= {f"{name}_{k}": v for k, v in s.items()}
+        log(f"{bid} {out.parent.name} {name}: L_P {s['L_P']:.4f}, L_J2 {s['L_J2']:.4f}, D "
+            f"{s['D_exact']:.4f}, C {s['C']:.0f} m^2, {s['faces']} sub-blocks (largest "
+            f"{s['face_largest_m2']:.0f} m^2), road {s['road_m']:.0f} m, dead ends "
+            f"{s['dead_ends']}, deep within 50 m {s['deep_within50']:.2f}, L_P deep "
+            f"{s['L_P_deep']:.4f}, cut {s['damage_cut']:.4f}")
+    return sc
 
 
 def main(argv: list[str]) -> None:

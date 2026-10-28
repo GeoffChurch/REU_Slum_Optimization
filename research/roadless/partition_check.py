@@ -23,6 +23,12 @@ deadends: the cut answer of the Voronoi start (4 cells, no update) counted on it
 skeleton: no dead end and no floating line; the stubs the thinning leaves at junctions are not
 dead ends (shorter than a road's width). Fault: `spur` (a SPUR_M road from the middle of the
 longest boundary, square to it on the side away from the street, added: one dead end).
+enclaves: the cut answer of the Voronoi start (4 cells, no update) with an ISLAND_PX square island
+of another label planted at the pixel farthest inside a label, and a sliver SLIVER_W_PX wide and
+SLIVER_L_PX long of a third label from that label's nearest boundary inward: partition.thick merges
+both, the labels back to the start's own (no dead end, no floating line), and leaves every region
+of the start itself (its region count unchanged). Fault: `no-thick` (the raw argmax labels: the
+sliver's corridor a spur, one dead end).
 mma: partition.Mma on a separable convex problem with a known optimum, min sum c_j / x_j s.t.
 sum a_j x_j <= V (x_j proportional to sqrt(c_j / a_j)): the iterate within TOL_MMA of it after
 MMA_STEPS. Fault: `no-mu` (the constraint's multiplier held at 0).
@@ -32,7 +38,7 @@ label (a road inside one label, the rev 2 band answers' dead ends). Fault: `ridg
 ROAD_W wide and RIDGE_M long planted at the pixel farthest inside a label: found).
 
     C=research/roadless/partition_check.py             # from the repo root, PYTHONPATH=.
-    uv run python $C grad|bgrad|dD|edD|deadends|mma|ridges <block> [fault]
+    uv run python $C grad|bgrad|dD|edD|deadends|enclaves|mma|ridges <block> [fault]
 """
 from __future__ import annotations
 
@@ -45,6 +51,7 @@ import numpy as np
 import shapely
 from numpy.typing import NDArray
 from scipy import ndimage
+from skimage.measure import label
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -60,6 +67,8 @@ NOISE = 0.6              # grad: uniform noise on the start's one-hot fields
 NOISE_D = 0.02           # dD: its noise
 FILTER_TOL = 1e-10       # grad: the FFT filter against Raster.filter, absolute
 SPUR_M = 15.0            # deadends: the planted spur's length
+ISLAND_PX = 3            # enclaves: the planted island's side (pixels)
+SLIVER_W_PX, SLIVER_L_PX = 3, 15         # enclaves: the planted sliver's width and length
 TOL_MMA, MMA_STEPS = 1e-3, 200
 MIXED_PLAN = "pt.K4.R10.t1.5.b4.q3.i1.D0.05.s0.3.vor4s0"   # grad, dD, deadends
 BAND_T = 0.1             # bgrad, edD: the banded road's temperature
@@ -234,6 +243,59 @@ def deadends(bid: str, fault: str | None) -> None:
         raise SystemExit(1)
 
 
+def enclaves(bid: str, fault: str | None) -> None:
+    b, _, _, p, f = problem(bid, MIXED_PLAN)
+    ra = p.rd.raster
+    raw = p.lab.argmax(f).reshape(ra.shape)
+    n0 = int(label(raw + 1, background=0, connectivity=1).max())
+    kept = int(label(pt.thick(raw) + 1, background=0, connectivity=1).max())
+    on = ra.on.reshape(ra.shape)
+    lab = raw.copy()
+    inner = np.zeros(ra.shape)
+    for k in np.unique(raw[on]):
+        inner = np.maximum(inner, np.where(on & (raw == k),
+                                           ndimage.distance_transform_edt(raw == k), 0.0))
+    i, j = np.unravel_index(int(np.argmax(inner)), ra.shape)
+    A = int(raw[i, j])
+    depth, (bi, bj) = ndimage.distance_transform_edt(raw == A, return_indices=True)
+    h = ISLAND_PX // 2
+    lab[i - h:i + h + 1, j - h:j + h + 1] = (A + 1) % p.K
+    # the sliver: from the boundary pixel nearest the deep one, inward along the line to it
+    ei, ej = int(bi[i, j]), int(bj[i, j])                 # the nearest pixel off label A
+    B = int(raw[ei, ej])
+    C = next(k for k in range(p.K) if k not in (A, B, (A + 1) % p.K))
+    d = np.array([i - ei, j - ej], dtype=np.float64)
+    d /= np.hypot(*d)
+    w = SLIVER_W_PX // 2
+    for t in range(1, SLIVER_L_PX + 1):
+        ci, cj = int(round(ei + t * d[0])), int(round(ej + t * d[1]))
+        lab[ci - w:ci + w + 1, cj - w:cj + w + 1] = np.where(
+            raw[ci - w:ci + w + 1, cj - w:cj + w + 1] == A, C,
+            lab[ci - w:ci + w + 1, cj - w:cj + w + 1])
+    print(f"planted in label {A} ({depth[i, j]:.0f} px deep): a {ISLAND_PX} px island of label "
+          f"{(A + 1) % p.K}; a {SLIVER_W_PX} x {SLIVER_L_PX} px sliver of label {C} from its "
+          f"boundary with label {B}")
+    geo = p.rd.m.geo
+    used = lab if fault == "no-thick" else pt.thick(lab)
+    restored = bool((used == raw).all())
+    lines = pt.boundary_lines(ra, used)
+    cut = shapely.intersection(geo.utm(lines), b.boundary)
+    parts = shapely.get_parts(shapely.line_merge(shapely.union_all(shapely.get_parts(cut))))
+    ground = shapely.intersection(
+        road_corridor(gpd.GeoDataFrame(geometry=list(parts), crs=b.crs).assign(width_m=pt.ROAD_W)),
+        b.boundary)
+    _, ends, _ = pt.skeleton(b, ground)
+    street = shapely.union_all(b.streets.geometry.to_numpy())
+    floating = int((~rs.linked(parts, street)).sum())
+    ok = ends == 0 and floating == 0 and kept == n0 and restored
+    print(f"enclaves {bid}: the start's regions {n0}, kept by thick {kept}; the planted labels "
+          f"{'' if restored else 'not '}restored to the start's; their cut {len(parts)} lines: "
+          f"{ends} dead ends, {floating} floating -> "
+          f"{'PASS' if ok else 'FAIL'}")
+    if not ok:
+        raise SystemExit(1)
+
+
 def mma(_bid: str, fault: str | None) -> None:
     rng = np.random.default_rng(5)
     n = 300
@@ -275,6 +337,6 @@ def _check(x: F, g: F, f: Callable[[F], float], what: str, *, h: float,
 
 if __name__ == "__main__":
     verb, bid, *fault = sys.argv[1:]
-    {"grad": grad, "bgrad": bgrad, "dD": dD, "edD": edD, "deadends": deadends, "mma": mma,
-     "ridges": ridges}[verb](
+    {"grad": grad, "bgrad": bgrad, "dD": dD, "edD": edD, "deadends": deadends,
+     "enclaves": enclaves, "mma": mma, "ridges": ridges}[verb](
         bid, fault[0] if fault else None)
