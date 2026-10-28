@@ -12,6 +12,7 @@ import { removeFallbackImage } from "../dom/fallback.js";
 import { observeSize } from "../dom/resize.js";
 import { ranking, scores, selectAt, type MetricName, type Selection } from "../model/screen.js";
 import { createLayer } from "../render/city.js";
+import { createCloseup, type Closeup } from "../render/closeup.js";
 import { sizeCanvas } from "../render/canvas.js";
 import { fitBbox, type Bbox, type View } from "../view/transform.js";
 
@@ -233,10 +234,28 @@ function describeSelection(city: ScreenState["city"], bundle: CityBundle, sel: S
  * it on a switch to a city that carries no `follow` -- text set once would leave Cape Town's block
  * named over Nairobi's map. Rewriting a NON-live element announces nothing, so per-render writing
  * costs the reader no repeats. The id comes off the bundle, never typed here. */
-function describeFollow(bundle: CityBundle): string {
+function describeFollow(bundle: CityBundle, closeup: boolean): string {
   const follow = bundle.follow;
-  return follow === undefined ? ""
-    : `Block ${follow.block_id} is ringed on the map: it is the one the rest of the site follows.`;
+  if (follow === undefined) return "";
+  const where = closeup ? "ringed on the map and outlined in blue in the close-up"
+    : "ringed on the map";
+  return `Block ${follow.block_id} is ${where}: it is the one the rest of the site follows.`;
+}
+
+/** `data-closeup-pad-m`: the close-up's margin around the followed block, in metres, or `null`
+ * where the mount point asks for no close-up -- a real optional, not a defaulted one: the
+ * Screening and Explore pages' mount points carry no such attribute and draw the city map alone,
+ * exactly as before the Demo page asked for one. Present but not a positive number is a page
+ * authoring error, so it throws (into the figure's caption, mount.ts's route) rather than being
+ * read as "no close-up". */
+function closeupPad(raw: string | undefined): number | null {
+  if (raw === undefined) return null;
+  const v = Number(raw);
+  if (raw.trim() === "" || !Number.isFinite(v) || !(v > 0)) {
+    throw new Error(
+      `${LABEL}: data-closeup-pad-m must be a positive number of metres, got "${raw}"`);
+  }
+  return v;
 }
 
 function fetchBundle(src: string): Promise<CityBundle> {
@@ -264,6 +283,9 @@ interface Bundles { capetown: CityBundle; nairobi: CityBundle }
 
 function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: Bundles): void {
   const caption = host.querySelector("figcaption");
+
+  const pad = closeupPad(host.dataset.closeupPadM);
+  const closeup: Closeup | null = pad === null ? null : createCloseup(pad);
 
   const cv = document.createElement("canvas");
   // Inline styles, never presentation attributes -- Material's `.md-typeset svg{height:auto;
@@ -312,12 +334,13 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
   // reading order. The fallback <img> is NOT removed here: it goes after the first successful
   // draw, below, so a canvas that mounts into a zero-width container or a draw that throws leaves
   // the static picture the error text points the reader at.
+  // The close-up, where asked for, sits directly after the city map it zooms into; the page's
+  // stylesheet puts the two side by side where there is room (`figure[data-closeup-pad-m]`).
+  const pictures: HTMLElement[] = closeup === null ? [cv] : [cv, closeup.canvas];
   if (caption) {
-    host.insertBefore(cv, caption);
-    host.insertBefore(followNote, caption);
-    host.insertBefore(controls, caption);
+    for (const el of [...pictures, followNote, controls]) host.insertBefore(el, caption);
   } else {
-    host.append(cv, followNote, controls);
+    host.append(...pictures, followNote, controls);
   }
 
   const state: StateSource<ScreenState> = makeState({
@@ -407,12 +430,14 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
     const floor = st.floor ?? defaultFloorFor(bundle, st.metric, s);
     const sel = selectAt(bundle, order, s, floor);
     layer.paintFrame(ctx, bundle, view, bundle.encoding, order, sel.count, size);
+    // From the same `order` and `sel.count`, so the close-up can never show a different pool.
+    closeup?.paint(bundle, order, sel.count);
     // Every number the picture shows is also present as text, computed from the same `sel` the
     // picture was drawn from -- there is no second call to `selectAt` that could disagree with it.
     readout.textContent = describeSelection(st.city, bundle, sel);
     // From the SAME `bundle` the frame above was painted from, so the sentence and the ring can
     // never name different cities.
-    followNote.textContent = describeFollow(bundle);
+    followNote.textContent = describeFollow(bundle, closeup !== null);
   };
 
   // Coalesces every state-driven redraw (a floor drag, a metric switch, a city toggle) onto the
@@ -443,6 +468,14 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
   // `runOrReport`: a real ResizeObserver delivers from the browser's own dispatch, OUTSIDE the
   // fetch chain above, so that chain's `.catch` cannot see a throw in here -- it would be an
   // uncaught exception with a blank figure and no message (dom/error.ts).
+  // The close-up's own size, observed BEFORE the city canvas's: its `resize` only stores the size
+  // and repaints the last frame, so it is harmless before the first `render`, and observing it
+  // first keeps the city canvas's observer the most recent one -- the one the boot tests'
+  // `fireResize` drives.
+  if (closeup !== null) {
+    observeSize(closeup.canvas,
+                (measured) => runOrReport(host, LABEL, () => closeup.resize(measured)));
+  }
   let firstDraw = true;
   observeSize(cv, (measured) => runOrReport(host, LABEL, () => {
     size = measured;

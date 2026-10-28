@@ -125,15 +125,18 @@ function plotRectOf(svg: SVGSVGElement): Rect {
  * figure the Frontier widget replaces draws none at all. The caller supplies the weight; `0` is a
  * legitimate value meaning "no gridlines".
  *
- * UNITS (fix round 1 of the Frontier task, and the one thing that reopened this file): `formatTick`
- * turns a tick VALUE into its label TEXT, and it is REQUIRED -- no default. This module previously
- * printed `String(t)`, so a caller whose data are fractions got bare `0.6` where the matplotlib
- * figure the widget replaces prints `60%` (emit.compare_report puts a `PercentFormatter(xmax=1)` on
- * both axes). A defaulted parameter would have let that divergence come back silently at the next
- * call site, which is the failure mode this project keeps finding: nothing throws, the chart draws,
- * and only a human comparing two pictures notices. Required means a new caller must state its units
- * or fail to compile. The formatter's OUTPUT is deliberately unconstrained -- an empty string is a
- * legitimate "hide this tick" -- so nothing here validates it beyond drawing it.
+ * UNITS (fix round 1 of the Frontier task, and the one thing that reopened this file): a tick
+ * formatter turns a tick VALUE into its label TEXT, and it is REQUIRED -- no default. This module
+ * previously printed `String(t)`, so a caller whose data are fractions got bare `0.6` where the
+ * matplotlib figure the widget replaces prints `60%` (emit.compare_report puts a
+ * `PercentFormatter(xmax=1)` on both axes). A defaulted parameter would have let that divergence
+ * come back silently at the next call site, which is the failure mode this project keeps finding:
+ * nothing throws, the chart draws, and only a human comparing two pictures notices. Required means
+ * a new caller must state its units or fail to compile. The formatter's OUTPUT is deliberately
+ * unconstrained -- an empty string is a legitimate "hide this tick" -- so nothing here validates
+ * it beyond drawing it. One formatter PER AXIS (`formatX`, `formatY`): Frontier's two axes are
+ * both fractions, but the Demo page's build-out plots put kilometres and square metres against
+ * permeability, and one shared formatter would have printed one axis in the other's units.
  *
  * CONTAINMENT (fix round 1, Critical, kept): every label still renders inside
  * `[0, width] x [0, height]`, even at `pad = 0` where the plot rect fills the whole box and there
@@ -169,7 +172,8 @@ function plotRectOf(svg: SVGSVGElement): Rect {
  */
 export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: number[],
                          xLabel: string, yLabel: string,
-                         formatTick: (t: number) => string, gridOpacity: number): void {
+                         formatX: (t: number) => string, formatY: (t: number) => string,
+                         gridOpacity: number): void {
   const box = sizeOf(svg);
   const { width, height } = box;
   const rect = plotRect(v, xTicks, yTicks, box);
@@ -234,7 +238,7 @@ export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: 
       label.setAttribute("dominant-baseline", "alphabetic");
     }
     label.setAttribute("fill", "currentColor");
-    label.textContent = formatTick(t);
+    label.textContent = formatX(t);
     svg.append(label);
   }
 
@@ -267,7 +271,7 @@ export function drawAxes(svg: SVGSVGElement, v: View, xTicks: number[], yTicks: 
     label.setAttribute("text-anchor", hasLeftGutter ? "end" : "start");
     label.setAttribute("dominant-baseline", baseline);
     label.setAttribute("fill", "currentColor");
-    label.textContent = formatTick(t);
+    label.textContent = formatY(t);
     svg.append(label);
   }
 
@@ -411,4 +415,53 @@ export function drawGuide(svg: SVGSVGElement, v: View, axis: "x" | "y", value: n
   line.setAttribute("aria-hidden", "true");
   svg.append(line);
   return line;
+}
+
+/** A point on a chart that MOVES: a dot of `radius` with dashed drop lines from it to the plot
+ * rect's left and bottom edges, so its two coordinates can be read off the axes. The build-out
+ * widget's "this frame" marker, one per plot, following a slider.
+ *
+ * Created once per layout and moved by `move`, which rewrites the three elements' attributes
+ * rather than redrawing the chart -- a slider drag then costs three attribute writes per plot, and
+ * the axes, curve and markers drawn under it stay the same nodes. Call after `drawAxes` (the drop
+ * lines end at the plot rect it records, `drawGuide`'s rule) and after whatever it should sit over.
+ * `dot` is returned so the caller can style it (a halo, say) without this module growing a
+ * parameter per look. */
+export interface Cursor {
+  readonly dot: SVGCircleElement;
+  move(x: number, y: number): void;
+}
+
+export function drawCursor(svg: SVGSVGElement, v: View, colour: string,
+                           radius: number): Cursor {
+  const rect = plotRectOf(svg);
+  const toLeft = el("line");
+  const toBottom = el("line");
+  for (const line of [toLeft, toBottom]) {
+    line.setAttribute("stroke", colour);
+    line.setAttribute("stroke-dasharray", "3 3");
+    line.setAttribute("aria-hidden", "true");
+    svg.append(line);
+  }
+  const dot = el("circle");
+  dot.setAttribute("r", String(radius));
+  dot.setAttribute("fill", colour);
+  dot.setAttribute("aria-hidden", "true");
+  svg.append(dot);
+  return {
+    dot,
+    move(x, y) {
+      const [sx, sy] = toScreen(v, x, y);
+      dot.setAttribute("cx", String(sx));
+      dot.setAttribute("cy", String(sy));
+      toLeft.setAttribute("x1", String(rect.left));
+      toLeft.setAttribute("y1", String(sy));
+      toLeft.setAttribute("x2", String(sx));
+      toLeft.setAttribute("y2", String(sy));
+      toBottom.setAttribute("x1", String(sx));
+      toBottom.setAttribute("y1", String(sy));
+      toBottom.setAttribute("x2", String(sx));
+      toBottom.setAttribute("y2", String(rect.bottom));
+    },
+  };
 }
