@@ -7,8 +7,9 @@ and blue good. Before it (owner 2026-10-28, "we should have a screening section"
 stage, the site's Cape Town screen bundle (examples/screen-map/capetown.json) lightened into
 screen.json (screen_bake) and drawn by the page with a floor slider, a city map and a close-up of
 the block; then news reports of fires near the block (a list; the map marks none of them, since
-some reports' streets cannot be placed). A claude.ai artifact at plates/artifact/ (the page and its files), its publish list
-plates/artifact_publish.json; everything under plates/ is generated (git-ignored).
+some reports' streets cannot be placed). A claude.ai artifact at plates/artifact/ (the page and
+its files), its publish list plates/artifact_publish.json; everything under plates/ is generated
+(git-ignored).
 
 Reuses the 5810 build-out page's pipeline (GeoffChurch/REU_Slum_Optimization's
 research/roadless/atlas/roads5810/): the method's page rows from networks.py's sources
@@ -30,16 +31,29 @@ centroids, smoothed, inside the block); and the share of each home's escape time
 own mesh's baseline (0 to SAVED_MAX, sequential blue: owner 2026-10-28, the diverging map's red
 half was almost unused, since a road only adds a way through).
 
+The public site's Demo page (owner 2026-10-28, "make this a new 'demo' page on the website") is
+this prototype ported onto main, which cannot merge this branch: `site <checkout>` writes what the
+page needs into a main checkout as a committed bundle (SITE_DIR: demo.json, the three sprite
+sheets, a README naming this script) and the bundle's TypeScript declaration (SITE_DTS, generated
+from the bundle's dataclasses below, so a renamed field is a type error on main). Every number the
+page shows is in demo.json, the fires' facts included (FIRES, quoted from their reports); the
+site's generator reads it and the page's prose types none.
+
     PYTHONPATH=. uv run python research/roadless/atlas/explore_proto/build.py plates   # ~10 min
     PYTHONPATH=. uv run python research/roadless/atlas/explore_proto/build.py page
     PYTHONPATH=. uv run python research/roadless/atlas/explore_proto/build.py          # both
+    PYTHONPATH=. uv run python research/roadless/atlas/explore_proto/build.py site ~/src/wt_demo
 """
 from __future__ import annotations
 
+import dataclasses
+import datetime as dt
 import html as htmllib
 import json
 import shutil
 import sys
+import types
+import typing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol
@@ -47,8 +61,10 @@ from typing import Any, NamedTuple, Protocol
 import numpy as np
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parents[1]))           # research/roadless: growth, road_simp
 sys.path.insert(0, str(HERE.parent / "roads5810"))
 import geopandas as gpd  # noqa: E402
+import growth  # noqa: E402
 import matplotlib  # noqa: E402
 import matplotlib.colors as mcolors  # noqa: E402
 import matplotlib.patheffects as pe  # noqa: E402
@@ -56,6 +72,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import networks as nw  # noqa: E402  (the build-out page's families; imports compute and render)
 import pandas as pd  # noqa: E402
 import render  # noqa: E402
+import road_simp  # noqa: E402
 import shapely  # noqa: E402
 from PIL import Image  # noqa: E402
 from pyproj import Transformer  # noqa: E402
@@ -186,7 +203,8 @@ METHOD: Shown = EARS_PATHS
 
 # ------------------------------------------------------------------ the topology extrapolation
 
-class Timed(NamedTuple):
+@dataclass(frozen=True)
+class Timed:
     """One recorded topology run: its block, building count and seconds."""
     block: str
     n: int
@@ -201,6 +219,7 @@ class Timed(NamedTuple):
 TOPOLOGY_RUNS = (Timed("ZAF.9.3.1_1_38136", 51, 1.5), Timed("ZAF.9.3.1_1_21016", 93, 4.2),
                  Timed("ZAF.9.3.1_1_20254", 122, 14.4), Timed("ZAF.9.3.1_1_45919", 159, 14.5),
                  Timed("ZAF.9.3.1_1_44918", 257, 82.6), Timed("ZAF.9.3.1_1_5618", 759, 42477.5))
+TOPOLOGY_ALPHA = 10      # the runs' TopologyMethod(alpha=...)
 
 
 class Extrapolation(NamedTuple):
@@ -445,20 +464,60 @@ def simplified(rings: list[list[list[float]]], tol: float) -> list[list[int]]:
     return out
 
 
-def screen_bake(out: Path) -> dict[str, Any]:
-    """The site's Cape Town screen bundle, lightened for the page: each block's score under the
-    shipped screen (gen_screen_map._score, the widget's own arithmetic), the City's informal
-    survey flag, rings simplified for the city map and, inside the close-up's window, for the
-    close-up; the shipped floor, the followed block (local metres, the bundle's origin). Written to `out`; returns the page's facts about the followed block."""
+class Screen(NamedTuple):
+    """The site's Cape Town screen bundle (its parsed JSON), every block's score under the shipped
+    screen (gen_screen_map._score, the widget's own arithmetic), the shipped floor's entry and the
+    followed block's index."""
+    bundle: dict[str, Any]
+    score: np.ndarray
+    floor: dict[str, Any]
+    follow: int
+
+
+def screen() -> Screen:
+    """SCREEN under SCREEN_METRIC; refuses a bundle that follows another block than the page's."""
     from scripts.gen_screen_map import _score  # noqa: PLC0415  (the repo's scripts package)
 
     b = json.loads(SCREEN.read_text())
     n, a, per = (np.asarray(b[k], dtype=float) for k in ("n", "area_m2", "perimeter_m"))
-    score = _score(SCREEN_METRIC, n, a, per)
     [floor] = [f for f in b["floors"] if f["metric"] == SCREEN_METRIC]
     follow = b["follow"]["index"]
     if b["block_id"][follow] != cp.BID:
         raise SystemExit(f"the bundle follows {b['block_id'][follow]}, the page {cp.BID}")
+    return Screen(bundle=b, score=_score(SCREEN_METRIC, n, a, per), floor=floor, follow=follow)
+
+
+class ScreenFacts(NamedTuple):
+    """The followed block under the shipped screen (its score and rank among the bundle's
+    blocks), and the screen at its floor: the pool (the bundle's own count, checked), its
+    precision and its recall against the City's survey."""
+    metric: str
+    score: float
+    rank: int
+    n_blocks: int
+    floor: float
+    pool: int
+    precision: float
+    recall: float
+
+
+def screen_facts(sc: Screen) -> ScreenFacts:
+    pool = int((sc.score >= sc.floor["value"]).sum())
+    if pool != sc.floor["n"]:
+        raise AssertionError("the screen's pool at its floor is not the bundle's")
+    return ScreenFacts(metric=SCREEN_METRIC, score=float(sc.score[sc.follow]),
+                       rank=int((sc.score > sc.score[sc.follow]).sum()) + 1,
+                       n_blocks=len(sc.score), floor=float(sc.floor["value"]), pool=pool,
+                       precision=float(sc.floor["precision"]), recall=float(sc.floor["recall"]))
+
+
+def screen_bake(sc: Screen, out: Path) -> None:
+    """The screen bundle, lightened for the prototype into `out`: each block's score, the City's
+    informal survey flag, rings simplified for the city map and, inside the close-up's window,
+    for the close-up; the shipped floor, the followed block (local metres, the bundle's
+    origin)."""
+    b, floor, follow = sc.bundle, sc.floor, sc.follow
+    a = np.asarray(b["area_m2"], dtype=float)
     mine = np.asarray(b["rings"][follow][0])
     xs, ys = mine[:, 0], mine[:, 1]
     cx, cy = (xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2
@@ -468,17 +527,110 @@ def screen_bake(out: Path) -> dict[str, Any]:
     order = np.argsort(-a, kind="stable")                  # the large first, the small over them
     data = dict(
         metric=SCREEN_METRIC, floor=floor["value"], follow=follow,
-        s=[float(f"{v:.7g}") for v in score], inf="".join(str(int(v)) for v in b["informal"]),
+        s=[float(f"{v:.7g}") for v in sc.score], inf="".join(str(int(v)) for v in b["informal"]),
         order=order.tolist(), city=[simplified(r, CITY_TOL) for r in b["rings"]],
         box=[round(cx - half), round(cy - half), round(cx + half), round(cy + half)],
         near=near, local=[simplified(b["rings"][i], LOCAL_TOL) for i in near])
     if sum(v >= floor["value"] for v in data["s"]) != floor["n"]:
         raise AssertionError("the rounded scores' pool at the floor is not the bundle's")
     out.write_text(json.dumps(data, separators=(",", ":")))
-    rank = int((score > score[follow]).sum()) + 1
-    return dict(score=float(score[follow]), rank=rank, n_blocks=len(score),
-                pool=int((score >= floor["value"]).sum()), floor=floor["value"],
-                precision=floor["precision"], recall=floor["recall"])
+
+
+# ------------------------------------------------------------------ the place and the fires
+
+PLACE = "the Bloekombos and Wallacedene area of Kraaifontein"     # the block's, in words
+
+
+@dataclass(frozen=True)
+class Report:
+    """One news report: its outlet, its date (ISO), its headline (None where the page cites
+    none) and its URL."""
+    outlet: str
+    date: str
+    title: str | None
+    url: str
+
+
+@dataclass(frozen=True)
+class Fire:
+    """One fire reported near the block: its month (ISO, YYYY-MM), where the reports place it
+    (with OpenStreetMap's distance to the block where the street can be found), what they say
+    happened, and the reports. Each was checked against its article (2026-10-28); none is placed
+    inside the block, and the page draws none of them on a map (owner 2026-10-28: some reports'
+    streets cannot be placed)."""
+    month: str
+    where: str
+    what: str
+    reports: tuple[Report, ...]
+
+
+FIRES = (
+    Fire("2016-05",
+         "Japhta and Dlayedwa streets, Bloekombos, Kraaifontein. OpenStreetMap puts Dlayedwa "
+         "Street about 80 m outside the block.",
+         "Two shacks were set alight, allegedly with a petrol bomb, and four members of one "
+         "family died: a woman and three children aged 8 to 13. Neighbours tried to fight it "
+         "with water and could not.",
+         (Report("Cape Times", "2016-05-23", "Four die in suspected arson attack",
+                 "https://iol.co.za/capetimes/news/2016-05-23-four-die-in-suspected-arson-attack/"),)),
+    Fire("2020-02",
+         "Wallacedene, Kraaifontein, beside the block.",
+         "A fire at about 2am burned 28 shacks, displaced 83 people and killed two. Fire engines "
+         "could not drive in: a community leader said “we have no roads and the shacks are "
+         "closely clustered”, so crews parked on Mfeketo Street and walked to the fire. The "
+         "taps gave no water, and residents pulled down shacks to stop it spreading.",
+         (Report("GroundUp", "2020-02-25", "Couple dies in shack fire in Kraaifontein",
+                 "https://groundup.news/article/couple-dies-shack-fire-kraaifontein/"),)),
+    Fire("2022-06",
+         "Pietersen Road, Wallacedene. OpenStreetMap puts Pietersen Road about 1.2 km south of "
+         "the block.",
+         "Three shacks burned, 11 people were displaced and three siblings died.",
+         (Report("News24", "2022-06-17",
+                 "Three siblings die in Cape Town fire that displaced 11 people",
+                 "https://www.news24.com/southafrica/news/three-siblings-die-in-cape-town-fire-"
+                 "that-displaced-11-people-20220617"),)),
+    Fire("2024-10",
+         "Manuel Street, Wallacedene.",
+         "Four people died, three of them children, in one of 48 shack fires across Cape Town "
+         "that weekend. JP Smith, the City's mayoral committee member for safety and security, "
+         "said its crews arrive quickly but are “hampered by other factors such as "
+         "access”; he spoke of the weekend's fires as a whole.",
+         (Report("TimesLIVE", "2024-10-28",
+                 "Nine people perish in weekend informal settlement fires in Cape Town",
+                 "https://www.timeslive.co.za/news/south-africa/2024-10-28-nine-people-perish-in-"
+                 "weekend-informal-settlement-fires-in-cape-town/"),)),
+    Fire("2025-07",
+         "Maroela Road, Wallacedene. OpenStreetMap puts the Wallacedene stretch of Maroela Road "
+         "about 630 m south of the block; the road also passes within about 16 m of the block's "
+         "south edge.",
+         "About 20 shacks burned and 60 to 80 people were displaced. A 6-year-old girl died.",
+         (Report("EWN", "2025-07-15", None,
+                 "https://www.ewn.co.za/2025/07/15/kraaifontein-police-monitoring-wallacedene-"
+                 "after-shack-fire-claims-life-of-girl"),
+          Report("Cape Argus", "2025-07-17", None,
+                 "https://capeargus.co.za/news/2025-07-17-tragic-shack-fire-claims-life-of-6-"
+                 "year-old-girl-in-wallacedene/"))),
+)
+
+
+def fires_html() -> str:
+    """FIRES as the prototype's list."""
+    def report(r: Report) -> str:
+        d = dt.date.fromisoformat(r.date)
+        title = "" if r.title is None else f": “{htmllib.escape(r.title, quote=False)}”"
+        return (f'<a href="{htmllib.escape(r.url)}" target="_blank" rel="noopener">'
+                f"{htmllib.escape(r.outlet, quote=False)}, {d.day} {d:%B %Y}{title} ↗</a>")
+
+    items = "".join(
+        f"      <li>\n"
+        f'        <div class="when">{dt.date.fromisoformat(f.month + "-01"):%b %Y}</div>\n'
+        f'        <div class="what">\n'
+        f'          <p class="where">{htmllib.escape(f.where, quote=False)}</p>\n'
+        f"          <p>{htmllib.escape(f.what, quote=False)}</p>\n"
+        f'          <p class="src">{" · ".join(report(r) for r in f.reports)}</p>\n'
+        f"        </div>\n"
+        f"      </li>\n" for f in FIRES)
+    return f'    <ol class="fires">\n{items}    </ol>'
 
 
 # ------------------------------------------------------------------ the page
@@ -529,11 +681,44 @@ def fill(template: str, fields: dict[str, str]) -> str:
     return out
 
 
-def page() -> None:
+def maps_url(lat: float, lon: float) -> str:
+    """Google Maps' satellite view centred on (lat, lon)."""
+    return (f"https://www.google.com/maps/@?api=1&map_action=map&center={lat:.5f}%2C{lon:.5f}"
+            f"&zoom=17&basemap=satellite")
+
+
+class Built(NamedTuple):
+    """What both pages say about the method on the block: the slider rows (render.SLIDER's) and
+    the run time to each, the sprite sheets' frames (`fs`, "000" the no-road baseline first), the
+    block's centroid, its homes, the method's whole run time, the topology extrapolation at the
+    block's size and the escape-time view's scale (World.scale)."""
+    rows: list[dict[str, Any] | None]
+    secs: list[float | None]
+    fs: list[str]
+    lat: float
+    lon: float
+    n_homes: int
+    total: float
+    ex: Extrapolation
+    scale: float
+
+
+def built() -> Built:
     key, src = METHOD.pick.key(), METHOD.pick.source()
     rows = src.rows(key)
     secs = METHOD.runtime.seconds(key, src, rows)
-    fs = ["000"] + list(dict.fromkeys(r["f"] for r in rows if r is not None))
+    lat, lon = centroid_wgs84()
+    n_homes = len(np.load(cp.DATA / "baseline_times.npz")["u"])
+    return Built(rows=rows, secs=secs,
+                 fs=["000"] + list(dict.fromkeys(r["f"] for r in rows if r is not None)),
+                 lat=lat, lon=lon, n_homes=n_homes, total=max(s for s in secs if s is not None),
+                 ex=extrapolate(TOPOLOGY_RUNS, n_homes), scale=world().scale)
+
+
+def page() -> None:
+    b = built()
+    rows, secs, fs, ex, total = b.rows, b.secs, b.fs, b.ex, b.total
+    lat, lon, n_homes = b.lat, b.lon, b.n_homes
     if OUT.exists():
         shutil.rmtree(OUT)
     (OUT / "s").mkdir(parents=True)
@@ -550,27 +735,20 @@ def page() -> None:
             frames.append(dict(i=fs.index(r["f"]), target=k / 100, D=r["D"], km=r["km"],
                                LP=r["LP"], C=r["C"], t=s, none=False,
                                held=bool(r.get("held", False)), full=bool(r.get("full", False))))
-    lat, lon = centroid_wgs84()
-    sc = screen_bake(OUT / "screen.json")
-    if sc["pool"] != next(f["n"] for f in json.loads(SCREEN.read_text())["floors"]
-                          if f["metric"] == SCREEN_METRIC):
-        raise AssertionError("the screen's pool at its floor is not the bundle's")
-    n_homes = len(np.load(cp.DATA / "baseline_times.npz")["u"])
-    ex = extrapolate(TOPOLOGY_RUNS, n_homes)
-    total = max(s for s in secs if s is not None)
-    w = world()
+    scr = screen()
+    screen_bake(scr, OUT / "screen.json")
+    sc = screen_facts(scr)
     data = dict(frames=frames, sheet=dict(n=len(fs), w=size[0], h=size[1]),
                 stem=METHOD.stem, default=DEFAULT, iso=ISO_STEP)
-    maps = (f"https://www.google.com/maps/@?api=1&map_action=map&center={lat:.5f}%2C{lon:.5f}"
-            f"&zoom=17&basemap=satellite")
     runs = "; ".join(f"{r.n:,} buildings {r.seconds:,.1f} s" for r in TOPOLOGY_RUNS)
     fields = {
         "NAME": htmllib.escape(METHOD.name),
         "BLURB": htmllib.escape(METHOD.blurb),
         "BID": cp.BID,
+        "PLACE": htmllib.escape(PLACE),
         "LAT": f"{abs(lat):.4f}° {'S' if lat < 0 else 'N'}",
         "LON": f"{abs(lon):.4f}° {'E' if lon >= 0 else 'W'}",
-        "MAPS": htmllib.escape(maps),
+        "MAPS": htmllib.escape(maps_url(lat, lon)),
         "HOMES": f"{n_homes:,}",
         "OURS": span(total),
         "OURS_MACHINE": htmllib.escape(METHOD.runtime.machine),
@@ -592,18 +770,19 @@ def page() -> None:
         "SAVED_TICKS": "".join(f"<span>{t}</span>" for t in
                                ["none"] + [f"{SAVED_MAX * 100 * k / 3:.0f}%" for k in (1, 2)]
                                + [f"{SAVED_MAX * 100:.0f}%+"]),
-        "SCALE": f"{w.scale:.0f}",
+        "SCALE": f"{b.scale:.0f}",
         "STEM": METHOD.stem,
         "DATA": json.dumps(data, separators=(",", ":")),
-        "SC_SCORE": f"{sc['score']:.4f}",
-        "SC_FLOOR": f"{sc['floor']:g}",
-        "SC_TIMES": f"{sc['score'] / sc['floor']:.1f}",
-        "SC_RANK": f"{sc['rank']:,}",
-        "SC_N": f"{sc['n_blocks']:,}",
-        "SC_TOP": f"{100 * sc['rank'] / sc['n_blocks']:.2g}",
-        "SC_POOL": f"{sc['pool']:,}",
-        "SC_PREC": f"{100 * sc['precision']:.0f}",
-        "SC_REC": f"{100 * sc['recall']:.0f}",
+        "FIRES": fires_html(),
+        "SC_SCORE": f"{sc.score:.4f}",
+        "SC_FLOOR": f"{sc.floor:g}",
+        "SC_TIMES": f"{sc.score / sc.floor:.1f}",
+        "SC_RANK": f"{sc.rank:,}",
+        "SC_N": f"{sc.n_blocks:,}",
+        "SC_TOP": f"{100 * sc.rank / sc.n_blocks:.2g}",
+        "SC_POOL": f"{sc.pool:,}",
+        "SC_PREC": f"{100 * sc.precision:.0f}",
+        "SC_REC": f"{100 * sc.recall:.0f}",
     }
     html = fill(TEMPLATE.read_text(), fields)
     (OUT / "index.html").write_text(html)
@@ -631,6 +810,264 @@ def page() -> None:
           f"{total:.0f} s; centre {lat:.5f}, {lon:.5f}", flush=True)
 
 
+# ------------------------------------------------------------------ the site's bundle
+
+SITE_DIR = Path("examples") / "demo"            # in a main checkout: the bundle
+SITE_DTS = Path("web") / "src" / "demo.d.ts"   # in a main checkout: the bundle's declaration
+# A building counts as wholly destroyed once this share of it is gone (or a road cuts it in two):
+# the displacement rule the build-out page's network plate states (roads5810's caption).
+GONE_SHARE = 0.1
+
+
+@dataclass(frozen=True)
+class DemoScreen:
+    """The block under the shipped screen (ScreenFacts), and the close-up's margin around it (m):
+    the site's screen map frames its close-up of the block the way the prototype's does."""
+    metric: str
+    score: float
+    rank: int
+    n_blocks: int
+    floor: float
+    pool: int
+    precision: float
+    recall: float
+    closeup_pad_m: float
+
+
+@dataclass(frozen=True)
+class DemoFrame:
+    """One slider position: the network the method has built by the displacement budget `budget`
+    (a share of the homes' floor area; 0 the block with no new road). `displacement` is the share
+    it reaches (at least `budget`), `road_km` its new road, `permeability` its L_P,
+    `conductance_m2` the conductance it adds (m² of open ground), `seconds` the method's run time
+    to it, `row` its frame's row in each sprite sheet."""
+    budget: float
+    displacement: float
+    road_km: float
+    permeability: float
+    conductance_m2: float
+    seconds: float
+    row: int
+
+
+@dataclass(frozen=True)
+class DemoMethod:
+    """The method the page builds out: its reader-facing name, how it works, where its run time
+    was recorded, the slider's frames (`default_frame` the one the page opens on)."""
+    name: str
+    blurb: str
+    machine: str
+    default_frame: int
+    frames: tuple[DemoFrame, ...]
+
+
+@dataclass(frozen=True)
+class DemoSheets:
+    """The plates as sprite sheets beside demo.json, one per view, each `rows` frames of `width` x
+    `frame_height` px stacked top to bottom: the roads (`network`), each home's escape time
+    (`time`), and the share of it the roads save (`saved`)."""
+    width: int
+    frame_height: int
+    rows: int
+    network: str
+    time: str
+    saved: str
+
+
+@dataclass(frozen=True)
+class DemoEncoding:
+    """The plates' colours and the quantities their legends state. `escape_ramp` maps escape time
+    from 0 to 100% of `escape_scale` (the model's units: the 99th-percentile home with no new
+    road), short blue to long red, with an isochrone every `iso_step` of it; `saved_ramp` maps the
+    share saved from none to `saved_max`. Roads are `road_width_m` wide and conduct
+    `road_conductance` times what open ground does; a building counts as wholly destroyed once
+    `gone_share` of it is gone. The block's edge: `street` (where people walk out), `edge` (a
+    railway's or a ditch's line), `water` (a ditch)."""
+    building: str
+    destroyed: str
+    road: str
+    street: str
+    edge: str
+    water: str
+    escape_ramp: tuple[str, ...]
+    saved_ramp: tuple[str, ...]
+    escape_scale: float
+    iso_step: float
+    saved_max: float
+    road_width_m: float
+    road_conductance: float
+    gone_share: float
+
+
+@dataclass(frozen=True)
+class DemoTopology:
+    """The original topology algorithm's run time on this block, extrapolated from `runs` (each
+    once, at `alpha`, on one thread) to `n_buildings`: a least-squares power law through all of
+    them (seconds ~ n^`exponent`, standard error `se`) gives `central_s`; anchored on the largest
+    run, the smaller runs' exponent (`small_exponent`) gives `low_s` and the two largest runs'
+    slope (`top_exponent`) `high_s`."""
+    alpha: int
+    runs: tuple[Timed, ...]
+    n_buildings: int
+    exponent: float
+    se: float
+    central_s: float
+    low_s: float
+    high_s: float
+    small_exponent: float
+    top_exponent: float
+
+
+@dataclass(frozen=True)
+class DemoBundle:
+    """The Demo page's numbers: the block (its id, buildings, place in words, centroid and a Google
+    Maps link), the screen's verdict on it, the fires reported near it, the method built out on it
+    and its plates, and the topology algorithm's extrapolated run time on it."""
+    block_id: str
+    n_buildings: int
+    place: str
+    lat: float
+    lon: float
+    maps_url: str
+    screen: DemoScreen
+    fires: tuple[Fire, ...]
+    method: DemoMethod
+    sheets: DemoSheets
+    encoding: DemoEncoding
+    topology: DemoTopology
+
+
+def ts_type(t: Any) -> str:
+    """`t`'s TypeScript spelling, for the bundle's types only (refusing anything else)."""
+    if t is str:
+        return "string"
+    if t is int or t is float:
+        return "number"
+    if typing.get_origin(t) is tuple:
+        item, more = typing.get_args(t)
+        if more is not Ellipsis:
+            raise TypeError(f"{t!r}: only tuple[X, ...] has a TypeScript spelling here")
+        return f"{ts_type(item)}[]"
+    if typing.get_origin(t) is types.UnionType:
+        return " | ".join("null" if a is type(None) else ts_type(a) for a in typing.get_args(t))
+    if dataclasses.is_dataclass(t):
+        return t.__name__
+    raise TypeError(f"no TypeScript spelling for {t!r}")
+
+
+def dts(top: type) -> str:
+    """`top` and every dataclass it holds as TypeScript interfaces, each documented by its
+    docstring, the held ones first."""
+    order: list[type] = []
+
+    def visit(cls: type) -> None:
+        for hint in typing.get_type_hints(cls).values():
+            for t in (hint, *typing.get_args(hint)):
+                if dataclasses.is_dataclass(t) and t not in order:
+                    visit(t)  # type: ignore[arg-type]
+        if cls not in order:
+            order.append(cls)
+
+    visit(top)
+    out = ["// GENERATED by research/roadless/atlas/explore_proto/build.py (branch",
+           "// research/roadless) -- do not edit. Regenerate there: build.py site <this checkout>",
+           "// This file is what makes a renamed Python field a TypeScript error instead of a",
+           "// blank panel."]
+    for cls in order:
+        doc = (cls.__doc__ or "").strip().splitlines()
+        out.append("/** " + "\n * ".join(line.strip() for line in doc) + " */")
+        out.append(f"export interface {cls.__name__} {{")
+        out += [f"  {k}: {ts_type(t)};" for k, t in typing.get_type_hints(cls).items()]
+        out.append("}")
+    return "\n".join(out) + "\n"
+
+
+SITE_README = """\
+<!-- GENERATED by research/roadless/atlas/explore_proto/build.py (branch research/roadless) --
+     do not edit. Regenerate there: build.py site <a main checkout> -->
+
+# The Demo page's bundle
+
+What the site's Demo page reads: one Cape Town block, `{bid}`, followed from the city-wide screen
+to the roads one method builds through it.
+
+- `demo.json`: every number the page shows. The block and its place, the shipped screen's verdict
+  on it (checked against `../screen-map/capetown.json`), the fires reported near it (each quoted
+  from its report and checked against the article; none is placed inside the block, and the page
+  draws none of them on a map), the method's frames under a displacement budget with its recorded
+  run time, the plates' colours, and the original topology algorithm's run time on this block,
+  extrapolated from {n_runs} recorded runs on smaller blocks.
+- {sheets}: the method's plates, one sprite sheet per view ({rows} frames each, the block with no
+  new road first).
+
+`web/src/demo.d.ts` is generated beside it from the same dataclasses, so a renamed field is a
+TypeScript error.
+
+The producer is `research/roadless/atlas/explore_proto/build.py` on the `research/roadless`
+branch, which cannot merge into `main` (it carries a private submit group and a large GPU group):
+the frames are the 5810 build-out pilot's stored ones (`{plan}`), so this directory is how they
+reach the public site.
+"""
+
+
+def site(root: Path) -> None:
+    """The Demo page's bundle (SITE_DIR) and its declaration (SITE_DTS) into the main checkout
+    `root`."""
+    if not (root / "mkdocs.yml").is_file() or not (root / "web" / "src").is_dir():
+        raise SystemExit(f"{root} is not a checkout of the site (no mkdocs.yml or web/src)")
+    b = built()
+    if any(r is None or s is None for r, s in zip(b.rows, b.secs, strict=True)):
+        raise SystemExit("a slider row with no network: the site's widget draws a network at "
+                         "every budget")
+    out = root / SITE_DIR
+    if out.exists():
+        shutil.rmtree(out)
+    out.mkdir(parents=True)
+    names = {v: f"{METHOD.stem}_{v}.webp" for v in VIEWS}
+    size = None
+    for v in VIEWS:
+        size = sprite(b.fs, v, out / names[v])
+    assert size is not None
+    frames = [DemoFrame(budget=0.0, displacement=0.0, road_km=0.0, permeability=0.0,
+                        conductance_m2=0.0, seconds=0.0, row=0)]
+    for t, r, s in zip(render.SLIDER, b.rows, b.secs, strict=True):
+        assert r is not None and s is not None                   # refused above
+        frames.append(DemoFrame(budget=t, displacement=r["D"], road_km=r["km"],
+                                permeability=r["LP"], conductance_m2=float(r["C"]), seconds=s,
+                                row=b.fs.index(r["f"])))
+    sc = screen_facts(screen())
+    ex = b.ex
+    bundle = DemoBundle(
+        block_id=cp.BID, n_buildings=b.n_homes, place=PLACE, lat=b.lat, lon=b.lon,
+        maps_url=maps_url(b.lat, b.lon),
+        screen=DemoScreen(**sc._asdict(), closeup_pad_m=LOCAL_PAD),
+        fires=FIRES,
+        method=DemoMethod(name=METHOD.name, blurb=METHOD.blurb, machine=METHOD.runtime.machine,
+                          default_frame=DEFAULT, frames=tuple(frames)),
+        sheets=DemoSheets(width=size[0], frame_height=size[1], rows=len(b.fs),
+                          network=names["network"], time=names["time"], saved=names["saved"]),
+        encoding=DemoEncoding(
+            building=rnd.BUILDING, destroyed=rnd.CLEARED, road=render.ROAD, street=rnd.STREET,
+            edge=rnd.EDGE, water=nw.cp.gm.WATER_FILL,
+            escape_ramp=tuple(mcolors.to_hex(SEQ(t)) for t in np.linspace(0, 1, 11)),
+            saved_ramp=tuple(mcolors.to_hex(SAVED(t)) for t in np.linspace(0, 1, 11)),
+            escape_scale=round(b.scale, 1), iso_step=ISO_STEP, saved_max=SAVED_MAX,
+            road_width_m=road_simp.ROAD_W, road_conductance=growth.ROAD_KAPPA,
+            gone_share=GONE_SHARE),
+        topology=DemoTopology(
+            alpha=TOPOLOGY_ALPHA, runs=TOPOLOGY_RUNS, n_buildings=ex.n, exponent=ex.exponent,
+            se=ex.se, central_s=ex.central, low_s=ex.low, high_s=ex.high,
+            small_exponent=ex.small_exponent, top_exponent=ex.top_exponent))
+    (out / "demo.json").write_text(json.dumps(dataclasses.asdict(bundle), indent=1,
+                                              ensure_ascii=False) + "\n")
+    (out / "README.md").write_text(SITE_README.format(
+        bid=cp.BID, n_runs=len(TOPOLOGY_RUNS), rows=len(b.fs), plan=METHOD.pick.key(),
+        sheets=", ".join(f"`{n}`" for n in names.values())))
+    (root / SITE_DTS).write_text(dts(DemoBundle))
+    mb = sum(p.stat().st_size for p in out.iterdir()) / 1e6
+    print(f"{out}: {len(list(out.iterdir()))} files, {mb:.1f} MB; {root / SITE_DTS}", flush=True)
+
+
 def main(argv: list[str]) -> None:
     matplotlib.use("Agg")
     match argv:
@@ -638,6 +1075,8 @@ def main(argv: list[str]) -> None:
             plates()
         case ["page"]:
             page()
+        case ["site", root]:
+            site(Path(root).expanduser().resolve())
         case []:
             plates()
             page()
