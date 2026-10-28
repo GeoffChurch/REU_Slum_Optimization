@@ -661,6 +661,18 @@ Open:
     (mostly rings round single buildings, cluttered); at D 0.05 k 0.01 gamma 1 and 1.5 lead the
     lazy greedy by 0.14 -- 0.16 at their own D in 2 -- 2.7x its road; U's clearing changes little
     as a vote and costs as a real clearing. Next: their linked roads as the greedy stage's pools.
+    Rev 8 (NOTES, "Paving and clearing on one frontier"): the price a Strategy (`.k` area, `.s`
+    sheet: lambda C, conductance added), the joint clearing `.cjoint` (y per building beside x,
+    D the union of the roads' cover and the clearing, one OC). On 5810 at sheet price 0.1 and 0.3
+    its paved and roads answers are new points on the (D, C) plane (no page frame at their D and
+    C or less reaches their L_P: 0.600 at D 0.053 and 192k m^2, 0.643 at 0.158 and 188k; at equal
+    C 0.07 -- 0.24 over every road network), D spent on a deeper clearing than SIMP's and C on
+    open-ground paving; at equal D the lazy greedy's SIMP-pool roads still lead (0.633, 0.764) at
+    1.7 -- 3.4x the C. At 1 and 3 it is a grey clearing trailing SIMP's. **Open**: OC does not
+    settle on the joint design (bang-bang where D does not bind: a building's C and gain both go as
+    proj^q; 34 -- 853 grey buildings, L_P swinging 0.10 -- 0.29 at D 0.15 price 3): a clearing
+    cost linear in proj(y), an incumbent of rounded iterates, or MMA, before more prices or
+    blocks; and the paving exponent gamma beside a clearing (Adaptive refused with `.cjoint`).
   - The damage term: expected P over single blockages from one solve and each road piece's
     leverage (Sherman-Morrison); for vehicles on the road graph alone (agenda item 5).
 - **The public package's displacement, and the methods' internal costs, onto the ramped
@@ -839,7 +851,11 @@ Open:
   second cost axis for paving (paved length or area) beside D, every intervention on one frontier
   (recommended); new roads unboosted, as the lineup was; or paving existing lanes as an
   intervention, with clearing allowed to pave what it clears. The held re-run and the site's
-  headline wait on it.
+  headline wait on it. Since 2026-10-27 the conductance added C prices both in one unit (NOTES,
+  "Conductance added", "The uniform baselines"), and road_simp rev 8's joint SIMP pays for paving
+  and clearing under one D and one price on C (NOTES, "Paving and clearing on one frontier"): at
+  low prices its answers sit beyond both families on the (D, C) plane, its D on clearing and its
+  C on open-ground paving; its OC does not yet settle (the road SIMP item).
 - **Repulsion in the road builders** (2026-10-24, **owner's call**; NOTES, "Clutter", "Roads
   interact as induced dipoles", "cycle_native's loops lie doubled"). ΔP greedy clutters because a
   second road beside a built one displaces no one, so it costs nothing while P still credits it

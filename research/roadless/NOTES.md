@@ -10849,3 +10849,95 @@ pools, 0.765 at 730k against 0.625; the lazy greedy 1.6x at 0.05; clearance_loop
 0.10 and below it at 0.15 (0.421 at 434k, uniform 0.503). So most of a road's conductance does what
 the same conductance spread evenly would: a road is a placement worth 1 -- 1.6x evenness, a
 clearing 7 -- 13x. The page draws both lines wherever C is an axis.
+
+### Paving and clearing on one frontier: a joint SIMP on 5810 (2026-10-27)
+
+Owner: "put paving and clearing on one frontier, priced by conductance added". road_simp rev 8
+(eeb14054; brief .superpowers/sdd/2026-10-27-joint/brief.md): beside the paving density x per
+pixel, a clearing y per building (`.cjoint`), its atom's factor k_b = EPS + (1 - EPS) proj(y_b)^q
+(Relaxation.k_of's form, the paving's q and beta), the state's openness kt = kt_c + s (1 - kt_c)
+with kt_c the width form's terms at k, its boost bw + s db; D per building the union of the
+roads' cover (through the ramp) and the projected clearing, D_b = 1 - (1 - ramp(X_b)) (1 -
+proj(y_b)); the price a Strategy, the area price `.k<per_km>` as before or the sheet price
+`.s<price>`, lambda C with C the eps world's sheet less the exact baseline's (Model.sheet) and
+lambda = price P0 / 1e5 m^2 (price: the L_P that 100,000 m^2 of conductance added must buy back).
+OC moves x ++ y with one nu bisected on D at the trial update, from XMIN everywhere. Answers: the
+clearing (proj(y) >= 1/2 at beta 16) alone (`clear_*`) and road_simp's paved and linked-roads
+answers beside it as a real clearing, each with its C (its sheet less its own mesh's baseline's,
+as atlas/roads5810/sheet.py). Guards (road_simp_check.py, 19570, each failing under its fault):
+jgrad, dP/dx 9.8e-7 and dP/dy 1.8e-5 against central differences (faults no-clear-s, the clearing
+path's (1 - s) dropped, 1.7e-1; kt0, the paving path's (1 - kt_c) read as (1 - kt0), 4.7e-2);
+jdD 9.2e-9 (sum: 3.5e-1); jdC 9.9e-9 (no-kt-db: 5.1e-1); jsheet, at a binary design C off the
+exact state's by 0.59 m^2 within the eps world's own 1.07 (not-applied: 1,025 m^2). P's
+differences step x by 1e-3: P is solved to about 1e-12 relative, 1e-4 of a derivative at the old
+1e-5; y keeps 1e-5 (the terms' kinks).
+
+The sweep (rsimp-joint-q2, job 85589, 8 tasks on quadro2: orion sat in `completing`; r 7, q 1, 2, 3,
+3, 3 at beta 1, 2, 4, 8, 16, 60 updates a stage; 5.7 -- 6.4 h a run, 13.5 GB): D 0.05 and 0.15,
+sheet price 0.1, 0.3, 1, 3. D 0.15 s 0.3's paved answer failed to mesh (`_conform` refused a 7.6e-10
+m split: the parked "A carved atom has no width floor"); its clearing and linked roads were scored
+from the stored design by the same functions (.superpowers/sdd/2026-10-27-joint/rescue.py). Against
+the build-out page's rows (L_P linear in D, in log C; the best road network the largest L_P among
+those whose range covers the point; D past 0.15 read at 0.15):
+
+    D     price answer          L_P    L_J2   D      C (m^2)  paved  | at its D:   at its C:
+                                                                     | SIMP road  | SIMP road  open
+    0.05  0.1   clearing        0.228  0.386  0.052  7,800           | 0.258 0.630| 0.250  -   0.019
+                paved + clear   0.600  0.830  0.053  191,500  20,900 | 0.261 0.633|  -   0.498 0.311
+                roads + clear   0.516  0.752  0.055  139,000  17,100 | 0.265 0.637|  -   0.443 0.251
+          0.3   clearing        0.242  0.406  0.055  8,200           | 0.265 0.637| 0.256  -   0.020
+                paved + clear   0.410  0.630  0.055  52,000   5,100  | 0.265 0.637|  -   0.232 0.110
+                roads + clear   0.392  0.608  0.055  47,500   5,400  | 0.265 0.638|  -   0.209 0.102
+          1     paved + clear   0.249  0.411  0.052  9,500    210    | 0.259 0.631| 0.272  -   0.022
+          3     clearing        0.150  0.270  0.044  6,400    0      | 0.240 0.600| 0.228  -   0.016
+    0.15  0.1   clearing        0.365  0.580  0.157  25,500          | 0.401 0.764|  -     -   0.061
+                paved + clear   0.643  0.862  0.158  188,000  18,400 | 0.401 0.764|  -   0.495 0.307
+                roads + clear   0.598  0.824  0.158  147,300  15,500 | 0.401 0.764|  -   0.452 0.262
+          0.3   clearing        0.390  0.609  0.159  25,400          | 0.401 0.764|  -     -   0.061
+                roads + clear   0.439  0.665  0.159  37,200   2,400  | 0.401 0.764|  -   0.196 0.086
+          1     paved + clear   0.301  0.486  0.136  22,000   150    | 0.387 0.752| 0.382  -   0.051
+          3     clearing        0.100  0.188  0.030  4,300    0      | 0.202 0.544| 0.192  -   0.010
+
+(at prices 1 and 3 the answers are the clearing within 0.006; SIMP: the page's CDATA `simp`, its C
+range 1.6k -- 25k; road: the page's DATA, C from 30k; the best road at equal D is the lazy ΔP greedy
+on the lineup + SIMP r7 pools throughout, at 323k -- 640k m^2; at equal C simp_gamma1,
+cycle_native_dp_apart0, clearance_looped_power, the lazy greedy under J_2. open: the uniform
+baseline.) Checked frame by frame, no page frame of either family has at most the paved or roads
+answer's D and C and at least its L_P, at prices 0.1 and 0.3 (D 0.05 and 0.15): these are new points
+on the (D, C) plane. They do not beat both families on either axis alone: at equal D the best road
+network leads (0.633 against 0.600 at D 0.05, 0.764 against 0.643 at 0.15) with 1.7 -- 3.4x the
+price-0.1 answers' conductance (6 -- 17x the price-0.3 ones'); at equal C the joint answers lead
+every road network by 0.07 -- 0.24 and take 1.9 -- 5x the uniform baseline's L_P (roads 0.8 --
+1.6x), where no clearing reaches. At prices 1 and 3 the design pays for almost no paving (0 -- 210
+m^2) and the answer is a clearing that trails SIMP's at equal C by 0.01 -- 0.09 (each but D 0.05
+price 1's clearing alone, 0.238 at 7.8k m^2, dominated by a page clearing frame).
+
+How it splits the budget. D goes to clearing: in the eps world the clearing holds 0.0475 -- 0.0500
+of D 0.05 and 0.147 -- 0.150 of 0.15 (price 3 spends 0.099 of it); the paving lies on open ground,
+which costs no D. C goes to paving at the low prices (at D 0.05: 184k of 192k at 0.1, 44k of 52k at
+0.3; at D 0.15 163k of 188k at 0.1), to the clearing at 1 and 3. Against road SIMP's paved answers
+without a clearing (NOTES, "A road-placing SIMP": 0.532 at D 0.035 with 15k m^2 paved, 0.648 at
+0.048 with 30k), the joint's 0.600 with 20.9k m^2 is about where their paved area puts it
+(interpolated 0.58), its D spent on a clearing they did not have. At prices 0.1 and 0.3 the clearing
+it chooses is deeper than SIMP's: 275 buildings at D 0.05, 60 -- 67% of their floor in SIMP's own
+clearing at that budget, median depth 0.46 -- 0.50 against SIMP's 0.376, deepest quarter 6.6 -- 7.8%
+of the cleared floor against 1.7%, shallowest 6.9 -- 8.3% against 13.1%; at D 0.15 (989 -- 1034
+buildings) median 0.47 -- 0.50 against 0.44, deepest 8.3 -- 15% against 5.0%. Cleared beside paving,
+a building pays where the paved network cannot reach; and alone that clearing is the weaker one
+(0.228 -- 0.242 against SIMP's 0.258 -- 0.265 at their D).
+
+OC behaves badly here, and that is the round's limit. No run settled: the last ten updates of
+every run moved some entry by the 0.2 limit; the clearing stayed grey (34 -- 853 buildings with
+proj(y) in 0.05 .. 0.95 at beta 16) and at the higher prices the iterates swing between two states
+(L_P over the last ten 0.098 -- 0.287 at D 0.15 price 3, 0.289 -- 0.330 at price 1, 0.433 --
+0.453 at 0.3), so the threshold answer loses much of the eps world's (D 0.15 price 3: eps D 0.099
+and L_P 0.28, the answer D 0.030 and 0.100). Under the sheet price a building's C and its P gain
+both go as proj(y)^q, so where D does not bind (nu 0) B = gain / (lambda dC) does not depend on
+how far the building is cleared: OC has no interior fixed point and moves it by the full limit
+each step (bang-bang); where D binds, its linear dD restores SIMP's penalty, and the D 0.05
+low-price runs are the least grey (34 -- 39). Not fixed in this round (the brief: report, not
+improvise): a C linear in proj(y) (the clearing's own sheet as its cost, the conductance still
+proj^q), an incumbent of rounded iterates as relax.simp keeps, or MMA would each be a candidate.
+Rows: road_simp_rows/<RUNTIME>/rs.D*.s*.r7.q1,2,3,3,3.b1,2,4,8,16.i60.uOC.cjoint.p1e0.0001v8/
+(not committed); the table and the rescue in .superpowers/sdd/2026-10-27-joint/ (table.py,
+table.csv, split.csv, rescue.py).
