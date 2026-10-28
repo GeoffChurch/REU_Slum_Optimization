@@ -39,13 +39,19 @@ seeds placed by k-means on the homes' centroids; `spec<n>s<seed>`, the shelved s
 cut (memory "Voronoi-adjacency partition method": a gap-aware affinity exp(-gap^2 / 2 sigma^2)
 between each building and its KNN nearest, sigma the median gap, the n smallest eigenvectors of
 the normalized Laplacian row-normalized and k-means'd; each pixel takes its nearest building's
-cluster), each cell then coloured into the K labels (DSatur on the cells' adjacency: K labels make
-any number of sub-blocks, four colouring every planar partition); `ears` (the bottom-up arm's
-answer) is refused until it exists.
+cluster); `nodal<n>s<seed>`, a Dirichlet spectral partition aiming at the spectral minimal
+partition (Helffer, Hoffmann-Ostenhof, Terracini: the pieces' smallest first eigenvalue the
+largest, a piece's P at most its demand over its lambda_1; Nodal); each cell then coloured into
+the K labels (DSatur on the cells' adjacency: K labels make any number of sub-blocks, four
+colouring every planar partition, DSatur not always finding it). `ears` (the bottom-up arm's
+answer) and `divides` (its Morse-Smale basins of u, research/roadless/ears.py's generator, to be
+imported) are refused until they exist. Each start is scored as its own cut answer before the
+update moves it (`start_*` in the row).
 
 Answers, each scored as a road network (road_simp.scored: its own carved mesh, RUNTIME), with the
 measures `measures` gives (sub-blocks, road length, dead ends, the depth measures, the damage
 term's cut share):
+  start: the start's own cut answer (below), before the update;
   band: the triangles at r >= 1/2 (road_simp.paved_of);
   cut: the label boundaries (argmax phi on the raster, each pixel edge between two labels, merged
     and simplified) as roads ROAD_W wide (road_corridor), clipped to the block.
@@ -113,6 +119,8 @@ RAA = 1e-6               # MMA: p and q's floor, relative to the largest |deriva
 TW_TOL = 1e-4            # Plan.tw: T_w bisected to this, relative
 TW_N = 200               # Plan.tw: the synthetic step's raster (pixels a side)
 KNN = 8                  # Spectral: each building's nearest neighbours (by centroid)
+NODAL_FLOOR = 0.01       # Nodal: the mass's share spread by area (the open ground's cells
+                         # hold no demand: M positive definite)
 KMEANS_ITER = 50         # Voronoi, Spectral: k-means iterations
 SNAP_TOL = 1.0           # m: the cut answer's boundaries simplified to this
 FACE_M2 = 100.0          # m^2: a sub-block is a face of the block less the roads this large
@@ -191,15 +199,63 @@ class Spectral:
         return np.asarray(lab[near], dtype=np.int64)
 
 
+@dataclass(frozen=True, kw_only=True)
+class Nodal:
+    """A Dirichlet spectral partition (module docstring): the n lowest eigenfunctions of the
+    baseline's grounded operator (the street ground, the exits' leak on its diagonal, every
+    footprint standing at its conductance), A v = lambda M v with the mass M the population per
+    cell plus NODAL_FLOOR of it spread by area (a piece's P is at most its demand over its own
+    lambda_1); shift-invert about 0 on the model's own factorization; the cells k-means'd
+    (seeded) on the row-normalized eigenvectors, each pixel its triangle's cell's cluster (an
+    off or ground pixel its nearest labelled one's)."""
+    n: int
+    seed: int
+
+    @property
+    def name(self) -> str:
+        return f"nodal{self.n}s{self.seed}"
+
+    def cells(self, ra: rs.Raster, m: gcl.Model) -> I64:
+        st = m.state(np.zeros(m.n))
+        assert st.A is not None and st.factor is not None
+        idx = np.flatnonzero(st.reach.unknown)
+        A = st.A[idx][:, idx]
+        f = np.asarray(st.sys.Pc @ m.pop)[idx]
+        area = np.asarray(m.leak_site.area)[idx]
+        mass = f / f.sum() + NODAL_FLOOR * area / area.sum()
+        full = np.zeros(st.A.shape[0])
+        factor = st.factor
+
+        def inv(v: F64) -> F64:
+            full[idx] = np.ravel(v)
+            return np.asarray(factor.solve(full)[idx])
+
+        op = spla.LinearOperator(A.shape, matvec=inv, dtype=np.float64)
+        _, vec = spla.eigsh(A, k=self.n, M=sp.diags(mass), sigma=0.0, which="LM", OPinv=op)
+        emb = vec / np.maximum(np.linalg.norm(vec, axis=1, keepdims=True), 1e-300)
+        _, lab = kmeans2(emb, self.n, iter=KMEANS_ITER, minit="++", seed=self.seed)
+        cell_lab = np.full(st.A.shape[0], -1, dtype=np.int64)
+        cell_lab[idx] = lab
+        tri = cell_lab[m.c.cell]
+        px = np.full(ra.shape[0] * ra.shape[1], -1, dtype=np.int64)
+        px[ra.pix[tri >= 0]] = tri[tri >= 0]
+        grid = px.reshape(ra.shape)
+        _, near = ndimage.distance_transform_edt(grid < 0, return_indices=True)
+        return np.asarray(grid[near[0], near[1]].ravel(), dtype=np.int64)
+
+
 def start_of(token: str) -> Start:
-    m = re.fullmatch(r"(vor|spec)([0-9]+)s([0-9]+)", token)
+    m = re.fullmatch(r"(vor|spec|nodal)([0-9]+)s([0-9]+)", token)
     if token == "ears":
         raise SystemExit("ears: the bottom-up arm's answer does not exist yet "
                          "(.superpowers/sdd/2026-10-27-ears/brief.md)")
+    if token == "divides":
+        raise SystemExit("divides: the ears arm's generator (the Morse-Smale basins of u) is not "
+                         "in research/roadless/ears.py yet; it is to be imported, not duplicated")
     if m is None:
-        raise SystemExit(f"{token}: a start is vor<n>s<seed> or spec<n>s<seed>")
+        raise SystemExit(f"{token}: a start is vor<n>s<seed>, spec<n>s<seed> or nodal<n>s<seed>")
     n, seed = int(m[2]), int(m[3])
-    return Voronoi(n=n, seed=seed) if m[1] == "vor" else Spectral(n=n, seed=seed)
+    return {"vor": Voronoi, "spec": Spectral, "nodal": Nodal}[m[1]](n=n, seed=seed)
 
 
 def _pixel_xy(ra: rs.Raster) -> F64:
@@ -274,7 +330,7 @@ class Plan:
     @staticmethod
     def of(spec: str) -> Plan:
         m = re.fullmatch(r"pt\.K([0-9]+)\.R([0-9.]+)\.t([0-9.,]+)\.b([0-9.,]+)\.q([0-9.,]+)"
-                         r"\.i([0-9]+)\.D([0-9.e-]+)\.s([0-9.e-]+)\.([a-z]+[0-9]+s[0-9]+|ears)",
+                         r"\.i([0-9]+)\.D([0-9.e-]+)\.s([0-9.e-]+)\.([a-z]+[0-9]+s[0-9]+|ears|divides)",
                          spec)
         if m is None:
             raise SystemExit(f"{spec}: a plan is pt.K<K>.R<radius>.t<T/T_w,..>.b<beta,..>"
@@ -554,6 +610,16 @@ def cut_lines(pt: Partition, f: F64, T: float) -> Any:
     return shapely.simplify(merged, SNAP_TOL)
 
 
+def cut_of(b: Any, pt: Partition, f: F64, T: float) -> tuple[Any, Any]:
+    """(the cut answer's lines, its ground), world frame, clipped to the block."""
+    cut = shapely.intersection(pt.rd.m.geo.utm(cut_lines(pt, f, T)), b.boundary)
+    cut = shapely.line_merge(shapely.union_all(shapely.get_parts(cut)))
+    ground = shapely.intersection(
+        road_corridor(gpd.GeoDataFrame(geometry=list(shapely.get_parts(cut)), crs=b.crs)
+                      .assign(width_m=ROAD_W)), b.boundary)
+    return cut, ground
+
+
 def depth_quantiles(u: F64, area: F64) -> F64:
     """Each home's depth: the area-weighted share of homes with a shorter escape time (nan with no
     trip of its own): atlas/roads5810/depth5810's definition."""
@@ -690,6 +756,7 @@ def run(bid: str, plan: Plan, device: str, *, standing: clearings.Standing) -> N
     print(f"{bid}: {pt.rd.m.fx.fm.nt} triangles, {int(pt.rd.raster.on.sum())} design pixels, "
           f"K {plan.K}, T_w {pt.T_w:.4f}, start {plan.start.name}: {n} cells "
           f"({time.time() - t0:.0f}s)", flush=True)
+    start_cut = cut_of(b, pt, f, plan.stages[-1][0] * pt.T_w)
     f, rows = simp(pt, f, plan, log=lambda s: print(s, flush=True))
     out.parent.mkdir(parents=True, exist_ok=True)
     on = pt.rd.raster.on
@@ -701,14 +768,11 @@ def run(bid: str, plan: Plan, device: str, *, standing: clearings.Standing) -> N
     geo = pt.rd.m.geo
     band = geo.utm(rs.paved_of(pt.rd, w.r))
     band_lines = skeleton(b, band)[0] if not band.is_empty else shapely.MultiLineString()
-    cut = shapely.intersection(geo.utm(cut_lines(pt, f, T)), b.boundary)
-    cut = shapely.line_merge(shapely.union_all(shapely.get_parts(cut)))
+    cut, cut_ground = cut_of(b, pt, f, T)
     del pt
-    cut_ground = shapely.intersection(
-        road_corridor(gpd.GeoDataFrame(geometry=list(shapely.get_parts(cut)), crs=b.crs)
-                      .assign(width_m=ROAD_W)), b.boundary)
     sc: dict[str, Any] = {}
-    for name, ground, lines in (("band", band, band_lines), ("cut", cut_ground, cut)):
+    for name, ground, lines in (("start", start_cut[1], start_cut[0]), ("band", band, band_lines),
+                                ("cut", cut_ground, cut)):
         gpd.GeoDataFrame(geometry=[ground], crs=b.crs).to_parquet(
             out.with_name(f"{bid}_{name}_ground.parquet"))
         gpd.GeoDataFrame(geometry=list(shapely.get_parts(lines)), crs=b.crs).to_parquet(
