@@ -44,8 +44,9 @@ partition (Helffer, Hoffmann-Ostenhof, Terracini: the pieces' smallest first eig
 largest, a piece's P at most its demand over its lambda_1; Nodal); each cell then coloured into
 the K labels (DSatur on the cells' adjacency: K labels make any number of sub-blocks, four
 colouring every planar partition, DSatur not always finding it). `ears` (the bottom-up arm's
-answer) and `divides` (its Morse-Smale basins of u, research/roadless/ears.py's generator, to be
-imported) are refused until they exist. Each start is scored as its own cut answer before the
+answer) is refused until it exists; `div<n>p<tau>`, the flow's own divides: the
+persistence-simplified Morse-Smale cuts of u (the ears arm's generator, imported: ears.divides)
+until about n pieces (Divides). Each start is scored as its own cut answer before the
 update moves it (`start_*` in the row).
 
 Answers, each scored as a road network (road_simp.scored: its own carved mesh, RUNTIME), with the
@@ -94,8 +95,10 @@ sys.path.insert(0, str(HERE))
 import clearings  # noqa: E402
 import common  # noqa: E402
 import damage  # noqa: E402
+import ears  # noqa: E402
 import gap_calib  # noqa: E402
 import gap_clear as gcl  # noqa: E402
+import growth as gr  # noqa: E402
 import metrics  # noqa: E402
 import relax  # noqa: E402
 import road_simp as rs  # noqa: E402
@@ -247,16 +250,57 @@ class Nodal:
         return np.asarray(grid[near[0], near[1]].ravel(), dtype=np.int64)
 
 
+@dataclass(frozen=True, kw_only=True)
+class Divides:
+    """The flow's own divides (module docstring): ears.divides on the whole block as one face
+    (ears.raster_of's PIX raster and pixel graph, from a growth.Growth of the block), u the eps
+    world's baseline potential under the population's demand, at persistence threshold `tau`;
+    its cuts added most persistent first until the block falls into at least n regions; each
+    pixel of this raster its nearest coarse pixel's region (a cut pixel its nearest region's)."""
+    n: int
+    tau: float
+
+    @property
+    def name(self) -> str:
+        return f"div{self.n}p{self.tau:g}"
+
+    def cells(self, ra: rs.Raster, m: gcl.Model) -> I64:
+        g = gr.Growth(m, contrast=gr.Road(kappa=gr.ROAD_KAPPA))
+        er = ears.raster_of(g)
+        u = g.solve(g.state(np.zeros(g.nt, dtype=bool)))[0]
+        t = np.maximum(er.tri, 0)
+        u_pix = np.where(er.tri >= 0, u[m.c.cell[t]], 0.0)
+        face = np.where(er.tri >= 0, 0, -1)
+        cuts = ears.divides(u_pix, face, er.ea, er.eb, er.xy, er.bld, face=0, tau=self.tau,
+                            stretch_m=ears.STRETCH_M)
+        inside = (face == 0).reshape(er.shape)
+        cut = np.zeros(er.shape, dtype=bool)
+        reg = np.zeros(er.shape, dtype=np.int64)
+        for d in cuts:
+            cut.ravel()[d.pixels] = True
+            reg = np.asarray(label(inside & ~cut, background=0, connectivity=1), dtype=np.int64)
+            if reg.max() >= self.n:
+                break
+        if not cuts:
+            reg = inside.astype(np.int64)
+        _, near = ndimage.distance_transform_edt(reg == 0, return_indices=True)
+        reg = reg[near[0], near[1]] - 1
+        ij = np.floor((_pixel_xy(ra) - er.lo) / ears.PIX).astype(np.int64)
+        ij = np.clip(ij, 0, np.array(er.shape) - 1)
+        return np.asarray(reg[ij[:, 0], ij[:, 1]], dtype=np.int64)
+
+
 def start_of(token: str) -> Start:
     m = re.fullmatch(r"(vor|spec|nodal)([0-9]+)s([0-9]+)", token)
+    d = re.fullmatch(r"div([0-9]+)p([0-9.]+)", token)
     if token == "ears":
         raise SystemExit("ears: the bottom-up arm's answer does not exist yet "
                          "(.superpowers/sdd/2026-10-27-ears/brief.md)")
-    if token == "divides":
-        raise SystemExit("divides: the ears arm's generator (the Morse-Smale basins of u) is not "
-                         "in research/roadless/ears.py yet; it is to be imported, not duplicated")
+    if d is not None:
+        return Divides(n=int(d[1]), tau=float(d[2]))
     if m is None:
-        raise SystemExit(f"{token}: a start is vor<n>s<seed>, spec<n>s<seed> or nodal<n>s<seed>")
+        raise SystemExit(f"{token}: a start is vor<n>s<seed>, spec<n>s<seed>, nodal<n>s<seed> "
+                         "or div<n>p<tau>")
     n, seed = int(m[2]), int(m[3])
     return {"vor": Voronoi, "spec": Spectral, "nodal": Nodal}[m[1]](n=n, seed=seed)
 
@@ -333,7 +377,8 @@ class Plan:
     @staticmethod
     def of(spec: str) -> Plan:
         m = re.fullmatch(r"pt\.K([0-9]+)\.R([0-9.]+)\.t([0-9.,]+)\.b([0-9.,]+)\.q([0-9.,]+)"
-                         r"\.i([0-9]+)\.D([0-9.e-]+)\.s([0-9.e-]+)\.([a-z]+[0-9]+s[0-9]+|ears|divides)",
+                         r"\.i([0-9]+)\.D([0-9.e-]+)\.s([0-9.e-]+)\.([a-z]+[0-9]+s[0-9]+|div[0-9]+p[0-9.]+"
+                         r"|ears)",
                          spec)
         if m is None:
             raise SystemExit(f"{spec}: a plan is pt.K<K>.R<radius>.t<T/T_w,..>.b<beta,..>"
