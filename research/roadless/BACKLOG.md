@@ -1090,19 +1090,24 @@ Not pursued, with what would change that:
 - **Reblocking top-down: a multi-phase partition SIMP and grid templates** (owner 2026-10-27 -- 28;
   piloted on 5810, NOTES "Reblocking top-down"; partition.py, templates.py,
   .superpowers/sdd/2026-10-27-partition/): K label fields through the cone filter and a softmax, the
-  roads where the labels change (1 - sum phi^2, normalized), road SIMP's eps world, MMA under D;
-  starts Voronoi, spectral cut, nodal (Dirichlet spectral) and the ears' divides; templates of
-  strips or grids snapped to the gaps. Findings: every cut answer is a partition (no dead end,
-  damage cut 0); the spectral cut leads the ears' paths at D 0.10 and 0.15 (0.564, 0.630 against
-  0.504, 0.586) at 1.2 -- 1.3x its C, trails at 0.05 and trails the lazy ΔP greedy by 0.05 -- 0.09
-  at equal D; strips win at D 0.05 (0.422 at 216k m^2); the update adds 0.04 -- 0.06 over the
-  spectral start. Open, in the formulation: (1) grey ridges, roads inside one label (two tied
-  fields), which carry most of the update's gain (the band answers, 4 -- 42 dead ends): a density
-  that reads only label change (e.g. the filtered fields' argmax jump) is the candidate; (2) the
-  ramp's zero slope past the knee, so an over-budget start cannot shed D (the nodal starts never
-  did): starts under the budget, or a D relaxed through the knee early in the continuation. Not
-  built: the grounded contrast (a System per state), the template bend; varying loads still
-  undefined (the damage term's cut share stands in).
+  roads where the labels change, road SIMP's eps world, MMA under D; starts Voronoi, spectral cut,
+  nodal (Dirichlet spectral), the ears' divides and (rev 3) the ears' paths; templates of strips or
+  grids snapped to the gaps. Rev 3 fixed rev 2's two obstacles: the banded road (sharp labels, a
+  second cone gives the band its width: no ridge inside a label) and the ramp's relaxed tail (an
+  over-budget start sheds D); cuDSS and an Illinois search for mu make a run 45 min against 6 h. Rev
+  4: the answers on a 1 mm grid (a carved-mesh refusal) and the cut's sub-road islands merged (its 1
+  -- 4 dead ends; one tongue of a label left, ears at 0.05). Findings (rev 4, price 0.1): the
+  spectral cut, every road on a loop, ties the lazy ΔP greedy (0.511 / 0.621 / 0.669 against 0.495 /
+  0.612 / 0.678 at D 0.05 / 0.10 / 0.15, 1.2 -- 1.9x its C); the ears start gets the same at 0.15
+  with less C (0.667 at 512k against 630k); both trail the kappa-10 growth by 0.05 -- 0.20.
+  Partition plus spurs (the lazy greedy adding roads to the cut, +0.01 / +0.02 of D) closes 40 --
+  49% of the gap to the growth above the 0.05 cut and 18 -- 26% above the 0.10 cut, leads the lazy
+  greedy by 0.04 -- 0.07 at equal D, and the 0.10 cut plus 0.02 (0.692 at D 0.119) beats both the
+  0.15 cut and the lazy greedy at 0.15. Open: the nodal start under rev 3 (not run); an opening of
+  each label for the tongue the merge cannot see (it rounds every junction); the islands the merge
+  removed were worth 0.006 -- 0.029 of L_P (small paved patches, the band's kind); not built: the
+  grounded contrast (a System per state), the template bend; varying loads still undefined (the
+  damage term's cut share stands in).
 - **Add/remove subset search** (built 2026-10-09; NOTES "The add/remove search as one
   Strategy"). search.py: a Round (rank, refine, build, evaluate, accept) under a schedule; the
   greedy's pickers, exchange (the polish), grow-then-prune and floating search are its

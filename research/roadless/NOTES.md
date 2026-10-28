@@ -11238,3 +11238,130 @@ norm (some field moved by 0.2 at every update), but at most 0.11% of the variabl
 limit over the last ten. Scripts: research/roadless/partition.py, partition_check.py, templates.py;
 .superpowers/sdd/2026-10-27-partition/ (compare.py, compare.csv, rescue_div64.py, progress.md); rows
 in research/roadless/partition_rows/ and templates_rows/ (not committed).
+
+Rev 3 and 4 (2026-10-28, evening; partition.py 88353c05, 49eaf496). The profile (5810 on this
+machine, one thread): an update was SuperLU's factorization 23 s of 32, the refined solve 2 s, a
+K-field FFT filter 0.32 s, MMA's trial 0.21 s and a D 0.45 s per evaluation of mu, 300 of those at
+the first update of an over-budget start and 12 -- 16 an update once the budget binds. Exact
+speed-ups (rows bit-identical to rev 2 over 5 + 5 updates): the cone's FFT with its kernel's
+transform kept, the softmax on the design pixels alone, MMA on the free variables alone, both
+gradients back through one batched filter (32 -> 30 s an update). Then mu by least_mu (brackets
+squared out to 1e300 in nine evaluations, closed by the Illinois rule on log mu, D to 1e-4 of the
+budget): 4 -- 5 evaluations an update on average, at most 22 -- 34. And cuDSS on the GPU
+(gap_factor.CuDSS, `gpu`): 0.1 s a refactorization after a 36 s plan, 5 -- 11 s an update. A rev-3
+run is 200 updates in 41 -- 50 min with its three answers scored (rev 2: 5.5 -- 6.3 h on quadro2's
+CPUs). Tried and dropped: SuperLU's relax and panel size, 4 BLAS threads, PCG preconditioned by the
+last update's factorization (not at 1e-8 in 500 iterations).
+
+The two fixes, both rev 2's obstacles. (1) The banded road (`.band`): phi is continued nearly
+one-hot (T = t, 0.2 down to 0.02) and filtered by a second cone (8.09 m: a sharp interface's band is
+ROAD_W wide), the road 1 - sum of its squares normalized, so the road is a band of fixed width
+around the sharp labels' boundaries, its width from the cone and not from T, and a tie inside a
+label is averaged away: no ridge. (2) The ramp's tail (`.e`, one eps per stage, 0.2 down to 0 at the
+last): past the knee a covered building counts min(1, X / tau) + eps (X - tau) / (1 - tau), so a
+start over budget can shed D by moving its boundaries off the buildings it covers; the budget holds
+the relaxed D during the continuation, the true ramp at the last stage and in every score. The six
+runs' starts begin 1.6 -- 2.2 times over their budgets in the eps world (its wide first band) and
+are under them by update 47 -- 86 (the second or third stage), where rev 2's spectral runs got there
+at 85 -- 161 and its nodal runs never. Rev 4 (no change to the update): every answer's ground on a 1
+mm grid in the block's local frame (`gridded`; rev 3's ears start at D 0.15 lost its band to the
+carved mesh's conformity, a 7.6e-10 m edge, the parked "a carved atom has no width floor"; the grid
+alone moves a score by about 1e-5), and the cut's regions narrower than a road merged into a
+neighbour (`thick`). Rev 3's cuts had 1 -- 4 dead ends each (spec 1 / 0 / 3, ears 2 / 4), every one
+an island or sliver of a label narrower than a road that the argmax leaves where two fields nearly
+tie: its boundary's corridor is a blob, its skeleton a spur (or a floating loop: spec40's cut had no
+dead end but 2,000 m^2 of such islands). After `thick` the spectral and ears cuts have 0 dead ends
+but one: ears at D 0.05 keeps a tongue of a label narrower than a road, attached to its region (its
+skeleton's branch at the 7 m floor), which merging regions cannot see; an opening of each label by a
+road's half-width would, at the price of rounding every junction's corners, so not added. The
+islands were worth something: rev 3's cuts scored 0.534 / 0.638 / 0.675 (spectral) and 0.524 / 0.630
+(ears) with them, 0.006 -- 0.029 above rev 4's, as small paved patches that are no part of a
+partition (the band answers, which keep such pieces, score higher again). The rev-3 runs were
+migrated to rev 4 from their stored fields (.superpowers/sdd/2026-10-27-partition/migrate_v4.py);
+the ears start at D 0.15 was re-run. Guards (partition_check.py, 19570): rev 3's grad 1.6e-6, bgrad
+4.6e-5 (no-band 8.2e-1, no-offdiag 9.8e-1, no-T 9.0e-1, unclipped 5.7e-3), dD 9.3e-9, edD 9.4e-8
+(no-tail 2.8e-2), deadends 0 (spur 1), mma 6.4e-6 (no-mu 5.1), ridges 0 of 1,700 road pixels (a
+planted ridge 85); rev 4's enclaves (an island and a sliver planted in the Voronoi start's labels):
+restored, 0 dead ends, the start's 4 regions kept (no-thick: 1 dead end, FAIL).
+
+Rev 4 on 5810 at price 0.1 (L_P under RUNTIME; faces of 100 m^2 and more; the start: the start's own
+cut, before the update):
+
+    D     answer             L_P    L_J2   D      C (k)  faces largest  road km  dead  deep50
+    0.05  spec20 start       0.369  0.602  0.050  332    21    46k      5.73     0     0.84
+          spec20 cut         0.511  0.760  0.049  376    25    46k      6.65     0     0.83
+          spec20 band        0.541  0.787  0.050  368    6     416k     6.12     11    0.83
+          ears start         0.375  0.599  0.045  169    9     182k     2.78     0     0.41
+          ears cut           0.495  0.741  0.045  213    11    180k     3.66     1     0.42
+          ears band          0.554  0.799  0.049  236    4     549k     3.33     7     0.42
+    0.10  spec40 start       0.505  0.752  0.090  489    41    27k      8.62     0     0.99
+          spec40 cut         0.621  0.854  0.097  489    43    28k      8.73     0     0.99
+          spec40 band        0.643  0.870  0.099  472    14    358k     8.51     8     0.98
+          ears start         0.469  0.717  0.096  398    24    73k      6.69     0     0.98
+          ears cut           0.605  0.845  0.092  423    24    74k      7.16     0     0.98
+          ears band          0.642  0.873  0.099  414    11    393k     7.19     5     0.98
+    0.15  spec64 start       0.577  0.820  0.120  657    67    14k      11.58    0     1.00
+          spec64 cut         0.669  0.887  0.146  630    65    22k      11.11    0     1.00
+          spec64 band        0.678  0.892  0.148  602    26    320k     11.63    15    1.00
+          ears start         0.568  0.814  0.145  544    42    59k      9.54     0     1.00
+          ears cut           0.667  0.888  0.143  512    38    64k      9.01     0     1.00
+          ears band          0.681  0.898  0.146  489    16    358k     9.10     8     0.99
+
+(the ears start: ears' `paths` frame at the budget, as the 5810 page cuts it.) Against the rest at
+the same targets: rev 2's spectral cut 0.406 / 0.564 / 0.630; the lazy ΔP greedy 0.495 / 0.612 /
+0.678 (C 193k / 376k / 517k); ears' paths 0.431 / 0.504 / 0.586; the kappa-10 growth 0.564 / 0.803 /
+0.864 (C 324k / 777k / 1,207k). Rev 3 is the formulation rev 2 was not: the spectral cut gains 0.10
+/ 0.06 / 0.04 over rev 2's, and its update now adds 0.14 / 0.12 / 0.09 to its start (rev 2: 0.04 /
+0.06 / 0.05); the band, no longer ridges, is within 0.01 -- 0.06 of the cut. With no dead end the
+cut now ties the lazy ΔP greedy, the best road builder under P on the page's lineup: 0.511 against
+0.495 at 0.05, 0.621 against 0.612 at 0.10, 0.669 against 0.678 at 0.15, at 1.9 / 1.3 / 1.2 times
+its C. The ears start reaches the same at less C (0.667 at D 0.143 and 512k against spectral's 0.669
+at 0.146 and 630k; 0.605 at 0.092 against 0.621 at 0.097), from a start that is itself a partition
+with fewer, larger faces; at 0.05 it trails (0.495) with a 180k m^2 sub-block and 42% of the deepest
+quarter within 50 m. Both trail the kappa-10 growth by 0.05 / 0.18 / 0.20, which buys it with dead
+ends (its fingers) and, at 0.10 and 0.15, 1.6 and 1.9 times the spectral cut's C (at 0.05 less: 324k
+against 376k). The nodal start was not run in rev 3: rev 2's nodal runs never got under their
+budgets (the ramp's flat tail), which the tail now addresses, and its eigenfunctions ignore the
+footprints' cost; it is the start to retry next.
+
+Partition plus spurs (owner-approved 2026-10-28; .superpowers/sdd/2026-10-27-partition/spurs.py).
+From each rev-4 spectral cut, the lazy ΔP greedy the page's comparison numbers come from (dp_greedy:
+the lineup's 966 roads as candidates, lazy pick in fives, cost D, objective P) adds roads until D is
+the cut's own plus 0.02, the +0.01 point its shortest prefix there. The cut is a fixed network in
+the pool's carving (its stored ground as the corridor), built before the first step, so a pool road
+is open when it touches the street, the cut or a built road; the lenses are against the bare block.
+A small extra budget, not the same total D after trading partition roads away: a trade needs a
+removal pass (each removal an exact solve, over 25 -- 65 sub-blocks' boundaries) and breaks the
+property the partition is for, while an extra budget measures the spurs' marginal value directly and
+sets it against the curves at equal D. The candidates are solved one after another on the GPU
+(cuDSS, one plan for the pool's mesh, 13.2M triangles): 5.4 s a candidate, the first step solving
+every open one (305 / 377 / 459, 28 -- 48 min), then 5 -- 20 a step; 43 / 61 / 77 min a build, its
+two prefixes then scored on their own meshes (the build's L_P to the fourth digit). (dp_greedy's
+builder now takes a base network and a Solver Strategy, forked SuperLU or serial; a lens key the P
+objective wrote twice is fixed.) At the same D, the cut alone read between the three spectral cuts,
+the lazy greedy and the kappa-10 growth from their page rows:
+
+    cut + dD     D      L_P    C (k)  added  dead | cut alone  lazy   k10 (C k)    | recovered
+    spec20 +0.01 0.0589 0.575  433    22     15   | 0.534      0.514  0.617 (386)  | 0.49
+    spec20 +0.02 0.0706 0.612  471    30     19   | 0.561      0.547  0.689 (492)  | 0.40
+    spec40 +0.01 0.1090 0.667  565    30     11   | 0.633      0.628  0.818 (870)  | 0.18
+    spec40 +0.02 0.1193 0.692  611    47     18   | 0.643      0.640  0.833 (959)  | 0.26
+    spec64 +0.01 0.1584 0.707  716    41     16   | (past the curves' 0.15: k10 0.862, lazy 0.678)
+    spec64 +0.02 0.1664 0.722  753    51     20   |
+
+(added: the roads the greedy built, 12 -- 19 of them free at the first step, D 0 and mostly short
+connectors; dead: the skeleton's dead ends, the spurs; recovered: the share of the gap from the cut
+alone to the kappa-10 growth at that D that the spurs close.) A few spurs recover 40 -- 49% of that
+gap above the 0.05 cut and 18 -- 26% above the 0.10 cut: 0.03 -- 0.05 of L_P above the cut alone at
+the same D (0.04 -- 0.10 above the cut itself), 2.6 -- 6.2 of L_P per unit of D against the
+partition's own 1.0 -- 2.3 between its budgets and the lazy greedy's 1.4 -- 2.6 there. Cut plus
+spurs leads the lazy greedy by 0.04 -- 0.07 at equal D and reaches past it: the 0.10 cut plus 0.02
+(0.692 at D 0.119) beats the 0.15 cut alone (0.669 at 0.146) and the lazy greedy at 0.15 (0.678);
+the 0.15 cut plus 0.02 reaches 0.722 at 0.166. The kappa-10 growth stays well ahead from D 0.10 on
+(0.818 / 0.833 against 0.667 / 0.692), at 1.5 times the C; at 0.06 -- 0.07 the two are close in C
+(433k / 471k against 386k / 492k) and 0.04 -- 0.08 apart in L_P. The partition's core is untouched:
+the damage term's cut share stays at most 0.001, the spurs hanging off it (11 -- 20 dead ends). On
+the 5810 page as "partition SIMP + spurs" (the 0.05 and 0.10 cuts' four points; the 0.15 cut's lie
+past the slider).
+Scripts (.superpowers/sdd/2026-10-27-partition/): rev4_table.py, spurs.py, spurs_table.py,
+migrate_v4.py, grid_check.py, faces_fix.py; spurs' rows in spurs/ and spurs_rows/ (not committed).
