@@ -4,35 +4,55 @@
 
 The design is K label fields psi_k per design pixel (road_simp's raster and cone filter of radius
 R), phi = the softmax of the filtered fields at temperature T. The roads are where the labels
-change: g = 1 - sum_k phi_k^2, read as a road density rho = (g - g_pure) / (g_pair - g_pure)
-clipped to [0, 1], g_pure its value on a pure label (one field 1, the rest 0: the floor of g over
-the design's box) and g_pair at the middle of a sharp two-label interface (two fields 1/2): the
-interior of a label reads 0 at any T, an interface's middle 1, so the projection's threshold sits
-between them (the raw 1 - sum phi^2 leaves 0.08 -- 0.7 of road density inside a label at the
-temperatures that make a 7 m road, every building past the ramp's knee). Then road_simp's eps
-world: per triangle r = proj(rho, beta) of its pixel, s = r^q, kt = kt0 + s (1 - kt0), b = bw +
-s db (road_simp.Roads.world_of: kappa 10, the metric's own road); D the ramp over the buildings'
-covered shares, C the sheet's conductance added (road_simp.Roads.D, .C). The contrast is kappa 10
-only: the grounded leak (growth.GroundedLeak) needs a System per state with the leak on its
-graph, where road_simp.Roads.state reads the model's own, so a second state path; not built.
-
-The width of an interface is set by R and T: across a sharp step in the design the band rho >=
-1/2 widens with T and saturates near 0.8 R. A stage's T is a multiple of T_w (`Plan.tw`: the T at
-which a sharp straight interface's band is ROAD_W wide, by bisection on a synthetic step through
-the plan's own filter), so the continuation runs toward ROAD_W from softer, wider interfaces.
-q and beta are continued as road_simp's.
+change, read from a field `mix` per label as g = 1 - sum_k mix_k^2, a road density rho = (g -
+g_pure) / (g_pair - g_pure) clipped to [0, 1], g_pure its value on a pure label (one field 1, the
+rest 0: the floor of g over the design's box) and g_pair at the middle of a sharp two-label
+interface: the interior of a label reads 0 at any T, an interface's middle 1, so the projection's
+threshold sits between them. `mix` is a Strategy (Band, the plan's `.band` token or none):
+  Mixed (rev 2's, no token): phi itself, the road where the labels mix (the raw 1 - sum phi^2
+    leaves 0.08 -- 0.7 of road density inside a label at the temperatures that make a 7 m road,
+    hence the normalization). Its band rho >= 1/2 across a sharp step in the design widens with T
+    and saturates near 0.8 R; a stage's T is the plan's t times T_w (`tw`: the T at which a sharp
+    straight interface's band is ROAD_W wide, by bisection on a synthetic step through the plan's
+    own filter), so the continuation runs toward ROAD_W from softer, wider interfaces. Two fields
+    tied inside one label read as road too: a ridge, a road with the same label on both sides,
+    which can end anywhere (NOTES, "Reblocking top-down": the rev 2 band answers' 4 -- 42 dead
+    ends, and most of their gain over the cut).
+  Banded (rev 3, `.band`; owner 2026-10-28, the design -> filtered -> projected scheme): phi
+    nearly one-hot (T continued sharp: T is the plan's t), then filtered by a second cone (the
+    band's, `band_radius`: a sharp straight interface's band rho >= 1/2 is ROAD_W wide, rho = 4 a
+    (1 - a) with a the band's share of one side), so the road is a band of fixed width around the
+    sharp labels' boundaries: its width comes from the band's cone, not from T, and a tie inside
+    a label is a band of width ~T R, which the band's cone averages away (partition_check's
+    `ridges`).
+Then road_simp's eps world: per triangle r = proj(rho, beta) of its pixel, s = r^q, kt = kt0 + s
+(1 - kt0), b = bw + s db (road_simp.Roads.world_of: kappa 10, the metric's own road); D the ramp
+over the buildings' covered shares, C the sheet's conductance added (road_simp.Roads.D, .C). The
+contrast is kappa 10 only: the grounded leak (growth.GroundedLeak) needs a System per state with
+the leak on its graph, where road_simp.Roads.state reads the model's own, so a second state path;
+not built. q and beta are continued as road_simp's.
 
 No dead ends by construction: a label boundary closes, meets the street or meets others at a
-junction. The 0/1 answers can still have them (a band thinned below the threshold breaks): they
-are counted on each answer's skeleton.
+junction. The 0/1 answers can still have them (a band thinned below the threshold breaks; Mixed's
+ridges): they are counted on each answer's skeleton.
 
 Objective: P + lambda C (road_simp.SheetPrice: lambda = price P0 / SHEET_M2) under D <= Plan.D.
 Gradient: road_simp's adjoint (dP/ds per triangle, through kt and b), back through the
-projection, the normalization, the softmax (dphi_k / dpsi~_j = phi_k (delta_kj - phi_j) / T) and
-the filter's transpose. The update is MMA (Svanberg 1987), one constraint: OC needs a gain of one
-sign, and a label field's has none (moving an interface helps one side and hurts the other); the
-multiplier mu of D is bisected on the true D of the trial update (road_simp.least_nu: the
-projection makes a linearised D overshoot), as road_simp's nu.
+projection, the normalization, the band's cone (its transpose; Banded), the softmax (dphi_k /
+dpsi~_j = phi_k (delta_kj - phi_j) / T) and the filter's transpose. The update is MMA (Svanberg
+1987), one constraint: OC needs a gain of one sign, and a label field's has none (moving an
+interface helps one side and hurts the other); the multiplier mu of D is found on the true D of
+the trial update (the projection makes a linearised D overshoot): least_mu, bracketed by squaring
+factors and closed by the Illinois rule (rev 3; rev 2 bisected it, road_simp.least_nu, 12 -- 16
+evaluations an update once the budget binds and 300 at the first update of an over-budget start).
+
+The ramp's tail (Partition.D, the plan's `.e` token, one eps per stage, the last 0; owner
+2026-10-28): past the knee tau a building's covered share X counts min(1, X / tau) + eps (X - tau)
+/ (1 - tau), so D's slope there is eps / (1 - tau), not 0: a start over its budget can shed D by
+moving its interfaces off the buildings it covers (rev 2's nodal and Voronoi-10 starts never got
+under, their multiplier at its ceiling throughout), and a building at the margin is traded. The
+tail is in the D the budget holds during the continuation (D_relaxed in the rows, at least the
+true D), and gone at the last stage; the rows' D and every answer's score use the true ramp.
 
 The start is a Strategy (Start, the plan's last token): `vor<n>s<seed>`, the Voronoi cells of n
 seeds placed by k-means on the homes' centroids; `spec<n>s<seed>`, the shelved spectral normalized
@@ -41,13 +61,13 @@ between each building and its KNN nearest, sigma the median gap, the n smallest 
 the normalized Laplacian row-normalized and k-means'd; each pixel takes its nearest building's
 cluster); `nodal<n>s<seed>`, a Dirichlet spectral partition aiming at the spectral minimal
 partition (Helffer, Hoffmann-Ostenhof, Terracini: the pieces' smallest first eigenvalue the
-largest, a piece's P at most its demand over its lambda_1; Nodal); each cell then coloured into
-the K labels (DSatur on the cells' adjacency: K labels make any number of sub-blocks, four
-colouring every planar partition, DSatur not always finding it). `ears` (the bottom-up arm's
-answer) is refused until it exists; `div<n>p<tau>`, the flow's own divides: the
-persistence-simplified Morse-Smale cuts of u (the ears arm's generator, imported: ears.divides)
-until about n pieces (Divides). Each start is scored as its own cut answer before the
-update moves it (`start_*` in the row).
+largest, a piece's P at most its demand over its lambda_1; Nodal); `div<n>p<tau>`, the flow's own
+divides: the persistence-simplified Morse-Smale cuts of u (the ears arm's generator, imported:
+ears.divides) until about n pieces (Divides); `ears`, the ears' `paths` answer at the plan's
+budget, its faces the cells (Ears: EARS_RUN's frame there, as the 5810 page reads it). Each cell
+then coloured into the K labels (DSatur on the cells' adjacency: K labels make any number of
+sub-blocks, four colouring every planar partition, DSatur not always finding it). Each start is
+scored as its own cut answer before the update moves it (`start_*` in the row).
 
 Answers, each scored as a road network (road_simp.scored: its own carved mesh, RUNTIME), with the
 measures `measures` gives (sub-blocks, road length, dead ends, the depth measures, the damage
@@ -57,16 +77,24 @@ term's cut share):
   cut: the label boundaries (argmax phi on the raster, each pixel edge between two labels, merged
     and simplified) as roads ROAD_W wide (road_corridor), clipped to the block.
 
+Speed (5810: 7.2M triangles, 6.8M cells, 519k design pixels of 2.2M, K 5; this machine, one
+thread): an update is the factorization (SuperLU 23 s, cuDSS 0.1 s after its 36 s plan), the
+refined solve (2 s; 0.4 s), the chain and its way back (FFT filters, the kernels' transforms
+computed once: 0.2 s a K-field filter), and the search for mu (a trial and a D, 0.3 s each); on
+`gpu` (the run's device: gap_factor.CuDSS) the factorization drops out.
+
     P=research/roadless/partition.py                   # from the repo root, PYTHONPATH=.
     uv run python $P run <block> <plan> cpu|gpu [--replace]
     uv run python $P start <block> <plan>              # the start's D, C and cells, no solve
 
-plan: pt.K<K>.R<radius>.t<T/T_w,...>.b<beta,...>.q<q,...>.i<iters>.D<D>.s<price>.<start> (the
-stages pair t, beta and q in order), e.g. pt.K4.R10.t2,1.5,1.2,1,1.b1,2,4,8,16.q1,2,3,3,3.i40
-.D0.05.s0.1.vor12s0; its name adds the raster's pixel and the eps world's eps and the code's
-revision (.p<PIXEL>e<EPS>v<REV>). Rows in partition_rows/<metric>/<name>/<block>.parquet (the
-iterates and the answers' scores), beside the design (<block>_psi.parquet, the fields on the
-design pixels), the answers' grounds and lines (<block>_<answer>_ground.parquet, _lines.parquet).
+plan: pt.K<K>.R<radius>[.band].t<t,...>.b<beta,...>.q<q,...>[.e<eps,...>].i<iters>.D<D>
+.s<price>.<start> (the stages pair t, beta, q and eps in order; no `.e`, the true ramp
+throughout), e.g. pt.K5.R10.band.t0.2,0.1,0.05,0.03,0.02.b1,2,4,8,16.q1,2,3,3,3
+.e0.2,0.1,0.05,0.02,0.i40.D0.1.s0.1.spec40s0; its name adds the raster's pixel and the eps
+world's eps and the code's revision (.p<PIXEL>e<EPS>v<REV>). Rows in
+partition_rows/<metric>/<name>/<block>.parquet (the iterates and the answers' scores), beside the
+design (<block>_psi.parquet, the fields on the design pixels), the answers' grounds and lines
+(<block>_<answer>_ground.parquet, _lines.parquet).
 """
 from __future__ import annotations
 
@@ -74,6 +102,7 @@ import re
 import socket
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol, TypeAlias
@@ -85,7 +114,8 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 import shapely
 from numpy.typing import NDArray
-from scipy import ndimage, signal
+from scipy import fft as sp_fft
+from scipy import ndimage
 from scipy.cluster.vq import kmeans2
 from scipy.spatial import cKDTree
 from skimage.measure import label
@@ -120,6 +150,8 @@ ASYM_GROW, ASYM_SHRINK = 1.2, 0.7    # MMA: the asymptotes' update (Svanberg's)
 ASYM_MIN, ASYM_MAX = 0.01, 10.0      # MMA: the asymptotes' distance from x, bounds
 RAA = 1e-6               # MMA: p and q's floor, relative to the largest |derivative| (keeps a
                          # variable with a zero derivative from moving to an asymptote)
+MU_TOL = 1e-4           # least_mu: D within this of the budget (relative)
+MU_MIN, MU_MAX = 1e-300, 1e300       # least_mu: mu's range
 TW_TOL = 1e-4            # Plan.tw: T_w bisected to this, relative
 TW_N = 200               # Plan.tw: the synthetic step's raster (pixels a side)
 KNN = 8                  # Spectral: each building's nearest neighbours (by centroid)
@@ -134,8 +166,12 @@ REACH_M = 50.0           # m: a home "reached": within this of a road (the growt
 DEEP_Q = 0.75            # the deepest quarter: homes at depth quantile >= this
 DAMAGE_STEP_M = 10.0     # the damage term's piece length (NOTES, "Roads from the vote, stage 2")
 DAMAGE_CARRY_M = 100.0   # the damage term's carry
-REV = 2                  # 2: the start's cells split into connected regions before colouring,
-                         # those under MIN_REGION_M2 merged (`merged`)
+REV = 3                  # 2: the start's cells split into connected regions before colouring,
+                         # those under MIN_REGION_M2 merged (`merged`); 3: the banded road
+                         # (`.band`), the ramp's tail (`.e`), the ears start, mu by least_mu
+TAU = common.MEASURE.tau                 # the ramp's knee (the ramp's tail, Partition.D)
+EARS_RUN = "ears.paths.b20.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1"   # the ears start's run
+                         # (growth_rows/<block>/: the ears arm's paths on 5810)
 OUT = HERE / "partition_rows"
 
 
@@ -149,7 +185,7 @@ class Start(Protocol):
     @property
     def name(self) -> str: ...
 
-    def cells(self, ra: rs.Raster, m: gcl.Model) -> I64:
+    def cells(self, b: Any, ra: rs.Raster, m: gcl.Model) -> I64:
         """Per pixel (the raster's, on and off) its cell, 0 .. n-1."""
         ...
 
@@ -164,7 +200,7 @@ class Voronoi:
     def name(self) -> str:
         return f"vor{self.n}s{self.seed}"
 
-    def cells(self, ra: rs.Raster, m: gcl.Model) -> I64:
+    def cells(self, b: Any, ra: rs.Raster, m: gcl.Model) -> I64:
         cen = shapely.get_coordinates(shapely.centroid(np.asarray(m.geo.polys)))
         seeds, _ = kmeans2(cen, self.n, iter=KMEANS_ITER, minit="++", seed=self.seed)
         return np.asarray(cKDTree(seeds).query(_pixel_xy(ra))[1], dtype=np.int64)
@@ -181,7 +217,7 @@ class Spectral:
     def name(self) -> str:
         return f"spec{self.n}s{self.seed}"
 
-    def cells(self, ra: rs.Raster, m: gcl.Model) -> I64:
+    def cells(self, b: Any, ra: rs.Raster, m: gcl.Model) -> I64:
         polys = np.asarray(m.geo.polys)
         cen = shapely.get_coordinates(shapely.centroid(polys))
         _, nb = cKDTree(cen).query(cen, k=KNN + 1)
@@ -221,7 +257,7 @@ class Nodal:
     def name(self) -> str:
         return f"nodal{self.n}s{self.seed}"
 
-    def cells(self, ra: rs.Raster, m: gcl.Model) -> I64:
+    def cells(self, b: Any, ra: rs.Raster, m: gcl.Model) -> I64:
         st = m.state(np.zeros(m.n))
         assert st.A is not None and st.factor is not None
         idx = np.flatnonzero(st.reach.unknown)
@@ -265,7 +301,7 @@ class Divides:
     def name(self) -> str:
         return f"div{self.n}p{self.tau:g}"
 
-    def cells(self, ra: rs.Raster, m: gcl.Model) -> I64:
+    def cells(self, b: Any, ra: rs.Raster, m: gcl.Model) -> I64:
         g = gr.Growth(m, contrast=gr.Road(kappa=gr.ROAD_KAPPA))
         e = ears.EarWorld(g)
         er = e.ra
@@ -290,19 +326,46 @@ class Divides:
         return np.asarray(reg[ij[:, 0], ij[:, 1]], dtype=np.int64)
 
 
-def start_of(token: str) -> Start:
+@dataclass(frozen=True, kw_only=True)
+class Ears:
+    """The ears' `paths` answer (the bottom-up arm, EARS_RUN) at the plan's budget: the frame the
+    5810 page shows there (atlas/roads5810/networks.Grown's reading: the shortest prefix whose
+    exact D reaches it, the whole run where none does), its faces the cells (the pixels whose
+    centres lie off its region, 4-connected; a road pixel its nearest face's)."""
+    budget: float
+    name = "ears"
+
+    def cells(self, b: Any, ra: rs.Raster, m: gcl.Model) -> I64:
+        sys.path.insert(0, str(HERE / "atlas" / "roads5810"))
+        import networks  # type: ignore[import-not-found]  # noqa: PLC0415  (the page's reader)
+        net = networks.Grown(b, gr.OUT / b.block_id / EARS_RUN, targets=(self.budget,))
+        s = net.prefix_len(self.budget)
+        reg = net.region(s)
+        print(f"ears: prefix {s} of {net.size} at D {self.budget:g} (its region's D "
+              f"{net.D_region(s):.4f})", flush=True)
+        xy = _pixel_xy(ra)
+        shapely.prepare(reg)
+        road = shapely.contains_xy(reg, xy[:, 0], xy[:, 1]).reshape(ra.shape)
+        faces = np.asarray(label(ra.on.reshape(ra.shape) & ~road, background=0, connectivity=1),
+                           dtype=np.int64)
+        _, near = ndimage.distance_transform_edt(faces == 0, return_indices=True)
+        return np.asarray(faces[near[0], near[1]].ravel() - 1, dtype=np.int64)
+
+
+def start_of(token: str, *, budget: float) -> Start:
     m = re.fullmatch(r"(vor|spec|nodal)([0-9]+)s([0-9]+)", token)
     d = re.fullmatch(r"div([0-9]+)p([0-9.]+)", token)
     if token == "ears":
-        raise SystemExit("ears: the bottom-up arm's answer does not exist yet "
-                         "(.superpowers/sdd/2026-10-27-ears/brief.md)")
+        return Ears(budget=budget)
     if d is not None:
         return Divides(n=int(d[1]), tau=float(d[2]))
     if m is None:
-        raise SystemExit(f"{token}: a start is vor<n>s<seed>, spec<n>s<seed>, nodal<n>s<seed> "
-                         "or div<n>p<tau>")
+        raise SystemExit(f"{token}: a start is vor<n>s<seed>, spec<n>s<seed>, nodal<n>s<seed>, "
+                         "div<n>p<tau> or ears")
     n, seed = int(m[2]), int(m[3])
-    return {"vor": Voronoi, "spec": Spectral, "nodal": Nodal}[m[1]](n=n, seed=seed)
+    kinds: dict[str, type[Voronoi] | type[Spectral] | type[Nodal]] = {
+        "vor": Voronoi, "spec": Spectral, "nodal": Nodal}
+    return kinds[m[1]](n=n, seed=seed)
 
 
 def _pixel_xy(ra: rs.Raster) -> F64:
@@ -349,12 +412,48 @@ def colour(cells: I64, shape: tuple[int, int], k: int) -> I64:
 # ---------------------------------------------------------------- the plan
 
 
+class Stage(NamedTuple):
+    """A stage of the continuation: the plan's t (the band's temperature: Mixed's T / T_w,
+    Banded's T), beta, q and the ramp's tail (`eps`, Partition.D)."""
+    t: float
+    beta: float
+    q: float
+    eps: float
+
+
+class BandOf(Protocol):
+    """The plan's road reading (module docstring; `.band` in the name, or none), built once on
+    the block's raster."""
+
+    @property
+    def name(self) -> str: ...
+
+    def of(self, ra: rs.Raster, *, radius: float, K: int) -> Band: ...
+
+
+@dataclass(frozen=True)
+class MixedOf:
+    name = ""
+
+    def of(self, ra: rs.Raster, *, radius: float, K: int) -> Band:
+        return Mixed(T_w=tw(radius, K))
+
+
+@dataclass(frozen=True)
+class BandedOf:
+    name = "band"
+
+    def of(self, ra: rs.Raster, *, radius: float, K: int) -> Band:
+        return Banded(ra, radius=band_radius())
+
+
 @dataclass(frozen=True, kw_only=True)
 class Plan:
     """A run's settings, all in its name (module docstring)."""
     K: int
     radius: float
-    stages: tuple[tuple[float, float, float], ...]     # (T / T_w, beta, q) in order
+    band: BandOf
+    stages: tuple[Stage, ...]
     iters: int
     D: float
     price: rs.SheetPrice
@@ -365,92 +464,220 @@ class Plan:
                 and self.D > 0):
             raise ValueError(f"{self}: K at least 2; a radius, stages, updates and a budget, "
                              "each positive")
+        if any(s.eps < 0 for s in self.stages) or self.stages[-1].eps != 0:
+            raise ValueError(f"{self}: the ramp's tail non-negative, 0 at the last stage (the "
+                             "true ramp)")
 
     @property
     def name(self) -> str:
-        t = ",".join(f"{t:g}" for t, _, _ in self.stages)
-        b = ",".join(f"{b:g}" for _, b, _ in self.stages)
-        q = ",".join(f"{q:g}" for _, _, q in self.stages)
-        return (f"pt.K{self.K}.R{self.radius:g}.t{t}.b{b}.q{q}.i{self.iters}.D{self.D:g}"
-                f".{self.price.name}.{self.start.name}.p{PIXEL:g}e{EPS:g}v{REV}")
+        def joined(k: int) -> str:
+            return ",".join(f"{s[k]:g}" for s in self.stages)
+        band = f".{self.band.name}" if self.band.name else ""
+        eps = f".e{joined(3)}" if any(s.eps for s in self.stages) else ""
+        return (f"pt.K{self.K}.R{self.radius:g}{band}.t{joined(0)}.b{joined(1)}.q{joined(2)}{eps}"
+                f".i{self.iters}.D{self.D:g}.{self.price.name}.{self.start.name}"
+                f".p{PIXEL:g}e{EPS:g}v{REV}")
 
     @staticmethod
     def of(spec: str) -> Plan:
-        m = re.fullmatch(r"pt\.K([0-9]+)\.R([0-9.]+)\.t([0-9.,]+)\.b([0-9.,]+)\.q([0-9.,]+)"
-                         r"\.i([0-9]+)\.D([0-9.e-]+)\.s([0-9.e-]+)\.([a-z]+[0-9]+s[0-9]+|div[0-9]+p[0-9.]+"
-                         r"|ears)",
-                         spec)
+        m = re.fullmatch(r"pt\.K([0-9]+)\.R([0-9.]+)(\.band)?\.t([0-9.,]+)\.b([0-9.,]+)"
+                         r"\.q([0-9.,]+)(?:\.e([0-9.,]+))?\.i([0-9]+)\.D([0-9.e-]+)\.s([0-9.e-]+)"
+                         r"\.([a-z]+[0-9]+s[0-9]+|div[0-9]+p[0-9.]+|ears)", spec)
         if m is None:
-            raise SystemExit(f"{spec}: a plan is pt.K<K>.R<radius>.t<T/T_w,..>.b<beta,..>"
-                             ".q<q,..>.i<iters>.D<D>.s<price>.<vor<n>s<seed>|spec<n>s<seed>>")
-        ts, bs, qs = ([float(v) for v in m[k].split(",")] for k in (3, 4, 5))
-        if not len(ts) == len(bs) == len(qs):
-            raise SystemExit(f"{spec}: as many t as beta as q")
-        return Plan(K=int(m[1]), radius=float(m[2]),
-                    stages=tuple(zip(ts, bs, qs, strict=True)), iters=int(m[6]),
-                    D=float(m[7]), price=rs.SheetPrice(price=float(m[8])),
-                    start=start_of(m[9]))
+            raise SystemExit(f"{spec}: a plan is pt.K<K>.R<radius>[.band].t<t,..>.b<beta,..>"
+                             ".q<q,..>[.e<eps,..>].i<iters>.D<D>.s<price>.<start>")
+        ts, bs, qs = ([float(v) for v in m[k].split(",")] for k in (4, 5, 6))
+        es = [float(v) for v in m[7].split(",")] if m[7] else [0.0] * len(ts)
+        if not len(ts) == len(bs) == len(qs) == len(es):
+            raise SystemExit(f"{spec}: as many t as beta as q (as eps)")
+        D = float(m[9])
+        return Plan(K=int(m[1]), radius=float(m[2]), band=BandedOf() if m[3] else MixedOf(),
+                    stages=tuple(Stage(t=t, beta=b, q=q, eps=e)
+                                 for t, b, q, e in zip(ts, bs, qs, es, strict=True)),
+                    iters=int(m[8]), D=D, price=rs.SheetPrice(price=float(m[10])),
+                    start=start_of(m[11], budget=D))
 
 
 # ---------------------------------------------------------------- the design's chain
 
 
-def _g(L: F64) -> F64:
-    """1 - sum phi^2 of the softmax of logits L (labels on axis 0)."""
+class Conv:
+    """A symmetric kernel's correlation (its convolution) over a raster by FFT, every field at
+    once, the kernel's transform computed once: signal.fftconvolve's `same`, bit for bit (its
+    padded size, next_fast_len of the full convolution's, and its centred crop)."""
+
+    def __init__(self, shape: tuple[int, int], kernel: F64) -> None:
+        self.shape = shape
+        self.h = kernel.shape[0] // 2
+        self.s = tuple(sp_fft.next_fast_len(n + 2 * self.h, True) for n in shape)
+        self.kf = sp_fft.rfft2(kernel, self.s)
+
+    def __call__(self, img: F64) -> F64:
+        """img (m, pixels) -> (m, pixels)."""
+        m = img.shape[0]
+        x = img.reshape(m, *self.shape)
+        y = sp_fft.irfft2(sp_fft.rfft2(x, self.s, axes=(1, 2)) * self.kf, self.s, axes=(1, 2))
+        h, (a, b) = self.h, self.shape
+        return np.ascontiguousarray(y[:, h:h + a, h:h + b]).reshape(m, -1)
+
+
+class Filter:
+    """A kernel's normalized filter over the design pixels (road_simp.Raster.filter's form: an off
+    pixel reads 0 and is read as 0), every field at once, and its transpose."""
+
+    def __init__(self, ra: rs.Raster, kernel: F64, norm: F64) -> None:
+        self.on = ra.on
+        self.conv = Conv(ra.shape, kernel)
+        self.den = np.where(ra.on, norm, 1.0)
+
+    def __call__(self, f: F64) -> F64:
+        return np.where(self.on, self.conv(np.where(self.on, f, 0.0)) / self.den, 0.0)
+
+    def T(self, g: F64) -> F64:
+        return np.where(self.on, self.conv(np.where(self.on, g / self.den, 0.0)), 0.0)
+
+
+def cone(radius: float) -> F64:
+    """road_simp.Raster.of's cone kernel of `radius` m on the PIXEL grid."""
+    r = radius / PIXEL
+    k = int(np.ceil(r))
+    d = np.hypot(*np.meshgrid(np.arange(-k, k + 1), np.arange(-k, k + 1), indexing="ij"))
+    return np.maximum(0.0, r - d)
+
+
+def softmax(L: F64) -> F64:
     phi = np.exp(L - L.max(axis=0))
     phi /= phi.sum(axis=0)
-    return np.asarray(1.0 - (phi ** 2).sum(axis=0))
+    return phi
 
 
-def g_ends(T: float, K: int) -> tuple[float, float]:
-    """(g on a pure label, g at the middle of a sharp two-label interface) at temperature T."""
-    pure = np.zeros((K, 1))
-    pure[0] = 1.0
-    pair = np.zeros((K, 1))
-    pair[:2] = 0.5
-    return float(_g(pure / T)[0]), float(_g(pair / T)[0])
+class Band(Protocol):
+    """How the labels' softmax phi makes the field the road is read from (`mix`, per label and
+    design pixel), the road density rho = (g - g_pure) / (g_pair - g_pure) with g = 1 - sum_k
+    mix_k^2 (`ends`: g on a pure label and at the middle of a sharp two-label interface, at T),
+    and a stage's temperature from the plan's t (module docstring; the plan's `.band` token)."""
+
+    @property
+    def name(self) -> str: ...
+
+    def T(self, t: float) -> float: ...
+
+    def ends(self, T: float, K: int) -> tuple[float, float]: ...
+
+    def mix(self, phi: F64) -> F64:
+        """phi (m, pixels) -> mix (m, pixels)."""
+        ...
+
+    def mix_T(self, g: F64) -> F64: ...
+
+
+class Mixed:
+    """Rev 2's road (module docstring): phi itself, the road where the labels mix; T = t T_w."""
+    name = ""
+
+    def __init__(self, *, T_w: float) -> None:
+        self.T_w = T_w
+
+    def T(self, t: float) -> float:
+        return t * self.T_w
+
+    def ends(self, T: float, K: int) -> tuple[float, float]:
+        pure = np.zeros((K, 1))
+        pure[0] = 1.0
+        pair = np.zeros((K, 1))
+        pair[:2] = 0.5
+        return _g(softmax(pure / T)), _g(softmax(pair / T))
+
+    def mix(self, phi: F64) -> F64:
+        return phi
+
+    def mix_T(self, g: F64) -> F64:
+        return g
+
+
+class Banded:
+    """The road a band around the sharp labels' boundaries (module docstring): phi filtered by a
+    cone of `radius` (`band_radius`: a sharp straight interface's band rho >= 1/2 is ROAD_W wide);
+    T = t."""
+    name = "band"
+
+    def __init__(self, ra: rs.Raster, *, radius: float) -> None:
+        self.radius = radius
+        k = cone(radius)
+        norm = ndimage.correlate(ra.on.reshape(ra.shape).astype(np.float64), k,
+                                 mode="constant").ravel()
+        self.filter = Filter(ra, k, norm)
+
+    def T(self, t: float) -> float:
+        return t
+
+    def ends(self, T: float, K: int) -> tuple[float, float]:
+        a = np.zeros((K, 1))
+        a[0] = 1.0
+        b = np.zeros((K, 1))
+        b[1] = 1.0
+        pa, pb = softmax(a / T), softmax(b / T)
+        return _g(pa), _g(0.5 * (pa + pb))
+
+    def mix(self, phi: F64) -> F64:
+        return self.filter(phi)
+
+    def mix_T(self, g: F64) -> F64:
+        return self.filter.T(g)
+
+
+def _g(mix: F64) -> float:
+    return float(1.0 - (mix[:, 0] ** 2).sum())
+
+
+class Chain(NamedTuple):
+    """The chain's values at a design: per pixel rho and its raw value before the clip, per label
+    and pixel phi and the field the road is read from (`mix`); off the design pixels all 0."""
+    rho: F64
+    raw: F64
+    phi: F64
+    mix: F64
 
 
 class Labels:
     """The K label fields' chain on the raster (module docstring): fields (K, pixels) -> the
-    filtered fields -> phi -> rho per pixel, and its way back."""
+    filtered fields (the plan's cone) -> phi (softmax at T) -> the band's mix -> rho per pixel,
+    and its way back. The per-pixel steps run on the design pixels alone (off them every value
+    is 0: none is read)."""
 
-    def __init__(self, ra: rs.Raster, *, K: int) -> None:
-        self.ra, self.K = ra, K
-        self.kern = ra.kernel                    # symmetric: correlation is convolution
+    def __init__(self, ra: rs.Raster, *, K: int, band: Band) -> None:
+        self.ra, self.K, self.band = ra, K, band
+        self.cone = Filter(ra, ra.kernel, ra.norm)
+        self.idx = np.flatnonzero(ra.on)
 
     def filter(self, f: F64) -> F64:
         """Raster.filter by FFT, every field at once."""
-        ra = self.ra
-        img = np.where(ra.on, f, 0.0).reshape(self.K, *ra.shape)
-        y = signal.fftconvolve(img, self.kern[None], mode="same", axes=(1, 2))
-        y = y.reshape(self.K, -1)
-        return np.where(ra.on, y / np.where(ra.on, ra.norm, 1.0), 0.0)
+        return self.cone(f)
 
     def filter_T(self, g: F64) -> F64:
-        ra = self.ra
-        img = np.where(ra.on, g / np.where(ra.on, ra.norm, 1.0), 0.0).reshape(self.K, *ra.shape)
-        y = signal.fftconvolve(img, self.kern[None], mode="same", axes=(1, 2))
-        return np.where(ra.on, y.reshape(self.K, -1), 0.0)
+        return self.cone.T(g)
 
-    def rho(self, f: F64, T: float) -> tuple[F64, F64, F64]:
-        """(rho per pixel, phi (K, pixels), rho's raw value before the clip)."""
-        lo, hi = g_ends(T, self.K)
-        L = self.filter(f) / T
-        phi = np.exp(L - L.max(axis=0))
-        phi /= phi.sum(axis=0)
-        raw = ((1.0 - (phi ** 2).sum(axis=0)) - lo) / (hi - lo)
-        return np.clip(raw, 0.0, 1.0), phi, raw
+    def chain(self, f: F64, T: float) -> Chain:
+        lo, hi = self.band.ends(T, self.K)
+        n = len(self.ra.on)
+        phi = np.zeros((self.K, n))
+        phi[:, self.idx] = softmax(self.filter(f)[:, self.idx] / T)
+        mix = self.band.mix(phi)
+        raw = np.zeros(n)
+        raw[self.idx] = ((1.0 - (mix[:, self.idx] ** 2).sum(axis=0)) - lo) / (hi - lo)
+        return Chain(rho=np.clip(raw, 0.0, 1.0), raw=raw, phi=phi, mix=mix)
 
-    def back(self, g_rho: F64, phi: F64, raw: F64, T: float) -> F64:
-        """A per-pixel derivative in rho back to the fields (K, pixels)."""
-        lo, hi = g_ends(T, self.K)
-        live = (raw > 0.0) & (raw < 1.0)
-        g_phi = np.where(live, g_rho, 0.0) * (-2.0 * phi) / (hi - lo)
-        g_L = phi * (g_phi - (g_phi * phi).sum(axis=0))       # the softmax's Jacobian
-        return self.filter_T(g_L / T)
+    def back(self, g_rho: F64, ch: Chain, T: float) -> F64:
+        """Per-pixel derivatives in rho (m, pixels) back to the fields (m, K, pixels)."""
+        lo, hi = self.band.ends(T, self.K)
+        m, K = g_rho.shape[0], self.K
+        live = (ch.raw > 0.0) & (ch.raw < 1.0)
+        g_mix = (np.where(live, g_rho, 0.0)[:, None, :] * (-2.0 * ch.mix)[None] / (hi - lo))
+        g_phi = self.band.mix_T(g_mix.reshape(m * K, -1)).reshape(m, K, -1)
+        g_L = ch.phi[None] * (g_phi - (g_phi * ch.phi[None]).sum(axis=1, keepdims=True))
+        return self.filter_T((g_L / T).reshape(m * K, -1)).reshape(m, K, -1)
 
-    def argmax(self, f: F64, T: float) -> I64:
+    def argmax(self, f: F64) -> I64:
         """Per pixel its label (argmax phi), an off pixel its nearest on pixel's."""
         lab = np.argmax(self.filter(f), axis=0)
         on = self.ra.on.reshape(self.ra.shape)
@@ -458,50 +685,141 @@ class Labels:
         return np.asarray(lab.reshape(self.ra.shape)[idx[0], idx[1]].ravel(), dtype=np.int64)
 
 
-def tw(radius: float, K: int) -> float:
-    """T_w: the temperature at which a sharp straight interface's band rho >= 1/2 is ROAD_W wide,
-    through the plan's own cone filter on a synthetic TW_N x TW_N raster (the band's width read
-    by linear interpolation of the profile across the step); raises if no T reaches it (the band
-    saturates near 0.8 R)."""
+def _step_raster(radius: float) -> rs.Raster:
+    """A TW_N x TW_N raster, every pixel on, the cone of `radius` (tw's and band_radius's)."""
     on = np.ones(TW_N * TW_N, dtype=bool)
     ra = rs.Raster.of(np.array([[0.5, 0.5], [TW_N - 0.5, TW_N - 0.5]]), radius=radius)
-    ra = ra._replace(on=on, norm=ndimage.correlate(np.ones((TW_N, TW_N)), ra.kernel,
-                                                   mode="constant").ravel())
-    lab = Labels(ra, K=K)
+    return ra._replace(on=on, norm=ndimage.correlate(np.ones((TW_N, TW_N)), ra.kernel,
+                                                     mode="constant").ravel())
+
+
+def _width(rho: F64) -> float:
+    """The band rho >= HALF across the synthetic step (a TW_N x TW_N raster, the step at its
+    middle row), by linear interpolation of the profile."""
+    row = rho.reshape(TW_N, TW_N)[:, TW_N // 2]
+    x = np.arange(TW_N) + 0.5
+    up = np.flatnonzero((row[:-1] < HALF) & (row[1:] >= HALF))
+    dn = np.flatnonzero((row[:-1] >= HALF) & (row[1:] < HALF))
+    if not len(up) or not len(dn):
+        return 0.0
+
+    def cross(i: int) -> float:
+        return float(x[i] + (HALF - row[i]) / (row[i + 1] - row[i]))
+    return cross(int(dn[-1])) - cross(int(up[0]))
+
+
+def _step(K: int) -> F64:
     f = np.zeros((K, TW_N, TW_N))
     f[0, : TW_N // 2] = 1.0
     f[1, TW_N // 2:] = 1.0
-    f = f.reshape(K, -1)
+    return f.reshape(K, -1)
 
-    def width(T: float) -> float:
-        row = lab.rho(f, T)[0].reshape(TW_N, TW_N)[:, TW_N // 2]
-        x = np.arange(TW_N) + 0.5
-        up = np.flatnonzero((row[:-1] < HALF) & (row[1:] >= HALF))
-        dn = np.flatnonzero((row[:-1] >= HALF) & (row[1:] < HALF))
-        if not len(up) or not len(dn):
-            return 0.0
 
-        def cross(i: int) -> float:
-            return float(x[i] + (HALF - row[i]) / (row[i + 1] - row[i]))
-        return cross(int(dn[-1])) - cross(int(up[0]))
-
-    lo, hi = 1e-3, 10.0
+def _bisect(width: Any, lo: float, hi: float, what: str) -> float:
+    """The least x in [lo, hi] (geometric bisection to TW_TOL) whose width reaches ROAD_W
+    (width rises with x)."""
     if width(hi) < ROAD_W:
-        raise SystemExit(f"R {radius:g}: no temperature makes a {ROAD_W:g} m band (at T {hi:g} "
-                         f"it is {width(hi):.2f} m)")
+        raise SystemExit(f"{what}: no value makes a {ROAD_W:g} m band (at {hi:g} it is "
+                         f"{width(hi):.2f} m)")
     while hi / lo > 1.0 + TW_TOL:
         mid = float(np.sqrt(lo * hi))
         lo, hi = (mid, hi) if width(mid) < ROAD_W else (lo, mid)
     return hi
 
 
+def tw(radius: float, K: int) -> float:
+    """T_w (Mixed): the temperature at which a sharp straight interface's band rho >= 1/2 is
+    ROAD_W wide, through the plan's own cone filter on a synthetic TW_N x TW_N raster; raises if
+    no T reaches it (the band saturates near 0.8 R)."""
+    ra = _step_raster(radius)
+    lab = Labels(ra, K=K, band=Mixed(T_w=1.0))
+    f = _step(K)
+    return _bisect(lambda T: _width(lab.chain(f, T).rho), 1e-3, 10.0, f"R {radius:g}")
+
+
+def band_radius() -> float:
+    """Banded's radius: the cone whose band rho >= 1/2 across a sharp straight interface (phi a
+    one-hot step: the T -> 0 limit, rho = 4 a (1 - a) for a the band's share of one side) is
+    ROAD_W wide."""
+    def width(radius: float) -> float:
+        ra = _step_raster(radius)
+        b = Banded(ra, radius=radius)
+        phi = _step(2)
+        mix = b.mix(phi)
+        return _width(np.clip(2.0 * (1.0 - (mix ** 2).sum(axis=0)), 0.0, 1.0))
+    return _bisect(width, PIXEL, 10.0 * ROAD_W, "the band's cone")
+
+
 # ---------------------------------------------------------------- MMA
+
+
+def least_mu(trial: Callable[[float], F64], *, D_of: Callable[[F64], float], budget: float,
+             mu0: float) -> tuple[F64, float, int]:
+    """(trial(mu), mu, D's evaluations): mu 0 if trial(0)'s D is within the budget, else the
+    least mu whose trial's D is, to MU_TOL of the budget (D in [budget (1 - MU_TOL), budget]) or
+    a factor 1 + road_simp.NU_TOL in mu, whichever comes first (D falls as mu rises). Bracketed
+    from mu0 (the last update's) by factors that grow as their squares (10, 100, 10^4, ..: to
+    MU_MAX, where the move limit can hold D over the budget, in nine evaluations, where
+    road_simp.least_nu's tenfold steps take 300), then the Illinois rule on log mu (false
+    position, the end kept twice in a row its residual halved for the interpolation)."""
+    n = 0
+
+    def at(mu: float) -> tuple[F64, float]:
+        nonlocal n
+        n += 1
+        x = trial(mu)
+        return x, D_of(x) - budget
+
+    x, d = at(0.0)
+    if d <= 0:
+        return x, 0.0, n
+    mu = min(max(mu0, MU_MIN), MU_MAX) if mu0 > 0 else 1.0
+    x, d = at(mu)
+    step = 10.0
+    if d > 0:                                       # over the budget: climb
+        while d > 0:
+            if mu >= MU_MAX:
+                return x, mu, n                     # the move limit holds D over: the most kept
+            lo, dlo = mu, d
+            mu = min(mu * step, MU_MAX)
+            step *= step
+            x, d = at(mu)
+        hi, xhi, dhi = mu, x, d
+    else:                                           # within it: descend
+        hi, xhi, dhi = mu, x, d
+        while True:
+            if mu <= MU_MIN:
+                return xhi, hi, n
+            mu = max(mu / step, MU_MIN)
+            step *= step
+            x, d = at(mu)
+            if d > 0:
+                lo, dlo = mu, d
+                break
+            hi, xhi, dhi = mu, x, d
+    flo, fhi, kept = dlo, dhi, 0
+    while dhi < -MU_TOL * budget and hi / lo > 1.0 + rs.NU_TOL:
+        a, b = float(np.log(lo)), float(np.log(hi))
+        s = b - fhi * (b - a) / (fhi - flo)
+        s = min(max(s, a + 0.01 * (b - a)), b - 0.01 * (b - a))     # strictly inside
+        mu = float(np.exp(s))
+        x, d = at(mu)
+        if d > 0:
+            lo, dlo, flo = mu, d, d
+            fhi = 0.5 * fhi if kept == 1 else fhi
+            kept = 1
+        else:
+            hi, xhi, dhi, fhi = mu, x, d, d
+            flo = 0.5 * flo if kept == -1 else flo
+            kept = -1
+    return xhi, hi, n
 
 
 class Mma:
     """Svanberg's MMA with one constraint (module docstring), its asymptotes the instance's state:
     the subproblem's x(mu) in closed form per variable, mu bisected on the true D
-    (road_simp.least_nu)."""
+    (road_simp.least_nu). Its variables are the free ones alone (each moves on its own: a fixed
+    variable's asymptotes never reach a free one's)."""
 
     def __init__(self, n: int) -> None:
         self.x1: F64 | None = None
@@ -509,9 +827,9 @@ class Mma:
         self.L = np.zeros(n)
         self.U = np.ones(n)
 
-    def step(self, x: F64, g0: F64, g1: F64, *, free: B, D_of: Any, budget: float,
-             mu0: float) -> tuple[F64, float, float]:
-        """(the new x, mu, the share of the free variables at their move limit)."""
+    def step(self, x: F64, g0: F64, g1: F64, *, D_of: Callable[[F64], float], budget: float,
+             mu0: float) -> tuple[F64, float, float, int]:
+        """(the new x, mu, the share of the variables at their move limit, D's evaluations)."""
         if self.x1 is None or self.x2 is None:
             L, U = x - ASYM_INIT, x + ASYM_INIT
         else:
@@ -525,7 +843,7 @@ class Mma:
         hi = np.minimum.reduce([np.ones_like(x), U - 0.1 * (U - x), x + MOVE])
 
         def pq(g: F64) -> tuple[F64, F64]:
-            r = RAA * max(float(np.abs(g[free]).max(initial=0.0)), 1e-300)
+            r = RAA * max(float(np.abs(g).max(initial=0.0)), 1e-300)
             gp, gm = np.maximum(g, 0.0), np.maximum(-g, 0.0)
             return ((U - x) ** 2 * (1.001 * gp + 0.001 * gm + r),
                     (x - L) ** 2 * (0.001 * gp + 1.001 * gm + r))
@@ -535,31 +853,35 @@ class Mma:
 
         def trial(mu: float) -> F64:
             a, b = np.sqrt(p0 + mu * p1), np.sqrt(q0 + mu * q1)
-            return np.where(free, np.clip((L * a + U * b) / (a + b), lo, hi), x)
+            return np.clip((L * a + U * b) / (a + b), lo, hi)
 
-        xn, mu = rs.least_nu(trial, D_of=D_of, budget=budget, nu0=mu0)
+        xn, mu, n = least_mu(trial, D_of=D_of, budget=budget, mu0=mu0)
         at = np.abs(xn - x) >= MOVE - 1e-9
-        return xn, mu, float(at[free].mean())
+        return xn, mu, float(at.mean()), n
 
 
 # ---------------------------------------------------------------- the problem
 
 
 class Iterate(NamedTuple):
-    """One update's row (`J` = P + the price's cost; `grey` the share of the design pixels with
-    0.05 < rho < 0.95; `at_limit` the share of the free variables MMA moved by MOVE; `labels`
-    the pixels each label holds, argmax, joined)."""
+    """One update's row (`J` = P + the price's cost; D the true ramp's, `D_relaxed` the stage's
+    (Partition.D: the one held to the budget); `grey` the share of the design pixels with 0.05 <
+    rho < 0.95; `at_limit` the share of the free variables MMA moved by MOVE; `labels` the pixels
+    each label holds, argmax, joined; `n_D` D's evaluations in the search for mu)."""
     T: float
     beta: float
     q: float
+    eps: float
     it: int
     P: float
     L_P: float
     J: float
     C: float
     D: float
+    D_relaxed: float
     A: float
     mu: float
+    n_D: int
     change: float
     at_limit: float
     grey: float
@@ -570,84 +892,111 @@ class Iterate(NamedTuple):
 class Partition:
     """The block's label-field problem (module docstring) on road_simp's eps world."""
 
-    def __init__(self, rd: rs.Roads, *, K: int, T_w: float) -> None:
-        self.rd, self.K, self.T_w = rd, K, T_w
-        self.lab = Labels(rd.raster, K=K)
+    def __init__(self, rd: rs.Roads, *, K: int, band: Band) -> None:
+        if rd.held.any() or rd.free.any():
+            raise ValueError("the partition's eps world clears no building")
+        self.rd, self.K = rd, K
+        self.lab = Labels(rd.raster, K=K, band=band)
         self.y = np.zeros(rd.m.n)               # no clearing
         self.npx = len(rd.raster.on)
 
-    def world(self, f: F64, T: float, beta: float, q: float) -> tuple[rs.World, F64, F64]:
-        """(the eps world, phi, rho's raw value) at the fields f (K, pixels)."""
-        rho, phi, raw = self.lab.rho(f, T)
-        r = relax.project(rho, beta)[self.rd.raster.pix]
-        return self.rd.world_of(rho, r, self.y, q, beta), phi, raw
+    def world(self, f: F64, T: float, beta: float, q: float) -> tuple[rs.World, Chain]:
+        """(the eps world, the chain's values) at the fields f (K, pixels)."""
+        ch = self.lab.chain(f, T)
+        r = relax.project(ch.rho, beta)[self.rd.raster.pix]
+        return self.rd.world_of(ch.rho, r, self.y, q, beta), ch
 
     def back_r(self, w: rs.World, g_r: F64) -> F64:
         """A per-triangle derivative in r to the pixels' rho (w.xf is rho)."""
         g = np.bincount(self.rd.raster.pix, weights=g_r, minlength=self.npx)
         return g * relax.dproject(w.xf, w.beta)
 
-    def D_of(self, f: F64, T: float, beta: float) -> float:
-        rho = self.lab.rho(f, T)[0]
-        return self.rd.D(relax.project(rho, beta)[self.rd.raster.pix], self.rd.held)
+    def D(self, r: F64, eps: float) -> float:
+        """D with the ramp's tail eps (module docstring): road_simp's D (the true ramp) plus eps
+        times the population-weighted share of each building covered past the knee, (X - tau) /
+        (1 - tau) (a fully covered building counts 1 + eps)."""
+        rd = self.rd
+        return rd.D(r, rd.held) + eps * float(rd.w @ _tail(rd.cover @ r))
 
-    def derivs(self, f: F64, T: float, beta: float, q: float,
+    def dD(self, w: rs.World, eps: float) -> F64:
+        """dD / dr per triangle, the tail's slope eps / (1 - tau) past the knee."""
+        rd = self.rd
+        X = rd.cover @ w.r
+        return rd.dD(w)[0] + eps * np.asarray(rd.cover.T @ (rd.w * (X > TAU) / (1.0 - TAU)))
+
+    def D_of(self, f: F64, T: float, beta: float, eps: float) -> float:
+        rho = self.lab.chain(f, T).rho
+        return self.D(relax.project(rho, beta)[self.rd.raster.pix], eps)
+
+    def derivs(self, f: F64, T: float, beta: float, q: float, eps: float,
                price: rs.SheetPrice) -> tuple[rs.World, float, float, F64, F64]:
         """(the world, P, the price's cost, d(P + cost)/df, dD/df), the derivatives (K,
         pixels)."""
-        w, phi, raw = self.world(f, T, beta, q)
+        w, ch = self.world(f, T, beta, q)
         P, gs, _ = self.rd.P_grad(w)
-        ch = price.charge(self.rd, w, rs.OC())          # (the sheet price reads no update)
-        g_r = gs * q * np.maximum(w.r, 1e-300) ** (q - 1.0) + ch.d_r
-        g0 = self.lab.back(self.back_r(w, g_r), phi, raw, T)
-        g1 = self.lab.back(self.back_r(w, self.rd.dD(w)[0]), phi, raw, T)
-        return w, P, ch.cost, g0, g1
+        cost = price.charge(self.rd, w, rs.OC())          # (the sheet price reads no update)
+        g_r = gs * q * np.maximum(w.r, 1e-300) ** (q - 1.0) + cost.d_r
+        g = self.lab.back(np.stack([self.back_r(w, g_r), self.back_r(w, self.dD(w, eps))]), ch, T)
+        return w, P, cost.cost, g[0], g[1]
+
+
+def _tail(X: F64) -> F64:
+    return np.maximum(0.0, X - TAU) / (1.0 - TAU)
 
 
 def simp(pt: Partition, f: F64, plan: Plan, *, log: Any) -> tuple[F64, list[Iterate]]:
-    """The plan's MMA from the start's fields f (K, pixels)."""
+    """The plan's MMA from the start's fields f (K, pixels), on the free variables (every field on
+    the design pixels; off them 0)."""
     K, npx = pt.K, pt.npx
-    free = np.tile(pt.rd.raster.on, K)
-    mma = Mma(K * npx)
+    on = pt.rd.raster.on
+    free = np.flatnonzero(np.tile(on, K))
+    mma = Mma(len(free))
     rows: list[Iterate] = []
     mu = 0.0
     t0 = time.time()
     P0 = pt.rd.P0
-    for tm, beta, q in plan.stages:
-        T = tm * pt.T_w
 
-        def D_of(z: F64, T: float = T, beta: float = beta) -> float:
-            return pt.D_of(z.reshape(K, npx), T, beta)
+    def full(z: F64) -> F64:
+        out = np.zeros(K * npx)
+        out[free] = z
+        return out.reshape(K, npx)
+
+    for st in plan.stages:
+        T, beta, q, eps = pt.lab.band.T(st.t), st.beta, st.q, st.eps
+
+        def D_of(z: F64, T: float = T, beta: float = beta, eps: float = eps) -> float:
+            return pt.D_of(full(z), T, beta, eps)
 
         for it in range(plan.iters):
-            w, P, cost, g0, g1 = pt.derivs(f, T, beta, q, plan.price)
-            z, mu, at = mma.step(f.ravel(), g0.ravel() / P0, g1.ravel(), free=free, D_of=D_of,
-                                 budget=plan.D, mu0=mu)
-            fn = z.reshape(K, npx)
-            change = float(np.abs(fn - f)[:, pt.rd.raster.on].max())
+            w, P, cost, g0, g1 = pt.derivs(f, T, beta, q, eps, plan.price)
+            z, mu, at, nD = mma.step(f.ravel()[free], g0.ravel()[free] / P0,
+                                     g1.ravel()[free], D_of=D_of, budget=plan.D, mu0=mu)
+            fn = full(z)
+            change = float(np.abs(fn - f)[:, on].max())
             f = fn
-            rho = w.xf[pt.rd.raster.on]
-            lab = np.bincount(np.argmax(pt.lab.filter(f), axis=0)[pt.rd.raster.on], minlength=K)
-            rows.append(Iterate(T=T, beta=beta, q=q, it=it, P=P, L_P=1.0 - P / P0,
+            rho = w.xf[on]
+            lab = np.bincount(np.argmax(pt.lab.filter(f), axis=0)[on], minlength=K)
+            rows.append(Iterate(T=T, beta=beta, q=q, eps=eps, it=it, P=P, L_P=1.0 - P / P0,
                                 J=(P + cost) / P0, C=pt.rd.C(w), D=pt.rd.D(w.r, w.c),
-                                A=float(pt.rd.area @ w.r), mu=mu, change=change, at_limit=at,
+                                D_relaxed=pt.D(w.r, eps), A=float(pt.rd.area @ w.r), mu=mu,
+                                n_D=nD, change=change, at_limit=at,
                                 grey=float(((rho > 0.05) & (rho < 0.95)).mean()),
                                 labels=",".join(str(int(v)) for v in lab), t=time.time() - t0))
             r = rows[-1]
-            log(f"T {T:.3f} beta {beta:g} q {q:g} it {it}: L_P {r.L_P:.4f}, J {r.J:.4f}, D "
-                f"{r.D:.4f}, C {r.C:.0f} m^2, paved {r.A:.0f} m^2, mu {mu:.3g}, change "
-                f"{change:.3f}, at limit {at:.3f}, grey {r.grey:.4f}, labels {r.labels} "
-                f"({r.t:.0f}s)")
+            log(f"T {T:.3f} beta {beta:g} q {q:g} eps {eps:g} it {it}: L_P {r.L_P:.4f}, J "
+                f"{r.J:.4f}, D {r.D:.4f} (relaxed {r.D_relaxed:.4f}), C {r.C:.0f} m^2, paved "
+                f"{r.A:.0f} m^2, mu {mu:.3g}, change {change:.3f}, at limit {at:.3f}, grey "
+                f"{r.grey:.4f}, labels {r.labels}, {nD} D ({r.t:.0f}s)")
     return f, rows
 
 
 # ---------------------------------------------------------------- answers and measures
 
 
-def cut_lines(pt: Partition, f: F64, T: float) -> Any:
+def cut_lines(pt: Partition, f: F64) -> Any:
     """The label boundaries (module docstring), merged and simplified (local frame)."""
     ra = pt.rd.raster
-    lab = pt.lab.argmax(f, T).reshape(ra.shape)
+    lab = pt.lab.argmax(f).reshape(ra.shape)
     segs = []
     i, j = np.nonzero(lab[1:, :] != lab[:-1, :])           # an edge at x = i + 1
     segs.append(np.stack([np.stack([i + 1, j], 1), np.stack([i + 1, j + 1], 1)], 1))
@@ -658,9 +1007,9 @@ def cut_lines(pt: Partition, f: F64, T: float) -> Any:
     return shapely.simplify(merged, SNAP_TOL)
 
 
-def cut_of(b: Any, pt: Partition, f: F64, T: float) -> tuple[Any, Any]:
+def cut_of(b: Any, pt: Partition, f: F64) -> tuple[Any, Any]:
     """(the cut answer's lines, its ground), world frame, clipped to the block."""
-    cut = shapely.intersection(pt.rd.m.geo.utm(cut_lines(pt, f, T)), b.boundary)
+    cut = shapely.intersection(pt.rd.m.geo.utm(cut_lines(pt, f)), b.boundary)
     cut = shapely.line_merge(shapely.union_all(shapely.get_parts(cut)))
     ground = shapely.intersection(
         road_corridor(gpd.GeoDataFrame(geometry=list(shapely.get_parts(cut)), crs=b.crs)
@@ -767,7 +1116,7 @@ def partition_of(b: Any, metric: gcl.ComplexMetric, plan: Plan) -> Partition:
     m = metric.clearing(b, demand=common.PopulationDemand())
     none = np.zeros(m.n, dtype=bool)
     rd = rs.Roads(m, radius=plan.radius, cleared=none, real=False, free=none)
-    return Partition(rd, K=plan.K, T_w=tw(plan.radius, plan.K))
+    return Partition(rd, K=plan.K, band=plan.band.of(rd.raster, radius=plan.radius, K=plan.K))
 
 
 def merged(cells: I64) -> I64:
@@ -792,11 +1141,11 @@ def merged(cells: I64) -> I64:
     return np.asarray(out.reshape(cells.shape), dtype=np.int64)
 
 
-def fields_of(pt: Partition, start: Start) -> tuple[F64, int]:
+def fields_of(b: Any, pt: Partition, start: Start) -> tuple[F64, int]:
     """The start's fields (K, pixels): each pixel's label 1, the rest 0; and its cells' count
     (each start's cell split into its connected regions first: a k-means cluster can lie in
     several, and coloured whole their adjacencies add up; `merged`)."""
-    cells = merged(start.cells(pt.rd.raster, pt.rd.m).reshape(pt.rd.raster.shape)).ravel()
+    cells = merged(start.cells(b, pt.rd.raster, pt.rd.m).reshape(pt.rd.raster.shape)).ravel()
     lab = colour(cells, pt.rd.raster.shape, pt.K)[cells]
     f = np.zeros((pt.K, pt.npx))
     f[lab, np.arange(pt.npx)] = 1.0
@@ -808,12 +1157,14 @@ def start(bid: str, plan: Plan) -> None:
     metric = metrics.metric_of(metrics.RUNTIME, device="cpu")
     [b] = common.build_blocks([bid])
     pt = partition_of(b, metric, plan)
-    f, n = fields_of(pt, plan.start)
-    print(f"{bid} {plan.start.name}: {n} cells, T_w {pt.T_w:.4f}", flush=True)
-    for tm, beta, q in plan.stages:
-        w = pt.world(f, tm * pt.T_w, beta, q)[0]
-        print(f"  T {tm * pt.T_w:.3f} beta {beta:g} q {q:g}: D {pt.rd.D(w.r, w.c):.4f}, C "
-              f"{pt.rd.C(w):.0f} m^2, paved {float(pt.rd.area @ w.r):.0f} m^2", flush=True)
+    f, n = fields_of(b, pt, plan.start)
+    print(f"{bid} {plan.start.name}: {n} cells", flush=True)
+    for st in plan.stages:
+        T = pt.lab.band.T(st.t)
+        w = pt.world(f, T, st.beta, st.q)[0]
+        print(f"  T {T:.3f} beta {st.beta:g} q {st.q:g} eps {st.eps:g}: D "
+              f"{pt.rd.D(w.r, w.c):.4f} (relaxed {pt.D(w.r, st.eps):.4f}), C {pt.rd.C(w):.0f} "
+              f"m^2, paved {float(pt.rd.area @ w.r):.0f} m^2", flush=True)
 
 
 def run(bid: str, plan: Plan, device: str, *, standing: clearings.Standing) -> None:
@@ -824,23 +1175,22 @@ def run(bid: str, plan: Plan, device: str, *, standing: clearings.Standing) -> N
     t0 = time.time()
     [b] = common.build_blocks([bid])
     pt = partition_of(b, metric, plan)
-    f, n = fields_of(pt, plan.start)
+    f, n = fields_of(b, pt, plan.start)
     print(f"{bid}: {pt.rd.m.fx.fm.nt} triangles, {int(pt.rd.raster.on.sum())} design pixels, "
-          f"K {plan.K}, T_w {pt.T_w:.4f}, start {plan.start.name}: {n} cells "
-          f"({time.time() - t0:.0f}s)", flush=True)
-    start_cut = cut_of(b, pt, f, plan.stages[-1][0] * pt.T_w)
+          f"K {plan.K}, start {plan.start.name}: {n} cells ({time.time() - t0:.0f}s)",
+          flush=True)
+    start_cut = cut_of(b, pt, f)
     f, rows = simp(pt, f, plan, log=lambda s: print(s, flush=True))
     out.parent.mkdir(parents=True, exist_ok=True)
     on = pt.rd.raster.on
     pd.DataFrame({f"psi{k}": f[k, on].astype(np.float32) for k in range(plan.K)}).to_parquet(
         out.with_name(f"{bid}_psi.parquet"))
-    tm, beta, q = plan.stages[-1]
-    T = tm * pt.T_w
-    w = pt.world(f, T, beta, q)[0]
+    last = plan.stages[-1]
+    w = pt.world(f, pt.lab.band.T(last.t), last.beta, last.q)[0]
     geo = pt.rd.m.geo
     band = geo.utm(rs.paved_of(pt.rd, w.r))
     band_lines = skeleton(b, band)[0] if not band.is_empty else shapely.MultiLineString()
-    cut, cut_ground = cut_of(b, pt, f, T)
+    cut, cut_ground = cut_of(b, pt, f)
     del pt
     sc: dict[str, Any] = {}
     for name, ground, lines in (("start", start_cut[1], start_cut[0]), ("band", band, band_lines),
