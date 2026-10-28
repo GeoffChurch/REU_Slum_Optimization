@@ -1068,6 +1068,19 @@ Not pursued, with what would change that:
   8480, 38616) and 5810, with resistance_lp, cycle_desire and SIMP alongside. Under the paved-only
   boost the corridors are the flow's own (on 5810 unboosted, the lanes hold 18% of the power on
   15.5% of the open ground).
+- **Roads grown as a front: Laplacian growth** (owner 2026-10-27; in progress, growth.py,
+  .superpowers/sdd/2026-10-27-growth/brief.md): the street pulled inward toward the demand,
+  road-width patches grown at the front by their first-order gain per unit cost (D and C priced),
+  DBM's eta the tree / loop dial, bridges scored by the exact rank-one gain; contrast a Strategy
+  (kappa 10 roads, or the grown cells grounded through the leak so the street itself moves in),
+  connectivity a Strategy (attached; free, islands paying a fixed charge). Pass 1 on 5810 (kappa
+  10 attached, price 0.1): the greedy grows a dendritic network into the deep core, L_P 0.561 /
+  0.809 / 0.864 at D 0.05 / 0.10 / 0.15 with C 316k / 832k / 1,273k m^2 (above C ~350k it
+  matches the lazy greedy at half the D; the joint SIMP's paved answer, 0.600 at D 0.053 and
+  192k, dominates its D 0.05 frame); eta 1 grows a fringe along the street. Open: the bridges
+  re-run after rev 2's fix (pass 1's estimates ran ~30x the exact gain), a second seed, the
+  grounded runs (depth of intrusion the headline), price 0.3 beside 0.1, the free (paving)
+  connectivity, and then varying loads (Corson 2010; Katifori et al. 2010) if bridges leave trees.
 - **Add/remove subset search** (built 2026-10-09; NOTES "The add/remove search as one
   Strategy"). search.py: a Round (rank, refine, build, evaluate, accept) under a schedule; the
   greedy's pickers, exchange (the polish), grow-then-prune and floating search are its
