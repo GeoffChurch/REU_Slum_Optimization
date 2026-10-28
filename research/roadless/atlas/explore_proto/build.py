@@ -1,0 +1,625 @@
+"""A prototype of the public site's Explore page, Methods stage, redesigned (owner 2026-10-28): one
+method's build-out on block 5810 under a budget slider in place of the GIF, with three stacked
+plots whose dots follow the slider (permeability L_P against displacement, road length and
+conductance added), the block's Google Maps link, the method's recorded run time beside an
+extrapolation of the original topology algorithm's, and the plates re-coloured so that red is bad
+and blue good. A claude.ai artifact at plates/artifact/ (the page and its files), its publish list
+plates/artifact_publish.json; everything under plates/ is generated (git-ignored).
+
+Reuses the 5810 build-out page's pipeline (GeoffChurch/REU_Slum_Optimization's
+research/roadless/atlas/roads5810/): the method's page rows from networks.py's sources
+(GrownSource, family_of, Source.rows), the frames' stored rasters and escape times (networks.DATA,
+written by compute.frames_of: no flow is recomputed here), render.py's plate helpers (network_plate, the
+edge, `small`) and its building and road colours. Only the colour maps differ, and they are this
+script's own (SEQ, DIV below), so the build-out page's plates are untouched.
+
+The method is one setting (METHOD): a Shown, which names its stored frames (a Pick), the
+reader-facing name and blurb, and how its run time is read (a Runtime Strategy: a grown run's
+steps, or an optimizer's rows per budget). Swapping to the partition SIMP's cut is
+`METHOD = PARTITION_CUT`, once networks.py `add` has written its frames.
+
+Views (VIEWS): the roads (network_plate as on the build-out page); each home's escape time on one
+fixed scale (the plain baseline's 99th percentile as 100%), long red and short blue, with
+isochrones every ISO_STEP of that scale (the homes' escape times interpolated between their
+centroids, smoothed, inside the block); and each home's escape time over its own mesh's baseline
+(log2, LIM_GAIN either side: faster blue, slower red). One optional figure: an oblique 3D surface
+of the escape-time field at the default frame (HEIGHT_FRAME), to show what a heightmap would look
+like.
+
+    PYTHONPATH=. uv run python research/roadless/atlas/explore_proto/build.py plates   # ~10 min
+    PYTHONPATH=. uv run python research/roadless/atlas/explore_proto/build.py page
+    PYTHONPATH=. uv run python research/roadless/atlas/explore_proto/build.py          # both
+"""
+from __future__ import annotations
+
+import html as htmllib
+import json
+import shutil
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, NamedTuple, Protocol
+
+import numpy as np
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent / "roads5810"))
+import networks as nw  # noqa: E402  (the build-out page's families; imports compute and render)
+import render  # noqa: E402
+
+import geopandas as gpd  # noqa: E402
+import matplotlib  # noqa: E402
+import matplotlib.colors as mcolors  # noqa: E402
+import matplotlib.patheffects as pe  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+import pandas as pd  # noqa: E402
+import shapely  # noqa: E402
+from PIL import Image  # noqa: E402
+from pyproj import Transformer  # noqa: E402
+from scipy.interpolate import griddata  # noqa: E402
+from scipy.ndimage import gaussian_filter  # noqa: E402
+
+cp, rnd = nw.cp, render.rnd
+PLATES = HERE / "plates"                 # git-ignored: everything this script writes
+FRAMES = PLATES / "frames"               # full-size plates, one per frame and view
+OUT = PLATES / "artifact"                # the artifact: index.html, s/, the figure
+TEMPLATE = HERE / "page.html"            # the page, with this script's {{...}} fields
+WIDTH = 800                              # px: a sprite frame's width (roads5810's artifact.WIDTH)
+QUALITY = 80                             # lossy WebP's
+BATCH_MB, BATCH_FILES = 60.0, 250        # a publish's files at most (roads5810's artifact.py)
+VIEWS = ("network", "time", "gain")      # the plates' views, in the page's order
+
+
+# ------------------------------------------------------------------ the method (one setting)
+
+class Runtime(Protocol):
+    """How long the method took to build each slider row's network, read from its own rows."""
+
+    @property
+    def machine(self) -> str:
+        """Where it ran, in words (the rows do not record the host)."""
+        ...
+
+    def seconds(self, key: str, src: Any, rows: list[dict[str, Any] | None]) -> list[float | None]:
+        """Per slider row the run time to that row's network (None where the row is none)."""
+        ...
+
+
+@dataclass(frozen=True)
+class GrownSteps:
+    """A growth or ears run (networks.GrownSource): steps.parquet's cumulative t at the row's
+    stop, the state after its first m steps (the stop's prefix: networks.Grown)."""
+    machine: str
+
+    def seconds(self, key: str, src: Any, rows: list[dict[str, Any] | None]) -> list[float | None]:
+        steps = pd.read_parquet(src.dir / "steps.parquet").set_index("step").t
+        info = nw.info_of(key, "slider")
+        m_of = {f: m for m, f in render.frame_names(info).items()}
+        return [None if r is None else float(steps[m_of[r["f"]]]) for r in rows]
+
+
+@dataclass(frozen=True)
+class AnswerRows:
+    """An optimizer's answer per budget (networks.AnswerSource over a Lined or Joint design): the
+    run's own t_total (its rows' last), each row its budget's run's."""
+    machine: str
+
+    def seconds(self, key: str, src: Any, rows: list[dict[str, Any] | None]) -> list[float | None]:
+        design = src.design
+        return [None if r is None else
+                float(nw.last_row(design.dir(r["b"]) / f"{nw.BID}.parquet").t_total) for r in rows]
+
+
+class Pick(Protocol):
+    """A method's stored frames on the build-out page: its key there (networks.DATA's file stem)
+    and its networks.Source (runs and slider rows)."""
+
+    def key(self) -> str: ...
+
+    def source(self) -> Any: ...
+
+
+@dataclass(frozen=True)
+class GrownRun:
+    """A growth or ears run by its plan (networks.GrownSource). Not through networks.Ears, which
+    refuses a plan of an older ears revision: the build-out page's paths run is rev 1, and rev 2
+    (ears.REV) changed only `divides`."""
+    plan: str
+    budget: float
+
+    def key(self) -> str:
+        return self.plan
+
+    def source(self) -> Any:
+        return nw.GrownSource(self.plan, budget=self.budget)
+
+
+@dataclass(frozen=True)
+class Family:
+    """A networks.py family by its command line (networks.family_of)."""
+    argv: tuple[str, ...]
+
+    def key(self) -> str:
+        return nw.family_of(list(self.argv)).entry().key
+
+    def source(self) -> Any:
+        return nw.family_of(list(self.argv)).source()
+
+
+@dataclass(frozen=True)
+class Shown:
+    """The method the page shows: its stored frames, its reader-facing name, a sentence on how it
+    works, a file stem, and how its run time is read."""
+    pick: Pick
+    name: str
+    blurb: str
+    stem: str
+    runtime: Runtime
+
+
+EARS_PATHS = Shown(
+    pick=GrownRun("ears.paths.b20.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1", budget=0.15),
+    name="Loop roads",
+    blurb=("Each new road runs from the street, or a road already built, across the block and "
+           "back to a street or road, so every road is on a loop and none is a dead end. At each "
+           "step the method tries the cheapest routes through the gaps between buildings and "
+           "builds the one that most improves permeability for the homes it displaces."),
+    stem="loop",
+    runtime=GrownSteps(machine="one process on a workstation CPU (Intel Xeon w7-3455)"))
+
+R3 = ("pt.K5.R10.band.t0.2,0.1,0.05,0.03,0.02.b1,2,4,8,16.q1,2,3,3,3.e0.2,0.1,0.05,0.02,0.i40")
+PARTITION_CUT = Shown(
+    pick=Family(("partition", "cut", f"{R3}.D{{D}}.s0.1.spec{{n}}s0.p1e0.0001v4")),
+    name="Sub-block roads",
+    blurb=("Divides the block into sub-blocks and lays a road wherever two sub-blocks meet, so "
+           "every road is on a loop. The sub-blocks start from clusters of buildings and move "
+           "until the roads between them most improve permeability within the budget; each "
+           "budget is solved afresh."),
+    stem="part",
+    runtime=AnswerRows(machine="partition_rows' t_total (rows do not name the machine)"))
+
+METHOD: Shown = EARS_PATHS
+
+
+# ------------------------------------------------------------------ the topology extrapolation
+
+class Timed(NamedTuple):
+    """One recorded topology run: its block, building count and seconds."""
+    block: str
+    n: int
+    seconds: float
+
+
+# topo_obj.py `time` (GeoffChurch/REU_Slum_Optimization, branch research/group-steiner,
+# research/group_steiner/topo_obj.py): TopologyMethod(alpha=10, seed=0, road_width_m=7) once per
+# block, single-threaded, on six of the 220 consensus blocks spaced by size; its printed output,
+# recovered from the 2026-09-26 session transcript (the rows were lost with /tmp). The 11.8 h run
+# is the one docs/superpowers/notes/2026-09-26-topology-is-a-group-steiner-tree.md cites.
+TOPOLOGY_RUNS = (Timed("ZAF.9.3.1_1_38136", 51, 1.5), Timed("ZAF.9.3.1_1_21016", 93, 4.2),
+                 Timed("ZAF.9.3.1_1_20254", 122, 14.4), Timed("ZAF.9.3.1_1_45919", 159, 14.5),
+                 Timed("ZAF.9.3.1_1_44918", 257, 82.6), Timed("ZAF.9.3.1_1_5618", 759, 42477.5))
+
+
+class Extrapolation(NamedTuple):
+    exponent: float          # the fit's: seconds ~ n^exponent
+    se: float                # its standard error
+    central: float           # seconds at n, by the fit
+    low: float               # seconds at n: the smaller blocks' exponent from the largest run
+    high: float              # seconds at n: the two largest runs' slope from the largest run
+    small_exponent: float
+    top_exponent: float
+    largest: Timed
+    n: int
+
+
+def extrapolate(runs: tuple[Timed, ...], n: int) -> Extrapolation:
+    """A least-squares power law through every run (log seconds on log n), and a range anchored on
+    the largest run: the exponent of the runs below it (low) and the slope between the two
+    largest (high). The runs steepen with size, so the fit through all of them under-predicts the
+    largest; the range says how far the extrapolation could go either way."""
+    x = np.log([r.n for r in runs])
+    y = np.log([r.seconds for r in runs])
+    (b, a), *_ = np.linalg.lstsq(np.vstack([x, np.ones_like(x)]).T, y, rcond=None)
+    resid = y - (a + b * x)
+    se = float(np.sqrt((resid ** 2).sum() / (len(x) - 2) / ((x - x.mean()) ** 2).sum()))
+    (bs, _as), *_ = np.linalg.lstsq(np.vstack([x[:-1], np.ones(len(x) - 1)]).T, y[:-1],
+                                    rcond=None)
+    top = runs[-1]
+    bt = float((y[-1] - y[-2]) / (x[-1] - x[-2]))
+    return Extrapolation(exponent=float(b), se=se, central=float(np.exp(a) * n ** b),
+                         low=top.seconds * (n / top.n) ** bs, high=top.seconds * (n / top.n) ** bt,
+                         small_exponent=float(bs), top_exponent=bt, largest=top, n=n)
+
+
+def span(seconds: float) -> str:
+    """A duration in the largest unit that keeps it readable."""
+    for unit, s in (("centuries", 100 * 3.156e7), ("years", 3.156e7), ("months", 2.63e6),
+                    ("days", 86400.0), ("hours", 3600.0), ("minutes", 60.0)):
+        if seconds >= 1.5 * s:
+            v = seconds / s
+            return f"{v:.0f} {unit}" if v >= 10 else f"{v:.1f} {unit}"
+    return f"{seconds:.0f} seconds"
+
+
+# ------------------------------------------------------------------ colour maps (OKLab)
+
+def oklch(L: float, C: float, h: float) -> tuple[float, float, float]:
+    """sRGB of an OKLCh colour (Ottosson's OKLab), refusing one out of gamut."""
+    a, b = C * np.cos(np.radians(h)), C * np.sin(np.radians(h))
+    l_, m_, s_ = (L + 0.3963377774 * a + 0.2158037573 * b, L - 0.1055613458 * a - 0.0638541728 * b,
+                  L - 0.0894841775 * a - 1.2914855480 * b)
+    l, m, s = l_ ** 3, m_ ** 3, s_ ** 3
+    lin = np.array([4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+                    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+                    -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s])
+    if lin.min() < -1e-3 or lin.max() > 1 + 1e-3:
+        raise ValueError(f"OKLCh({L}, {C}, {h}) is out of the sRGB gamut")
+    lin = np.clip(lin, 0.0, 1.0)
+    rgb = np.where(lin <= 0.0031308, 12.92 * lin, 1.055 * lin ** (1 / 2.4) - 0.055)
+    return (float(rgb[0]), float(rgb[1]), float(rgb[2]))
+
+
+def ramp(name: str, stops: list[tuple[float, float, float]], n: int = 256) -> mcolors.Colormap:
+    """A map through OKLCh `stops` (L, C, h), each coordinate linear between them: lightness
+    linear makes equal steps of the value equal steps of perceived lightness."""
+    t = np.linspace(0, 1, n)
+    k = np.linspace(0, 1, len(stops))
+    L, C, h = (np.interp(t, k, [s[i] for s in stops]) for i in range(3))
+    return mcolors.ListedColormap([oklch(*v) for v in zip(L, C, h, strict=True)], name=name)
+
+
+# one-signed (escape time): short a light blue, long a deep red, lightness falling evenly
+SEQ = ramp("escape_seq", [(0.84, 0.075, 245.0), (0.62, 0.115, 320.0), (0.40, 0.150, 385.0)])
+# signed (time over before): faster blue, unchanged a pale neutral, slower red; the two arms'
+# lightness symmetric about the centre
+DIV = mcolors.ListedColormap(
+    list(ramp("faster", [(0.42, 0.125, 255.0), (0.70, 0.080, 248.0), (0.965, 0.004, 248.0)],
+              128).colors)
+    + list(ramp("slower", [(0.965, 0.004, 30.0), (0.70, 0.110, 30.0), (0.45, 0.150, 27.0)],
+                128).colors), name="escape_div")
+LIM_GAIN = 2.0           # log2: 1/4x to 4x (the homes' ratios reach 0.28x at D 0.15)
+ISO_STEP = 0.10          # the isochrones' spacing, a share of the baseline's 99th percentile
+ISO_GRID = 2.0           # m: the interpolated escape-time field's cell
+ISO_SMOOTH = 4.0         # m: its Gaussian smoothing
+HEIGHT_FRAME = 10        # the slider position the heightmap shows (D 0.10)
+DEFAULT = 5              # the slider's opening position (D 0.05)
+
+
+# ------------------------------------------------------------------ plates
+
+class World(NamedTuple):
+    """What every plate shares: the frame, the buildings, the block's edge and polygon, the
+    plain baseline's escape times and the escape-time scale."""
+    fr: Any
+    polys: np.ndarray
+    centroids: np.ndarray
+    edge: Any
+    inside: Any
+    u_plain: np.ndarray
+    scale: float             # the plain baseline's 99th percentile: 100% on the time view
+
+
+def world() -> World:
+    b = np.load(cp.DATA / "baseline.npz", allow_pickle=True)          # our own file: WKB
+    polys = shapely.from_wkb(b["polys"])
+    [boundary] = shapely.from_wkb(b["boundary"])
+    u = np.load(cp.DATA / "baseline_times.npz")["u"]
+    c = shapely.centroid(polys)
+    return World(fr=render.frame_from(b), polys=polys,
+                 centroids=np.column_stack([shapely.get_x(c), shapely.get_y(c)]),
+                 edge=render.edge(b), inside=boundary, u_plain=u,
+                 scale=float(np.percentile(u[np.isfinite(u)], 99)))
+
+
+def field(w: World, u: np.ndarray, ok: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The homes' escape times (`u` where `ok`) as a field on an ISO_GRID grid over the plate:
+    linear between the centroids, smoothed by ISO_SMOOTH (normalized, so the block's edge does
+    not pull it toward 0), nan outside the block."""
+    x0, x1, y0, y1 = w.fr.lim
+    xs = np.arange(x0, x1, ISO_GRID)
+    ys = np.arange(y0, y1, ISO_GRID)
+    X, Y = np.meshgrid(xs, ys)
+    Z = griddata(w.centroids[ok], u[ok], (X, Y), method="linear")
+    have = np.isfinite(Z)
+    s = ISO_SMOOTH / ISO_GRID
+    num = gaussian_filter(np.where(have, Z, 0.0), s)
+    den = gaussian_filter(have.astype(float), s)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        Z = np.where(have & (den > 0.2), num / den, np.nan)
+    Z[~shapely.contains_xy(w.inside, X, Y)] = np.nan
+    return X, Y, Z
+
+
+def frame_axes(w: World):  # type: ignore[no-untyped-def]
+    f = w.fr.frame
+    fig = plt.figure(figsize=(f.nx / 100, f.ny / 100), dpi=100)
+    return fig, fig.add_axes((0, 0, 1, 1))
+
+
+def finish(fig, ax, w: World, out: Path) -> None:  # type: ignore[no-untyped-def]
+    render.draw_edge(ax, w.fr, w.edge)
+    ax.set_xlim(w.fr.lim[0], w.fr.lim[1])
+    ax.set_ylim(w.fr.lim[2], w.fr.lim[3])
+    ax.set_axis_off()
+    tmp = render.scratch(out)
+    fig.savefig(tmp, dpi=100, facecolor="white")
+    plt.close(fig)
+    render.small(tmp, out)
+
+
+def homes_plate(w: World, value: np.ndarray, *, cmap, norm, gone: np.ndarray, corridor,  # type: ignore[no-untyped-def]
+                iso: tuple[np.ndarray, np.ndarray, np.ndarray] | None, out: Path) -> None:
+    """render.time_plate's figure on this script's map: each home filled by `value` (nan: no
+    home, outlined), the gone buildings and the corridor in render.ROAD, and with `iso` the
+    isochrones (every ISO_STEP of the scale, dark lines on a white halo)."""
+    fig, ax = frame_axes(w)
+    has = np.isfinite(value) & ~gone
+    gpd.GeoSeries(list(w.polys[has])).plot(ax=ax, color=cmap(norm(value[has])), lw=0)
+    gpd.GeoSeries(list(w.polys[~has & ~gone])).boundary.plot(ax=ax, color=rnd.BUILDING, lw=0.4)
+    gpd.GeoSeries(list(w.polys[gone])).plot(ax=ax, color=render.ROAD, lw=0)
+    if corridor is not None:
+        gpd.GeoSeries([corridor]).plot(ax=ax, color=render.ROAD, lw=0)
+    if iso is not None:
+        X, Y, Z = iso
+        levels = np.arange(ISO_STEP, 1.0 + 1e-9, ISO_STEP) * w.scale
+        cs = ax.contour(X, Y, Z, levels=levels, colors=rnd.STREET, linewidths=1.1)
+        cs.set_path_effects([pe.Stroke(linewidth=2.8, foreground="white", alpha=0.85),
+                             pe.Normal()])
+    finish(fig, ax, w, out)
+
+
+def ratio(after: np.ndarray, before: np.ndarray) -> np.ndarray:
+    """log2 of each home's escape time over before, clipped to LIM_GAIN (render.time_ratio on
+    this script's range): a home freed (none before) at -LIM_GAIN, nan with none after."""
+    with np.errstate(invalid="ignore", divide="ignore"):
+        g = np.where(np.isfinite(before) & (before > 0), np.log2(after / before), -LIM_GAIN)
+    return np.where(np.isfinite(after), np.clip(g, -LIM_GAIN, LIM_GAIN), np.nan)
+
+
+def plate_name(f: str, view: str) -> Path:
+    return FRAMES / f"{METHOD.stem}_{f}_{view}.webp"
+
+
+def plates() -> None:
+    """Every frame of the method's runs, and the baseline, in VIEWS, into FRAMES; then the
+    heightmap."""
+    FRAMES.mkdir(parents=True, exist_ok=True)
+    w = world()
+    tn = mcolors.Normalize(0.0, w.scale, clip=True)
+    gn = mcolors.Normalize(-LIM_GAIN, LIM_GAIN, clip=True)
+    none = np.zeros(len(w.polys), dtype=bool)
+    render.network_plate(w.fr, w.polys, np.zeros(len(w.polys)), None, edge=w.edge,
+                         out=plate_name("000", "network"))
+    ok = np.isfinite(w.u_plain)
+    homes_plate(w, w.u_plain, cmap=SEQ, norm=tn, gone=none, corridor=None,
+                iso=field(w, w.u_plain, ok), out=plate_name("000", "time"))
+    homes_plate(w, np.where(ok, 0.0, np.nan), cmap=DIV, norm=gn, gone=none, corridor=None,
+                iso=None, out=plate_name("000", "gain"))
+    key, src = METHOD.pick.key(), METHOD.pick.source()
+    for run in src.runs():
+        info = nw.info_of(key, run.name)
+        d = np.load(nw.DATA / f"{key}_{run.name}.npz", allow_pickle=True)      # our own: WKB
+        t = np.load(nw.DATA / f"{key}_{run.name}_times.npz")
+        if not np.allclose(d["frame"], np.asarray(w.fr.frame, dtype=float)):
+            raise AssertionError(f"{key} {run.name}: its frame is not the baseline's")
+        names = render.frame_names(info)
+        for mm in [int(s) for s in d["stops"]]:
+            f = names[mm]
+            [corridor] = shapely.from_wkb(d[f"corridor_{mm}"])
+            c = d[f"c_{mm}"]
+            gone = c >= 1.0
+            u = t[f"u_{mm}"]
+            render.network_plate(w.fr, w.polys, c, corridor, edge=w.edge,
+                                 out=plate_name(f, "network"))
+            homes_plate(w, u, cmap=SEQ, norm=tn, gone=gone, corridor=corridor,
+                        iso=field(w, u, np.isfinite(u) & ~gone), out=plate_name(f, "time"))
+            homes_plate(w, ratio(u, t["u_base"]), cmap=DIV, norm=gn, gone=gone,
+                        corridor=corridor, iso=None, out=plate_name(f, "gain"))
+    heightmap(w, key, src)
+
+
+def heightmap(w: World, key: str, src: Any) -> None:
+    """An oblique surface of the escape-time field at HEIGHT_FRAME (the time view's field and
+    map, height its value), the roads as a dark trace on the floor."""
+    row = src.rows(key)[HEIGHT_FRAME - 1]
+    if row is None:
+        raise SystemExit(f"{key}: no frame at slider position {HEIGHT_FRAME}")
+    run = next(r for r in src.runs()
+               if row["f"] in render.frame_names(nw.info_of(key, r.name)).values())
+    info = nw.info_of(key, run.name)
+    mm = {f: m for m, f in render.frame_names(info).items()}[row["f"]]
+    d = np.load(nw.DATA / f"{key}_{run.name}.npz", allow_pickle=True)          # our own: WKB
+    u = np.load(nw.DATA / f"{key}_{run.name}_times.npz")[f"u_{mm}"]
+    gone = d[f"c_{mm}"] >= 1.0
+    X, Y, Z = field(w, u, np.isfinite(u) & ~gone)
+    k = 3                                                   # every third cell: 6 m
+    X, Y, Z = X[::k, ::k], Y[::k, ::k], Z[::k, ::k] / w.scale
+    rows_in, cols_in = np.flatnonzero(np.isfinite(Z).any(1)), np.flatnonzero(np.isfinite(Z).any(0))
+    sl = (slice(rows_in[0], rows_in[-1] + 1), slice(cols_in[0], cols_in[-1] + 1))
+    X, Y, Z = X[sl], Y[sl], Z[sl]                           # the block's own extent
+    face = SEQ(np.clip(np.nan_to_num(Z, nan=0.0), 0.0, 1.0))
+    ls = mcolors.LightSource(azdeg=300, altdeg=40)          # relief shading, so the form reads
+    face[..., :3] = ls.shade_rgb(face[..., :3], np.nan_to_num(Z, nan=0.0) * 60.0, fraction=0.6,
+                                 blend_mode="soft")
+    face[~np.isfinite(Z)] = (1.0, 1.0, 1.0, 0.0)           # off the block: nothing drawn
+    fig = plt.figure(figsize=(12, 7.5), dpi=100)
+    ax = fig.add_axes((-0.1, -0.15, 1.2, 1.35), projection="3d", computed_zorder=False)
+    ax.plot_surface(X, Y, np.where(np.isfinite(Z), Z, np.nan), facecolors=face, rstride=1,
+                    cstride=1, linewidth=0, antialiased=False, shade=False, zorder=1)
+    # the roads draped on the surface (their corridors' outlines at the field's height there)
+    [corridor] = shapely.from_wkb(d[f"corridor_{mm}"])
+    x0, y0, h = X[0, 0], Y[0, 0], ISO_GRID * k
+    for g in getattr(corridor, "geoms", [corridor]):
+        xs, ys = np.asarray(g.exterior.coords).T
+        i = np.clip(np.round((ys - y0) / h).astype(int), 0, Z.shape[0] - 1)
+        j = np.clip(np.round((xs - x0) / h).astype(int), 0, Z.shape[1] - 1)
+        ax.plot(xs, ys, np.nan_to_num(Z[i, j], nan=0.0) + 0.01, color=render.ROAD, lw=0.9,
+                zorder=2)                                   # over the surface: mplot3d cannot hide
+    ax.view_init(elev=34, azim=-62)
+    ax.set_box_aspect((1.0, float(np.ptp(Y) / np.ptp(X)), 0.32))
+    ax.set_axis_off()
+    out = FRAMES / f"{METHOD.stem}_height.webp"
+    tmp = render.scratch(out)
+    fig.savefig(tmp, dpi=100, facecolor="white")
+    plt.close(fig)
+    im = Image.open(tmp).convert("RGB")
+    x0b, y0b, x1b, y1b = Image.eval(im, lambda v: 255 - v).getbbox()      # trimmed to the drawing
+    im.crop((max(x0b - 16, 0), max(y0b - 16, 0), min(x1b + 16, im.width),
+             min(y1b + 16, im.height))).save(tmp)
+    render.small(tmp, out)
+
+
+# ------------------------------------------------------------------ the page
+
+def scaled(path: Path) -> Image.Image:
+    im = Image.open(path)
+    return im.resize((WIDTH, round(im.height * WIDTH / im.width)), Image.LANCZOS)
+
+
+def sprite(fs: list[str], view: str, out: Path) -> tuple[int, int]:
+    """The frames `fs` of `view` stacked at WIDTH px into `out`; (width, frame height)."""
+    ims = [scaled(plate_name(f, view)) for f in fs]
+    h = ims[0].height
+    if any(i.height != h for i in ims):
+        raise AssertionError(f"{view}: frames of different heights")
+    if h * len(ims) > 16383:
+        raise SystemExit(f"{view}: {len(ims)} frames of {h} px exceed WebP's 16383 px")
+    sheet = Image.new("RGB", (WIDTH, h * len(ims)), "white")
+    for i, im in enumerate(ims):
+        sheet.paste(im, (0, i * h))
+    sheet.save(out, quality=QUALITY, method=6)
+    return WIDTH, h
+
+
+def stops_css(cmap, n: int = 11) -> str:  # type: ignore[no-untyped-def]
+    """A CSS linear-gradient of `cmap` (the legend's bar, drawn by the page on white)."""
+    return ", ".join(f"{mcolors.to_hex(cmap(t))} {t * 100:.0f}%" for t in np.linspace(0, 1, n))
+
+
+def centroid_wgs84() -> tuple[float, float]:
+    """The block's centroid (its own polygon, in its CRS) as (lat, lon)."""
+    [b] = cp.common.build_blocks([cp.BID])
+    c = shapely.centroid(b.boundary)
+    lon, lat = Transformer.from_crs(b.crs, "EPSG:4326", always_xy=True).transform(c.x, c.y)
+    return float(lat), float(lon)
+
+
+def fill(template: str, fields: dict[str, str]) -> str:
+    """`template` with each {{name}} replaced; refuses a field missing either way."""
+    out = template
+    for k, v in fields.items():
+        tok = "{{" + k + "}}"
+        if tok not in out:
+            raise SystemExit(f"page.html: no {tok}")
+        out = out.replace(tok, v)
+    if "{{" in out:
+        raise SystemExit(f"page.html: an unfilled field near {out[out.index('{{'):][:40]!r}")
+    return out
+
+
+def page() -> None:
+    key, src = METHOD.pick.key(), METHOD.pick.source()
+    rows = src.rows(key)
+    secs = METHOD.runtime.seconds(key, src, rows)
+    fs = ["000"] + list(dict.fromkeys(r["f"] for r in rows if r is not None))
+    if OUT.exists():
+        shutil.rmtree(OUT)
+    (OUT / "s").mkdir(parents=True)
+    size = None
+    for v in VIEWS:
+        size = sprite(fs, v, OUT / "s" / f"{METHOD.stem}_{v}.webp")
+    assert size is not None
+    scaled(FRAMES / f"{METHOD.stem}_height.webp").save(OUT / "height.webp", quality=QUALITY,
+                                                     method=6)
+    frames = [dict(i=0, target=0.0, D=0.0, km=0.0, LP=0.0, C=0, t=0.0, none=False, held=False)]
+    for k, (r, s) in enumerate(zip(rows, secs, strict=True), start=1):
+        if r is None:
+            frames.append(dict(i=0, target=k / 100, D=0.0, km=0.0, LP=0.0, C=0, t=None,
+                               none=True, held=False))
+        else:
+            frames.append(dict(i=fs.index(r["f"]), target=k / 100, D=r["D"], km=r["km"],
+                               LP=r["LP"], C=r["C"], t=s, none=False,
+                               held=bool(r.get("held", False)), full=bool(r.get("full", False))))
+    lat, lon = centroid_wgs84()
+    n_homes = len(np.load(cp.DATA / "baseline_times.npz")["u"])
+    ex = extrapolate(TOPOLOGY_RUNS, n_homes)
+    total = max(s for s in secs if s is not None)
+    w = world()
+    data = dict(frames=frames, sheet=dict(n=len(fs), w=size[0], h=size[1]),
+                stem=METHOD.stem, default=DEFAULT, iso=ISO_STEP)
+    maps = (f"https://www.google.com/maps/@?api=1&map_action=map&center={lat:.5f}%2C{lon:.5f}"
+            f"&zoom=17&basemap=satellite")
+    runs = "; ".join(f"{r.n:,} buildings {r.seconds:,.1f} s" for r in TOPOLOGY_RUNS)
+    fields = {
+        "NAME": htmllib.escape(METHOD.name),
+        "BLURB": htmllib.escape(METHOD.blurb),
+        "BID": cp.BID,
+        "LAT": f"{abs(lat):.4f}° {'S' if lat < 0 else 'N'}",
+        "LON": f"{abs(lon):.4f}° {'E' if lon >= 0 else 'W'}",
+        "MAPS": htmllib.escape(maps),
+        "HOMES": f"{n_homes:,}",
+        "OURS": span(total),
+        "OURS_MACHINE": htmllib.escape(METHOD.runtime.machine),
+        "TOPO": span(ex.central),
+        "TOPO_LOW": span(ex.low),
+        "TOPO_HIGH": span(ex.high),
+        "TOPO_EXP": f"{ex.exponent:.1f}",
+        "TOPO_SE": f"{ex.se:.1f}",
+        "TOPO_SMALL_EXP": f"{ex.small_exponent:.1f}",
+        "TOPO_TOP_EXP": f"{ex.top_exponent:.1f}",
+        "TOPO_LARGEST_N": f"{ex.largest.n:,}",
+        "TOPO_LARGEST_H": f"{ex.largest.seconds / 3600:.1f}",
+        "TOPO_RUNS": runs,
+        "TOPO_RATIO": f"{float(f'{ex.central / total:.2g}'):,.0f}",   # two figures
+        "SEQ": stops_css(SEQ),
+        "DIV": stops_css(DIV),
+        "ISO_PCT": f"{ISO_STEP * 100:.0f}",
+        "GAIN_LO": f"1/{2 ** LIM_GAIN:.0f}",
+        "GAIN_HI": f"{2 ** LIM_GAIN:.0f}",
+        "SCALE": f"{w.scale:.0f}",
+        "HEIGHT_PCT": f"{HEIGHT_FRAME}",
+        "STEM": METHOD.stem,
+        "DATA": json.dumps(data, separators=(",", ":")),
+    }
+    html = fill(TEMPLATE.read_text(), fields)
+    (OUT / "index.html").write_text(html)
+    head = ('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+            '<meta name="viewport" content="width=device-width, initial-scale=1, '
+            'viewport-fit=cover">\n<base href="artifact/">\n<style>body{margin:0;'
+            'font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}'
+            '</style>\n</head>\n<body>\n')
+    (PLATES / "preview.html").write_text(head + html + "\n</body>\n</html>\n")
+    files = sorted(p for p in OUT.rglob("*") if p.is_file() and p != OUT / "index.html")
+    batches: list[dict[str, str]] = [{}]
+    mb = 0.0
+    for f in files:
+        fmb = f.stat().st_size / 1e6
+        if batches[-1] and (mb + fmb > BATCH_MB or len(batches[-1]) >= BATCH_FILES):
+            batches.append({})
+            mb = 0.0
+        batches[-1][str(f.relative_to(OUT))] = str(f)
+        mb += fmb
+    (PLATES / "artifact_publish.json").write_text(json.dumps(
+        dict(page=str(OUT / "index.html"), batches=batches), indent=1))
+    allmb = sum(p.stat().st_size for p in OUT.rglob("*") if p.is_file()) / 1e6
+    print(f"{len(files) + 1} files, {allmb:.1f} MB in {OUT}; topology {span(ex.central)} "
+          f"(n^{ex.exponent:.2f} +- {ex.se:.2f}; {span(ex.low)} -- {span(ex.high)}); ours "
+          f"{total:.0f} s; centre {lat:.5f}, {lon:.5f}", flush=True)
+
+
+def main(argv: list[str]) -> None:
+    matplotlib.use("Agg")
+    match argv:
+        case ["plates"]:
+            plates()
+        case ["page"]:
+            page()
+        case []:
+            plates()
+            page()
+        case _:
+            raise SystemExit(__doc__)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
