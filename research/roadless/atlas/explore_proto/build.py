@@ -6,8 +6,8 @@ extrapolation of the original topology algorithm's, and the plates re-coloured s
 and blue good. Before it (owner 2026-10-28, "we should have a screening section"): the Screening
 stage, the site's Cape Town screen bundle (examples/screen-map/capetown.json) lightened into
 screen.json (screen_bake) and drawn by the page with a floor slider, a city map and a close-up of
-the block; then news reports of fires near the block, their streets placed by OpenStreetMap
-(FIRES). A claude.ai artifact at plates/artifact/ (the page and its files), its publish list
+the block; then news reports of fires near the block (a list; the map marks none of them, since
+some reports' streets cannot be placed). A claude.ai artifact at plates/artifact/ (the page and its files), its publish list
 plates/artifact_publish.json; everything under plates/ is generated (git-ignored).
 
 Reuses the 5810 build-out page's pipeline (GeoffChurch/REU_Slum_Optimization's
@@ -421,21 +421,7 @@ SCREEN = cp.ROOT / "examples" / "screen-map" / "capetown.json"   # the site's Sc
 SCREEN_METRIC = "depth_density_proxy"   # the shipped screen (its floor read from the bundle)
 CITY_TOL = 30.0          # m: the city map's simplification (a pixel is ~90 m at 800 px)
 LOCAL_TOL = 2.0          # m: the close-up's
-LOCAL_PAD = 450.0        # m: the close-up's margin around the block and the fire markers
-
-
-class Placed(NamedTuple):
-    """A fire report's street as OpenStreetMap places it (Nominatim, 2026-10-28): a point on the
-    named street, not the fire's own spot. `label` is the marker's text on the close-up."""
-    label: str
-    lat: float
-    lon: float
-
-
-# the reports whose street OSM names (the page's list says which could not be placed)
-FIRES = (Placed("2016", -33.8399851, 18.7460948),      # Dlayedwa Street, Kraaifontein East
-         Placed("2022", -33.8576754, 18.7369617),      # Pietersen Road, Kraaifontein
-         Placed("2025", -33.8515658, 18.7417907))      # Maroela Road, Wallacedene
+LOCAL_PAD = 450.0        # m: the close-up's margin around the block
 
 
 def deltas(ring: np.ndarray) -> list[int]:
@@ -463,8 +449,7 @@ def screen_bake(out: Path) -> dict[str, Any]:
     """The site's Cape Town screen bundle, lightened for the page: each block's score under the
     shipped screen (gen_screen_map._score, the widget's own arithmetic), the City's informal
     survey flag, rings simplified for the city map and, inside the close-up's window, for the
-    close-up; the shipped floor, the followed block, the fire markers (local metres, the bundle's
-    origin). Written to `out`; returns the page's facts about the followed block."""
+    close-up; the shipped floor, the followed block (local metres, the bundle's origin). Written to `out`; returns the page's facts about the followed block."""
     from scripts.gen_screen_map import _score  # noqa: PLC0415  (the repo's scripts package)
 
     b = json.loads(SCREEN.read_text())
@@ -474,15 +459,8 @@ def screen_bake(out: Path) -> dict[str, Any]:
     follow = b["follow"]["index"]
     if b["block_id"][follow] != cp.BID:
         raise SystemExit(f"the bundle follows {b['block_id'][follow]}, the page {cp.BID}")
-    ox, oy = b["origin"]
-    to_utm = Transformer.from_crs("EPSG:4326", f"EPSG:{b['crs_epsg']}", always_xy=True)
-    fires = []
-    for f in FIRES:
-        x, y = to_utm.transform(f.lon, f.lat)
-        fires.append(dict(label=f.label, x=round(x - ox), y=round(y - oy)))
     mine = np.asarray(b["rings"][follow][0])
-    xs = np.concatenate([mine[:, 0], [f["x"] for f in fires]])
-    ys = np.concatenate([mine[:, 1], [f["y"] for f in fires]])
+    xs, ys = mine[:, 0], mine[:, 1]
     cx, cy = (xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2
     half = max(np.ptp(xs), np.ptp(ys)) / 2 + LOCAL_PAD
     box = shapely.box(cx - half, cy - half, cx + half, cy + half)
@@ -493,7 +471,7 @@ def screen_bake(out: Path) -> dict[str, Any]:
         s=[float(f"{v:.7g}") for v in score], inf="".join(str(int(v)) for v in b["informal"]),
         order=order.tolist(), city=[simplified(r, CITY_TOL) for r in b["rings"]],
         box=[round(cx - half), round(cy - half), round(cx + half), round(cy + half)],
-        near=near, local=[simplified(b["rings"][i], LOCAL_TOL) for i in near], fires=fires)
+        near=near, local=[simplified(b["rings"][i], LOCAL_TOL) for i in near])
     if sum(v >= floor["value"] for v in data["s"]) != floor["n"]:
         raise AssertionError("the rounded scores' pool at the floor is not the bundle's")
     out.write_text(json.dumps(data, separators=(",", ":")))
