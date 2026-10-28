@@ -83,7 +83,7 @@ header h1 { font-size: clamp(36px, 6vw, 60px); line-height: 1; font-weight: 700;
 button:focus-visible, input:focus-visible { outline: 2px solid var(--select); outline-offset: 2px; }
 
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding-block: 22px; }
-.col { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.col { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-content: start; min-width: 0; }
 .pick {
   font-family: var(--display); font-size: 26px; font-weight: 600; color: var(--ink);
   background: var(--surface); border: 1px solid var(--rule); border-radius: 4px;
@@ -97,6 +97,20 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--select); ou
 .chart .key { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 0; margin: 10px 0 0; max-width: 900px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .chart .key li { display: flex; align-items: center; gap: 8px; }
 .chart .key svg { width: 34px; height: 10px; flex: none; }
+/* a legend entry is a button that hides or shows its line (aria-pressed: shown) */
+.chart .key button {
+  display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 2px 0; margin: 0;
+  font: inherit; color: inherit; text-align: left; background: transparent; border: 0; border-radius: 3px; cursor: pointer;
+}
+.chart .key button:hover { color: var(--ink); }
+.chart .key button[aria-pressed="false"] { opacity: 0.4; text-decoration: line-through; }
+.keyctl { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.keyctl button {
+  font-family: var(--display); font-size: 13px; letter-spacing: 0.05em; text-transform: uppercase;
+  border: 1px solid var(--rule); background: var(--surface); color: var(--muted); padding: 3px 12px; border-radius: 999px; cursor: pointer;
+}
+.keyctl button:hover { color: var(--ink); }
+.chart .keyctl + .key { margin-top: 0; }
 .chart .cndp { stroke: var(--scored); fill: none; stroke-width: 2.5; stroke-dasharray: 1 5; stroke-linecap: round; }
 .chart .cndp7 { stroke: var(--scored); fill: none; stroke-width: 2.5; stroke-dasharray: 7 5; }
 .chart .cndp14 { stroke: var(--scored); fill: none; stroke-width: 2.5; }
@@ -256,7 +270,12 @@ footer p { max-width: 95ch; }
       <span class="axl" aria-hidden="true">Across</span><div class="seg" role="group" aria-label="Horizontal axis" id="ax-x"></div>
     </div>
     <svg id="chart" viewBox="0 0 900 380" role="img" aria-label=""></svg>
-    <ul class="key" id="key" aria-label="Line styles"></ul>
+    <div class="keyctl" role="group" aria-label="Lines on the plot">
+      <span>Press a name to hide or show its line.</span>
+      <button type="button" id="key-all">Show all</button>
+      <button type="button" id="key-none">Hide all</button>
+    </div>
+    <ul class="key" id="key" aria-label="Lines on the plot"></ul>
     <p class="caption" data-only="clearings" hidden>L<sub>P</sub> is the share of the homes' total escape time removed, under the same metric as the roads. Conductance added is the sheet conductance a frame adds to the block, in m² of open ground: a cleared m² adds one, with the shy zone around it that it alone held shut, and a road adds ten for each m² of its corridor (a proposed road's boost), so the roads lie far to the right of the clearings; the log scale shows both. Where conductance added is an axis, the two thin black lines are no method but the reference a placement must beat: the same conductance added evenly, every triangle's conductance raised by one factor (dotted: all the ground, paved ways too; dash-dot: only the open ground off them), no one displaced. Gold is SIMP minimizing J₂. Orange is SIMP (solid: the default; dashed: optimized under the rule that counts every walled-in home, U + F1, free first as a track) and purple the greedy (dotted: its own build order; solid: the cheap preset, the greedy polished at each budget); the two shown above are drawn thicker. The faint grey lines are the road networks. The thin dashed line (where displacement is an axis) and the rings follow the slider.</p>
     <p class="caption" data-only="roads">L<sub>P</sub> is the share of the homes' total escape time removed. Conductance added is the sheet conductance a frame adds to the block, in m² of open ground: a cleared m² adds one, with the shy zone around it that it alone held shut, and a road adds ten for each m² of its corridor (a proposed road's boost), so the roads lie far to the right of the clearings; the log scale shows both. Where conductance added is an axis, the two thin black lines are no method but the reference a placement must beat: the same conductance added evenly, every triangle's conductance raised by one factor (dotted: all the ground, paved ways too; dash-dot: only the open ground off them), no one displaced. Orange is cycle_native and blue clearance_looped; dashed lines are the power-guided versions and orange dotted and dash-dotted lines cycle_native with its loop's legs kept 7 and 14 m apart; gold is cycle_native with its loops chosen by ΔP (dotted: legs anywhere, dashed: kept 7 m apart, solid: 14 m), purple is ΔP greedy (dashed: four solved a step, solid: twelve, dotted: solved exactly, dash-dotted: exactly under J₂), and fuchsia the exact ΔP greedy with road SIMP's roads among its candidates (solid: P, dashed: J₂); the two shown above are drawn thicker. The pilots' methods are named in the key below the chart: rose is Laplacian growth at ten times (solid: greedy, dashed: drawn at η 1, dotted: greedy with conductance priced three times higher) and brown the growth grounded while it grows (solid: greedy, dashed: η 1, dotted: with islands) or by ears (dash-dotted: cheapest paths, long dashes: the divides of the escape potential); the green diamonds are the joint SIMP's answers (filled: its paved ground, hollow: its roads, each beside its clearing) and the grey ones the grid templates. The teal point is SIMP's clearing at 5% under the same metric (it was optimized under the older one), and the faint grey lines the five clearings of the Clearings mode, optimized under this one. The thin dashed line (where displacement is an axis) and the rings follow the slider.</p>
   </section>
@@ -497,6 +516,20 @@ var UDATA = {"all":[{"C":2000,"LP":0.0039},{"C":5000,"LP":0.0098},{"C":10000,"LP
   var BASE = { network: "baseline_network.webp", clearing: "baseline_network.webp", current: "baseline_current.webp", power: "baseline_power.webp", time: "baseline_time.webp" };
   var st = { mode: location.hash === "#clearings" ? "clearings" : "roads", k: 5, view: "layout",
              picks: { roads: MODES.roads.pick, clearings: MODES.clearings.pick } };
+  // the plot's hidden lines, by chart class, a set per mode, remembered where storage works (the
+  // plot only: the pickers list every method, and a picked line hidden stays hidden)
+  function keyed(m) { return MODES[m].key.concat(UKEY).map(function (item) { return item[1]; }); }
+  function recalled(m) {
+    var set = {}, saved = [];
+    try { saved = JSON.parse(localStorage.getItem("roads5810.hidden." + m) || "[]"); } catch (e) { saved = []; }
+    if (Array.isArray(saved)) keyed(m).forEach(function (c) { if (saved.indexOf(c) >= 0) set[c] = true; });
+    return set;        // a class no longer on the page (a renamed or dropped method) forgotten
+  }
+  function remember() {
+    try { localStorage.setItem("roads5810.hidden." + st.mode, JSON.stringify(Object.keys(st.hidden[st.mode]))); } catch (e) { /* not kept */ }
+  }
+  st.hidden = { roads: recalled("roads"), clearings: recalled("clearings") };
+  function shown(c) { return !st.hidden[st.mode][c]; }
   var dsl = document.getElementById("dsl"), dout = document.getElementById("dout");
 
   function M() { return MODES[st.mode]; }
@@ -634,7 +667,8 @@ var UDATA = {"all":[{"C":2000,"LP":0.0039},{"C":5000,"LP":0.0098},{"C":10000,"LP
     el("text", { x: (X0 + X1) / 2, y: Y0 + 40, "text-anchor": "middle", "class": "lab" }, X.label, grid);
     el("text", { x: 14, y: (Y0 + Y1) / 2, "text-anchor": "middle", "class": "lab", transform: "rotate(-90 14 " + (Y0 + Y1) / 2 + ")" }, Y.label, grid);
     document.getElementById("h-chart").innerHTML = Y.html + " against " + X.html;
-    svg.setAttribute("aria-label", Y.name + " against " + X.name + ", " + M().chartLabel + ".");
+    var off = Object.keys(st.hidden[st.mode]).length;
+    svg.setAttribute("aria-label", Y.name + " against " + X.name + ", " + M().chartLabel + (off ? ", " + off + " hidden" : "") + ".");
     ["x", "y"].forEach(function (a) {
       document.querySelectorAll("#ax-" + a + " button").forEach(function (b) { b.setAttribute("aria-pressed", b.dataset.ax === st.ax[a] ? "true" : "false"); });
     });
@@ -666,10 +700,11 @@ var UDATA = {"all":[{"C":2000,"LP":0.0039},{"C":5000,"LP":0.0098},{"C":10000,"LP
       pts.forEach(function (p) { el("circle", { cx: x(p[0]), cy: y(p[1]), r: own ? 2.5 : 1.5, "class": own ? m.dot[method] : "ctxd" }, null, plot); });
     }
     Object.keys(other.cls).forEach(function (method) { line(other, method, false); });
-    Object.keys(own.cls).forEach(function (method) { line(own, method, true); });
+    Object.keys(own.cls).forEach(function (method) { if (shown(own.cls[method])) line(own, method, true); });
     // the uniform baselines (UDATA): no one displaced, so only where conductance added is an axis
     var conductance = AX[st.ax.x].field === "C" || AX[st.ax.y].field === "C";
     if (conductance) Object.keys(UCLASS).forEach(function (v) {
+      if (!shown(UCLASS[v])) return;
       var pts = (origin ? [[0, 0]] : []).concat(UDATA[v].map(point).filter(function (p) {
         return p !== null && AX[st.ax.x].s.at(p[0]) <= 1 && AX[st.ax.y].s.at(p[1]) <= 1; }));
       el("polyline", { points: pts.map(function (p) { return x(p[0]) + "," + y(p[1]); }).join(" "), "class": UCLASS[v] }, null, plot);
@@ -682,16 +717,40 @@ var UDATA = {"all":[{"C":2000,"LP":0.0039},{"C":5000,"LP":0.0098},{"C":10000,"LP
     // legend: an HTML list under the plot, one swatch per line in the chart's own line classes
     key.textContent = "";
     own.key.concat(conductance ? UKEY : []).forEach(function (item) {
-      var li = document.createElement("li");
-      li.innerHTML = item[2] === "point" ? '<svg viewBox="0 0 34 10" aria-hidden="true"><g class="' + item[1] + '"><path d="M17 1L21 5L17 9L13 5Z"/></g></svg>'
+      var li = document.createElement("li"), b = document.createElement("button");
+      b.type = "button"; b.dataset.cls = item[1];
+      b.setAttribute("aria-pressed", shown(item[1]) ? "true" : "false");
+      b.innerHTML = item[2] === "point" ? '<svg viewBox="0 0 34 10" aria-hidden="true"><g class="' + item[1] + '"><path d="M17 1L21 5L17 9L13 5Z"/></g></svg>'
         : '<svg viewBox="0 0 34 10" aria-hidden="true"><line x1="1" x2="33" y1="5" y2="5" class="' + item[1] + '"/></svg>';
-      li.appendChild(document.createTextNode(item[0]));
+      b.appendChild(document.createTextNode(item[0]));
+      li.appendChild(b);
       key.appendChild(li);
     });
     // the selected lines drawn thicker (draw's), whichever measures are shown
     var p = st.picks[st.mode];
     Object.keys(own.cls).forEach(function (k) { var pl = document.getElementById("line-" + k); if (pl) pl.setAttribute("class", own.cls[k] + (k === p.a || k === p.b ? " sel" : "")); });
   }
+  // hiding and showing: the legend's buttons, one line each, and all or none of the mode's
+  function rehide(focus) {
+    remember();
+    lines();
+    cursor();
+    if (focus) { var b = key.querySelector('[data-cls="' + focus + '"]'); if (b) b.focus(); }
+  }
+  key.addEventListener("click", function (ev) {
+    var b = ev.target.closest("button[data-cls]");
+    if (!b) return;
+    var c = b.dataset.cls, set = st.hidden[st.mode];
+    if (set[c]) delete set[c]; else set[c] = true;
+    rehide(c);
+  });
+  document.getElementById("key-all").addEventListener("click", function () { st.hidden[st.mode] = {}; rehide(null); });
+  document.getElementById("key-none").addEventListener("click", function () {
+    var set = {};
+    keyed(st.mode).forEach(function (c) { set[c] = true; });
+    st.hidden[st.mode] = set;
+    rehide(null);
+  });
   // the slider's frame: a line where displacement is an axis, and a ring on each of the mode's lines
   function cursor() {
     var d = st.k / 100;
@@ -701,6 +760,7 @@ var UDATA = {"all":[{"C":2000,"LP":0.0039},{"C":5000,"LP":0.0098},{"C":10000,"LP
     now.textContent = "";
     if (st.k === 0) return;
     Object.keys(M().cls).forEach(function (method) {
+      if (!shown(M().cls[method])) return;
       var r = M().data[method][st.k - 1], p = r && !r.held ? point(r) : null;
       if (p) el("circle", { cx: x(p[0]), cy: y(p[1]), r: 5, "class": "now" }, null, now);
     });
