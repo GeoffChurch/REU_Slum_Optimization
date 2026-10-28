@@ -51,8 +51,8 @@ unpack one tar at once into the checkout they share.
     uv run python research/roadless/cluster.py watch start|stop
     uv run python research/roadless/cluster.py gpu      # the GPU market's last allocation
     uv run python research/roadless/cluster.py demand
-        # state reblock's demand in the GPU market now (after submit, resubmit, sync, wait and
-        # cancel it is stated anyway: cluster_demand)
+        # state reblock's campaign demand (its pool leases) in the GPU market now (after
+        # submit, resubmit, sync, wait and cancel it is stated anyway: cluster_demand)
     uv run python research/roadless/cluster.py wave submit <w> --preset <p> --family <f> \
         --nodes <n,...> [--items <items,|@file>] [--unpack TAR] [--with FILE ...] \
         [--board PATH] [--dry] <ids,|@file> -- <script> <args with {id} [and {item}]>
@@ -98,12 +98,14 @@ starts its pools) and reads and steers it. A wave's state lives on the cluster, 
 `<WAVES>/<w>/` below its home (the queue, the inputs shipped once, summary.json, the ledger, the
 requests), never in a run's directory, which the keeper or `gc` releases once its run settles.
 
-reblock states its demand in ai's GPU market as one campaign, CAMPAIGN (cluster_submit's README,
-"GPU market"; cluster_demand.py), so the market's keeper charges what its tasks hold: what they
-hold and wait for, and each live wave's pool lines from its summary.json (`state_demand`: the
-larger of its workers running and its jobs pending or claimed, per node and class). This
-machine's step, after every verb of STATES_DEMAND, writes it; a steward never does (the plan's
-Ruling 1).
+reblock states its demand in ai's GPU market as two accounts (cluster_submit's README, "GPU
+market"), so the market's keeper charges what its tasks hold: its one campaign, CAMPAIGN, names
+its pool leases and states each live wave's pool lines from its summary.json (`state_demand`,
+cluster_demand.py: the larger of its workers running and its jobs pending or claimed, per node and
+class); the hand account (cluster_submit's room.hand_demand, which its sync writes) names and
+states every other run, a `blocks` or `cpu` run, a steward, a long run. A run is one account's:
+the keeper refuses both demands that name one run. This machine's step, after every verb of
+STATES_DEMAND, writes the campaign's; a steward never does (the plan's Ruling 1).
 
 Before a CPU run, the node's load: `ssh ai sinfo -N -p defq -o '%N %c %T %C'` (cores allocated,
 idle, other, total) and `scontrol show node <node>` (AllocMem of RealMemory).
@@ -968,21 +970,23 @@ class Waves:
 # attribute_cache: how long ai's login node may answer a stat from cached attributes (its NFSv3
 # home's acregmax and acdirmax, the client's defaults: 60 s), so a run is finished, with its last
 # pull, only once it has been out of squeue that long (cluster_submit's "Settling a run": mycooc's
-# ev2-lib-20k-c, finished a second after it left squeue, lost its last row so, 2026-10-21).
-# market: the disk market of ai's home (its keeper holds reblock's files once a launch publishes
-# them). checkout_setup: nothing to link into a checkout. gpu_market: in ai's GPU market (owner
-# 2026-10-21, at GeoffChurch/mycooc's asking): reblock states its demand there (cluster_demand,
-# after the verbs of STATES_DEMAND), so the keeper attributes what its tasks hold and charges it.
-# harm: the keeper's published harm (harm.json, prices.json on ai's board), which every launch is
-# admitted by (cluster_submit's README, "Admission"). hand_weight: the weight of reblock's hand
-# account (its runs no campaign claims: `blocks`, `cpu`, stewards, long runs) beside its one
+# ev2-lib-20k-c, finished a second after it left squeue, lost its last row so, 2026-10-21). market:
+# the disk market of ai's home (its keeper holds reblock's files once a launch publishes them).
+# checkout_setup: nothing to link into a checkout. gpu_market: in ai's GPU market (owner 2026-10-21,
+# at GeoffChurch/mycooc's asking): reblock states its campaign's demand there, its pool leases
+# (cluster_demand, after the verbs of STATES_DEMAND), and cluster_submit's sync its hand account's,
+# every other run, so the keeper attributes what its tasks hold and charges it. harm: the keeper's
+# published harm (harm.json, prices.json on ai's board), which every launch is admitted by
+# (cluster_submit's README, "Admission"). hand_weight: the weight of reblock's hand account (its
+# runs no campaign claims: `blocks`, `cpu`, stewards, long runs; room.hand_demand names and states
+# them, so cluster_demand must not: a run two demands name is refused in both) beside its one
 # campaign, CAMPAIGN_WEIGHT, in the market weights' scale; 1.0, the two alike, is the owner's call
-# to change. From this pin on (fair-reference admission, 13e9544), `keeper install` from here is
-# how the keeper is installed (the owner's plan: the new keeper, with the schema 3 GPU file, from
-# reblock at this pin); the newest install wins, deploying its pin's cluster_submit, market file
-# and GPU file over any other project's. campaigns: Waves, whose pool runs are its leases (the
-# market widens and starts them in active mode), and none of whose other runs (a steward, a long
-# run, a `blocks` or `cpu` run) is one.
+# to change. From this pin on (fair-reference admission, 13e9544), `keeper install` from here is how
+# the keeper is installed (the owner's plan: the new keeper, with the schema 3 GPU file, from
+# reblock at this pin); the newest install wins, deploying its pin's cluster_submit, market file and
+# GPU file over any other project's. campaigns: Waves, whose pool runs are its leases (the market
+# widens and starts them in active mode), and none of whose other runs (a steward, a long run, a
+# `blocks` or `cpu` run) is one.
 PROJECT = cs.Project(name="reblock", repo=REPO, cluster=cs.load_cluster("ai"),
                      kinds=(Blocks(), Cpu(), Pool(), Steward(), Long()),
                      max_gpus=MAX_GPUS,
@@ -1055,7 +1059,7 @@ def demand_waves(recs: Sequence[cs.RunRecord], login: Login,
 
 
 def state_demand(registry: Registry) -> cluster_demand.Written:
-    """The project's demand (cluster_demand.state; Ruling 1: this step is its file's one writer),
+    """The campaign's demand (cluster_demand.state; Ruling 1: this step is its file's one writer),
     from squeue, `registry` read once and its waves as `demand_waves` reads them: what it
     wrote."""
     login = Remote(PROJECT.cluster.host, SubprocessRunner())
@@ -1065,8 +1069,7 @@ def state_demand(registry: Registry) -> cluster_demand.Written:
         recs=recs, unreadable=unreadable, pools=waves.pools, summaries=waves.summaries,
         login=login,
         board=PROJECT.cluster.board(), project=PROJECT.name, campaign=CAMPAIGN,
-        weight=CAMPAIGN_WEIGHT, nodes=tuple(n.name for n in PROJECT.cluster.nodes),
-        now=utcnow())
+        weight=CAMPAIGN_WEIGHT, now=utcnow())
 
 
 def _demand_after() -> None:

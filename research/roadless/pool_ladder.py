@@ -10,7 +10,9 @@ OOM moves it a rung up, and past the top rung it goes to the long lane (pool_que
 - A CPU class holds a whole core, 2 CPUs (the plan's Ruling 3: ai's CR_CORE_MEMORY holds both of a
   core's threads, so a 1-CPU class's demand line would never match what its workers hold); jobs
   stay single-threaded (cluster_env.sh).
-- The steward's bundle (STEWARD, Ruling 11) is no rung's, so its unit never joins a pool's line.
+- The steward's bundle (STEWARD, Ruling 11) may be a rung's: a steward is the hand account's
+  (cluster_submit's room.hand_demand states it), never on a pool's line, which the campaign's
+  demand states (cluster_demand), so the two never meet on one line.
 - Leases are the preset's length (Ruling 9): 120 minutes in both production presets, the active
   tier's 2 h; a worker claims only a job whose estimate fits the walltime it has left less the
   margin, and a job estimated past the lease less the margin and a worker's startup (its
@@ -25,7 +27,7 @@ from itertools import pairwise
 
 from cluster_submit import Bundle
 
-#: The steward's lease (Ruling 11): orion, 2 CPUs (a whole core) and 3 GB, a bundle no rung has.
+#: The steward's lease (Ruling 11): orion, 2 CPUs (a whole core) and 3 GB.
 STEWARD = Bundle(cards=0, cpus=2, mem_gb=3)
 
 
@@ -78,10 +80,6 @@ class Ladder:
             raise ValueError(f"{self.name}: a startup of {self.startup_minutes} minutes leaves no "
                              f"room in a lease of {self.lease_minutes} with a margin of "
                              f"{self.margin_minutes}")
-        steward = [g for g in r if self.bundle(g) == STEWARD]
-        if steward:
-            raise ValueError(f"{self.name}: the rung of {steward[0]} GB is the steward's bundle "
-                             f"({STEWARD.text()}), so its unit would join a pool's line")
 
     def bundle(self, mem_gb: int) -> Bundle:
         """What a worker of the rung `mem_gb` holds; a size that is no rung is refused."""

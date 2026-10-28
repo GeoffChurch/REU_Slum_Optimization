@@ -6,10 +6,10 @@ stages), and checks what a task would get.
     uv run python $C cpu <ids,> <items,>    # a print, checked by eye
     uv run python $C ids [fault]            # fault: no-check
     uv run python $C script [fault]         # fault: no-script-check
-    uv run python $C demand [fault]         # faults: finished-named, no-throttle, any-reason,
-                                            # no-running, count-done, every-node, queue-only,
-                                            # waiting-counted, broken-dropped, running-twice,
-                                            # pool-refuses, split-refuses
+    uv run python $C demand [fault]         # faults: finished-named, no-running, hand-named,
+                                            # hand-held, count-done, every-node, queue-only,
+                                            # broken-dropped, running-twice, pool-refuses,
+                                            # split-refuses, asks-with-none
     uv run python $C kinds [fault]          # fault: lease-bundle
     uv run python $C more [fault]           # faults: continue-idle, finished-dead, task-reaps,
                                             # hung-waits, reap-first, none-unreaped,
@@ -56,41 +56,40 @@ commit) is refused naming the commit; one the commit holds and the working tree 
 the commit before the one that deleted it) plans. Fault `no-script-check`: cluster._script_at a
 no-op: the absent script plans.
 
-`demand` (cluster_demand: reblock's one campaign in the GPU market, with the lease-pool plan's
-Rulings 1 and 2): its demand from a made-up squeue, seven made-up runs of this registry and three
-waves' runs, their summaries read from a cluster home made here, and the board script run on a
-scratch board. Held units: every running task of the project's but a pool lease's,
-cp-roads4-desire-g3b's as it stood on 2026-10-21 among them (throttle 2, one running, three
-waiting, their memory changed in Slurm), a cancelled run's and another checkout's run's too, the
-waves' two running stewards (one unit each at the steward's bundle on orion) and a long run,
-aggregated by (node, bundle) at the mean of their time limits; waiting units: those each run's
-throttle starts now (one of g3b's), none held by a dependency or a begin time, none of a cancelled
-run; an unpinned run's waiting tasks stated nowhere and counted, another checkout's left to it and
-counted. The waves' pool lines, each wave's queue made in that home and its summary.json its
-steward's (pool_steward._summary, its lines pool_summary.lines_of's): waves `a` and `b` share
-(quadro2, cpu-score's m4), `a` with 5 jobs pending, 2 claimed and 3 workers running there and one
-job pending on orion (m12), `b` with nothing pending or claimed and 2 workers running there (idle,
-about to retire), and `c` finished, its m12 jobs on quadro2 done and its worker exited; a lease of
-`a` waits in Slurm on (quadro2, m4). The waves read as state_demand reads them
-(cluster.demand_waves): the live waves (`c`'s steward finished and unsettled) a, b and c, the
-registry's pool runs its three unfinished ones; (quadro2, m4) states 9 units, max(3, 5 + 2) and
-max(2, 0) (Ruling 2), at the units' mean of a's jobs' estimates and b's workers' time limits; the
-waiting lease no unit; (orion, m12) 1; `c` no line; and `b` unread, its two workers stated alone
-(the same line) and the rest stated as ever, when its summary is absent and when its records do not
-read: two leases of `b` at 13 GB (no rung of cpu-score), the first with a task running (stated at
-what Slurm holds: (quadro2, 13 GB) 1 unit at its limit) and one waiting (no unit),
-cluster.pool_runs naming both in `b`'s why; or `b`'s stewards live at two commits. Its runs every
-run squeue lists of the project's and every unfinished one of the registry (every pool, steward and
-long run among them), not a finished one, another user's, another project's, or a task that left
-squeue between the two reads. Faults: `finished-named` (cluster_demand.finished never true: a
-finished run named), `no-throttle` (cluster_demand.room unbounded: units past a run's throttle),
-`any-reason` (cluster_demand.waits_for always true: a task held by its dependency counted),
-`no-running` (cluster_demand.held's units dropped: what the waves hold stated as units 0),
-`count-done` (pool_summary.lines_of counting a DONE job as pending: the finished wave `c` states
-units), `every-node` (lines_of counting each job on every node of its wave: a group's jobs counted
-on each of the wave's nodes), `queue-only` (cluster_demand.pool_units the jobs pending or claimed
-alone: `b`'s idle workers dropped, against Ruling 2), `waiting-counted`
-(cluster_demand.pool_waiting never true: the waiting lease counted by its throttle),
+`demand` (cluster_demand: reblock's one campaign in the GPU market, its pool leases alone, with
+the lease-pool plan's Rulings 1 and 2, beside the hand account's demand): its demand from a
+made-up squeue, seven made-up runs of this registry and three waves' runs, their summaries read
+from a cluster home made here, and the board script run on a scratch board. The project's other
+tasks, none of which it states (each the hand account's): cp-roads4-desire-g3b as it stood on
+2026-10-21 (throttle 2, one running, three waiting, their memory changed in Slurm), a cancelled
+run's, an unpinned run's, another checkout's run's, the waves' two running stewards and a long
+run, and tasks held by a dependency or a begin time. The waves' pool lines, each wave's queue made
+in that home and its summary.json its steward's (pool_steward._summary, its lines
+pool_summary.lines_of's): waves `a` and `b` share (quadro2, cpu-score's m4), `a` with 5 jobs
+pending, 2 claimed and 3 workers running there and one job pending on orion (m12), `b` with
+nothing pending or claimed and 2 workers running there (idle, about to retire), and `c` finished,
+its m12 jobs on quadro2 done and its worker exited; a lease of `a` waits in Slurm on (quadro2, m4).
+The waves read as state_demand reads them (cluster.demand_waves): the live waves (`c`'s steward
+finished and unsettled) a, b and c, the registry's pool runs its three unfinished ones; the demand
+states (orion, m12) 1 and (quadro2, m4) 9 units, max(3, 5 + 2) and max(2, 0) (Ruling 2), at the
+units' mean of a's jobs' estimates and b's workers' time limits, and nothing else; the waiting
+lease no unit; `c` no line; and `b` unread, its two workers stated alone (the same line) and the
+rest stated as ever, when its summary is absent and when its records do not read: two leases of
+`b` at 13 GB (no rung of cpu-score), the first with a task running (stated at what Slurm holds:
+(quadro2, 13 GB) 1 unit at its limit) and one waiting (no unit), cluster.pool_runs naming both in
+`b`'s why; or `b`'s stewards live at two commits. Its runs the three unfinished pool runs alone.
+Then the hand account's demand from the same registry (cluster_submit's room.hand_demand, as its
+sync writes hand.json) names runs, none of the campaign's; both are written on the scratch board
+and the keeper's own reading of it (gpuboard.demands, which refuses both demands that name one
+run) reads both and refuses neither. Faults: `finished-named` (cluster_demand.finished never true:
+a finished pool run named), `no-running` (cluster_demand.held's units dropped: what a lease whose
+record does not say holds stated as units 0), `hand-named` (cluster_demand.campaign_runs naming
+g3b, a hand run, too: the keeper refuses both files), `hand-held` (cluster_demand.campaign_task
+true of every task of the project's, its reach before the hand account: the hand runs' tasks
+stated as the campaign's), `count-done` (pool_summary.lines_of counting a DONE job as pending: the
+finished wave `c` states units), `every-node` (lines_of counting each job on every node of its
+wave: a group's jobs counted on each of the wave's nodes), `queue-only` (cluster_demand.pool_units
+the jobs pending or claimed alone: `b`'s idle workers dropped, against Ruling 2),
 `broken-dropped` (cluster_demand.at_tres_alloc false for every pool lease's task: the running task
 of a lease whose record does not say what it holds dropped, held and not demanded), `running-twice`
 (cluster_demand.at_tres_alloc always true: a pool's running workers stated at their tres-alloc as
@@ -264,7 +263,7 @@ import sys
 import tarfile
 import tempfile
 from collections import Counter
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from enum import Enum
@@ -283,12 +282,19 @@ import pool_steward  # noqa: E402
 import pool_summary as psum  # noqa: E402
 import pool_worker as pw  # noqa: E402
 import row_marker  # noqa: E402
-from cluster_submit import Bundle, RunPlan  # noqa: E402
+from cluster_submit import Bundle, RunPlan, room  # noqa: E402
 from cluster_submit.arrays import Array, route, script  # noqa: E402
 from cluster_submit.cli import parser  # noqa: E402
 from cluster_submit.context import STAMP, Context, Shell, kind_of, utcnow  # noqa: E402
-from cluster_submit.gpu import DemandLine, chain_base, demand_path, read_demand  # noqa: E402
-from cluster_submit.gpuboard import Pending, Running, Seen  # noqa: E402
+from cluster_submit.gpu import (  # noqa: E402
+    DemandLine,
+    chain_base,
+    demand_json,
+    demand_path,
+    read_demand,
+    run_of,
+)
+from cluster_submit.gpuboard import Pending, Running, Seen, demands  # noqa: E402
 from cluster_submit.project import NAME  # noqa: E402
 from cluster_submit.registry import NO_OVERRIDES, ArrayRecord, Registry, RunRecord  # noqa: E402
 from cluster_submit.remote import Completed, Local, Login, Remote, SubprocessRunner  # noqa: E402
@@ -662,16 +668,13 @@ def check_demand() -> list[str]:
              "a-quadro2-m4-s1": cluster_demand.PoolRun(wave="a", node="quadro2", bundle=m4),
              "a-quadro2-m4-s2": cluster_demand.PoolRun(wave="a", node="quadro2", bundle=m4),
              "b-quadro2-m4-s1": cluster_demand.PoolRun(wave="b", node="quadro2", bundle=m4)}
-    # (quadro2, m4): a's max(3 running, 5 pending + 2 claimed) at its jobs' mean (40 minutes),
-    # and b's max(2 running, none) at its workers' time limits; c's m12 line there none
+    # the waves' pool lines alone: (orion, m12) a's one job pending; (quadro2, m4) a's max(3
+    # running, 5 pending + 2 claimed) at its jobs' mean (40 minutes), and b's max(2 running, none)
+    # at its workers' time limits; c's m12 line there none. No other task of the project's, held
+    # or waiting, is stated: each is the hand account's.
     want = tuple(DemandLine(node=n, bundle=b, units=u, minutes=m, urgency=None) for n, b, u, m in (
-        ("orion", cpu(850, 2), 1, week), ("orion", cpu(540, 2), 3, (six + 60 + 600) / 3),
-        ("tesla1", card, 1, 120.0), ("orion", steward, 2, 120.0),
-        ("orion", cpu(90, 2), 1, 3000.0), ("orion", cpu(375), 1, six),
-        ("orion", cpu(360), 0, 0.0), ("orion", cpu(280), 0, 0.0), ("orion", cpu(540), 1, 30.0),
         ("orion", cpu(12, 2), 1, 25.0), ("quadro2", m4, 9, (7 * 40.0 + 2 * 100.0) / 9)))
-    runs = ("a-long-7", "a-quadro2-m4-s1", "a-quadro2-m4-s2", "a-steward", "b-quadro2-m4-s1",
-            "b-steward", "cancelled", "elsewhere", "g3a", "g3b", "held", "plain", "unpinned")
+    runs = ("a-quadro2-m4-s1", "a-quadro2-m4-s2", "b-quadro2-m4-s1")
 
     def shown(ls: tuple[DemandLine, ...]) -> list[tuple[str, str, int, float]]:
         return [(x.node, x.bundle.text(), x.units, round(x.minutes, 3)) for x in ls]
@@ -704,8 +707,8 @@ def check_demand() -> list[str]:
                 pending=(*seen.pending, wait("1250_1", "b-quadro2-m13-s1", cpu(13, 2),
                                              node="quadro2"))),
             limits={**limits, "1250_0": 120.0, "1250_1": 120.0},
-            lines=(*want[:5], DemandLine(node="quadro2", bundle=cpu(13, 2), units=1,
-                                         minutes=120.0, urgency=None), *want[5:])),
+            lines=(DemandLine(node="quadro2", bundle=cpu(13, 2), units=1, minutes=120.0,
+                              urgency=None), *want)),
         "b's stewards at two commits": _DemandCase(recs=(*recs, split), seen=seen,
                                                    limits=limits, lines=want)}
     bad = []
@@ -715,6 +718,7 @@ def check_demand() -> list[str]:
         login = dctx.remote()
         _demand_summaries(home)
         for r in recs:                  # a finished lease's exits, as its sync saved them
+            dctx.registry.write(r)      # the hand account's demand reads the registry
             if r.kind == cluster.Pool.name and r.finished_at is not None:
                 _exited(dctx, r, rc=str(int(pw.Exit.DRAINED)))
 
@@ -724,8 +728,7 @@ def check_demand() -> list[str]:
             w = cluster.demand_waves(rs, login, dctx.registry)
             return cluster_demand.demand_of(
                 rs, sq, lim, pools=w.pools, waves=w.summaries(), project="reblock",
-                campaign="reblock", weight=1.0, at=at,
-                nodes=tuple(n.name for n in PROJECT.cluster.nodes))
+                campaign="reblock", weight=1.0, at=at)
 
         got = cluster.demand_waves(recs, login, dctx.registry).pools
         if got != pools:
@@ -743,6 +746,7 @@ def check_demand() -> list[str]:
             bad.append(f"no wave, the login refusing every command: {e}")
         s = demanded(recs, seen, limits)
         bad += stated(s, lines=want, waves=("a", "b", "c"), unread=())
+        hand = room.hand_demand(dctx)
         for case, c in broken.items():
             try:
                 x = demanded(c.recs, c.seen, c.limits)
@@ -762,25 +766,37 @@ def check_demand() -> list[str]:
         bad += [f"b's summary absent: {x}" for x in stated(alone, lines=want, waves=("a", "c"),
                                                            unread=("b",))]
     d = s.demand
-    if (s.unplaced, s.elsewhere) != (2, 1):
-        bad.append(f"{s.unplaced} unplaced and {s.elsewhere} elsewhere, wanted 2 and 1")
     if d.runs != runs:
         bad.append(f"runs {d.runs}, wanted {runs}")
     if (d.project, d.campaign, d.at, d.weight) != ("reblock", "reblock", at, 1.0):
         bad.append(f"campaign {d.name()}, at {d.at}, weight {d.weight}")
+    if hand is None or not hand.runs:
+        bad.append(f"the hand account's demand names no run: {hand}")
+    elif both := sorted(set(d.runs) & set(hand.runs)):
+        bad.append(f"runs {both} named by both reblock.json and hand.json")
     with tempfile.TemporaryDirectory() as tmp:
         board = Path(tmp) / "market"
-        path, beside = demand_path(board, "reblock", "reblock"), demand_path(board, "reblock", "w")
+        path = demand_path(board, "reblock", "reblock")
+        beside = demand_path(board, "reblock", room.HAND)
         beside.parent.mkdir(parents=True)
-        beside.write_text("{}\n")
+        if hand is not None:
+            beside.write_text(demand_json(hand))
         Local("here", SubprocessRunner()).sh(cluster_demand.board_script(str(board), d))
         if not path.is_file() or read_demand(path.read_text(), str(path)) != d:
             bad.append(f"the board's {path.name} is not the demand")
         left = sorted(p.name for p in board.rglob("*") if p.is_file())
-        if left != ["reblock.json", "w.json"]:
-            bad.append(f"the board holds {left}, not the demand beside the other file")
-    print(f"demand: reblock's demand from a squeue, seven runs and waves a, b and c (b's summary "
-          f"read, then absent), on a scratch board -> {'ok' if not bad else 'FAILS'}", flush=True)
+        if left != ["hand.json", "reblock.json"]:
+            bad.append(f"the board holds {left}, not the demand beside the hand account's")
+        # the keeper's own reading of the board: neither file refused (a run is one campaign's)
+        if PROJECT.market is None:
+            raise AssertionError("reblock's project has no market: the keeper weighs no demand")
+        kept = demands(board, PROJECT.market, PROJECT.cluster)
+        if kept.refused or sorted(x.campaign for x in kept.read) != [room.HAND, "reblock"]:
+            bad.append(f"the keeper reads {[x.name() for x in kept.read]} and refuses "
+                       f"{kept.refused}, wanted reblock/hand and reblock/reblock read")
+    print(f"demand: reblock's campaign demand from a squeue, seven runs and waves a, b and c (b's "
+          f"summary read, then absent), on a scratch board beside the hand account's, read by the "
+          f"keeper -> {'ok' if not bad else 'FAILS'}", flush=True)
     return bad
 
 
@@ -796,37 +812,32 @@ def _finished_named() -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def _no_throttle() -> Iterator[None]:
-    """cluster_demand.room unbounded (fault `no-throttle`)."""
-    old = cluster_demand.room
-    cluster_demand.room = lambda rec, array, running: 10**6
-    try:
-        yield
-    finally:
-        cluster_demand.room = old
-
-
-@contextlib.contextmanager
-def _any_reason() -> Iterator[None]:
-    """cluster_demand.waits_for always true (fault `any-reason`)."""
-    old = cluster_demand.waits_for
-    cluster_demand.waits_for = lambda p, node: True
-    try:
-        yield
-    finally:
-        cluster_demand.waits_for = old
-
-
-@contextlib.contextmanager
 def _no_running() -> Iterator[None]:
-    """cluster_demand.held's lines kept with no units (fault `no-running`: what a wave holds
-    stated as units 0, the README's way for a wave that wants no more)."""
+    """cluster_demand.held's lines kept with no units (fault `no-running`: what a lease holds
+    stated as units 0, the README's way for a campaign that wants no more)."""
     old = cluster_demand.held
     cluster_demand.held = lambda running, limits: {k: [] for k in old(running, limits)}
     try:
         yield
     finally:
         cluster_demand.held = old
+
+
+_CAMPAIGN_RUNS = cluster_demand.campaign_runs
+
+
+def _hand_named(pools: Mapping[str, cluster_demand.PoolRun | None]) -> tuple[str, ...]:
+    """cluster_demand.campaign_runs naming a hand run beside the leases (fault `hand-named`: g3b,
+    a `cpu` run, in reblock.json and hand.json both, so the keeper refuses both)."""
+    return tuple(sorted({*_CAMPAIGN_RUNS(pools), "g3b"}))
+
+
+def _hand_held(j: Running, pooled: Mapping[str, cluster_demand.PoolRun | None], *, user: str,
+               project: str) -> bool:
+    """cluster_demand.campaign_task true of every task of the project's (fault `hand-held`: the
+    hand account's running tasks stated in the campaign's lines too, its reach before the hand
+    account)."""
+    return j.user == user and run_of(project, j.name) is not None
 
 
 _LINES_OF = psum.lines_of
@@ -880,13 +891,13 @@ def _split_refused(recs: Sequence[RunRecord], args: cluster.Args) -> cluster.Liv
 
 # The command line's fault names, each the fault it injects.
 DEMAND_FAULTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
-    "finished-named": _finished_named, "no-throttle": _no_throttle, "any-reason": _any_reason,
-    "no-running": _no_running,
+    "finished-named": _finished_named, "no-running": _no_running,
+    "hand-named": lambda: _patched(cluster_demand, "campaign_runs", _hand_named),
+    "hand-held": lambda: _patched(cluster_demand, "campaign_task", _hand_held),
     "count-done": lambda: _patched(psum, "lines_of", _count_done),
     "every-node": lambda: _patched(psum, "lines_of", _every_node),
     "queue-only": lambda: _patched(cluster_demand, "pool_units",
                                    lambda line, running: line.pending + line.claimed),
-    "waiting-counted": lambda: _patched(cluster_demand, "pool_waiting", lambda p, pooled: False),
     "broken-dropped": lambda: _patched(cluster_demand, "at_tres_alloc", lambda j, pooled:
                                        not cluster_demand.pool_task(j.job, pooled)),
     "running-twice": lambda: _patched(cluster_demand, "at_tres_alloc", lambda j, pooled: True),
