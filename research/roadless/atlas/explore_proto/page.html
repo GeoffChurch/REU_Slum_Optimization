@@ -120,19 +120,44 @@ header h1 { font-size: clamp(34px, 5.5vw, 56px); line-height: 1.02; font-weight:
 .plot .mover { transition: transform 180ms ease-out; }
 @media (prefers-reduced-motion: reduce) { .plot .mover { transition: none; } }
 
-.notes { display: grid; gap: 18px; padding-block: 18px 8px; }
-.note { border-left: 3px solid var(--accent); background: var(--surface); padding: 14px 16px; display: grid; gap: 8px; max-width: 90ch; }
-.note h2 { font-size: 20px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
-details.note summary { cursor: pointer; font-family: var(--display); font-size: 20px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
-details.note[open] summary { margin-bottom: 8px; }
-.note figure { margin: 6px 0 0; display: grid; gap: 6px; }
-.note figure img { width: 100%; height: auto; background: #ffffff; border: 1px solid var(--plate-frame); border-radius: 3px; }
-.note figcaption { font-size: 14px; color: var(--muted); }
+.stage-sec { display: grid; gap: 12px; padding-block: 26px 10px; border-top: 1px solid var(--rule); }
+.stage-sec h2 { font-size: clamp(26px, 3.6vw, 38px); line-height: 1.05; font-weight: 700; }
+.screen-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px 28px; align-items: start; margin-top: 6px; }
+.screen-side { display: grid; gap: 12px; min-width: 0; }
+.screen-ctl { display: grid; gap: 8px; }
+.map-fig { margin: 0; display: grid; gap: 6px; min-width: 0; }
+.map { background: #ffffff; border: 1px solid var(--plate-frame); border-radius: 3px; overflow: hidden; }
+.map canvas { display: block; width: 100%; height: auto; }
+.chip {
+  font-family: var(--display); font-size: 14px; letter-spacing: 0.05em; text-transform: uppercase;
+  border: 1px solid var(--rule); background: var(--surface); color: var(--ink); padding: 4px 12px; border-radius: 999px; cursor: pointer;
+}
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: 14.5px; color: var(--muted); cursor: pointer; }
+.check input { accent-color: var(--ink); }
+.read3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ramp-row { display: grid; gap: 4px; }
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--rule); margin: 6px 0 0; }
+.facts > div { padding: 12px 16px 12px 0; display: grid; gap: 2px; align-content: start; min-width: 0; }
+.facts > div + div { padding-left: 16px; border-left: 1px solid var(--rule); }
+.facts dt { font-family: var(--display); font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.facts dd { margin: 0; font-family: var(--mono); font-size: 24px; font-variant-numeric: tabular-nums; }
+.facts dd.sub { font-family: var(--body); font-size: 14.5px; color: var(--muted); }
+.fires { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 0; max-width: 90ch; }
+.fires li { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: 4px 18px; padding-block: 14px; border-top: 1px solid var(--rule); }
+.fires li:last-child { border-bottom: 1px solid var(--rule); }
+.fires .when { font-family: var(--display); font-size: 20px; font-weight: 600; letter-spacing: 0.03em; }
+.fires .what { display: grid; gap: 6px; min-width: 0; }
+.fires .where { font-size: 15px; color: var(--muted); }
+.fires .src { font-size: 14.5px; }
+.tag { font-family: var(--mono); font-size: 12px; color: var(--ink); border: 1px solid var(--rule); border-radius: 999px; padding: 0 7px; white-space: nowrap; }
+.mini { display: none; margin: 0; flex-wrap: wrap; gap: 2px 16px; font-size: 13px; color: var(--muted); }
+.mini b { color: var(--ink); font-weight: 500; }
 footer { border-top: 1px solid var(--rule); padding-block: 22px 40px; margin-top: 18px; color: var(--muted); font-size: 14px; display: grid; gap: 8px; }
 footer p { max-width: 100ch; }
 
 @media (max-width: 900px) {
-  .stage { grid-template-columns: minmax(0, 1fr); }
+  .stage, .screen-grid { grid-template-columns: minmax(0, 1fr); }
+  .bar .mini { display: flex; grid-column: 1 / -1; }
   .plots { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 620px) {
@@ -140,16 +165,118 @@ footer p { max-width: 100ch; }
   .times { grid-template-columns: minmax(0, 1fr); }
   .times > div + div { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule); }
   .read { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .read3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .facts { grid-template-columns: minmax(0, 1fr); }
+  .facts > div + div { padding-left: 0; border-left: 0; border-top: 1px solid var(--rule); }
+  .fires li { grid-template-columns: minmax(0, 1fr); }
   .seg button { padding: 5px 10px; font-size: 14px; }
 }
 </style>
 
 <div class="wrap">
   <header>
-    <div class="eyebrow">Explore · Methods · a prototype</div>
-    <h1>{{NAME}}, built out on one Cape Town block</h1>
+    <div class="eyebrow">Explore · a prototype</div>
+    <h1>One Cape Town block, screened and reblocked</h1>
+    <p class="place"><span>Block <span class="num">{{BID}}</span>, {{HOMES}} buildings, in the Bloekombos and Wallacedene area of Kraaifontein</span><span class="num">{{LAT}}, {{LON}}</span><a href="{{MAPS}}" target="_blank" rel="noopener">Open in Google Maps ↗</a></p>
+  </header>
+
+  <section class="stage-sec" id="screening" aria-labelledby="h-screen">
+    <div class="eyebrow">Stage · Screening</div>
+    <h2 id="h-screen">Why this block</h2>
+    <p class="lede">A metro has far too many blocks to reblock every one of them, so the pipeline opens with one cheap number per block and a floor on it. The shipped screen is the depth proxy times density, √(nA)/P · n/A, from each block's building count n, area A and perimeter P: a block scores high only if it is both deep, its interior many parcels back from a street, and crowded. Drag the floor to grow or shrink the pool.</p>
+    <div class="screen-grid">
+      <figure class="map-fig">
+        <div class="map"><canvas id="city" role="img" aria-label="Cape Town's blocks coloured by the screen score; the blocks under the floor in grey, block 5810 ringed."></canvas></div>
+        <figcaption class="caption">Cape Town's {{SC_N}} blocks, each coloured by its score where it clears the floor and grey where it does not. The ring marks block 5810, the box the close-up.</figcaption>
+      </figure>
+      <div class="screen-side">
+        <div class="screen-ctl">
+          <div class="slider">
+            <label for="floor">Floor</label>
+            <input type="range" id="floor" min="0" max="240" step="1" value="0">
+            <output id="floor-out" for="floor">{{SC_FLOOR}}</output>
+          </div>
+          <div class="row">
+            <button type="button" class="chip" id="floor-reset">Shipped floor</button>
+            <label class="check"><input type="checkbox" id="informal"> Outline the City's informal settlements</label>
+          </div>
+        </div>
+        <dl class="read read3">
+          <div><dt>Pool</dt><dd id="s-pool"></dd></div>
+          <div><dt>Precision</dt><dd id="s-prec"></dd></div>
+          <div><dt>Recall</dt><dd id="s-rec"></dd></div>
+        </dl>
+        <figure class="map-fig">
+          <div class="map"><canvas id="local" role="img" aria-label="Close-up of block 5810 and its neighbours, coloured by the screen score, with the fire reports' streets marked by year."></canvas></div>
+          <figcaption class="caption">Close-up: block 5810 outlined in black. A dated dot marks where OpenStreetMap puts the street a fire report names (below), not the fire itself.</figcaption>
+        </figure>
+      </div>
+    </div>
+    <div class="ramp-row">
+      <div class="ramp" id="score-ramp"></div>
+      <div class="ticks" id="score-ticks"></div>
+      <p class="caption">Screen score, log scale; red is deeper and more crowded.</p>
+    </div>
+    <dl class="facts">
+      <div><dt>Block 5810's score</dt><dd>{{SC_SCORE}}</dd><dd class="sub">{{SC_TIMES}} times the shipped floor of {{SC_FLOOR}}.</dd></div>
+      <div><dt>Its rank</dt><dd>{{SC_RANK}} of {{SC_N}}</dd><dd class="sub">In the top {{SC_TOP}}% of Cape Town's blocks.</dd></div>
+      <div><dt>At the shipped floor</dt><dd>Selected</dd><dd class="sub">One of {{SC_POOL}} blocks in the pool.</dd></div>
+    </dl>
+    <p class="caption">Precision and recall are measured against the City of Cape Town's own informal-structure survey. At the shipped floor the pool is {{SC_POOL}} blocks, {{SC_PREC}}% of them informal settlements by that survey, and it holds {{SC_REC}}% of the survey's settlement blocks. The floor is absolute, not a percentile, so it applies the same bar however the corpus grows or shrinks. Screening only decides which blocks are worth the expensive work below.</p>
+  </section>
+
+  <section class="stage-sec" id="fires" aria-labelledby="h-fires">
+    <div class="eyebrow">On the ground</div>
+    <h2 id="h-fires">Shack fires reported near the block</h2>
+    <p class="lede">The screen reads only building counts and block shapes. News reports from the surrounding area show what a deep, crowded block means when a fire starts. None of these fires is confirmed inside block 5810 itself; each place is stated as the report gives it.</p>
+    <ol class="fires">
+      <li>
+        <div class="when">May 2016</div>
+        <div class="what">
+          <p class="where">Japhta and Dlayedwa streets, Bloekombos, Kraaifontein. OpenStreetMap puts Dlayedwa Street about 80 m outside the block. <span class="tag">marker 2016</span></p>
+          <p>Two shacks were set alight, allegedly with a petrol bomb, and four members of one family died: a woman and three children aged 8 to 13. Neighbours tried to fight it with water and could not.</p>
+          <p class="src"><a href="https://iol.co.za/capetimes/news/2016-05-23-four-die-in-suspected-arson-attack/" target="_blank" rel="noopener">Cape Times, 23 May 2016: “Four die in suspected arson attack” ↗</a></p>
+        </div>
+      </li>
+      <li>
+        <div class="when">Feb 2020</div>
+        <div class="what">
+          <p class="where">Wallacedene, Kraaifontein, beside the block. The report names Mfeketo Street, which could not be placed on the map.</p>
+          <p>A fire at about 2am burned 28 shacks, displaced 83 people and killed two. Fire engines could not drive in: a community leader said “we have no roads and the shacks are closely clustered”, so crews parked on Mfeketo Street and walked to the fire. The taps gave no water, and residents pulled down shacks to stop it spreading.</p>
+          <p class="src"><a href="https://groundup.news/article/couple-dies-shack-fire-kraaifontein/" target="_blank" rel="noopener">GroundUp, 25 February 2020: “Couple dies in shack fire in Kraaifontein” ↗</a></p>
+        </div>
+      </li>
+      <li>
+        <div class="when">Jun 2022</div>
+        <div class="what">
+          <p class="where">Pietersen Road, Wallacedene. OpenStreetMap puts Pietersen Road about 1.2 km south of the block. <span class="tag">marker 2022</span></p>
+          <p>Three shacks burned, 11 people were displaced and three siblings died.</p>
+          <p class="src"><a href="https://www.news24.com/southafrica/news/three-siblings-die-in-cape-town-fire-that-displaced-11-people-20220617" target="_blank" rel="noopener">News24, 17 June 2022: “Three siblings die in Cape Town fire that displaced 11 people” ↗</a></p>
+        </div>
+      </li>
+      <li>
+        <div class="when">Oct 2024</div>
+        <div class="what">
+          <p class="where">Manuel Street, Wallacedene, which could not be placed on the map.</p>
+          <p>Four people died, three of them children, in one of 48 shack fires across Cape Town that weekend. JP Smith, the City's mayoral committee member for safety and security, said its crews arrive quickly but are “hampered by other factors such as access”; he spoke of the weekend's fires as a whole.</p>
+          <p class="src"><a href="https://www.timeslive.co.za/news/south-africa/2024-10-28-nine-people-perish-in-weekend-informal-settlement-fires-in-cape-town/" target="_blank" rel="noopener">TimesLIVE, 28 October 2024: “Nine people perish in weekend informal settlement fires in Cape Town” ↗</a></p>
+        </div>
+      </li>
+      <li>
+        <div class="when">Jul 2025</div>
+        <div class="what">
+          <p class="where">Maroela Road, Wallacedene. OpenStreetMap puts the Wallacedene stretch of Maroela Road about 630 m south of the block; the road also passes within about 16 m of the block's south edge. <span class="tag">marker 2025</span></p>
+          <p>About 20 shacks burned and 60 to 80 people were displaced. A 6-year-old girl died.</p>
+          <p class="src"><a href="https://www.ewn.co.za/2025/07/15/kraaifontein-police-monitoring-wallacedene-after-shack-fire-claims-life-of-girl" target="_blank" rel="noopener">EWN, 15 July 2025 ↗</a> · <a href="https://capeargus.co.za/news/2025-07-17-tragic-shack-fire-claims-life-of-6-year-old-girl-in-wallacedene/" target="_blank" rel="noopener">Cape Argus, 17 July 2025 ↗</a></p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section class="stage-sec" id="methods" aria-labelledby="h-methods">
+    <div class="eyebrow">Stage · Methods</div>
+    <h2 id="h-methods">{{NAME}}, built out on the block</h2>
     <p class="lede">{{BLURB}} Drag the budget to grow the network: each step lets it displace a larger share of the homes' floor area, and the dots on the plots follow.</p>
-    <p class="place"><span>Block <span class="num">{{BID}}</span>, {{HOMES}} buildings</span><span class="num">{{LAT}}, {{LON}}</span><a href="{{MAPS}}" target="_blank" rel="noopener">Open in Google Maps ↗</a></p>
     <dl class="times">
       <div>
         <dt>{{NAME}}, this block, to a 15% budget</dt>
@@ -158,11 +285,11 @@ footer p { max-width: 100ch; }
       </div>
       <div>
         <dt>The original topology algorithm, this block</dt>
-        <dd>about {{TOPO}}<sup><a href="#fn1" aria-label="How this was estimated">1</a></sup></dd>
-        <dd class="sub">Extrapolated, for one run; plausibly {{TOPO_LOW}} to {{TOPO_HIGH}}. Some {{TOPO_RATIO}} times longer.</dd>
+        <dd>Months to centuries<sup><a href="#fn1" aria-label="How this was estimated">1</a></sup></dd>
+        <dd class="sub">Extrapolated, for one run: {{TOPO_LOW}} to {{TOPO_HIGH}}, with a middle estimate of about {{TOPO}}, some {{TOPO_RATIO}} times longer.</dd>
       </div>
     </dl>
-  </header>
+  </section>
 </div>
 
 <div class="bar">
@@ -170,13 +297,14 @@ footer p { max-width: 100ch; }
     <div class="seg" role="group" aria-label="Map view">
       <button type="button" data-view="network" aria-pressed="true">Roads</button>
       <button type="button" data-view="time" aria-pressed="false">Escape time</button>
-      <button type="button" data-view="gain" aria-pressed="false">Time saved</button>
+      <button type="button" data-view="saved" aria-pressed="false">Time saved</button>
     </div>
     <div class="slider">
       <label for="budget">Budget</label>
       <input type="range" id="budget" min="0" max="15" step="1" value="5">
       <output id="budget-out" for="budget">5%</output>
     </div>
+    <p class="mini num" aria-hidden="true"><span>Permeability <b id="m-lp"></b></span><span>Displaced <b id="m-d"></b></span><span>Road <b id="m-km"></b></span></p>
   </div>
 </div>
 
@@ -203,10 +331,10 @@ footer p { max-width: 100ch; }
         <div class="ticks"><span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%+</span></div>
         <p class="caption">Each home's escape time: how hard it is for its people to walk out to the street, as a share of the longest (the 99th-percentile home's) before any road. Blue is a short way out, red a long one. Each dark line is an isochrone, every {{ISO_PCT}}% of that scale: homes inside a ring take longer than homes outside it. Watch the rings shrink as roads go in. Grey: a destroyed building or a road.</p>
       </div>
-      <div class="legend" id="legend-gain" hidden>
-        <div class="ramp" style="background: linear-gradient(90deg, {{DIV}})"></div>
-        <div class="ticks"><span>{{GAIN_LO}}×</span><span>½×</span><span>same</span><span>2×</span><span>{{GAIN_HI}}×</span></div>
-        <p class="caption">Each home's escape time now, over its time with no new road, on a log scale. Blue homes got out faster, the darkest in a quarter of the time or less; red homes would be slower. A road only adds a way through, so almost no home gets slower: the red end barely appears. Grey: a destroyed building or a road.</p>
+      <div class="legend" id="legend-saved" hidden>
+        <div class="ramp" style="background: linear-gradient(90deg, {{SAVED}})"></div>
+        <div class="ticks">{{SAVED_TICKS}}</div>
+        <p class="caption">The share of each home's escape time the new roads save, against its time with no new road. The darker the blue, the more time saved; at the darkest, three quarters or more. Grey: a destroyed building or a road.</p>
       </div>
       <p class="caption edge-key">The block's edge: <svg viewBox="0 0 40 14" aria-hidden="true"><path d="M3 7H37" stroke="#1e293b" stroke-width="2.8"/></svg>street, where people walk out; <svg viewBox="0 0 40 14" aria-hidden="true"><path d="M3 7H37M6 3.5V10.5M13 3.5V10.5M20 3.5V10.5M27 3.5V10.5M34 3.5V10.5" stroke="#1e293b" stroke-width="1.6" fill="none"/></svg>railway, crossed only at its two ends; <svg viewBox="0 0 40 14" aria-hidden="true"><rect x="3" y="4" width="34" height="6" rx="2" fill="#bfdbf3" stroke="#94a3b8" stroke-width="1"/></svg>a ditch.</p>
     </section>
@@ -228,18 +356,6 @@ footer p { max-width: 100ch; }
     </section>
   </div>
 
-  <div class="notes">
-    <details class="note">
-      <summary>Why colour and contours, not a 3D height map</summary>
-      <p>A height map shows the escape time as terrain: the higher the ground, the longer the way out. It is the field from the Escape time view at a {{HEIGHT_PCT}}% budget, coloured the same, with the roads traced on the floor.</p>
-      <figure>
-        <img src="height.webp" loading="lazy" alt="An oblique 3D surface of the homes' escape time over block 5810 at a {{HEIGHT_PCT}}% budget: high red ridges in the interior, low blue ground along the streets and roads.">
-        <figcaption>The block seen from the south-west. The front ridges hide the valleys behind them, perspective shrinks the far side, and the buildings and roads are lost under the surface.</figcaption>
-      </figure>
-      <p>So the page keeps the flat map and adds isochrones, which carry the magnitude as rings you can count, and puts the totals on the plots, where position along an axis is easier to compare than height or colour.</p>
-    </details>
-  </div>
-
   <footer>
     <p class="fn" id="fn1"><sup>1</sup> An extrapolation, not a measurement. Topology (Brelsford, Martin and Bettencourt) was timed once on each of six smaller Cape Town blocks, at α = 10 on one thread ({{TOPO_RUNS}}). A least-squares power law through all six gives time ∝ buildings<sup>{{TOPO_EXP}} ± {{TOPO_SE}}</sup>, which reaches about {{TOPO}} at this block's {{HOMES}} buildings. The runs steepen with size, so the fit under-predicts its largest block ({{TOPO_LARGEST_N}} buildings, {{TOPO_LARGEST_H}} hours). Anchored on that run, the five smaller blocks' exponent ({{TOPO_SMALL_EXP}}) gives {{TOPO_LOW}} and the slope between the two largest ({{TOPO_TOP_EXP}}) gives {{TOPO_HIGH}}. The paper's own procedure keeps the best of many runs, which multiplies the time again. Source: the group-Steiner study (docs/superpowers/notes/2026-09-26-topology-is-a-group-steiner-tree.md; its timing script on branch research/group-steiner). Topology's goal also differs: it builds until every parcel touches a road, where {{NAME}} stops at a displacement budget.</p>
     <p>A prototype for the Methods stage of the site's Explore page, built from the 5810 build-out pilot's stored frames: each frame is the shortest stretch of the method's build order that displaces at least the budget's share of floor area, scored under the research metric (a new road conducts ten times what open ground does). Run time: the method's own step log, to the step each frame stops at.</p>
@@ -254,7 +370,7 @@ footer p { max-width: 100ch; }
   var VIEWS = {
     network: { file: "s/" + DATA.stem + "_network.webp", alt: "the roads and the buildings they destroy" },
     time: { file: "s/" + DATA.stem + "_time.webp", alt: "each home's escape time, with isochrones" },
-    gain: { file: "s/" + DATA.stem + "_gain.webp", alt: "each home's escape time over its time with no road" }
+    saved: { file: "s/" + DATA.stem + "_saved.webp", alt: "the share of each home's escape time saved" }
   };
   var st = { k: DATA.default, view: "network" };
   var input = document.getElementById("budget"), out = document.getElementById("budget-out");
@@ -328,6 +444,9 @@ footer p { max-width: 100ch; }
     document.getElementById("r-km").textContent = r.none ? "–" : kmf(r.km);
     document.getElementById("r-lp").textContent = r.none ? "–" : pct(r.LP, 1);
     document.getElementById("r-t").textContent = r.none ? "–" : mins(r.t);
+    document.getElementById("m-lp").textContent = r.none ? "–" : pct(r.LP, 1);
+    document.getElementById("m-d").textContent = r.none ? "–" : pct(r.D, 1);
+    document.getElementById("m-km").textContent = r.none ? "–" : kmf(r.km);
     PLOTS.forEach(function (p) {
       var hide = r.none;
       p.dot.style.visibility = p.gx.style.visibility = p.gy.style.visibility = hide ? "hidden" : "visible";
@@ -339,7 +458,7 @@ footer p { max-width: 100ch; }
       p.gy.setAttribute("x1", X0); p.gy.setAttribute("x2", cx); p.gy.setAttribute("y1", cy); p.gy.setAttribute("y2", cy);
       p.readout.innerHTML = "<b>" + pct(r.LP, 1) + "</b> at " + p.head(r);
     });
-    ["network", "time", "gain"].forEach(function (k) { document.getElementById("legend-" + k).hidden = k !== st.view; });
+    ["network", "time", "saved"].forEach(function (k) { document.getElementById("legend-" + k).hidden = k !== st.view; });
     document.querySelectorAll("[data-view]").forEach(function (b) { b.setAttribute("aria-pressed", b.dataset.view === st.view ? "true" : "false"); });
   }
 
@@ -364,6 +483,136 @@ footer p { max-width: 100ch; }
   // the other views' sheets, fetched once the first has drawn
   window.addEventListener("load", function () {
     Object.keys(VIEWS).forEach(function (k) { if (k !== st.view) { var i = new Image(); i.src = VIEWS[k].file; } });
+  });
+})();
+</script>
+
+<script>
+(function () {
+  // The screen: the site's Cape Town bundle, lightened (build.py's screen_bake), drawn on two
+  // canvases on the plates' white; every block coloured by its score where it clears the floor.
+  var RAMP = {{SEQ_HEX}};
+  var GREY = "#e1e4e9", INK = "#17202c", GOLD = "#d98c00";
+  var floorIn = document.getElementById("floor"), floorOut = document.getElementById("floor-out");
+  var informalIn = document.getElementById("informal");
+  var city = document.getElementById("city"), local = document.getElementById("local");
+  var S = null, rgb = RAMP.map(function (h) { return [1, 3, 5].map(function (i) { return parseInt(h.slice(i, i + 2), 16); }); });
+  var LO = -3, HI = -0.8, STEPS = 240;          // the floor slider: log10 of the floor
+  function floorAt(v) { return Math.pow(10, LO + (HI - LO) * v / STEPS); }
+  function stepOf(f) { return Math.round((Math.log10(f) - LO) / (HI - LO) * STEPS); }
+  function colour(t) {
+    t = Math.max(0, Math.min(1, t)) * (rgb.length - 1);
+    var i = Math.min(rgb.length - 2, Math.floor(t)), u = t - i, a = rgb[i], b = rgb[i + 1];
+    return "rgb(" + [0, 1, 2].map(function (k) { return Math.round(a[k] + (b[k] - a[k]) * u); }).join(",") + ")";
+  }
+  function decode(rings) {
+    return rings.map(function (d) {
+      var out = new Float64Array(d.length), x = 0, y = 0;
+      for (var i = 0; i < d.length; i += 2) { x += d[i]; y += d[i + 1]; out[i] = x; out[i + 1] = y; }
+      return out;
+    });
+  }
+  function bounds(list) {
+    var b = [Infinity, Infinity, -Infinity, -Infinity];
+    list.forEach(function (rings) { rings.forEach(function (r) {
+      for (var i = 0; i < r.length; i += 2) { b[0] = Math.min(b[0], r[i]); b[1] = Math.min(b[1], r[i + 1]); b[2] = Math.max(b[2], r[i]); b[3] = Math.max(b[3], r[i + 1]); }
+    }); });
+    return b;
+  }
+  function view(canvas, box, pad) {
+    var w = canvas.parentNode.clientWidth || 600, dpr = Math.min(2, window.devicePixelRatio || 1);
+    var bw = box[2] - box[0], bh = box[3] - box[1], h = Math.round(w * bh / bw);
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    canvas.style.aspectRatio = w + " / " + h;
+    var k = (w - 2 * pad) / bw * dpr;
+    return { k: k, x: function (x) { return (pad * dpr) + (x - box[0]) * k; }, y: function (y) { return canvas.height - (pad * dpr) - (y - box[1]) * k; }, dpr: dpr };
+  }
+  function path(rings, v) {
+    var p = new Path2D();
+    rings.forEach(function (r) {
+      p.moveTo(v.x(r[0]), v.y(r[1]));
+      for (var i = 2; i < r.length; i += 2) p.lineTo(v.x(r[i]), v.y(r[i + 1]));
+      p.closePath();
+    });
+    return p;
+  }
+  var cityPaths = null, localPaths = null, cv = null, lv = null, lo = 0, hi = 1;
+  function layout() {
+    var cb = bounds(S.cityRings);
+    var bw = cb[2] - cb[0], bh = cb[3] - cb[1];
+    cv = view(city, [cb[0], cb[1], cb[2], cb[3]], 6);
+    lv = view(local, S.box, 0);
+    cityPaths = S.cityRings.map(function (r) { return path(r, cv); });
+    localPaths = S.localRings.map(function (r) { return path(r, lv); });
+  }
+  function fillOf(i, floor) { return S.s[i] >= floor ? colour((Math.log10(S.s[i]) - lo) / (hi - lo)) : GREY; }
+  function draw() {
+    if (!S) return;
+    var floor = floorAt(+floorIn.value), showInf = informalIn.checked;
+    if (+floorIn.value === stepOf(S.floor)) floor = S.floor;
+    var g = city.getContext("2d");
+    g.fillStyle = "#ffffff"; g.fillRect(0, 0, city.width, city.height);
+    S.order.forEach(function (i) { g.fillStyle = fillOf(i, floor); g.fill(cityPaths[i], "evenodd"); });
+    // a selected block also stroked in its own colour, so a small one stays visible at city scale
+    g.lineWidth = 1.5 * cv.dpr;
+    S.order.forEach(function (i) { if (S.s[i] >= floor) { g.strokeStyle = fillOf(i, floor); g.stroke(cityPaths[i]); } });
+    if (showInf) { g.strokeStyle = GOLD; g.lineWidth = 1.2 * cv.dpr; S.order.forEach(function (i) { if (S.inf.charCodeAt(i) === 49) g.stroke(cityPaths[i]); }); }
+    // the close-up's box, and the ring on 5810
+    g.strokeStyle = INK; g.lineWidth = 1.2 * cv.dpr;
+    g.strokeRect(cv.x(S.box[0]), cv.y(S.box[3]), (S.box[2] - S.box[0]) * cv.k, (S.box[3] - S.box[1]) * cv.k);
+    var fr = S.cityRings[S.follow][0], fx = 0, fy = 0, n = fr.length / 2;
+    for (var j = 0; j < fr.length; j += 2) { fx += fr[j]; fy += fr[j + 1]; }
+    g.beginPath(); g.arc(cv.x(fx / n), cv.y(fy / n), 13 * cv.dpr, 0, 2 * Math.PI);
+    g.strokeStyle = "#ffffff"; g.lineWidth = 5 * cv.dpr; g.stroke(); g.strokeStyle = INK; g.lineWidth = 2.2 * cv.dpr; g.stroke();
+    var h = local.getContext("2d");
+    h.fillStyle = "#ffffff"; h.fillRect(0, 0, local.width, local.height);
+    S.near.forEach(function (i, j) {
+      h.fillStyle = fillOf(i, floor); h.fill(localPaths[j], "evenodd");
+      h.strokeStyle = "#ffffff"; h.lineWidth = 1 * lv.dpr; h.stroke(localPaths[j]);
+    });
+    if (showInf) { h.strokeStyle = GOLD; h.lineWidth = 2 * lv.dpr; S.near.forEach(function (i, j) { if (S.inf.charCodeAt(i) === 49) h.stroke(localPaths[j]); }); }
+    var mine = S.near.indexOf(S.follow);
+    h.strokeStyle = INK; h.lineWidth = 2.5 * lv.dpr; h.stroke(localPaths[mine]);
+    h.font = (13 * lv.dpr) + "px 'IBM Plex Mono', ui-monospace, monospace";
+    S.fires.forEach(function (f) {
+      var x = lv.x(f.x), y = lv.y(f.y);
+      h.beginPath(); h.arc(x, y, 5 * lv.dpr, 0, 2 * Math.PI);
+      h.fillStyle = INK; h.fill(); h.strokeStyle = "#ffffff"; h.lineWidth = 2 * lv.dpr; h.stroke();
+      h.lineWidth = 4 * lv.dpr; h.strokeStyle = "#ffffff"; h.strokeText(f.label, x + 8 * lv.dpr, y + 4 * lv.dpr);
+      h.fillStyle = INK; h.fillText(f.label, x + 8 * lv.dpr, y + 4 * lv.dpr);
+    });
+    // the readouts
+    var count = 0, hits = 0, total = 0;
+    for (var i = 0; i < S.s.length; i++) {
+      var inf = S.inf.charCodeAt(i) === 49;
+      if (inf) total++;
+      if (S.s[i] >= floor) { count++; if (inf) hits++; }
+    }
+    floorOut.textContent = floor.toPrecision(3).replace(/\.?0+$/, "");
+    floorIn.setAttribute("aria-valuetext", "floor " + floorOut.textContent + ", " + count + " blocks selected");
+    document.getElementById("s-pool").textContent = count.toLocaleString("en-US");
+    document.getElementById("s-prec").textContent = count ? Math.round(100 * hits / count) + "%" : "–";
+    document.getElementById("s-rec").textContent = total ? Math.round(100 * hits / total) + "%" : "–";
+  }
+  var queued = false;
+  function soon() { if (!queued) { queued = true; requestAnimationFrame(function () { queued = false; draw(); }); } }
+  floorIn.addEventListener("input", soon);
+  informalIn.addEventListener("change", soon);
+  document.getElementById("floor-reset").addEventListener("click", function () { if (S) { floorIn.value = String(stepOf(S.floor)); soon(); } });
+  fetch("screen.json").then(function (r) { return r.json(); }).then(function (d) {
+    var sorted = d.s.filter(function (v) { return v > 0; }).map(function (v) { return Math.log10(v); }).sort(function (a, b) { return a - b; });
+    lo = sorted[Math.floor(0.05 * sorted.length)]; hi = sorted[Math.floor(0.998 * (sorted.length - 1))];
+    S = { s: d.s, inf: d.inf, order: d.order, follow: d.follow, floor: d.floor, box: d.box, near: d.near, fires: d.fires,
+          cityRings: d.city.map(decode), localRings: d.local.map(decode) };
+    floorIn.value = String(stepOf(S.floor));
+    var ramp = document.getElementById("score-ramp"), ticks = document.getElementById("score-ticks");
+    ramp.style.background = "linear-gradient(90deg, " + RAMP.join(", ") + ")";
+    ticks.innerHTML = [lo, (lo + hi) / 2, hi].map(function (v) { return "<span>" + Math.pow(10, v).toPrecision(2) + "</span>"; }).join("");
+    layout(); draw();
+    var last = city.parentNode.clientWidth;
+    window.addEventListener("resize", function () { var w = city.parentNode.clientWidth; if (w !== last) { last = w; layout(); soon(); } });
+  }).catch(function () {
+    document.getElementById("s-pool").textContent = "map data did not load";
   });
 })();
 </script>
