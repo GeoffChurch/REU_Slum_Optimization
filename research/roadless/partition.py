@@ -253,8 +253,9 @@ class Nodal:
 @dataclass(frozen=True, kw_only=True)
 class Divides:
     """The flow's own divides (module docstring): ears.divides on the whole block as one face
-    (ears.raster_of's PIX raster and pixel graph, from a growth.Growth of the block), u the eps
-    world's baseline potential under the population's demand, at persistence threshold `tau`;
+    (ears.EarWorld's PIX raster, pixel graph and sinks, the street's faces, from a growth.Growth
+    of the block), u the eps world's baseline potential under the population's demand (its
+    set_u), at persistence threshold `tau`;
     its cuts added most persistent first until the block falls into at least n regions; each
     pixel of this raster its nearest coarse pixel's region (a cut pixel its nearest region's)."""
     n: int
@@ -266,13 +267,12 @@ class Divides:
 
     def cells(self, ra: rs.Raster, m: gcl.Model) -> I64:
         g = gr.Growth(m, contrast=gr.Road(kappa=gr.ROAD_KAPPA))
-        er = ears.raster_of(g)
-        u = g.solve(g.state(np.zeros(g.nt, dtype=bool)))[0]
-        t = np.maximum(er.tri, 0)
-        u_pix = np.where(er.tri >= 0, u[m.c.cell[t]], 0.0)
+        e = ears.EarWorld(g)
+        er = e.ra
+        e.set_u(g.solve(g.state(np.zeros(g.nt, dtype=bool)))[0])
         face = np.where(er.tri >= 0, 0, -1)
-        cuts = ears.divides(u_pix, face, er.ea, er.eb, er.xy, er.bld, face=0, tau=self.tau,
-                            stretch_m=ears.STRETCH_M)
+        cuts = ears.divides(e.u_pix, face, e.sinks(), er.ea, er.eb, er.xy, er.bld, face=0,
+                            tau=self.tau, stretch_m=ears.STRETCH_M)
         inside = (face == 0).reshape(er.shape)
         cut = np.zeros(er.shape, dtype=bool)
         reg = np.zeros(er.shape, dtype=np.int64)
