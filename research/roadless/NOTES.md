@@ -11004,7 +11004,8 @@ up by the baseline's escape time, depth5810's; C in thousands of m^2; hours to D
     grounded free, island 0.03       0.310 0.432 0.492   0.246 0.380 0.449  182  351  507  3.1
     ears, paths                      0.431 0.504 0.586   0.421 0.504 0.590  176  357  512  0.5
       price 0.3                      0.430 0.490 0.575   0.423 0.495 0.573  175  330  483  0.5
-    ears, divides (tau 0.1)          0.175 0.332 0.383   0.194 0.330 0.386  125  199  284  0.4
+    ears, divides (tau 0.1, rev 2)   0.246 0.373 0.424   0.267 0.378 0.430  127  249  357  0.4
+      rev 1                          0.175 0.332 0.383   0.194 0.330 0.386  125  199  284  0.4
     lazy ΔP greedy (lineup pool)     0.495 0.612 0.678                      193  376  517  1.7
 
 (exact D within 0.006 of each target; price 0.1 unless named; the joint SIMP's paved answer at
@@ -11021,7 +11022,8 @@ quarter's homes, then of all homes; loops: faces of 100 m^2 and more less one):
     k10 eta 1 (seed 0, rev 2)   48  93 123    25 /  89   0   2  10%        39 48 56%     0  0  6
     grounded eta 1              49  80 108    24 /  86   0   2   9%        39 47 56%     0  0  1
     ears, paths                377 377 377    67 / 221  53  97 100%        53 81 94%     0  8 21
-    ears, divides              378 378 378    85 / 222  68  69  76%        40 53 56%     2  6 16
+    ears, divides (rev 2)      379 379 379   128 / 233  75  80  96%        43 69 82%     1  5 11
+      rev 1                    378 378 378    85 / 222  68  69  76%        40 53 56%     2  6 16
 
 Grounded growth is not deeper. At every D the kappa-10 greedy reaches further (371 m against 313
 at D 0.15) and serves more of the deepest quarter (100% within 50 m against 76%), at 1.3 -- 1.5x
@@ -11042,10 +11044,26 @@ of the no-dead-end constraint, ears against the grounded greedy: under RUNTIME 0
 at equal D, and about 0.04 at 357k m^2 and 0.07 at 512k at equal C (the greedy interpolated
 between its frames). In the grounded world the ears win (0.918 / 0.969 / 0.983 against 0.583 /
 0.873 / 0.980 at equal D, more at equal C): the batched first-order front is myopic where each ear
-is rescored exactly, and grounding rewards the long cut. `divides` cuts curved cells east of the
-centre for little C and trails `paths` throughout. Price 0.3 changes the ears little. Under P, for
-one fixed demand, trees win (Corson 2010), and here a loop costs 0.17 of L_P at D 0.10 -- 0.15:
-loops need the varying loads to earn their place.
+is rescored exactly, and grounding rewards the long cut. `divides` trails `paths` throughout.
+Price 0.3 changes the ears little. Under P, for one fixed demand, trees win (Corson 2010), and
+here a loop costs 0.17 of L_P at D 0.10 -- 0.15: loops need the varying loads to earn their place.
+
+`divides` rev 1 did its work in one area (owner 10-28: "is that a bug?"), and it was a bug. It
+costed the 16 most persistent divides across all faces, but persistence is relative to the face's
+own largest u, so once a few ears had cut small faces their divides (u 2 -- 60, relative
+persistence up to 0.86) took the 16 places and the large faces' (u 160 -- 230) were never
+costed. Replaying its states: at ear 4 the 351,000 m^2 outer face's divides ranked 38th and 39th
+and the 148,000 m^2 face's splitting ones 21st on, at 7x the best costed one's first order per
+cost; at ear 20, 13 of the 16 went to faces of 2,300 -- 2,700 m^2 at 1/1000 of it (one of the
+141,000 m^2 face's got in 16th and was built: the jump in L_P at ears 20 -- 22). The largest face
+did not change from ear 4 on, and two places a step went to a near-identical pair ending at the
+round hole by the south edge (refused: it splits nothing). Rev 2 offers the divides
+with the most first-order gain per metre along their pixels (as `paths` ranks; it correlates 0.98
+with first order per cost) and drops near-duplicates. Check `offer` (5810, after 8 ears: the
+costed 16 hold the best splitting first order per cost within 0.9): rev 2 1.00; fault
+`persistence`, rev 1's order, 0.48 FAIL. Rev 2 spreads over the south-west body (the north
+strip stays uncut, as in `paths`), 0.04 -- 0.07 above rev 1 at equal D for 1.0 -- 1.3x its C, and
+still below `paths` at equal D and at equal C (0.42 at 357k against 0.50).
 
 Bridges matter less than the seed. Rev 1 read a bridge's end potential at a front triangle,
 possibly inside a building at EPS, and its estimates ran about 30x the exact gain; rev 2 (ends on

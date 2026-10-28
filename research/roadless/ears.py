@@ -28,7 +28,9 @@ down the shortest-path tree), the best `pairs` sources' ears built as ROAD_W cor
 owner 2026-10-28), the separatrices of the persistence-simplified Morse-Smale complex of u on each
 face (the function `divides`, pure in its pixel inputs so other optimizers can seed from it; the
 persistence threshold `tau` in the name; the harmonic-measure split where the strict basins
-degenerate along the continuous street ring), the most persistent `pairs` costed; the brief's
+degenerate along the continuous street ring), near-duplicates dropped, across faces the `pairs`
+with the most first-order gain per metre costed (rev 2; rev 1's most persistent starved the
+large faces: Divides); the brief's
 `ridge` is `divides` at its strictest. Each step: every candidate's first-order gain per cost; in
 that order each must split its face (its faces of FACE_M2 and more rise by at least one), an ear
 that does not refused and logged (the no-dead-end invariant; check `ends`), until `exact` split;
@@ -38,7 +40,7 @@ the state's row.
 
     E=research/roadless/ears.py                        # from the repo root, PYTHONPATH=.
     uv run python $E run <block> <plan>
-    uv run python $E check decouple|first|ends <block> [fault]
+    uv run python $E check decouple|first|ends|offer <block> [fault]
 
 plan: ears.<paths.b<bld>|divides.p<tau>>.gl<h>Croad.n<nu>s<price>.M<pairs>.K<exact>.D<D>, its
 name adding the
@@ -57,6 +59,10 @@ first: on that state, for the top ears (their open triangles only, kt0 >= OPEN_K
   (|u| in place of u^2) fails it.
 ends: the top candidate ears each split their face (its faces of FACE_M2 and more rise). Fault
   `spur` (an ear's last third dropped: a dead end) fails it.
+offer: after OFFER_EARS ears of the divides check plan (faces of very different sizes), the
+  `pairs` divides Divides costs hold a splitting one within TOL_OFFER of the best first order
+  per cost among every face's divides. Fault `persistence` (rev 1's order, the most persistent
+  across faces: persistence is relative to the face's largest u) fails it.
 """
 from __future__ import annotations
 
@@ -94,11 +100,14 @@ SRC_M = 20.0           # m: ear sources along each face's boundary, one per squa
 MIN_EAR_M = 30.0       # m: an ear's ends at least this far apart in a straight line
 MIN_FACE_M2 = 2000.0   # m^2: a face this small is not split further
 STRETCH_M = 40.0       # m: divides' harmonic split: the face's boundary in stretches this wide
+DUP_M = 2 * PIX        # m: Divides: a divide's pixel this near a kept divide's is shared
+DUP_SHARE = 0.5        # Divides: a divide sharing this much of its pixels with a kept one dropped
 BLD_G = 0.01           # divides' harmonic split: a pixel edge's conductance through a building
 STEP_M = 0.25          # m: an ear's centreline sampled this finely (EarWorld.corridor)
 LOCATE_K = 12          # EarWorld.locate: candidate triangles per point
 CHUNK = 32             # sources per Dijkstra call (its distance and predecessor rows held)
-REV = 1
+REV = 2                # 2: Divides offers by first-order gain per metre, near-duplicates dropped
+                       # (rev 1: the most persistent across faces)
 TOL_DEC = 1e-2         # decouple: relative (19570, 3 ears at h 0.25: 2.4e-3; at h 25, 0.24)
 DEC_EVERY = 10         # build: the decoupling gap measured every this many ears
 TOL_FIRST = 2e-3       # first: relative (19570: 3.3e-4 at FIRST_H; 3.3e-2 at h 250, the drop
@@ -107,6 +116,10 @@ WEAK_H = 25.0          # m: decouple's fault: a weak leak
 FIRST_H = 2500.0       # m: first's leak (the drop linear in it: an ear's leak times its own
                        # resistance to ground far below 1)
 OPEN_KT = 0.999        # first: the ears' open triangles only (no opening term to speak of)
+OFFER_EARS = 8         # offer: ears built by the divides check plan before the offers are judged
+TOL_OFFER = 0.9        # offer: the costed divides' best splitting first order per cost over all
+                       # divides' (5810, rev 2's states 6 / 8 / 12: 1.0 each; rev 1's persistence
+                       # order 0.73 / 0.49 / 0.64, and 0.15 / 0.07 at rev 1's own states 4 / 8)
 
 
 class Face(NamedTuple):
@@ -443,11 +456,39 @@ def _cuts(u: F64, xy: F64, cut: B, edge: B, a: I64, b: I64, *, umax: float,
     return out
 
 
+class Offer(NamedTuple):
+    """A divide offered for costing: its face, the divide, and its first-order gain per metre
+    (the state's first-order gains binned to the PIX raster, summed along its pixels, over its
+    length: comparable across faces, as `paths`' gain per path cost is)."""
+    face: int
+    divide: Divide
+    per_m: float
+
+
+def _distinct(ds: list[Divide], xy: F64) -> list[Divide]:
+    """`ds` (most persistent first) less the near-duplicates: a divide with at least DUP_SHARE of
+    its pixels within DUP_M of a kept one's (ends one SRC_M cell apart trace the same divide)."""
+    kept: list[Divide] = []
+    trees: list[cKDTree] = []
+    for d in ds:
+        p = xy[d.pixels]
+        if any((t.query(p, k=1, distance_upper_bound=DUP_M)[0] <= DUP_M).mean() >= DUP_SHARE
+               for t in trees):
+            continue
+        kept.append(d)
+        trees.append(cKDTree(p))
+    return kept
+
+
 @dataclass(frozen=True, kw_only=True)
 class Divides:
     """The divides of u (`divides`), per face of at least MIN_FACE_M2 on its own u (the state's,
     the roads grounded), at persistence threshold `tau`, the harmonic-measure split where the
-    strict basins degenerate; the `pairs` most persistent costed."""
+    strict basins degenerate, near-duplicates dropped (`_distinct`); across faces the `pairs`
+    with the most first-order gain per metre costed (`offers`). Rev 1 took the `pairs` most
+    persistent across faces, but persistence is relative to its face's largest u, so on 5810 the
+    small faces' divides (u 2 -- 60) filled the pairs and the large faces' (u 160 -- 230, 7 -- 1000
+    times the costed ones' first-order gain per cost) were never costed."""
     tau: float
     pairs: int
 
@@ -455,19 +496,32 @@ class Divides:
     def name(self) -> str:
         return f"divides.p{self.tau:g}"
 
-    def ears(self, e: EarWorld, faces: Face, gain: F64, *, cost: gr.Cost) -> list[Ear]:
+    def offers(self, e: EarWorld, faces: Face, gain: F64) -> list[Offer]:
+        """Every face's distinct divides, the most first-order gain per metre first."""
         g, ra = e.g, e.ra
         pf = np.where(ra.tri >= 0, faces.lab[np.maximum(ra.tri, 0)], -1)
-        up = e.u_pix
+        gp = np.bincount(_pix_of(ra, g.cen), weights=gain, minlength=len(pf))
         sink = e.sinks()
-        offered: list[tuple[float, int, Divide]] = []
+        out: list[Offer] = []
         for f in np.flatnonzero(faces.area >= MIN_FACE_M2):
-            for d in divides(up, pf, sink, ra.ea, ra.eb, ra.xy, ra.bld, face=int(f),
-                             tau=self.tau, stretch_m=STRETCH_M):
-                offered.append((d.persistence, int(f), d))
-        offered.sort(key=lambda q: -q[0])
+            ds = divides(e.u_pix, pf, sink, ra.ea, ra.eb, ra.xy, ra.bld, face=int(f),
+                         tau=self.tau, stretch_m=STRETCH_M)
+            for d in _distinct(ds, ra.xy):
+                L = float(np.hypot(*np.diff(ra.xy[d.pixels], axis=0).T).sum())
+                out.append(Offer(face=int(f), divide=d,
+                                 per_m=float(gp[d.pixels].sum()) / max(L, PIX)))
+        out.sort(key=lambda o: -o.per_m)
+        return out
+
+    def ears(self, e: EarWorld, faces: Face, gain: F64, *, cost: gr.Cost) -> list[Ear]:
+        return self.costed(e, self.offers(e, faces, gain)[:self.pairs], gain, cost=cost)
+
+    @staticmethod
+    def costed(e: EarWorld, offers: list[Offer], gain: F64, *, cost: gr.Cost) -> list[Ear]:
+        g, ra = e.g, e.ra
         out = []
-        for _, f, d in offered[:self.pairs]:
+        for o in offers:
+            f, d = o.face, o.divide
             tris = e.corridor(ra.xy[d.pixels])
             if not len(tris):
                 continue
@@ -721,11 +775,12 @@ def run(bid: str, plan: Plan) -> None:
 # ---------------------------------------------------------------- the checks
 
 CHECK_PLAN = "ears.paths.b20.gl0.25Croad.n2s0.1.M8.K2.D1"
+CHECK_DIVIDES = "ears.divides.p0.1.gl0.25Croad.n2s0.1.M16.K4.D1"
 
 
-def _short(bid: str, h: float, n: int) -> EarWorld:
-    """A world with `n` ears built by the check plan at leak h."""
-    plan = Plan.of(CHECK_PLAN)
+def _short(bid: str, h: float, n: int, *, spec: str) -> EarWorld:
+    """A world with `n` ears built by the check plan `spec` at leak h."""
+    plan = Plan.of(spec)
     e = world_of(bid, h)
     build(e, plan, out=gr.OUT / bid / f"check.{plan.name}", log=lambda s: print(s, flush=True),
           steps=n)
@@ -736,7 +791,7 @@ def check(verb: str, bid: str, fault: str | None) -> None:
     if verb == "decouple":
         if fault not in (None, "weak-leak"):
             raise SystemExit("decouple's fault: weak-leak")
-        e = _short(bid, gr.GroundedLeak(h=0.25).h, 3)
+        e = _short(bid, gr.GroundedLeak(h=0.25).h, 3, spec=CHECK_PLAN)
         if fault == "weak-leak":
             e.g.contrast = gr.GroundedLeak(h=WEAK_H)
         on = e.g.step >= 0
@@ -752,7 +807,7 @@ def check(verb: str, bid: str, fault: str | None) -> None:
     elif verb == "first":
         if fault not in (None, "abs-u"):
             raise SystemExit("first's fault: abs-u")
-        e = _short(bid, 0.25, 2)
+        e = _short(bid, 0.25, 2, spec=CHECK_PLAN)
         g = e.g
         g.contrast = gr.GroundedLeak(h=FIRST_H)
         on = g.step >= 0
@@ -781,7 +836,7 @@ def check(verb: str, bid: str, fault: str | None) -> None:
     elif verb == "ends":
         if fault not in (None, "spur"):
             raise SystemExit("ends' fault: spur")
-        e = _short(bid, 0.25, 0)
+        e = _short(bid, 0.25, 0, spec=CHECK_PLAN)
         g = e.g
         st = g.state(g.step >= 0)
         u, _ = g.solve(st)
@@ -801,6 +856,37 @@ def check(verb: str, bid: str, fault: str | None) -> None:
             print(f"  ear of {len(path)} pixels: faces {n0} -> {n1}: "
                   f"{'splits' if split else 'a dead end'}")
         print(f"ends {bid} {fault or 'none'}: -> {'PASS' if ok else 'FAIL'}")
+    elif verb == "offer":
+        if fault not in (None, "persistence"):
+            raise SystemExit("offer's fault: persistence")
+        plan = Plan.of(CHECK_DIVIDES)
+        dv = plan.candidates
+        assert isinstance(dv, Divides)
+        e = _short(bid, plan.contrast.h, OFFER_EARS, spec=CHECK_DIVIDES)
+        g = e.g
+        st = g.state(g.step >= 0)
+        u, _ = g.solve(st)
+        e.set_u(u)
+        gain = g.contrast.gains(g, st, u)
+        fc = e.faces()
+        every = dv.offers(e, fc, gain)
+        if fault == "persistence":                 # rev 1's order: relative persistence
+            every = sorted(every, key=lambda o: -o.divide.persistence)
+        best = [0.0, 0.0]                          # splitting first order per cost: costed, all
+        for k, q in enumerate(Divides.costed(e, every, gain, cost=plan.cost)):
+            g.step[q.tris] = 0
+            split = e.faces().n > fc.n
+            g.step[q.tris] = -1
+            if split:
+                r = q.first / q.cost
+                best[1] = max(best[1], r)
+                if k < dv.pairs:
+                    best[0] = max(best[0], r)
+        ratio = best[0] / best[1]
+        ok = ratio >= TOL_OFFER
+        print(f"offer {bid} {fault or 'none'}: {fc.n} faces, {len(every)} divides; the costed "
+              f"{dv.pairs}' best splitting first order per cost {best[0]:.4g}, all divides' "
+              f"{best[1]:.4g}: ratio {ratio:.2f} (tol {TOL_OFFER:g}) -> {'PASS' if ok else 'FAIL'}")
     else:
         raise SystemExit(__doc__)
     if not ok:
