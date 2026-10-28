@@ -11,11 +11,13 @@ road_simp._grad returns, per triangle dP/dkt and dP/db at the state, so a candid
 first-order gain is -(dP/dkt (1 - kt0) + dP/db (boost - b_ways)): an upper bound on its exact gain
 (P is convex in the conductances, which are concave in kt and b).
 
-The contrast is a Strategy (Contrast): Road (kappa 10, the metric's own road) or Grounded (the
-corridor a leak to ground, kappa GROUND_KAPPA on the same machinery). The connectivity is a
-Strategy (Connectivity): Attached (only the front of the street, its connected paved ways and the
-region grown from them grows: vehicle roads) or Free (a patch may nucleate anywhere: paving and
-plazas; refused with Grounded, which is facility location, not road building).
+The contrast is a Strategy (Contrast): Road (kappa 10, the metric's own road) or GroundedLeak (the
+corridor a leak to ground through the Graph's leak, so the street itself moves inward: one-phase
+growth; its C charged as the same corridor's as a road). The connectivity is a Strategy
+(Connectivity): Attached (only the front of the street, its connected paved ways and the region
+grown from them grows: vehicle roads) or Free (a patch may also nucleate anywhere, an island,
+at a fixed charge each: paving and plazas, or with GroundedLeak leaky islands, destinations;
+the owner asked for them, 2026-10-27, after the brief's refusal).
 
 The method. A step solves the state once (u, P, the per-triangle first-order gains) and grows:
   patches: a road-width patch per front site (the triangles within PATCH_R of the site's centroid,
@@ -47,12 +49,13 @@ bridges, so the loops the bridges close are told from growth's.
 
 The bridge's rank-one gain is guarded by growth_check.py.
 
-plan: gr.<k<kappa>|grounded>.<att|free>.<greedy|e<eta>s<seed>>.N<batch>.sep<m>.n<nu>s<price>
-.<B0|B<reach>m<screen>k<top>>.K<exact>.D<D>, e.g. gr.k10.att.greedy.N32.sep14.n2s0.1.B21m8k2.K0
-.D0.15; its name (Plan.name) adds the code's revision (.v<REV>). Rows in growth_rows/<block>/
-<name>/: steps.parquet (a row per state), picks.parquet (the patches built), bridges.parquet
-(the bridges offered past the screen, built or not), tri_step.npy
-(per triangle the step it was grown in, -1 never), written after every step.
+plan: gr.<k<kappa>|gl<h>Croad>.<att|free<island>>.<greedy|e<eta>s<seed>>.N<batch>.sep<m>
+.n<nu>s<price>.<B0|B<reach>m<screen>k<top>>.K<exact>.D<D>, e.g.
+gr.k10.att.greedy.N32.sep14.n2s0.1.B21m8k2.K0.D0.15; its name (Plan.name) adds the code's
+revision (.v<REV>). Rows in growth_rows/<block>/<name>/: steps.parquet (a row per state),
+picks.parquet (the patches built), bridges.parquet (the bridges offered past the screen, built or
+not), tri_step.parquet (per triangle the step it was grown in, -1 never: parquet, so the
+cluster's pull brings it), written after every step.
 """
 from __future__ import annotations
 
@@ -95,7 +98,8 @@ REV = 2                  # the code's revision, in the plan's name (2: the bridg
                          # road's open edge, across a gap; 1: from the front, its u read there)
 MIN_NEW_M2 = 2.0         # m^2: a patch adds at least this much ground not yet grown
 FACE_M2 = 100.0          # m^2: a loop is a face of the region this large (road SIMP's count)
-GROUND_KAPPA = 1e4       # Grounded's contrast
+ROAD_KAPPA = 10.0        # GroundedLeak: its C counted as a road of this contrast's adds
+                         # (gap_exits.Boost.road's)
 FREE_M = PATCH_R         # m: Free's nucleation sites, one per square this wide
 SCREEN_PAIRS = 4         # Straight: pairs costed exactly per screened estimate (x screen)
 OUT = HERE / "growth_rows"
@@ -105,16 +109,26 @@ OUT = HERE / "growth_rows"
 
 
 class Contrast(Protocol):
-    """The grown corridor's conductance (module docstring)."""
+    """The grown corridor's conductance (module docstring): the state's factors where it is
+    grown, the boost its conductance added C is charged at, and its first-order gains."""
 
     @property
     def name(self) -> str: ...
 
     @property
-    def kappa(self) -> float: ...
-
-    @property
     def grounded(self) -> bool: ...
+
+    def world(self, g: Growth, on: B) -> tuple[F64, F64, F64 | None]:
+        """(per triangle openness kt, boost b; per cell the grown leak to ground, or None)."""
+        ...
+
+    def c_boost(self, bw: F64) -> F64:
+        """Per triangle the boost a grown triangle's conductance added is counted at."""
+        ...
+
+    def gains(self, g: Growth, st: gcl.State, u: F64) -> F64:
+        """Per triangle the first-order drop in P from growing it."""
+        ...
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -134,17 +148,59 @@ class Road:
     def grounded(self) -> bool:
         return False
 
+    def world(self, g: Growth, on: B) -> tuple[F64, F64, F64 | None]:
+        return (np.where(on, 1.0, g.kt0), np.where(on, self.c_boost(g.bw), g.bw), None)
 
-@dataclass(frozen=True)
-class Grounded:
-    """The corridor a leak to ground: kappa GROUND_KAPPA on the same machinery."""
-    name = "grounded"
-    kappa = GROUND_KAPPA
-    grounded = True
+    def c_boost(self, bw: F64) -> F64:
+        return np.maximum(bw, self.kappa)
+
+    def gains(self, g: Growth, st: gcl.State, u: F64) -> F64:
+        gk, gb = g.grad(st, u)
+        return -(gk * (1.0 - g.kt0) + gb * (self.c_boost(g.bw) - g.bw))
+
+
+@dataclass(frozen=True, kw_only=True)
+class GroundedLeak:
+    """The corridor a leak to ground, so the street itself moves inward: each grown triangle
+    open (openness 1, its boost the ways') and joined to ground by sigma / h^2 per m^2 of it on
+    its cell's diagonal (gap_exits' screened form, as InternalLeak's sigma / open_m^2: here h a
+    fraction of a metre, the corridor held near u 0 across a road's width). Its own sheet
+    conductance is not its conductance, so C is charged as the same corridor would add as a
+    kappa ROAD_KAPPA road (the road-equivalent C: `Croad` in the name). First order: the opening
+    (dP/dkt) and the leak, dP/d(leak_c) = -u_c^2."""
+    h: float
+
+    def __post_init__(self) -> None:
+        if not self.h > 0:
+            raise ValueError(f"h {self.h}: positive")
+
+    @property
+    def name(self) -> str:
+        return f"gl{self.h:g}Croad"
+
+    @property
+    def grounded(self) -> bool:
+        return True
+
+    def leak_t(self, g: Growth) -> F64:
+        """Per triangle its leak once grown: sigma / h^2 per m^2."""
+        return g.sigma * g.area / self.h ** 2
+
+    def world(self, g: Growth, on: B) -> tuple[F64, F64, F64 | None]:
+        leak = np.bincount(g.m.c.cell[on], weights=self.leak_t(g)[on], minlength=g.m.c.n)
+        return np.where(on, 1.0, g.kt0), g.bw, leak
+
+    def c_boost(self, bw: F64) -> F64:
+        return np.maximum(bw, ROAD_KAPPA)
+
+    def gains(self, g: Growth, st: gcl.State, u: F64) -> F64:
+        gk, _ = g.grad(st, u)
+        uc = u[g.m.c.cell]
+        return -gk * (1.0 - g.kt0) + uc * uc * self.leak_t(g)
 
 
 class Connectivity(Protocol):
-    """Where a patch may grow (module docstring)."""
+    """Where a patch may grow (module docstring), and its charge for starting an island."""
 
     @property
     def name(self) -> str: ...
@@ -153,7 +209,9 @@ class Connectivity(Protocol):
         """The patches' sites (triangles), thinned."""
         ...
 
-    def check(self, contrast: Contrast) -> None: ...
+    def charge(self, g: Growth, Pm: sp.csr_matrix) -> F64:
+        """Per patch (row of Pm) its extra cost in P."""
+        ...
 
 
 @dataclass(frozen=True)
@@ -165,23 +223,34 @@ class Attached:
     def sites(self, g: Growth) -> I64:
         return g.thin(g.front(), FRONT_M)
 
-    def check(self, contrast: Contrast) -> None:
-        return None
+    def charge(self, g: Growth, Pm: sp.csr_matrix) -> F64:
+        return np.zeros(Pm.shape[0])
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Free:
-    """Attached's front and a nucleation site anywhere ungrown, one per FREE_M square."""
-    name = "free"
+    """Attached's front and a nucleation site anywhere ungrown, one per FREE_M square; a patch
+    touching nothing grown or attached starts an island and pays `island` (L_P, times P0) on top
+    of its cost (owner 2026-10-27: leaky islands allowed, priced)."""
+    island: float
+
+    def __post_init__(self) -> None:
+        if not self.island >= 0:
+            raise ValueError(f"island {self.island}: non-negative")
+
+    @property
+    def name(self) -> str:
+        return f"free{self.island:g}"
 
     def sites(self, g: Growth) -> I64:
         return np.union1d(g.thin(g.front(), FRONT_M),
                           g.thin(np.flatnonzero(g.step < 0), FREE_M))
 
-    def check(self, contrast: Contrast) -> None:
-        if contrast.grounded:
-            raise ValueError("free and grounded is facility location, not road building (brief): "
-                             "refused")
+    def charge(self, g: Growth, Pm: sp.csr_matrix) -> F64:
+        s = g.attached()
+        near = (np.asarray(g.adj @ s.astype(np.int8)).ravel() > 0) | s
+        touch = np.asarray(Pm @ near.astype(np.float64)).ravel() > 0
+        return np.where(touch, 0.0, self.island * g.P0)
 
 
 class Pick(Protocol):
@@ -273,10 +342,15 @@ class Bridges(Protocol):
     def offer(self, g: Growth, st: gcl.State, u: F64, *, P: float, bar: float,
               cost: Cost) -> list[Bridge]: ...
 
+    def check(self, contrast: Contrast) -> None: ...
+
 
 @dataclass(frozen=True)
 class NoBridges:
     name = "B0"
+
+    def check(self, contrast: Contrast) -> None:
+        return None
 
     def offer(self, g: Growth, st: gcl.State, u: F64, *, P: float, bar: float,
               cost: Cost) -> list[Bridge]:
@@ -299,6 +373,11 @@ class Straight:
     @property
     def name(self) -> str:
         return f"B{self.reach:g}m{self.screen}k{self.top}"
+
+    def check(self, contrast: Contrast) -> None:
+        if contrast.grounded:
+            raise ValueError("bridges between grounded roads: every road sits at u 0, a bridge "
+                             "gains nothing (brief): B0")
 
     def offer(self, g: Growth, st: gcl.State, u: F64, *, P: float, bar: float,
               cost: Cost) -> list[Bridge]:
@@ -327,9 +406,9 @@ class Straight:
             return []
         cell = g.m.c.cell
         du = u[cell[a]] - u[cell[b]]
-        gab = g.sigma * (g.contrast.kappa - 1.0) * ROAD_W / L
+        gab = g.sigma * (g.kc - 1.0) * ROAD_W / L
         bound = gab * du * du
-        rough = bound / cost.of(np.zeros(len(L)), (g.contrast.kappa - 1.0) * ROAD_W * L,
+        rough = bound / cost.of(np.zeros(len(L)), (g.kc - 1.0) * ROAD_W * L,
                                 P0=g.P0)
         # the best pair per end, then the best pairs overall
         o = np.lexsort((-rough, a))
@@ -380,7 +459,7 @@ class Plan:
     def __post_init__(self) -> None:
         if not (self.batch >= 1 and self.sep >= 0 and self.exact >= 0 and self.D > 0):
             raise ValueError(f"{self}: a batch, sep >= 0, exact >= 0 and a budget")
-        self.connectivity.check(self.contrast)
+        self.bridges.check(self.contrast)
 
     @property
     def name(self) -> str:
@@ -390,15 +469,18 @@ class Plan:
 
     @staticmethod
     def of(spec: str) -> Plan:
-        m = re.fullmatch(r"gr\.(k[0-9.e+]+|grounded)\.(att|free)\.(greedy|e[0-9.]+s[0-9]+)"
+        m = re.fullmatch(r"gr\.(k[0-9.e+]+|gl[0-9.]+Croad)\.(att|free[0-9.e-]+)"
+                         r"\.(greedy|e[0-9.]+s[0-9]+)"
                          r"\.N([0-9]+)\.sep([0-9.]+)\.n([0-9.e-]+)s([0-9.e-]+)"
                          r"\.(B0|B[0-9.]+m[0-9]+k[0-9]+)\.K([0-9]+)\.D([0-9.]+)", spec)
         if m is None:
-            raise SystemExit(f"{spec}: a plan is gr.<k<kappa>|grounded>.<att|free>.<greedy|"
+            raise SystemExit(f"{spec}: a plan is gr.<k<kappa>|gl<h>Croad>.<att|free<island>>."
+                             "<greedy|"
                              "e<eta>s<seed>>.N<batch>.sep<m>.n<nu>s<price>.<B0|B<reach>m<screen>"
                              "k<top>>.K<exact>.D<D>")
-        contrast: Contrast = (Grounded() if m[1] == "grounded" else Road(kappa=float(m[1][1:])))
-        conn: Connectivity = Attached() if m[2] == "att" else Free()
+        contrast: Contrast = (GroundedLeak(h=float(m[1][2:-5])) if m[1].startswith("gl")
+                              else Road(kappa=float(m[1][1:])))
+        conn: Connectivity = (Attached() if m[2] == "att" else Free(island=float(m[2][4:])))
         if m[3] == "greedy":
             pick: Pick = Greedy()
         else:
@@ -436,8 +518,10 @@ class Growth:
         self.k = np.full(m.carving.n, EPS)
         self.kt0 = np.asarray(m.terms.value(self.k), dtype=np.float64)
         self.bw = np.asarray(m.b_ways, dtype=np.float64)
-        self.boost = np.maximum(self.bw, contrast.kappa)
-        self.dC_t = self.area * (self.boost - self.kt0 * self.bw)    # a triangle grown: its dC
+        self.cb = contrast.c_boost(self.bw)                          # a grown triangle's, in C
+        self.kc = float(contrast.c_boost(np.ones(1))[0])             # a road's contrast
+        self.dC_t = self.area * (self.cb - self.kt0 * self.bw)      # a triangle grown: its dC
+        self.leak0 = m.sys.graph.leak
         cov = fm.tcov.T.tocsr().astype(np.float64) @ sp.diags(self.area)
         self.cover = (sp.diags(1.0 / np.maximum(np.asarray(cov.sum(axis=1)).ravel(), 1e-300))
                       @ cov).tocsr()
@@ -504,6 +588,16 @@ class Growth:
         _, first = np.unique(key[:, 0] * 10_000_000 + key[:, 1], return_index=True)
         return t[np.sort(first)]
 
+    def islands(self) -> tuple[int, float]:
+        """(the grown components joined to no base triangle, their area in m^2)."""
+        s = self.attached()
+        idx = np.flatnonzero(s)
+        k, lab = connected_components(self.adj[idx][:, idx], directed=False)
+        based = np.zeros(k, dtype=bool)
+        based[lab[self.base[idx]]] = True
+        isl = ~based[lab]
+        return int(k - based.sum()), float(self.area[idx[isl]].sum())
+
     def faces(self) -> int:
         """The region's faces of FACE_M2 and more: components of the ungrown triangles."""
         off = self.step < 0
@@ -519,16 +613,17 @@ class Growth:
     def state(self, on: B) -> gcl.State:
         """The eps world with the triangles `on` grown, its operator assembled and factored."""
         m = self.m
-        kt = np.where(on, 1.0, self.kt0)
-        b = np.where(on, self.boost, self.bw)
+        kt, b, leak = self.contrast.world(self, on)
+        sys = (m.sys if leak is None else
+               m.sys.with_graph(m.sys.graph.with_leak(self.leak0 + leak, live0=m.leak_site.live)))
         fm = m.exits.edge.mesh(gx.boosted(m.fx.fm, b))
         kp, binds = gcl._passage_factors(fm, kt, self.k, m.fill)
-        r = m.sys.graph.reach(fm, kt, kp)
-        data = m.sys.graph.values(r)
-        p = m.sys.graph.pattern
+        r = sys.graph.reach(fm, kt, kp)
+        data = sys.graph.values(r)
+        p = sys.graph.pattern
         A = sp.csr_matrix((data, p.indices, p.indptr), shape=(p.n, p.n))
-        f = m.sys.planned.factor(data, r.unknown)
-        return gcl.State(sys=m.sys, prefix=gcl._NO_ROADS, b=b, fm=fm, k=self.k, kt=kt, kp=kp,
+        f = sys.planned.factor(data, r.unknown)
+        return gcl.State(sys=sys, prefix=gcl._NO_ROADS, b=b, fm=fm, k=self.k, kt=kt, kp=kp,
                          binds=binds, reach=r, A=A, factor=f)
 
     def solve(self, st: gcl.State) -> tuple[F64, float]:
@@ -540,12 +635,12 @@ class Growth:
         on[tris] = True
         return self.solve(self.state(on))[1]
 
-    def gains(self, st: gcl.State, u: F64) -> F64:
-        """Per triangle the first-order drop in P from growing it (module docstring)."""
+    def grad(self, st: gcl.State, u: F64) -> tuple[F64, F64]:
+        """Per triangle (dP/dkt, dP/db) at the state (road_simp._grad)."""
         c, fm = st.sys.cells, st.fm
         gk, gb = rs._grad(c.pe, c.ea, c.eb, fm.pa, fm.pb, fm.T, st.kt, st.kp, st.b, c.pf, c.fc,
                           fm.fa, fm.Tf, u, fm.nt)
-        return -(gk * (1.0 - self.kt0) + gb * (self.boost - self.bw))
+        return np.asarray(gk), np.asarray(gb)
 
     def resistance(self, st: gcl.State, i: int, j: int) -> float:
         """The effective resistance between cells i and j (a unit dipole's solve)."""
@@ -563,9 +658,10 @@ class Growth:
         return float(self.w @ common.MEASURE.ramp(self.X()))
 
     def C(self) -> float:
-        """The conductance the eps world adds (m^2): its sheet less the exact baseline's."""
+        """The conductance the eps world adds (m^2): its sheet less the exact baseline's, a grown
+        triangle's counted at the contrast's c_boost (a grounded corridor's as a road's)."""
         on = self.step >= 0
-        return float(self.area @ (np.where(on, 1.0, self.kt0) * np.where(on, self.boost, self.bw))
+        return float(self.area @ (np.where(on, 1.0, self.kt0) * np.where(on, self.cb, self.bw))
                      - self.sheet0)
 
     def costs(self, Pm: sp.csr_matrix) -> tuple[F64, F64]:
@@ -621,6 +717,8 @@ class Row(NamedTuple):
     faces: int
     n_patches: int
     n_bridges: int
+    islands: int
+    island_m2: float
     bar: float
     t: float
 
@@ -646,27 +744,29 @@ def grow(g: Growth, plan: Plan, *, out: Path, log: Any) -> None:
             bar = (P_prev - P) / last_cost
         D = g.D()
         faces = g.faces()
+        isl, isl_m2 = g.islands()
         rows.append(Row(step=step, P=P, L_P=1.0 - P / g.P0, D=D, C=g.C(),
                         area=float(g.area[g.step >= 0].sum()), faces_patches=faces_p,
-                        faces=faces, n_patches=n_p, n_bridges=n_b, bar=bar,
-                        t=time.time() - t0))
+                        faces=faces, n_patches=n_p, n_bridges=n_b, islands=isl,
+                        island_m2=isl_m2, bar=bar, t=time.time() - t0))
         r = rows[-1]
         log(f"state {step}: L_P {r.L_P:.4f}, D {D:.4f}, C {r.C:.0f} m^2, area {r.area:.0f} m^2, "
             f"loops {faces - faces0} (patches {faces_p - faces0}), built {n_p} + {n_b} bridges, "
+            f"islands {isl} ({isl_m2:.0f} m^2), "
             f"bar {bar:.3g} ({r.t:.0f}s)")
         pd.DataFrame(rows).to_parquet(out / "steps.parquet")
         pd.DataFrame(picks).to_parquet(out / "picks.parquet")
         pd.DataFrame(offered).to_parquet(out / "bridges.parquet")
-        np.save(out / "tri_step.npy", g.step)
+        pd.DataFrame({"step": g.step}).to_parquet(out / "tri_step.parquet")
         if D >= plan.D:
             break
-        gain = g.gains(st, u)
+        gain = plan.contrast.gains(g, st, u)
         sites = plan.connectivity.sites(g)
         Pm = g.patches(sites)
         new = np.asarray(Pm @ g.area)
         dD, dC = g.costs(Pm)
         fo = np.asarray(Pm @ gain)
-        cost = plan.cost.of(dD, dC, P0=g.P0)
+        cost = plan.cost.of(dD, dC, P0=g.P0) + plan.connectivity.charge(g, Pm)
         score = np.where(new >= MIN_NEW_M2, fo / cost, 0.0)
         exact = np.full(len(sites), np.nan)
         for i in np.argsort(-score)[:plan.exact]:
