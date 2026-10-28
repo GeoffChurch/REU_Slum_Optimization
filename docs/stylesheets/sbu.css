@@ -870,3 +870,354 @@ body,
   max-width: 68ch;
   color: var(--sbu-ink);
 }
+
+/* ------------------------------------------------------------------------------ the Demo page */
+
+/* The block's one-line identity under the H1: a fact line, so it reads as metadata, not lede. */
+.md-typeset .sbu-demo-place {
+  font-size: var(--sbu-step--1);
+  color: var(--sbu-ink-muted);
+}
+
+/* ScreenMap's close-up (`data-closeup-pad-m`, the Demo page only): the city map and the close-up
+   side by side where there is room, everything else the widget inserts -- the follow note, the
+   controls, the caption, and the fallback image until it is removed -- across both columns. A grid
+   on the figure itself rather than a wrapper the TypeScript would have to build: the two canvases
+   stay direct children, as the Screening and Explore mounts' one canvas is. */
+.md-typeset figure[data-closeup-pad-m] {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 0.6rem 1.4rem;
+  align-items: start;
+}
+
+.md-typeset figure[data-closeup-pad-m] > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.md-typeset figure[data-closeup-pad-m] > canvas {
+  grid-column: auto;
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-typeset figure[data-closeup-pad-m] > canvas {
+    grid-column: 1 / -1;
+  }
+}
+
+/* The fires near the block: a dated list, the date in the display face beside each report. */
+.md-typeset .sbu-fires {
+  list-style: none;
+  margin: 1.2rem 0 2rem;
+  padding: 0;
+  max-width: none;
+}
+
+.md-typeset .sbu-fires > li {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  gap: 0.2rem 1.4rem;
+  margin: 0;
+  padding: 0.9rem 0 0.5rem;
+  border-top: 1px solid var(--sbu-rule);
+}
+
+.md-typeset .sbu-fires > li:last-child {
+  border-bottom: 1px solid var(--sbu-rule);
+}
+
+.md-typeset .sbu-fires__when {
+  margin: 0;
+  font-family: var(--sbu-display);
+  font-size: var(--sbu-step-1);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.md-typeset .sbu-fires__what p {
+  margin: 0 0 0.45rem;
+}
+
+.md-typeset .sbu-fires__where,
+.md-typeset .sbu-fires__src {
+  font-size: var(--sbu-step--1);
+  color: var(--sbu-ink-muted);
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-typeset .sbu-fires > li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The two run times: the key-figures row, its long range-first value set a step smaller. */
+.md-typeset .sbu-demo-times {
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.md-typeset .sbu-demo-times dd sup {
+  font-family: var(--sbu-body);
+  font-size: 0.55em;
+}
+
+.md-typeset .sbu-footnote {
+  font-size: var(--sbu-step--1);
+  line-height: 1.55;
+  color: var(--sbu-ink-muted);
+}
+
+/* ----------------------------------------------------------------- the build-out widget */
+
+/* Everything below is built by web/src/widgets/build-out.ts inside its <figure>. Its layout answers
+   to the FIGURE's width, not the viewport's -- a container query -- because the content column's
+   width depends on which of Material's sidebars are showing, and the plate and its plots need the
+   column, not the window, to be wide enough to sit side by side. */
+.sbu-buildout {
+  container-type: inline-size;
+}
+
+/* The controls stay in reach while the plate scrolls under them, but only within the figure: sticky
+   inside its own container, just below Material's header (2.4rem in every layout). */
+.sbu-buildout__bar {
+  position: sticky;
+  top: 2.4rem;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+  padding: 0.55rem 0;
+  background: var(--md-default-bg-color);
+  border-top: 1px solid var(--sbu-rule);
+  border-bottom: 1px solid var(--sbu-rule);
+}
+
+.sbu-buildout__views {
+  display: inline-flex;
+  flex-wrap: wrap;
+  padding: 2px;
+  border: 1px solid var(--sbu-rule-strong);
+  border-radius: 999px;
+}
+
+.sbu-buildout__views button {
+  font: inherit;
+  font-size: var(--sbu-step--1);
+  font-weight: 700;
+  padding: 0.2rem 0.85rem;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--sbu-ink-muted);
+  cursor: pointer;
+}
+
+/* Pressed is the brand red with white on it: 8.92:1 in both schemes (the --sbu-red-fill token). */
+.sbu-buildout__views button[aria-pressed="true"] {
+  background: var(--sbu-red-fill);
+  color: #ffffff;
+}
+
+.sbu-buildout__views button:focus-visible,
+.sbu-buildout__budget input:focus-visible {
+  outline: 3px solid var(--sbu-red-ink);
+  outline-offset: 2px;
+}
+
+.sbu-buildout__budget {
+  display: flex;
+  flex: 1 1 14rem;
+  align-items: center;
+  gap: 0.7rem;
+  font-size: var(--sbu-step--1);
+  font-weight: 700;
+  color: var(--sbu-ink-muted);
+}
+
+.sbu-buildout__budget input {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--sbu-red-fill);
+}
+
+.sbu-buildout__budget output {
+  min-width: 3.5ch;
+  font-size: var(--sbu-step-0);
+  color: var(--sbu-ink);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The compact readout: shown only where the plots drop under the plate (below). */
+.md-typeset .sbu-buildout__mini {
+  display: none;
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--sbu-step--1);
+  color: var(--sbu-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sbu-buildout__stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.2rem 1.8rem;
+  margin-top: 1rem;
+  align-items: start;
+}
+
+@container (min-width: 40rem) {
+  .sbu-buildout__stage {
+    grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+  }
+}
+
+@container (max-width: 39.99rem) {
+  .md-typeset .sbu-buildout__mini {
+    display: block;
+  }
+}
+
+/* The plate: the frame is a window onto one sprite sheet, moved by `transform`. The plates are
+   drawn on white in both schemes, like every render on this site (see the dark-mode note above). */
+.sbu-buildout__plate {
+  position: relative;
+  overflow: hidden;
+  background: #ffffff;
+  border: 1px solid var(--sbu-rule-strong);
+  border-radius: 3px;
+}
+
+.md-typeset .sbu-buildout__plate img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.md-typeset .sbu-buildout__read {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0.6rem 0;
+  border-top: 1px solid var(--sbu-rule);
+  border-bottom: 1px solid var(--sbu-rule);
+}
+
+.md-typeset .sbu-buildout__read > div {
+  padding: 0.35rem 0.5rem 0.35rem 0;
+  min-width: 0;
+}
+
+.md-typeset .sbu-buildout__read dt {
+  font-size: var(--sbu-step--1);
+  color: var(--sbu-ink-muted);
+}
+
+.md-typeset .sbu-buildout__read dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+@container (max-width: 30rem) {
+  .md-typeset .sbu-buildout__read {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.sbu-buildout__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.3rem;
+  margin: 0.4rem 0;
+  font-size: var(--sbu-step--1);
+  color: var(--sbu-ink-muted);
+}
+
+/* `hidden` is the widget's switch between the three views' legends; the flex above would
+   otherwise outrank the user-agent rule that hides it. */
+.sbu-buildout__legend[hidden] {
+  display: none;
+}
+
+.sbu-buildout__key {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.sbu-buildout__swatch {
+  display: inline-block;
+  flex: none;
+  width: 1.5rem;
+  height: 0.7rem;
+  border: 1px solid var(--sbu-rule-strong);
+  border-radius: 2px;
+}
+
+.sbu-buildout__ramp {
+  width: 100%;
+  max-width: 24rem;
+}
+
+.sbu-buildout__ramp-bar {
+  height: 0.7rem;
+  border: 1px solid var(--sbu-rule-strong);
+  border-radius: 2px;
+}
+
+.sbu-buildout__ramp-ticks {
+  display: flex;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+}
+
+.sbu-buildout__plots {
+  display: grid;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.md-typeset .sbu-buildout__plot-title {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 0.8rem;
+  margin: 0;
+  font-family: var(--sbu-display);
+  font-size: var(--sbu-step-0);
+  font-weight: 600;
+}
+
+.md-typeset .sbu-buildout__plot-title span + span {
+  font-family: var(--sbu-body);
+  font-size: var(--sbu-step--1);
+  font-weight: 400;
+  color: var(--sbu-ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The axes, gridlines and labels paint in `currentColor` (render/svg.ts): the muted ink here, so
+   the curve and the dot over them carry the weight. */
+.md-typeset .sbu-buildout__chart svg {
+  display: block;
+  overflow: visible;
+  font-size: 0.55rem;
+  color: var(--sbu-ink-muted);
+}
+
+.sbu-buildout__chart .sbu-curve {
+  opacity: 0.6;
+}
+
+.sbu-buildout__chart .sbu-cursor {
+  fill: var(--sbu-ink);
+  stroke: var(--md-default-bg-color);
+  stroke-width: 2.5px;
+}

@@ -15,6 +15,7 @@ import re
 import tempfile
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -1093,3 +1094,124 @@ def test_the_headline_compares_only_what_lens_a_actually_matched(
     figures = gsp._key_figures()
     assert "70.0%" in figures and "95.0%" not in figures
     assert "single-block benchmark region" in figures and "1-block" not in figures
+
+
+# ------------------------------------------------------------------------------- the Demo page
+
+@pytest.fixture
+def demo_body(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
+    """The rendered Demo partial, markers filled -- `explore_body`'s fixture, for docs/demo.md."""
+    import scripts.gen_site_pages as gsp
+
+    monkeypatch.setattr(gsp, "DOCS", tmp_path)
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
+    return gsp._render_partial("demo")
+
+
+def _demo_bundle() -> dict[str, Any]:
+    import json
+    path = ROOT / "examples" / "demo" / "demo.json"
+    assert path.is_file(), f"{path} is missing; the Demo tests would check nothing"
+    out: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return out
+
+
+def test_the_demo_partial_types_no_numerals() -> None:
+    """The partial's header states the rule: every number on the page, the fires' quoted ones
+    included, comes from examples/demo/demo.json through a marker. A digit typed into the prose is
+    a second copy no re-bake moves. Markers are capitals only, so they cannot hide a digit."""
+    text = (ROOT / "docs" / "_partials" / "demo.md").read_text(encoding="utf-8")
+    body = re.sub(r"\A\s*<!--.*?-->", "", text, count=1, flags=re.S)
+    assert "<!-- DEMOFIRES -->" in body, "the comment strip ate the body; this test is vacuous"
+    digits = re.findall(r".{0,30}\d.{0,30}", body)
+    assert not digits, f"digits typed into the Demo partial's prose: {digits}"
+
+
+def test_the_demo_mounts_the_sites_screen_map_with_a_close_up_and_the_build_out(
+        demo_body: str) -> None:
+    """One screen widget on the site, not two: the Demo page's city map is ScreenMap, asking for a
+    close-up; then the build-out. And ONLY the Demo page asks for the close-up -- Screening and
+    Explore keep the markup they had."""
+    assert re.findall(r'data-widget="([a-z-]+)"', demo_body) == ["screen-map", "build-out"]
+    pad = _demo_bundle()["screen"]["closeup_pad_m"]
+    assert f'data-closeup-pad-m="{pad:g}"' in demo_body
+    for page in ("explore", "screening"):
+        assert "data-closeup-pad-m" not in render_page(page), page
+
+
+def test_the_demo_rewrites_its_bundle_urls_for_its_served_depth() -> None:
+    """docs/demo.md serves at <base>/demo/, url_depth 1: every asset it points at needs one `../`,
+    the build-out's bundle and its fallback sheet included."""
+    page = render_page("demo")
+    assert 'data-bundle="../assets/demo/demo.json"' in page
+    assert 'src="../assets/demo/loop_network.webp"' in page
+    for attr in ("src", "href", "data-bundle", "data-bundle-capetown", "data-bundle-nairobi"):
+        assert f'{attr}="assets/' not in page, attr
+
+
+def test_the_demo_ships_every_sheet_the_widget_fetches(monkeypatch: pytest.MonkeyPatch,
+                                                         tmp_path: Path) -> None:
+    """The widget fetches the three views' sheets from beside the bundle (build-out.ts's
+    `besideBundle`); the generator must copy all three there, not only the fallback's."""
+    import scripts.gen_site_pages as gsp
+
+    monkeypatch.setattr(gsp, "DOCS", tmp_path)
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
+    gsp._demo_build_out()
+    sheets = _demo_bundle()["sheets"]
+    for view in ("network", "time", "saved"):
+        assert (tmp_path / "assets" / "demo" / sheets[view]).is_file(), view
+
+
+def test_the_fires_are_listed_and_carry_nothing_a_map_could_draw(demo_body: str) -> None:
+    """Owner, 2026-10-28: the fires go on no map, since some reports' streets cannot be placed.
+    The list shows every fire the bundle has; and the bundle gives a fire no coordinates at all,
+    so no widget could draw one without the producer changing first."""
+    fires = _demo_bundle()["fires"]
+    assert isinstance(fires, list) and fires
+    assert demo_body.count('<p class="sbu-fires__when">') == len(fires)
+    for f in fires:
+        assert set(f) == {"month", "where", "what", "reports"}, f
+        for r in f["reports"]:
+            assert r["url"] in demo_body
+
+
+def test_the_demo_screen_facts_refuse_a_bundle_that_disagrees_with_the_map(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The figure row is baked on research/roadless, the map's bundle on main; a re-bake of one
+    alone must fail the build, not publish a pool the map beside it contradicts."""
+    import json
+
+    import scripts.gen_site_pages as gsp
+
+    bundle = _demo_bundle()
+    assert gsp._demo_screen_facts(), "the committed bundles disagree already"
+    bundle["screen"]["pool"] += 1
+    (tmp_path / "demo.json").write_text(json.dumps(bundle), encoding="utf-8")
+    monkeypatch.setattr(gsp, "DEMO", tmp_path)
+    with pytest.raises(SystemExit, match="disagrees"):
+        gsp._demo_screen_facts()
+
+
+def test_the_topology_headline_leads_with_the_range(demo_body: str) -> None:
+    """Owner, 2026-10-28: the topology time is headed by its range (months to centuries), the
+    middle estimate after it -- read off the bundle's low and high, not typed."""
+    import scripts.gen_site_pages as gsp
+
+    t = _demo_bundle()["topology"]
+    (_, low), (_, high) = gsp._span(t["low_s"]), gsp._span(t["high_s"])
+    assert f"<dd>{low.capitalize()} to {high}<sup>" in demo_body
+
+
+def test_demo_is_generated_gitignored_in_the_nav_and_seen_by_the_widget_guard() -> None:
+    """explore.md's three guards, for demo.md: committed, it drifts; outside nav, it is an orphan
+    `mkdocs build --strict` does not fail on; outside `generated_pages`, a missing widgets.js
+    leaves its two widgets dead behind their fallbacks."""
+    ignored = [line.strip()
+               for line in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()]
+    assert "docs/demo.md" in ignored
+    assert re.search(r"^\s+- Demo: demo\.md$",
+                     (ROOT / "mkdocs.yml").read_text(encoding="utf-8"), flags=re.M)
+    src = (ROOT / "scripts" / "gen_site_pages.py").read_text(encoding="utf-8")
+    block = re.search(r"generated_pages = \(([^)]*)\)", src, flags=re.S)
+    assert block is not None and '"demo.md"' in block.group(1)

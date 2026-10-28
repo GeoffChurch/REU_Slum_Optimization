@@ -62,6 +62,7 @@ outputs/*/.hydra/*
 docs/index.md
 docs/reproduce.md
 docs/explore.md
+docs/demo.md
 docs/methodology/
 docs/results/
 docs/assets/
