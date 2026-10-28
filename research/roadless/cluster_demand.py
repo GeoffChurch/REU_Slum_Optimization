@@ -81,7 +81,7 @@ from cluster_submit.gpuboard import Abstained, Pending, Running, Seen, look
 
 # Re-exported so a guard can replace it (cluster_check.py `demand`, fault any-reason).
 from cluster_submit.gpuboard import waits_for as waits_for
-from cluster_submit.registry import RunRecord
+from cluster_submit.registry import ArrayRecord, RunRecord
 from cluster_submit.remote import Login
 from cluster_submit.slurm import time_seconds
 from pool_summary import ClassLine, Summaries, Summary
@@ -141,10 +141,11 @@ def array_of(job: str) -> str:
     return job.partition("_")[0]
 
 
-def room(rec: RunRecord, running: int) -> int:
-    """How many more of an array's tasks its throttle starts now: RunRecord.gpus (each array's %N)
-    less its tasks running."""
-    return max(0, rec.gpus - running)
+def room(rec: RunRecord, array: ArrayRecord, running: int) -> int:
+    """How many more of `array`'s tasks (of run `rec`) its throttle starts now: RunRecord.gpus
+    (each array's %N; None, unthrottled: every task of the array) less its tasks running."""
+    at_once = len(array.tasks) if rec.gpus is None else rec.gpus
+    return max(0, at_once - running)
 
 
 def finished(rec: RunRecord) -> bool:
@@ -231,6 +232,7 @@ def demand_of(recs: Sequence[RunRecord], seen: Seen, limits: dict[str, float], *
     runs = {chain_base(r) for n in names if (r := run_of(project, n)) is not None}
     runs |= {chain_base(r.name) for r in live}
     owner = {a.job_id: r for r in live for a in r.arrays if a.job_id is not None}
+    array = {a.job_id: a for r in live for a in r.arrays if a.job_id is not None}
     pooled = {a: pools[r.name] for a, r in owner.items() if r.name in pools}
     workers: dict[PoolRun, list[float]] = {}
     for j in running:
@@ -238,7 +240,7 @@ def demand_of(recs: Sequence[RunRecord], seen: Seen, limits: dict[str, float], *
             workers.setdefault(pool, []).append(limits[j.job])
     busy = held([j for j in running if at_tres_alloc(j, pooled)], limits)
     wanted: dict[tuple[str, Bundle], list[float]] = {}
-    left = {a: room(r, sum(1 for j in running if array_of(j.job) == a))
+    left = {a: room(r, array[a], sum(1 for j in running if array_of(j.job) == a))
             for a, r in owner.items()}
     unplaced = elsewhere = 0
     for p in pending:                       # in Slurm's priority order (gpuboard.PENDING)

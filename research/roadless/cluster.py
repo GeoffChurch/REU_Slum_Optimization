@@ -17,20 +17,23 @@ local file.
 `cpu` runs one task per (block, item) on the CPUs of one node and no GPU: a script command with
 `{id}` and `{item}` in it, for every block of the ids and every item of `--items`, so a block's
 items (the arms of an experiment, say) spread over the node's cores rather than running one
-after another in one task. No GPU sizing and no GPU request: every task is CPU only. The node is
-required and is one of CPU_NODES (`--nodelist`: results can differ by machine, so a run says
-where it ran, and every item of a block runs on the one node; two nodes are two runs); so are
-the cores and memory of a task (`--cpus`, `--mem`). `--gpus N`, cluster_submit's throttle, is
-how many of the run's tasks run at once: a run of CPU tasks holds no GPU, so the project's GPU
-budget does not cap it, CPU_NODES does. The bank ships as for `blocks`, and `--unpack` too, but
-each task unpacks its block's tar through cluster_unpack.py, which renames every file into place:
-a block's tasks unpack one tar at once into the checkout they share.
+after another in one task. No GPU sizing and no GPU request: every task is CPU only. Every task
+of a run goes to one node (results can differ by machine, so a run says where it ran, and every
+item of a block runs on the one node; two nodes are two runs): with `--node`, that node of the
+site, pinned (cs.Pinned, `--nodelist`); without, the node cluster_submit places it on at admission
+(cs.Placed: the least-harm node with room, which its record names; cluster_submit's README,
+"Placement"). The cores and memory of a task are required (`--cpus`, `--mem`). `--gpus N`,
+cluster_submit's throttle, is how many of the run's tasks run at once: a run of CPU tasks holds no
+GPU, so the project's GPU budget does not cap it; whether they fit is admission's (README,
+"Admission"). The bank ships as for `blocks`, and `--unpack` too, but each task unpacks its
+block's tar through cluster_unpack.py, which renames every file into place: a block's tasks
+unpack one tar at once into the checkout they share.
 
     uv run python research/roadless/cluster.py setup
     uv run python research/roadless/cluster.py submit blocks <run> --gb G [--node N] [--time T] \
         [--gpus N] [--items <items,|@file>] [--with FILE ...] [--unpack TAR] <ids,|@file> \
         -- <script> <args with {id} [and {item}]>
-    uv run python research/roadless/cluster.py submit cpu <run> --node orion|quadro2 --cpus C \
+    uv run python research/roadless/cluster.py submit cpu <run> [--node N] --cpus C \
         --mem G --items <items,|@file> [--gpus N] [--time T] [--unpack TAR] <ids,|@file> \
         -- <script> <args with {id} and {item}>
     uv run python research/roadless/cluster.py submit steward <w>-steward --at <commit> \
@@ -136,15 +139,13 @@ from pool_worker import Exit
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-# The nodes a `cpu` run may go to, and the most of its tasks each runs at once (`--gpus`): the
-# cluster's two nodes whose GPUs are unusable (sites/ai.toml) and whose CPUs are fine (owner
-# 2026-10-12: "run the 13- and 60-block stages on orion/quadro2"). Slurm allocates whole cores
-# (CR_CORE_MEMORY: a 1-cpu task holds both of a core's threads), so fewer run at once than these
-# allow: 36 single-CPU tasks on orion, 32 on quadro2, less what others hold, and what --mem leaves.
-CPU_NODES = {
-    "orion": 64,        # 72 CPUs, 36 cores; idle on 2026-10-12
-    "quadro2": 40,      # 64 CPUs, 32 cores; shared (another user's jobs: 8 CPUs, 320 of 376 GB)
-}
+# The cards reblock's admitted runs hold at once, at most (Project.max_gpus: a run past it waits,
+# held; owner, 2026-10-03: a shared cluster), and a GPU pool lease's throttle (`throttle`).
+MAX_GPUS = 4
+# The most CPUs of any node of ai (orion's 72; the others' 64: sinfo, 2026-10-28), which the site
+# file does not state: a CPU pool lease's throttle is the most of its workers a node could hold
+# (`throttle`), so it never binds and room stays admission's.
+SITE_CPUS_MAX = 72
 # The shared env of uv.lock (cluster_submit's "Envs": one per lock, built once on the login node,
 # reblock and ext/topology editable against each task's checkout): reblock has no extras, and
 # pyproject's default-groups are every group, cupy and pyamg (`gpu`) among them, so it names none
@@ -199,6 +200,14 @@ def _unpacks(unpack: str | None, ids: list[str]) -> dict[str, Path]:
     return tars
 
 
+def _placement(node: str | None) -> cs.Placement:
+    """Where a `blocks` or `cpu` run goes (cluster_submit's README, "Placement"): `--node`'s node
+    of the site, pinned (`--nodelist`; a node the site file lacks is refused there); without it,
+    the node cluster_submit places it on at admission, of every node it fits (the least-harm one
+    with room, which the run's record names)."""
+    return cs.Placed(among=None) if node is None else cs.Pinned(node=node)
+
+
 def _unpack_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--unpack", metavar="TAR",
                         help="a tar per block, its path with {id}: shipped beside the bank "
@@ -212,6 +221,7 @@ class Blocks:
     env: cs.Env = ENV
     pull: cs.IntoTree = cs.IntoTree("research/roadless", ("*.parquet",))
     routine_exits: frozenset[int] = frozenset()     # every non-zero exit is a failure
+    reaper: cs.NoClaims = cs.NoClaims()             # a task holds nothing past its end
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("ids", help="block ids, comma-separated, or @file of ids")
@@ -219,7 +229,9 @@ class Blocks:
         parser.add_argument("--gb", type=float, required=True,
                             help="the GPU memory each task needs, in GB: its card's size")
         parser.add_argument("--node", help="the node every task runs on (--nodelist; its card "
-                                           "holds --gb): unpinned, the smallest card that does")
+                                           "holds --gb): unpinned, the node cluster_submit "
+                                           "places it on (least harm, with room) of those whose "
+                                           "card does")
         parser.add_argument("--items", help="items, comma-separated, or @file: one task per "
                                             "(block, item), the item in the command's {item}")
         parser.add_argument("--with", dest="extra", type=Path, action="append", default=[],
@@ -253,7 +265,9 @@ class Blocks:
         tasks = tuple(cs.Task(task_line(b, item), args.gb) for b in ids
                       for item in (items or ["{item}"]))
         return cs.RunPlan(
-            tasks=tasks, resources=cs.Resources(cpus=4, mem_gb=64, time=args.time, node=args.node),
+            tasks=tasks,
+            resources=cs.Resources(cpus=4, mem_gb=64, time=args.time,
+                                   placement=_placement(args.node), expected=None),
             inputs=(workdir / "bank.pkl", *args.extra, *unpack.values()),
             prelude=PRELUDE, describe=(f"{len(ids)} blocks: {line}",))
 
@@ -264,17 +278,20 @@ class Blocks:
 
 @dataclass(frozen=True)
 class Cpu:
-    """One task per (block, item), CPU only, on one node of CPU_NODES (the module's docstring)."""
+    """One task per (block, item), CPU only, on one node (the module's docstring)."""
 
     name: str = "cpu"
     env: cs.Env = ENV
     pull: cs.IntoTree = cs.IntoTree("research/roadless", ("*.parquet",))
     routine_exits: frozenset[int] = frozenset()     # every non-zero exit is a failure
+    reaper: cs.NoClaims = cs.NoClaims()             # a task holds nothing past its end
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("ids", help="block ids, comma-separated, or @file of ids")
-        parser.add_argument("--node", required=True, choices=sorted(CPU_NODES),
-                            help="the node every task runs on (--nodelist)")
+        parser.add_argument("--node",
+                            help="the node every task runs on, any of the site's (--nodelist): "
+                                 "unpinned, the node cluster_submit places it on (least harm, "
+                                 "with room)")
         parser.add_argument("--cpus", type=int, required=True,
                             help="cores per task (sbatch --cpus-per-task; 1 for a "
                                  "single-threaded task)")
@@ -295,10 +312,6 @@ class Cpu:
         _script_at(args, sha)
         if args.cpus < 1 or args.mem < 1:
             raise SystemExit(f"--cpus and --mem are at least 1: {args.cpus}, {args.mem}")
-        at_once = CPU_NODES[args.node]
-        if args.gpus > at_once:
-            raise SystemExit(f"--gpus {args.gpus}: at most {at_once} tasks at once on "
-                             f"{args.node} (CPU_NODES)")
         ids, items = _listed(args.ids), _listed(args.items)
         for what, names in (("ids", ids), ("items", items)):
             if len(set(names)) != len(names) or not all(names):
@@ -317,9 +330,10 @@ class Cpu:
         return cs.RunPlan(
             tasks=tasks,
             resources=cs.Resources(cpus=args.cpus, mem_gb=args.mem, time=args.time,
-                                   node=args.node),
+                                   placement=_placement(args.node), expected=None),
             inputs=(workdir / "bank.pkl", *unpack.values()), prelude=PRELUDE,
-            describe=(f"{len(ids)} blocks x {len(items)} items on {args.node}: {line}",))
+            describe=(f"{len(ids)} blocks x {len(items)} items, "
+                      f"{_placement(args.node).text()}: {line}",))
 
     def more(self, ctx: cs.Context, rec: cs.RunRecord, *,
              killed: tuple[str, ...]) -> cs.Continue | cs.Done:
@@ -331,8 +345,14 @@ class Cpu:
 #: The waves' home, below the cluster home (pool.py's, the one definition): each wave's queue,
 #: inputs, summary, ledger and final queue are in <WAVES>/<w>/ (the spec's 3.2).
 WAVES = pool.WAVES
-#: Where every wave's steward runs (the plan's Ruling 11): a node of CPU_NODES.
+#: Where every wave's steward runs (the plan's Ruling 11), pinned by choice (cs.Pinned): orion,
+#: whose GPUs are unusable and whose CPUs are fine.
 STEWARD_NODE = "orion"
+#: How old an allocation the steward still acts on, minutes: the GPU file's `stale_after_minutes`
+#: (GeoffChurch/cluster_submit's sites/ai.gpu.toml, 30; the keeper publishes it in harm.json),
+#: restated here because the launch side reads no GPU file and a plan has no read of the cluster.
+#: An allocation older than this asks nobody aside (`pool.py steward --stale-after-minutes`).
+STEWARD_STALE_AFTER_MINUTES = 30.0
 #: A steward's lease, the active tier's 2 h (Ruling 9): it retires with 75 before its end, and its
 #: own `more` continues it while its wave is live.
 STEWARD_LEASE_MINUTES = 120.0
@@ -372,22 +392,34 @@ def _rung_checked(ladder: Ladder, mem: int) -> None:
                          f"({', '.join(str(r) for r in ladder.rungs)} GB)")
 
 
-def throttle(ladder: Ladder, node: str) -> int:
-    """A pool lease's `--gpus` (Ruling 10), so a lease the market widens runs whole: a CPU
-    class's, on a node of CPU_NODES, that node's; a GPU class's, the project's budget. A CPU class
-    on another node is refused (SystemExit)."""
+def throttle(ladder: Ladder) -> int:
+    """A pool lease's `--gpus` (Ruling 10), so a lease the market widens runs whole: a GPU
+    class's, the project's cap (MAX_GPUS); a CPU class's, its own, the most of its workers any node
+    of the site holds (SITE_CPUS_MAX over its CPUs a worker), which no width the market gives it
+    reaches, so it never binds: whether its workers fit a node is admission's (cluster_submit's
+    README, "Admission"), on whichever node of the site the pool is pinned to."""
     if ladder.cards:
-        return PROJECT.max_gpus
-    if node not in CPU_NODES:
-        raise SystemExit(f"a CPU class's pool runs on a node of CPU_NODES "
-                         f"({', '.join(sorted(CPU_NODES))}), not {node}")
-    return CPU_NODES[node]
+        return MAX_GPUS
+    return SITE_CPUS_MAX // ladder.cpus
 
 
 def _preset_argument(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--preset", required=True, choices=sorted(LADDERS),
                         help="the wave's ladder (pool_ladder.LADDERS): its cards, CPUs and "
                              "rungs, and its lease's length")
+
+
+@dataclass(frozen=True)
+class StewardReaps:
+    """The reaper of the pool and long runs (cs.Reaper; cluster_submit's README, "Reapers"): their
+    workers hold claims on jobs in the wave's queue (pool_queue), which outlive a worker Slurm
+    kills, but the wave's steward reaps them each round on squeue's word (pool_steward._reap,
+    pool_queue.reap: a claim whose worker's job squeue no longer runs), so the sync that finishes
+    one of their runs has nothing to report."""
+
+    def reap(self, ctx: cs.Context, remote: Remote, rec: cs.RunRecord,
+             tasks: tuple[cs.Ended, ...]) -> None:
+        pass
 
 
 @dataclass(frozen=True)
@@ -399,6 +431,7 @@ class Pool:
     env: cs.Env = ENV
     pull: cs.IntoTree = cs.IntoTree("research/roadless", ("*.parquet",))
     routine_exits: frozenset[int] = frozenset({int(Exit.RETIRED)})   # retired: 75
+    reaper: StewardReaps = StewardReaps()           # its claims are the steward's to reap
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--wave", required=True, help="the wave whose jobs its workers claim")
@@ -412,7 +445,7 @@ class Pool:
         ladder = LADDERS[args.preset]
         wave = _wave(args.wave)
         _rung_checked(ladder, args.mem)
-        at_once = throttle(ladder, args.node)
+        at_once = throttle(ladder)
         if args.gpus > at_once:
             raise SystemExit(f"--gpus {args.gpus}: at most {at_once} workers at once of a "
                              f"{ladder.name} pool on {args.node} (Ruling 10)")
@@ -421,8 +454,10 @@ class Pool:
                 f"--class {cls}")
         return cs.RunPlan(
             tasks=(cs.Task(line, CARD_GB if ladder.cards else 0.0),),
+            # expected None: a lease's walltime is its length, its workers claiming jobs to its end
             resources=cs.Resources(cpus=ladder.cpus, mem_gb=args.mem,
-                                   time=slurm_time(ladder.lease_minutes), node=args.node),
+                                   time=slurm_time(ladder.lease_minutes),
+                                   placement=cs.Pinned(node=args.node), expected=None),
             inputs=(), prelude=(TASK_ENV,),
             describe=(f"a lease of wave {wave}'s pool of {cls} ({ladder.name}) on {args.node}: "
                       f"{line}",))
@@ -460,6 +495,7 @@ class Steward:
     env: cs.Env = ENV
     pull: WaveRecord = WaveRecord()
     routine_exits: frozenset[int] = frozenset({int(Exit.RETIRED)})   # retired: 75
+    reaper: cs.NoClaims = cs.NoClaims()     # it claims no job; its wave's state is the queue's
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--wave", required=True, help="the wave it stewards")
@@ -469,16 +505,17 @@ class Steward:
 
     def plan(self, args: argparse.Namespace, workdir: Path, *, sha: str) -> cs.RunPlan:
         wave = _wave(args.wave)
-        market = PROJECT.gpu_market
-        if market is None:
+        if not PROJECT.gpu_market:
             raise SystemExit("reblock is in no GPU market: a steward has no allocation to read")
-        minutes = market.stale_after.total_seconds() / 60
         line = (f"python -u research/roadless/pool.py steward --wave {wave} "
-                f"--board {shlex.quote(args.board)} --stale-after-minutes {minutes:g}")
+                f"--board {shlex.quote(args.board)} "
+                f"--stale-after-minutes {STEWARD_STALE_AFTER_MINUTES:g}")
         return cs.RunPlan(
             tasks=(cs.Task(line, 0.0),),
+            # its walltime is its lease (it retires before its end)
             resources=cs.Resources(cpus=STEWARD.cpus, mem_gb=math.ceil(STEWARD.mem_gb),
-                                   time=slurm_time(STEWARD_LEASE_MINUTES), node=STEWARD_NODE),
+                                   time=slurm_time(STEWARD_LEASE_MINUTES),
+                                   placement=cs.Pinned(node=STEWARD_NODE), expected=None),
             inputs=(), prelude=(TASK_ENV,),
             describe=(f"wave {wave}'s steward on {STEWARD_NODE}: {line}",))
 
@@ -501,6 +538,7 @@ class Long:
     env: cs.Env = ENV
     pull: cs.IntoTree = cs.IntoTree("research/roadless", ("*.parquet",))
     routine_exits: frozenset[int] = frozenset()     # every non-zero exit is a failure
+    reaper: StewardReaps = StewardReaps()           # its claim is the steward's to reap
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("--wave", required=True, help="the job's wave")
@@ -524,8 +562,11 @@ class Long:
                 f"--mem {args.mem}")
         return cs.RunPlan(
             tasks=(cs.Task(line, CARD_GB if ladder.cards else 0.0),),
+            # expected None, the walltime: its plan has only the walltime (`wave <w> long`'s
+            # LONG_TIME times the job's estimate, capped), not the estimate itself
             resources=cs.Resources(cpus=ladder.cpus, mem_gb=args.mem,
-                                   time=slurm_time(args.minutes), node=args.node),
+                                   time=slurm_time(args.minutes),
+                                   placement=cs.Pinned(node=args.node), expected=None),
             inputs=(), prelude=(TASK_ENV,),
             describe=(f"wave {wave}'s job {args.job} on {args.node}, alone: {line}",))
 
@@ -657,7 +698,7 @@ def pool_more(ctx: cs.Context, rec: cs.RunRecord, *,
       (GeoffChurch/mycooc's lesson 5: a lease whose worker sat idle to its walltime has nothing
       to continue for);
     - no job of its class pending on its node: Done;
-    - else Continue at the market's width (`cs.launches.width`; in shadow, its own width), at
+    - else Continue at the market's width (`cs.launches.width`; in off mode, its own width), at
       most the jobs pending."""
     a = ctx.parse(rec.argv)
     wave: str = a.wave
@@ -799,7 +840,7 @@ def _start_name(ctx: cs.Context, wave: str, node: str, cls: str) -> str:
 def _pool_args(*, wave: str, ladder: Ladder, node: str, rung: int) -> tuple[str, ...]:
     """A pool's submit arguments after its run's name (no --at: the template's commit is)."""
     return ("--wave", wave, "--preset", ladder.name, "--node", node, "--mem", str(rung),
-            "--gpus", str(throttle(ladder, node)))
+            "--gpus", str(throttle(ladder)))
 
 
 def _pool_of(a: argparse.Namespace) -> cluster_demand.PoolRun:
@@ -929,20 +970,26 @@ class Waves:
 # pull, only once it has been out of squeue that long (cluster_submit's "Settling a run": mycooc's
 # ev2-lib-20k-c, finished a second after it left squeue, lost its last row so, 2026-10-21).
 # market: the disk market of ai's home (its keeper holds reblock's files once a launch publishes
-# them). checkout_setup: nothing to link into a checkout. gpu_market: ai's GPU market (owner
+# them). checkout_setup: nothing to link into a checkout. gpu_market: in ai's GPU market (owner
 # 2026-10-21, at GeoffChurch/mycooc's asking): reblock states its demand there (cluster_demand,
 # after the verbs of STATES_DEMAND), so the keeper attributes what its tasks hold and charges it.
-# Never `keeper install` from here: the keeper is GeoffChurch/mycooc's to install, and the newest
-# install wins (one from here would deploy this pin's cluster_submit, market file and GPU file over
-# mycooc's). campaigns: Waves, whose pool runs are its leases (the market widens and starts them
-# in active mode), and none of whose other runs (a steward, a long run, a `blocks` or `cpu` run)
-# is one.
+# harm: the keeper's published harm (harm.json, prices.json on ai's board), which every launch is
+# admitted by (cluster_submit's README, "Admission"). hand_weight: the weight of reblock's hand
+# account (its runs no campaign claims: `blocks`, `cpu`, stewards, long runs) beside its one
+# campaign, CAMPAIGN_WEIGHT, in the market weights' scale; 1.0, the two alike, is the owner's call
+# to change. From this pin on (fair-reference admission, 13e9544), `keeper install` from here is
+# how the keeper is installed (the owner's plan: the new keeper, with the schema 3 GPU file, from
+# reblock at this pin); the newest install wins, deploying its pin's cluster_submit, market file
+# and GPU file over any other project's. campaigns: Waves, whose pool runs are its leases (the
+# market widens and starts them in active mode), and none of whose other runs (a steward, a long
+# run, a `blocks` or `cpu` run) is one.
 PROJECT = cs.Project(name="reblock", repo=REPO, cluster=cs.load_cluster("ai"),
                      kinds=(Blocks(), Cpu(), Pool(), Steward(), Long()),
-                     max_gpus=4,   # owner, 2026-10-03: a shared cluster
+                     max_gpus=MAX_GPUS,
                      checkout_setup=(), sacct_grace=timedelta(minutes=10),
                      attribute_cache=timedelta(seconds=60),
-                     market=cs.load_market("ai"), gpu_market=cs.load_gpu_market("ai"),
+                     market=cs.load_market("ai"), gpu_market=True, harm=cs.PublishedHarm(),
+                     hand_weight=1.0,
                      campaigns=Waves(registry=Registry(REPO)))
 
 # reblock's one campaign in the GPU market (the controller's ruling, 2026-10-21: one for the

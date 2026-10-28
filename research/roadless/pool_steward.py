@@ -11,7 +11,7 @@ gpu_demand's step-aside): one CPU lease per wave that runs a round every poll (`
    past its walltime no strike, the job's estimate raised). Never on elapsed time (mycooc's
    lesson 2); a squeue that fails, or answers without the steward's own task, reaps nobody (lesson
    15: an unreachable scheduler is no verdict).
-3. **Aside** (Ruling 5): the market's allocation through its mode (shadow asks nobody), unless
+3. **Aside** (Ruling 5): the market's allocation through its mode (off asks nobody), unless
    older than the market's stale_after; for each (node, bundle) the campaign yields there that is
    a class of this wave's ladder, its share of those units among the live waves' workers there
    (pool_summary.aside_share: the other waves counted by their latest summaries, one that does

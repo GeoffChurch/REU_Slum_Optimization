@@ -118,11 +118,12 @@ stored rows under `<rows>`, every block's area from its consolidated_rows/summar
   rate is the family's.
 - `plan`: plan_wave of the CLASS_BLOCKS stored lineup blocks with the most stored work (4287 among
   them: its arterial network's 3.0 h, the long lane's) and the seven methods, over CLASS_NODES
-  with pool_plan.USABLE_GB: each job's lane both ways against its estimate, as in `stored`;
-  every job of a block on one node, its group the block, and that node's usable memory holding
-  each of them (a pool job's rung, a long job's need: the g3 blocks' fitted cycle_desire scoring
-  is past quadro2's 248 GB); the placement replayed, the groups longest-processing-time first on
-  their pool jobs' minutes, each to the least loaded of the nodes that hold it.
+  (every node of the site) with pool_plan.USABLE_GB: each job's lane both ways against its
+  estimate, as in `stored`; every job of a block on one node, its group the block, and that node's
+  usable memory holding each of them (a pool job's rung, a long job's need: the g3 blocks' fitted
+  cycle_desire scoring is past the 248 GB of every node but orion); the placement replayed, the
+  groups longest-processing-time first on their pool jobs' minutes, each to the least loaded of
+  the nodes that hold it.
 Faults: `median-rate` (the fit's rate the median per-km2 rate, not the worst: the recomputation
 fails), `no-fit-margin` (the fit without its 1.5: 62803 is classed below its measured peak),
 `family-rate` (every item fitted at the family's rate: the cheap methods' recomputation fails),
@@ -235,7 +236,7 @@ the steward's own STEWARD_TASK among them, or a failure), no allocation unless a
   summaries), then two rounds each under a hand-made allocation (the keeper's JSON, read back)
   in which the campaign yields ASIDE_YIELDS (3) units of m4's bundle on quadro2: `active`, the
   workers each wave has asked after each round 2, 1, then 2, 1 (none more); `stale`, the
-  allocation older than STALE_AFTER, and `shadow`, its mode shadow: none; `ghost`, beside them a
+  allocation older than STALE_AFTER, and `off`, its mode off: none; `ghost`, beside them a
   dead steward's CLOSED summary written STALE_AFTER and a minute before, counting GHOST_WORKERS
   (6) workers there: it gets no share (2, 1, 2, 1) and the first wave's ledger names it as stale;
   `unreadable`, beside them a summary of another format: left out (2, 1, 2, 1) and named as
@@ -360,7 +361,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 import numpy as np
 import pandas as pd
-from cluster_submit import Bundle
+from cluster_submit import Bundle, load_cluster
 from cluster_submit.context import STAMP
 from cluster_submit.gpu import (
     Allocation,
@@ -947,7 +948,10 @@ class Guard(NamedTuple):
 
 # ---- class ----------------------------------------------------------------------------------
 
-CLASS_NODES = ("orion", "quadro2")
+#: The nodes `class` and `plan` plan a wave over: every node of the site, a CPU wave's pools going
+#: to any of them (pinned there; whether a lease fits is admission's), each with its usable memory
+#: (pool_plan.USABLE_GB).
+CLASS_NODES = tuple(n.name for n in load_cluster("ai").nodes)
 CLASS_ITEM = "cycle_native_betweenness_contrast"    # leave-one-out: cycle_desire's proposals
 CLASS_BLOCKS = 12        # plan: the stored lineup blocks with the most stored work
 # Facts of the stored rows (2026-10-21) that no reader supplies, pinning the scoring-only ruling
@@ -2336,7 +2340,7 @@ def aside(_args: list[str]) -> list[str]:
     for name, mode, age, third, want in (
             ("active", "active", fresh, None, (2, 1, 2, 1)),
             ("stale", "active", stale, None, (0, 0, 0, 0)),
-            ("shadow", "shadow", fresh, None, (0, 0, 0, 0)),
+            ("off", "off", fresh, None, (0, 0, 0, 0)),
             ("ghost", "active", fresh, _ghost(t0 - stale), (2, 1, 2, 1)),
             ("unreadable", "active", fresh, odd, (2, 1, 2, 1))):
         with tempfile.TemporaryDirectory(prefix="pool_check-") as tmp:

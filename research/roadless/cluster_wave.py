@@ -6,7 +6,7 @@ with the plan's Rulings 4, 7 and 12): a wave submitted whole, then read and stee
         [--unpack TAR] [--with FILE ...] [--board PATH] [--dry] <ids,|@file> \
         -- <script> <args with {id} [and {item}]>
     $C wave <w> status                  # its summary, reaps, long jobs and classes unserved, runs
-    $C wave <w> pools                   # shadow mode: a first lease per class with pending jobs
+    $C wave <w> pools                   # off mode: a first lease per class with pending jobs
     $C wave <w> long                    # a long run for each LONG job without one
     $C wave <w> retry <id,...>|failed   # a request its steward applies
     $C wave <w> cancel                  # a request, and its pool and long runs cancelled
@@ -25,7 +25,8 @@ with the plan's Rulings 4, 7 and 12): a wave submitted whole, then read and stee
    exactly when --items is given; --unpack's tars end in `.tar` (the steward deletes the wave's
    inputs/*.tar at its end). Each of --nodes has its usable memory known (pool_plan.USABLE_GB) and
    serves the preset: the pool the market would start there (Waves.template's arguments) plans and
-   routes, so a CPU ladder is refused off CPU_NODES and a GPU one on a node of unusable cards.
+   routes, so a node the site file lacks is refused, and a GPU ladder on a node of unusable cards
+   (a CPU ladder serves any node of the site: whether its workers fit is admission's).
 2. The bank (common.write_bank, every id checked: a misspelt one is refused before anything is
    planned), the areas (pool_plan.areas_of), the estimator (the family's rows, the earlier waves'
    records, FIT_MIN_KM2 and FIT_MIN_BLOCKS) and the seed (pool_plan.plan_wave: one job per (block,
@@ -61,14 +62,14 @@ and a stored or measured one, whose work has finished within the partition befor
 
 `status`: the summary (one ssh call) by node and class, the workers reaped, the LONG jobs with no
 unfinished long run (`wave <w> long` submits them), the classes with jobs pending and no pool lease
-of the wave there (the market starts them as the allocation gives them units; in shadow mode,
+of the wave there (the market starts them as the allocation gives them units; in off mode,
 `wave <w> pools`), and the wave's runs in the registry with their states.
 
-`pools` (shadow mode only, where the market starts nothing; refused in active mode, where it
-does): a first lease for each (node, class) with jobs pending and no pool lease of the wave there,
-as Waves.template names and argues it (`<w>-<node>-<class>-s<N>`, `_pool_args`), at the wave's
-commit. A lease "there" is a pool run of the wave that runs, or whose continuation is undecided
-(cluster.undone).
+`pools` (off mode only, harm.json's, where nothing acts on the allocation and the market starts
+nothing; refused in active mode, where it does): a first lease for each (node, class) with jobs
+pending and no pool lease of the wave there, as Waves.template names and argues it
+(`<w>-<node>-<class>-s<N>`, `_pool_args`), at the wave's commit. A lease "there" is a pool run of
+the wave that runs, or whose continuation is undecided (cluster.undone).
 
 `long`: a long run for each LONG job of the summary (pool_summary.LongJob, sized from it) with no
 unfinished long run, `<w>-long-<job>`, or `<w>-long-<job>-r<N>` when the registry has that.
@@ -119,10 +120,11 @@ import row_marker
 from cluster_submit.arrays import route
 from cluster_submit.cli import UNITS_DIR, parser
 from cluster_submit.context import Context, Shell, utcnow
-from cluster_submit.gpu import SHADOW
+from cluster_submit.gpu import OFF
 from cluster_submit.project import NAME
 from cluster_submit.registry import Registry, RunRecord
 from cluster_submit.remote import SubprocessRunner
+from cluster_submit.room import mode_of
 from cluster_submit.submit import throttle_checked
 from pool_ladder import LADDERS, Ladder, class_name
 from pool_steward import BANK, INPUTS, REQUESTS, SEED, read_request
@@ -426,7 +428,7 @@ def _servable(*, wave: str, ladder: Ladder, nodes: Sequence[str], commit: str,
             "submit", cluster.Pool.name, f"{wave}-{n}-check", "--dry", "--at", commit,
             *cluster._pool_args(wave=wave, ladder=ladder, node=n, rung=ladder.rungs[0])])
         plan = cluster.Pool().plan(args, work, sha=commit)
-        arrays, too_big = route(PROJECT.cluster, plan.tasks, node=plan.resources.node)
+        arrays, too_big = route(PROJECT.cluster, plan.tasks, placement=plan.resources.placement)
         if too_big:
             raise SystemExit(f"{n}'s card holds no {ladder.name} worker")
         throttle_checked(PROJECT, arrays, args.gpus)
@@ -491,7 +493,7 @@ def _print_plan(seed: pq.Seed, *, nodes: Sequence[str], longs: Sequence[tuple[Ca
     print(f"  estimated: {lad.cards * hours:.1f} card-hours, {lad.cpus * hours:.1f} CPU-hours "
           f"({hours:.1f} job-hours, {lad.cards} cards and {lad.cpus} CPUs a job)")
     print("  no pool is submitted: the steward's first summary puts each class in the next "
-          "sync's demand, and the market starts its leases (Waves.template; in shadow mode, "
+          "sync's demand, and the market starts its leases (Waves.template; in off mode, "
           f"`wave {h.wave} pools`)")
 
 
@@ -651,7 +653,7 @@ def _status(edge: Edge, wave: str) -> Ran:
                       "demanded, until a person, having looked, submits a pool run of it")
                 continue
             print(f"  no pool: {x.node} {x.cls}, {x.pending} pending: the market starts one as "
-                  f"the allocation gives it units (in shadow mode: `cluster.py wave {wave} "
+                  f"the allocation gives it units (in off mode: `cluster.py wave {wave} "
                   "pools`)")
     else:
         print(f"wave {wave}: its summary does not read ({got.unread[wave]})")
@@ -665,10 +667,10 @@ def _status(edge: Edge, wave: str) -> Ran:
 
 def _pools(edge: Edge, wave: str) -> Ran:
     ctx = edge.ctx
-    mode = cs.launches.mode_of(PROJECT)
-    if mode.name != SHADOW.name:
+    mode = mode_of(ctx)
+    if mode.name != OFF.name:
         raise SystemExit(f"the GPU market is in {mode.name} mode: it starts wave {wave}'s pools "
-                         f"from Waves.template (Ruling 4); `wave {wave} pools` is shadow mode's")
+                         f"from Waves.template (Ruling 4); `wave {wave} pools` is off mode's")
     _live(ctx, wave)
     s = cluster.wave_summary(ctx, wave)
     commit = s.commit
@@ -832,7 +834,7 @@ def _steer_parser() -> argparse.ArgumentParser:
     verbs = ap.add_subparsers(dest="verb", required=True)
     verbs.add_parser("status", help="its summary, reaps, long jobs and classes unserved, runs"
                      ).set_defaults(run=lambda edge, a: _status(edge, a.wave))
-    verbs.add_parser("pools", help="shadow mode: a first lease per class with pending jobs"
+    verbs.add_parser("pools", help="off mode: a first lease per class with pending jobs"
                      ).set_defaults(run=lambda edge, a: _pools(edge, a.wave))
     verbs.add_parser("long", help="a long run for each LONG job without one"
                      ).set_defaults(run=lambda edge, a: _long(edge, a.wave))

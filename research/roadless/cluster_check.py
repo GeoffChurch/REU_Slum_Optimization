@@ -32,10 +32,12 @@ it exits 1 when it fails as it is, and under a fault exits 0 when it fails (the 
 names the fault when it does not. `both-ways` runs each guard as it is and under each of its
 faults, in one process, and exits 1 naming every run not as expected.
 
-`cpu`: a `cpu` run on each node of CPU_NODES at its own throttle is one CPU array pinned there
-(`--nodelist`), with no GPU request, the given cores and memory, every (block, item) one task that
-unpacks the block's tar through cluster_unpack.py and runs the command with both placeholders
-filled; a run without `--node` is refused, and one past the node's throttle. The tars are empty
+`cpu`: a `cpu` run on each node of the site (any of them: a CPU run's node is any the site file
+names), at a throttle of its own (CPU_THROTTLES: uncapped, room is admission's), is one CPU array
+pinned there (`--nodelist`), and one without `--node` one CPU array placed by cluster_submit at
+admission (cs.Placed: no `--nodelist`); each with no GPU request, the given cores and memory,
+every (block, item) one task that unpacks the block's tar through cluster_unpack.py and runs the
+command with both placeholders filled. A `--node` the site file lacks is refused. The tars are empty
 stand-ins (a plan checks only that they exist). The command is gap_calib.py's `preset`, a
 (block, item) task.
 
@@ -109,12 +111,13 @@ read as the login node reads them:
 `kinds`: each kind planned from a command line at HEAD (as a dry submit plans it, routed and
 throttle-checked): a `pool` of cpu-score at 12 GB on quadro2 is one CPU array pinned there, 2
 CPUs, 12 GB, 2:00:00 (its sbatch header too), no inputs, its one line `pool.py work --wave w
---node quadro2 --class m12`; one of gpu-presets at 32 GB on tesla1 one array of tesla1's card,
-its task asking 8 GB of it, 4 CPUs and 32 GB, `--class g32`; refused: a gpu-presets pool on orion
-(its cards unusable), a `--mem` that is no rung of the preset, a cpu-score pool on tesla1 (no
-node of CPU_NODES, whose throttle it would run at: Ruling 10) and one past quadro2's throttle; a
-`steward` lands on orion with 2 CPUs and 3 GB for 2:00:00, its line `pool.py steward --wave w
---board cluster_submit/market --stale-after-minutes 30` (the market's stale_after); a `long` of
+--node quadro2 --class m12`, and so on tesla1 (a CPU class serves any node of the site); one of
+gpu-presets at 32 GB on tesla1 one array of tesla1's card, its task asking 8 GB of it, 4 CPUs and
+32 GB, `--class g32`; refused: a gpu-presets pool on orion (its cards unusable), a `--mem` that is
+no rung of the preset, a cpu-score pool on a node the site file lacks, and one past its class's
+throttle (cluster.throttle, Ruling 10: 36, the most of its workers a node holds); a `steward`
+lands on orion with 2 CPUs and 3 GB for 2:00:00, its line `pool.py steward --wave w --board
+cluster_submit/market --stale-after-minutes 30` (STEWARD_STALE_AFTER_MINUTES); a `long` of
 90 GB and 3000 minutes asks 90 GB and 2-02:00:00, its line `pool.py work --wave w --job 7 --mem
 90` (its worker's memory limit the run's own), and one of 7 days and a minute is refused.
 `Waves.lease` of each one's record: a pool's `Lease("reblock", node, its class's bundle)`, which
@@ -158,7 +161,8 @@ lease of `b` there already named b-quadro2-m12-s1, a live wave `c` whose summary
 live wave `d` whose summary names a ladder LADDERS lacks (no-such, with 9 jobs pending there).
 The template for (quadro2, 0/2/12) is `b`'s: kind `pool`, run b-quadro2-m12-s2, commit `b`'s
 queue's (HEAD^, its summary's: the commit its workers check the queue against, not its
-steward's), args `--wave b --preset cpu-score --node quadro2 --mem 12 --gpus 40`; and it passes
+steward's), args `--wave b --preset cpu-score --node quadro2 --mem 12 --gpus 36` (cpu-score's
+throttle, Ruling 10: 72 CPUs over its 2 a worker); and it passes
 every refusal of cluster_submit's `launches.start`, by launches' own code: its arguments parsed
 with `--at` its commit read that commit and no --dry, `chain_base` of its run is the run, the
 registry lacks it, the pool kind's plan of it passes `launches.line_checked` for that node and
@@ -318,7 +322,7 @@ def _plan(argv: list[str], workdir: Path, *, sha: str
     kind = {k.name: k for k in PROJECT.kinds}[args.kind]
     workdir.mkdir(parents=True, exist_ok=True)
     plan = kind.plan(args, workdir, sha=sha)
-    arrays, too_big = route(PROJECT.cluster, plan.tasks, node=plan.resources.node)
+    arrays, too_big = route(PROJECT.cluster, plan.tasks, placement=plan.resources.placement)
     if too_big:
         raise SystemExit(f"{len(too_big)} tasks too big for any card")
     throttle_checked(PROJECT, arrays, args.gpus)
@@ -336,6 +340,11 @@ def _refused(argv: list[str], workdir: Path, *, sha: str) -> str:
     raise AssertionError(f"planned, not refused: {argv}")
 
 
+#: `cpu`'s throttles, taken in turn over the site's nodes: a CPU run's `--gpus` is its own, uncapped
+#: by the project's cards (room is admission's), so one past what a node's cores hold plans too.
+CPU_THROTTLES = (36, 64, 200)
+
+
 def check_cpu(ids: list[str], items: list[str]) -> None:
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
@@ -344,33 +353,40 @@ def check_cpu(ids: list[str], items: list[str]) -> None:
                 pass
         common = ["--cpus", "1", "--mem", "4", "--time", "2:00:00", "--items", ",".join(items),
                   "--unpack", str(tmp / "{id}.tar"), ",".join(ids), *COMMAND]
-        for node, at_once in cluster.CPU_NODES.items():
-            argv = ["submit", "cpu", "guard", "--dry", "--node", node, "--gpus", str(at_once),
-                    *common]
+        lines = [f'python -u research/roadless/cluster_unpack.py "$CLUSTER_SUBMIT_INPUTS/'
+                 f'{b}.tar" && python -u research/roadless/gap_calib.py preset {b} {item} '
+                 'cpu' for b in ids for item in items]
+        env = cluster.Cpu().env.at(SubprocessRunner(), PROJECT.repo, SHA, root=PROJECT.root())
+        # every node of the site, each at a throttle of its own (a CPU run's is uncapped: room is
+        # admission's), and unpinned, placed by cluster_submit at admission
+        nodes: list[str | None] = [n.name for n in PROJECT.cluster.nodes]
+        for i, node in enumerate([*nodes, None]):
+            at_once = CPU_THROTTLES[i % len(CPU_THROTTLES)]
+            pin = [] if node is None else ["--node", node]
+            argv = ["submit", "cpu", "guard", "--dry", *pin, "--gpus", str(at_once), *common]
             args, plan, arrays = _plan(argv, tmp / "work", sha=SHA)
             [a] = arrays
-            env = cluster.Cpu().env.at(SubprocessRunner(), PROJECT.repo, SHA,
-                                       root=PROJECT.root())
             text = script(PROJECT, "guard", SHA, a, plan.resources, plan.prelude, args.gpus, env)
             head = [ln for ln in text.splitlines() if ln.startswith("#SBATCH")]
-            want = {f"#SBATCH --nodelist={node}", "#SBATCH --cpus-per-task=1",
-                    "#SBATCH --mem=4G", f"#SBATCH --array=0-{len(ids) * len(items) - 1}%{at_once}"}
+            want = {"#SBATCH --cpus-per-task=1", "#SBATCH --mem=4G",
+                    f"#SBATCH --array=0-{len(ids) * len(items) - 1}%{at_once}"}
+            listed = [ln for ln in head if ln.startswith("#SBATCH --nodelist")]
             gpu = [ln for ln in head if "gres" in ln or "--gpus" in ln]
-            lines = [f'python -u research/roadless/cluster_unpack.py "$CLUSTER_SUBMIT_INPUTS/'
-                     f'{b}.tar" && python -u research/roadless/gap_calib.py preset {b} {item} '
-                     'cpu' for b in ids for item in items]
-            assert a.card_gb == 0 and a.node == node, f"{node}: {a.label} array on {a.node}"
-            assert want <= set(head), f"{node}: header lacks {want - set(head)}"
-            assert not gpu, f"{node}: a GPU request in a CPU array: {gpu}"
-            assert list(a.tasks) == lines, f"{node}: task lines {a.tasks[:2]}"
-            assert plan.resources.node == node and all(t.cpu for t in plan.tasks)
-            print(f"{node}: one CPU array of {len(a.tasks)} tasks pinned there, at most "
-                  f"{at_once} at once, 1 cpu and 4 GB a task, no GPU request")
-            over = ["submit", "cpu", "guard", "--dry", "--node", node, "--gpus", str(at_once + 1),
+            where = "placed" if node is None else node
+            assert a.card_gb == 0 and a.node == node, f"{where}: {a.label} array on {a.node}"
+            assert plan.resources.placement.pinned == node, f"{where}: {plan.resources.placement}"
+            assert listed == ([] if node is None else [f"#SBATCH --nodelist={node}"]), \
+                f"{where}: {listed}"
+            assert want <= set(head), f"{where}: header lacks {want - set(head)}"
+            assert not gpu, f"{where}: a GPU request in a CPU array: {gpu}"
+            assert list(a.tasks) == lines, f"{where}: task lines {a.tasks[:2]}"
+            assert all(t.cpu for t in plan.tasks)
+            print(f"{where}: one CPU array of {len(a.tasks)} tasks "
+                  f"{plan.resources.placement.text()}, at most {at_once} at once, 1 cpu and 4 GB "
+                  "a task, no GPU request")
+        off_site = ["submit", "cpu", "guard", "--dry", "--node", "nosuchnode", "--gpus", "4",
                     *common]
-            print(f"  --gpus {at_once + 1} refused: {_refused(over, tmp / 'work', sha=SHA)}")
-        bare = ["submit", "cpu", "guard", "--dry", "--gpus", "4", *common]
-        print(f"without --node refused: {_refused(bare, tmp / 'work', sha=SHA)}")
+        print(f"--node off the site refused: {_refused(off_site, tmp / 'work', sha=SHA)}")
 
 
 def _refuses(what: str, fn: Callable[[], object]) -> str | None:
@@ -454,15 +470,20 @@ def _record(name: str, kind: str, job: str, *, gpus: int, finished: bool,
             cancelled: bool) -> RunRecord:
     """A made-up run's record, as a submit of `kind` writes it: one array, job `job`, at most
     `gpus` tasks at once."""
-    opts = (["--gb", "32"] if kind == "blocks"
+    blocks = kind == "blocks"       # unpinned, placed by cluster_submit; a `cpu` run on orion
+    opts = (["--gb", "32"] if blocks
             else ["--node", "orion", "--cpus", "1", "--mem", "540", "--items", "x"])
     argv = ("submit", kind, name, *opts, "--gpus", str(gpus), "a,b", "--",
             "research/roadless/road_rescore.py", "{id}", "{item}")
     stamp = "2026-10-21T12:00:00Z"
+    node = None if blocks else "orion"
     return RunRecord(name=name, kind=kind, commit=SHA, argv=argv, overrides=NO_OVERRIDES,
                      submitted_at=stamp, attempt=f"guard:{name}",
-                     arrays=(ArrayRecord(job, 32 if kind == "blocks" else 0, ("t",) * 4),),
-                     gpus=gpus, chained_after=(), last_sync=stamp,
+                     arrays=(ArrayRecord(job, 32 if blocks else 0, ("t",) * 4, node),),
+                     gpus=gpus, cpus=4 if blocks else 1, mem_gb=64 if blocks else 540,
+                     time="2:00:00",
+                     placement=cs.Placed(among=None) if blocks else cs.Pinned(node="orion"),
+                     expected=None, admitted_at=stamp, last_sync=stamp,
                      gone_at=stamp if finished else None, finished_at=stamp if finished else None,
                      cancelled_at=stamp if cancelled else None, unpulled=(), unstarted=(),
                      continues=None, continued_by=None, settled=False)
@@ -483,14 +504,15 @@ def _demand_run(name: str, kind: str, args: Sequence[str], job: str, *, width: i
     """A run of a `demand` wave: `_run`'s record of it at HEAD, `width` tasks of array job `job`;
     finished, its continuation undecided, or live."""
     r = _run(name, kind, args, commit=SHA, width=width, finished=finished, settled=False)
-    return replace(r, arrays=(ArrayRecord(job, 0, ("t",) * width),))
+    return replace(r, arrays=(ArrayRecord(job, 0, ("t",) * width, r.arrays[0].node),))
 
 
 def _demand_pool(name: str, wave: str, job: str, *, node: str, mem: int, width: int,
                  finished: bool) -> RunRecord:
     """A lease of `demand` wave `wave`'s cpu-score pool of `mem` GB on `node` (`_demand_run`)."""
     return _demand_run(name, "pool", ("--wave", wave, "--preset", "cpu-score", "--node", node,
-                                      "--mem", str(mem), "--gpus", str(cluster.CPU_NODES[node])),
+                                      "--mem", str(mem),
+                                      "--gpus", str(cluster.throttle(LADDERS["cpu-score"]))),
                        job, width=width, finished=finished)
 
 
@@ -574,12 +596,15 @@ def check_demand() -> list[str]:
     def run(job: str, run: str, node: str, b: Bundle, *, user: str = "me",
             label: str = "cpu", project: str = "reblock") -> Running:
         return Running(job, user, (node,), b, datetime(2026, 10, 21, tzinfo=UTC),
-                       name(run, label, project))
+                       name(run, label, project), required=(), excluded=(), ends=None)
 
     def wait(job: str, run: str, b: Bundle, reason: str = "Resources",
              node: str | None = "orion", label: str = "cpu") -> Pending:
         return Pending(job, "me", (node,) if node else (), () if node else ("orion", "quadro2"),
-                       reason, name(run, label), b)
+                       reason, name(run, label), b, priority=0,
+                       submitted=datetime(2026, 10, 21, tzinfo=UTC),
+                       eligible=datetime(2026, 10, 21, tzinfo=UTC), expected=None, limit=None,
+                       scheduled=())
 
     def rec(name: str, job: str, gpus: int, *, kind: str = "cpu", finished: bool = False,
             cancelled: bool = False) -> RunRecord:
@@ -774,7 +799,7 @@ def _finished_named() -> Iterator[None]:
 def _no_throttle() -> Iterator[None]:
     """cluster_demand.room unbounded (fault `no-throttle`)."""
     old = cluster_demand.room
-    cluster_demand.room = lambda rec, running: 10**6
+    cluster_demand.room = lambda rec, array, running: 10**6
     try:
         yield
     finally:
@@ -922,10 +947,13 @@ def _run(name: str, kind: str, args: Sequence[str], *, commit: str, width: int,
     500, `width` tasks), out of squeue at GONE_AT and finished (its continuation decided, or not:
     `settled`), or live."""
     stamp = "2026-10-21T10:00:00Z"
+    # pinned, as every run of a wave is: a pool or long run to its --node, a steward to its node
+    node = args[list(args).index("--node") + 1] if "--node" in args else cluster.STEWARD_NODE
     return RunRecord(name=name, kind=kind, commit=commit, argv=("submit", kind, name, *args),
                      overrides=NO_OVERRIDES, submitted_at=stamp, attempt=f"guard:{name}",
-                     arrays=(ArrayRecord("500", 0, ("t",) * width),), gpus=4, chained_after=(),
-                     last_sync=stamp, gone_at=GONE_AT if finished else None,
+                     arrays=(ArrayRecord("500", 0, ("t",) * width, node),), gpus=4, cpus=2,
+                     mem_gb=4, time="2:00:00", placement=cs.Pinned(node=node), expected=None,
+                     admitted_at=stamp, last_sync=stamp, gone_at=GONE_AT if finished else None,
                      finished_at=GONE_AT if finished else None, cancelled_at=None, unpulled=(),
                      unstarted=(), continues=None, continued_by=None, settled=settled)
 
@@ -937,7 +965,7 @@ def _steward_run(wave: str, *, commit: str, finished: bool, settled: bool) -> Ru
 
 def _pool_run(name: str, wave: str, *, node: str, mem: int, finished: bool) -> RunRecord:
     return _run(name, "pool", ("--wave", wave, "--preset", "cpu-score", "--node", node, "--mem",
-                               str(mem), "--gpus", str(cluster.CPU_NODES[node])),
+                               str(mem), "--gpus", str(cluster.throttle(LADDERS["cpu-score"]))),
                 commit=SHA, width=2, finished=finished, settled=False)
 
 
@@ -992,8 +1020,12 @@ def check_kinds() -> list[str]:
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
         ctx = _context(tmp / "repo", tmp / "home")
+        at_once = str(cluster.throttle(LADDERS["cpu-score"]))     # 36: 72 CPUs over 2 a worker
         cpu_pool = ("--wave", "w", "--preset", "cpu-score", "--node", "quadro2", "--mem", "12",
-                    "--gpus", "40")
+                    "--gpus", at_once)
+        # a CPU class serves any node of the site: one whose cards are fine too
+        cpu_tesla = ("--wave", "w", "--preset", "cpu-score", "--node", "tesla1", "--mem", "12",
+                     "--gpus", at_once)
         gpu_pool = ("--wave", "w", "--preset", "gpu-presets", "--node", "tesla1", "--mem", "32",
                     "--gpus", "4")
         steward = ("--wave", "w", "--board", "cluster_submit/market")
@@ -1002,32 +1034,39 @@ def check_kinds() -> list[str]:
         work = "python -u research/roadless/pool.py"
         want = {   # kind, run, args: card GB of its array, its node, resources, task GB, line
             ("pool", "w-quadro2-m12-s1", cpu_pool): (0, cs.Resources(
-                cpus=2, mem_gb=12, time="2:00:00", node="quadro2"), 0.0,
-                f"{work} work --wave w --node quadro2 --class m12"),
+                cpus=2, mem_gb=12, time="2:00:00", placement=cs.Pinned(node="quadro2"),
+                expected=None), 0.0, f"{work} work --wave w --node quadro2 --class m12"),
+            ("pool", "w-tesla1-m12-s1", cpu_tesla): (0, cs.Resources(
+                cpus=2, mem_gb=12, time="2:00:00", placement=cs.Pinned(node="tesla1"),
+                expected=None), 0.0, f"{work} work --wave w --node tesla1 --class m12"),
             ("pool", "w-tesla1-g32-s1", gpu_pool): (32, cs.Resources(
-                cpus=4, mem_gb=32, time="2:00:00", node="tesla1"), cluster.CARD_GB,
+                cpus=4, mem_gb=32, time="2:00:00", placement=cs.Pinned(node="tesla1"),
+                expected=None), cluster.CARD_GB,
                 f"{work} work --wave w --node tesla1 --class g32"),
             ("steward", "w-steward", steward): (0, cs.Resources(
-                cpus=2, mem_gb=3, time="2:00:00", node="orion"), 0.0,
+                cpus=2, mem_gb=3, time="2:00:00", placement=cs.Pinned(node="orion"),
+                expected=None), 0.0,
                 f"{work} steward --wave w --board cluster_submit/market "
                 "--stale-after-minutes 30"),
             ("long", "w-long-7", long): (0, cs.Resources(
-                cpus=2, mem_gb=90, time="2-02:00:00", node="orion"), 0.0,
-                f"{work} work --wave w --job 7 --mem 90")}
+                cpus=2, mem_gb=90, time="2-02:00:00", placement=cs.Pinned(node="orion"),
+                expected=None), 0.0, f"{work} work --wave w --job 7 --mem 90")}
         leases = {"w-quadro2-m12-s1": cs.Lease("reblock", "quadro2", Bundle(0, 2, 12)),
+                  "w-tesla1-m12-s1": cs.Lease("reblock", "tesla1", Bundle(0, 2, 12)),
                   "w-tesla1-g32-s1": cs.Lease("reblock", "tesla1", Bundle(1, 4, 32))}
         for (kind, run, args), (card, res, gb, line) in want.items():
             argv = ["submit", kind, run, "--dry", *args]
             sub, plan, arrays = _plan(argv, tmp / run, sha=SHA)
             got = ([(a.card_gb, a.node, list(a.tasks)) for a in arrays], plan.resources,
                    [t.gpu_gb for t in plan.tasks], plan.inputs, plan.prelude)
-            if got != ([(card, res.node, [line])], res, [gb], (), (cluster.TASK_ENV,)):
+            if got != ([(card, res.placement.pinned, [line])], res, [gb], (), (cluster.TASK_ENV,)):
                 bad.append(f"{kind} {run}: planned {got}")
             env = cluster.ENV.at(SubprocessRunner(), PROJECT.repo, SHA, root=PROJECT.root())
             head = {ln for ln in script(PROJECT, run, SHA, arrays[0], plan.resources,
                                         plan.prelude, sub.gpus, env).splitlines()
                     if ln.startswith("#SBATCH")}
-            sbatch = {f"#SBATCH --nodelist={res.node}", f"#SBATCH --cpus-per-task={res.cpus}",
+            sbatch = {f"#SBATCH --nodelist={res.placement.pinned}",
+                      f"#SBATCH --cpus-per-task={res.cpus}",
                       f"#SBATCH --mem={res.mem_gb}G", f"#SBATCH --time={res.time}"}
             if not sbatch <= head:
                 bad.append(f"{kind} {run}: its sbatch header lacks {sorted(sbatch - head)}")
@@ -1037,9 +1076,10 @@ def check_kinds() -> list[str]:
                 bad.append(f"{kind} {run}: Waves.lease {lease}, want {leases.get(run)}")
             asks = {Bundle(cards=0 if t.cpu else 1, cpus=plan.resources.cpus,
                            mem_gb=plan.resources.mem_gb) for t in plan.tasks}
-            if lease is not None and (lease.node, {lease.bundle}) != (plan.resources.node, asks):
+            pin = plan.resources.placement.pinned
+            if lease is not None and (lease.node, {lease.bundle}) != (pin, asks):
                 bad.append(f"{kind} {run}: its lease is {lease.bundle.text()} on {lease.node}, "
-                           f"its plan asks {[b.text() for b in asks]} on {plan.resources.node}")
+                           f"its plan asks {[b.text() for b in asks]} on {pin}")
         others = [_run("c", "cpu", ("--node", "orion", "--cpus", "1", "--mem", "8", "--items",
                                     "x", "a", "--", "research/roadless/gap_calib.py", "{id}",
                                     "{item}"), commit=SHA, width=1, finished=False,
@@ -1054,11 +1094,10 @@ def check_kinds() -> list[str]:
                                                      "--node", "orion", "--mem", "32", "--gpus",
                                                      "4"), "unusable"),
             "a --mem of 13 GB": ("pool", (*cpu_pool[:7], "13", *cpu_pool[8:]), "rung"),
-            "a cpu-score pool on tesla1": ("pool", ("--wave", "w", "--preset", "cpu-score",
-                                                    "--node", "tesla1", "--mem", "12"),
-                                           "CPU_NODES"),
-            "a cpu-score pool on quadro2 at --gpus 41": ("pool", (*cpu_pool[:9], "41"),
-                                                         "at most 40"),
+            "a cpu-score pool on a node the site lacks": ("pool", (
+                *cpu_pool[:5], "nosuchnode", *cpu_pool[6:]), "site file"),
+            f"a cpu-score pool on quadro2 at --gpus {int(at_once) + 1}": (
+                "pool", (*cpu_pool[:9], str(int(at_once) + 1)), f"at most {at_once}"),
             "a long run of 7 days and a minute": ("long", (*long[:11], "10081"), "7 days")}
         for what, (kind, args, word) in refusals.items():
             try:
@@ -1269,7 +1308,7 @@ def check_template() -> list[str]:
         t = waves.template(ctx, "reblock", "quadro2", m12)
         want = cs.Template(kind="pool", run="b-quadro2-m12-s2", commit=older,
                            args=("--wave", "b", "--preset", "cpu-score", "--node", "quadro2",
-                                 "--mem", "12", "--gpus", "40"))
+                                 "--mem", "12", "--gpus", "36"))
         if t != want:
             bad.append(f"the template for quadro2's m12 {t}, want {want}")
         if isinstance(t, cs.Template):
@@ -1420,9 +1459,10 @@ def _other_mem(*, wave: str, ladder: Ladder, node: str, rung: int) -> tuple[str,
 
 
 def _other_node(*, wave: str, ladder: Ladder, node: str, rung: int) -> tuple[str, ...]:
-    """The template's --node another node of CPU_NODES (fault `other-node`)."""
+    """The template's --node another node of the site (fault `other-node`): a CPU class's pool
+    may be on any."""
     args = list(_POOL_ARGS(wave=wave, ladder=ladder, node=node, rung=rung))
-    args[args.index("--node") + 1] = next(n for n in sorted(cluster.CPU_NODES) if n != node)
+    args[args.index("--node") + 1] = next(n.name for n in PROJECT.cluster.nodes if n.name != node)
     return tuple(args)
 
 
@@ -1596,9 +1636,9 @@ def _main_wave(got: _Waved, *, work: Path, scratch: str) -> list[str]:
            "--minutes", str(minutes), "--dry")
     if [p.argv for p in got.planned] != [steward, run]:
         bad.append(f"planned {[p.argv for p in got.planned]}, want {[steward, run]}")
-    elif got.planned[1].plan.resources != cs.Resources(cpus=2, mem_gb=int(mem),
-                                                       time=cluster.slurm_time(minutes),
-                                                       node=long.node):
+    elif got.planned[1].plan.resources != cs.Resources(
+            cpus=2, mem_gb=int(mem), time=cluster.slurm_time(minutes),
+            placement=cs.Pinned(node=long.node), expected=None):
         bad.append(f"the long run's resources {got.planned[1].plan.resources}")
     return bad
 
