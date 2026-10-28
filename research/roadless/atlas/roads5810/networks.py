@@ -48,6 +48,9 @@ families and specs:
   partition band|cut <plan with D{D}[, {n}]>  partition_rows/<RUNTIME>/<plan>, the same ({n}: the
                                               start's size, one run a budget)
   templates <plan with D{D}>                  templates_rows/<RUNTIME>/<plan>, the same
+  spurs <plan with D{D}, {n}, {x}>            the partition study's spurs_rows/<plan>: a cut ({n}
+                                              its start's size) plus the greedy's roads to {x}
+                                              more D, at D its total
 
 On the page (2026-10-28), each one `add`:
   growth gr.k10.att.greedy.N48.sep14.n2s0.1.B21m8k2.K0.D0.15.v2
@@ -70,6 +73,8 @@ On the page (2026-10-28), each one `add`:
   partition cut "$R3.D{D}.s0.1.ears.p1e0.0001v4"          (the ears start: ears' paths at each
       budget)
   (R3=pt.K5.R10.band.t0.2,0.1,0.05,0.03,0.02.b1,2,4,8,16.q1,2,3,3,3.e0.2,0.1,0.05,0.02,0.i40)
+  spurs 'ps.lazy5.D{D}.spec{n}s0.x{x}.v4'                (the spectral cuts at D 0.05 and 0.10 plus
+      the lazy ΔP greedy's roads to 0.01 and 0.02 more D; 0.15's beyond the slider)
 `ready` lists the finished runs not on the page, each once, with the spec naming the most budgets
 (D{D} alone, or with {n}); each one `add`, its style in place.
 A combination with no style here (STYLES, the families' `entry`) is refused: give it a class in
@@ -112,6 +117,7 @@ DATA = sheet.NETWORKS                 # the frames' rasters, jsons, times, sheet
 SLIDER = render.SLIDER                # D 0.01 .. 0.15
 SKEL_PIX = 1.0                        # m: the skeleton's raster (road_simp.PIXEL's)
 GRID_M = 1e-3                         # m: a grown region's union grid (frames.py's `region`)
+SPURS = sheet.ROOT / ".superpowers/sdd/2026-10-27-partition/spurs_rows"   # spurs.py's rows
 
 
 # ------------------------------------------------------------------ geometry
@@ -720,6 +726,27 @@ class PartitionFamily:
         return AnswerSource(self.design)
 
 
+class SpursFamily:
+    """A partition SIMP cut with the lazy ΔP greedy's roads added up to a little more D (the
+    partition study's spurs.py, its rows in SPURS)."""
+
+    def __init__(self, plan: str) -> None:
+        runs = Runs(rows=SPURS, template=plan)
+        self.design = Lined(runs=runs, answer="spurs")
+        self.cuts = [str(last_row(d / f"{BID}.parquet")["cut"]) for d in runs.dirs.values()]
+
+    def entry(self) -> Entry:
+        key = self.design.runs.key
+        name = "partition SIMP + spurs"
+        how = ("The partition SIMP's cut (spectral start, every road on a loop), then ΔP greedy, "
+               "solved exactly, adds roads from the lineup's networks, spurs among them, until "
+               "displacement is one or two points above the cut's own: at each budget shown.")
+        return Entry(key=key, name=name, how=how, cls="pts", dot="", label=name)
+
+    def source(self) -> Source:
+        return AnswerSource(self.design)
+
+
 class TemplatesFamily:
     """The grid templates' best layout."""
 
@@ -753,6 +780,8 @@ def family_of(argv: list[str]) -> Family:
             return PartitionFamily(answer, plan)
         case ["templates", plan]:
             return TemplatesFamily(plan)
+        case ["spurs", plan]:
+            return SpursFamily(plan)
     raise SystemExit(__doc__)
 
 
