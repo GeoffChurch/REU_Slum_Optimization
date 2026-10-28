@@ -611,7 +611,12 @@ class Roads:
 
     def world(self, x: NDArray[np.float64], y: NDArray[np.float64], q: float,
               beta: float) -> World:
-        xf, r = self.chain(x, beta)
+        return self.world_of(*self.chain(x, beta), y, q, beta)
+
+    def world_of(self, xf: NDArray[np.float64], r: NDArray[np.float64], y: NDArray[np.float64],
+                 q: float, beta: float) -> World:
+        """The eps world at the road density r per triangle (`xf` the design's per-pixel field
+        it came from, carried for its chain's way back) and the clearing y."""
         s = r ** q
         py = relax.project(y, beta)
         k = np.where(self.free, EPS + (1.0 - EPS) * py ** q, self.ka)
@@ -710,6 +715,15 @@ def _update(x: NDArray[np.float64], on: NDArray[np.bool_], gain: NDArray[np.floa
         B = gain / np.maximum(cost + nu * gD, 1e-300)
         return np.where(on, np.clip(x * B ** eta, lo_x, hi_x), x)
 
+    return least_nu(trial, D_of=D_of, budget=budget, nu0=nu0)
+
+
+def least_nu(trial: Callable[[float], NDArray[np.float64]], *,
+             D_of: Callable[[NDArray[np.float64]], float], budget: float,
+             nu0: float) -> tuple[NDArray[np.float64], float]:
+    """(trial(nu), nu): nu 0 if trial(0)'s D (D_of) is within the budget, else bisected (from
+    nu0, the last update's, bracketed by factors of 10) to the least nu whose trial's D is, to a
+    factor of 1 + NU_TOL (D falls as nu rises: each update's does)."""
     xn = trial(0.0)
     if D_of(xn) <= budget:
         return xn, 0.0
@@ -783,7 +797,11 @@ def simp(rd: Roads, plan: Plan, *,
 
 def paved(rd: Roads, x: NDArray[np.float64], beta: float) -> Any:
     """The paved answer (module docstring; the model's local frame)."""
-    _, r = rd.chain(x, beta)
+    return paved_of(rd, rd.chain(x, beta)[1])
+
+
+def paved_of(rd: Roads, r: NDArray[np.float64]) -> Any:
+    """The triangles at road density r >= HALF, unioned and smoothed (the model's local frame)."""
     fm = rd.m.fx.fm
     t = np.flatnonzero(r >= HALF)
     g = shapely.coverage_union_all(shapely.polygons(fm.xy[fm.tri[t]]))
@@ -851,6 +869,12 @@ def score(b: Any, metric: gcl.ComplexMetric, ground_world: Any, *,
           cleared: NDArray[np.bool_]) -> dict[str, float]:
     """A paved ground scored as a road network (module docstring), beside the buildings `cleared`
     (a real clearing's; none for a device's or no clearing): in the state, in D and in C."""
+    return scored(b, metric, ground_world, cleared=cleared)[2]
+
+
+def scored(b: Any, metric: gcl.ComplexMetric, ground_world: Any, *,
+           cleared: NDArray[np.bool_]) -> tuple[gcl.Model, gcl.Lenses, dict[str, float]]:
+    """`score`'s row with the carved mesh's model and the state's lenses (per home u)."""
     geo = gc.geometry(b)
     carving = gcl.Carving.of(geo, [[shapely.make_valid(geo.local(ground_world))]])
     MESHES.mkdir(parents=True, exist_ok=True)
@@ -860,11 +884,11 @@ def score(b: Any, metric: gcl.ComplexMetric, ground_world: Any, *,
     st = (m.cleared_road_state(m.k_of(cleared), prefix) if cleared.any()
           else m.road_state(prefix))
     lens = m.lenses_of(st)
-    return dict(P=lens.P, L_P=1.0 - lens.P / m.base.P, L_Pq=1.0 - lens.Pq / m.base.Pq,
-                L_J2=1.0 - lens.J2 / m.base.J2,
-                D_exact=_destroyed(b, [ground_world, *_footprints(b, cleared)]),
-                paved=float(shapely.area(ground_world)), enclosed=lens.enclosed,
-                C=m.sheet(st) - m.sheet(m.factors(np.zeros(m.n))))
+    return m, lens, dict(P=lens.P, L_P=1.0 - lens.P / m.base.P,
+                         L_Pq=1.0 - lens.Pq / m.base.Pq, L_J2=1.0 - lens.J2 / m.base.J2,
+                         D_exact=_destroyed(b, [ground_world, *_footprints(b, cleared)]),
+                         paved=float(shapely.area(ground_world)), enclosed=lens.enclosed,
+                         C=m.sheet(st) - m.sheet(m.factors(np.zeros(m.n))))
 
 
 def score_clearing(b: Any, m: gcl.Model, cleared: NDArray[np.bool_]) -> dict[str, float]:
