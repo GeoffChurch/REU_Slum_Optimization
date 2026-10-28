@@ -61,7 +61,8 @@ On the page (2026-10-28), each one `add`:
   growth gr.gl0.25Croad.free0.03.greedy.N48.sep14.n2s0.1.B0.K4.D0.15.v2  (islands: the charge
       that scores best under RUNTIME, the growth study's frames.py score: 0.492 at D 0.15, 0.01's
       0.458, 0.003's 0.465)
-  ears ears.divides.p0.1.gl0.25Croad.n2s0.1.M16.K4.D0.15.v1
+  ears ears.divides.p0.1.gl0.25Croad.n2s0.1.M16.K4.D0.15.v2         (rev 2: rev 1 starved the
+      large faces, ears.py 8794c3d7)
   partition cut 'pt.K5.R10.t2,1.5,1.2,1,1.b1,2,4,8,16.q1,2,3,3,3.i40.D{D}.s0.1.spec{n}s0.p1e0.0001v2'
   partition band (the same spec; the spectral start's 20, 40 and 64 clusters at D 0.05, 0.10, 0.15)
 `ready` lists the finished runs not on the page, each once, with the spec naming the most budgets
