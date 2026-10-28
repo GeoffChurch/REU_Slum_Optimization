@@ -11086,3 +11086,137 @@ road SIMP's paved answer; and varying loads (internal trips, single blockages), 
 under P the loops cost 0.17. Rows: research/roadless/growth_rows/ZAF.9.3.1_1_5810/ (not committed);
 plates, tables (table2.txt) and scripts (frames.py, table2.py, bridge_check.py) in
 .superpowers/sdd/2026-10-27-growth/; every run on the 5810 build-out page (934ac25c).
+
+### Reblocking top-down: a multi-phase partition SIMP and grid templates, on 5810 (2026-10-28)
+
+Owner 2026-10-27: "methods for literal reblocking, where we partition the region (so every road is a
+loop)"; "What would a good top-down cut-based approach be?"; yes to a multi-phase partition and to
+grid templates as its baseline; on 10-28 two more starts, the flow's own partitions. Brief
+.superpowers/sdd/2026-10-27-partition/brief.md; the bottom-up arm is the ears (previous section).
+
+partition.py (118e56c0 .. rev 2): K label fields per design pixel through road_simp's cone filter (R
+10 m) and a softmax at temperature T; the roads are where the labels change, read as a road density
+from 1 - sum phi^2 normalized so a pure label reads 0 and the middle of a sharp two-label interface
+1 (the raw form leaves 0.08 -- 0.7 of road density inside a label at the temperatures that make a 7
+m band, past the ramp's knee for every building). A sharp interface's band widens with T and
+saturates near 0.8 R; T_w, where it is ROAD_W, is 0.38 at K 4 and 0.35 at K 5 for R 10, and a
+stage's T is a multiple of it (2, 1.5, 1.2, 1, 1 at beta 1, 2, 4, 8, 16 and q 1, 2, 3, 3, 3, 40
+updates each). Then road_simp's eps world (kappa 10, kt and b as road SIMP's), D and C, objective P
++ lambda C at the sheet price, D <= the budget. The update is MMA with one constraint, its
+multiplier bisected on the true D (road_simp.least_nu, factored out of road SIMP's OC): OC needs a
+gain of one sign and an interface's has none. Starts (a Strategy, each cell split into connected
+regions, those under 400 m^2 merged, DSatur-coloured into K 5): `vor` (k-means on the homes,
+Voronoi), `spec` (the shelved spectral normalized cut, each pixel its nearest building's cluster),
+`nodal` (a Dirichlet spectral partition aiming at the spectral minimal partition: the baseline's
+grounded operator's lowest eigenfunctions, demand-weighted, shift-invert on the model's
+factorization, k-means on the row-normalized eigenvectors), `div` (ears.divides imported, the whole
+block one face: the persistence-simplified Morse-Smale cuts of the baseline u until about n pieces).
+Answers: the start's own cut (scored before the update moves it), `cut` (the argmax labels'
+boundaries as 7 m roads) and `band` (the triangles at r >= 1/2), each scored exactly under RUNTIME
+with sub-blocks (faces of 100 m^2 and more), road length, dead ends (skeleton ends more than 5 m
+from the street on branches of a road's width or more), the depth measures (the growth pilot's) and
+the damage term's cut share. The grounded contrast was not built: it needs a System per state, where
+road_simp.Roads.state reads the model's own. Guards (partition_check.py, 19570, each failing under
+its fault): the J gradient through the whole chain 2.6e-6 at the 12 largest entries and the 12
+largest on clipped pixels (no-offdiag 6.9e-1, no-T 4.3e-1, unclipped 9.5e-2), dD 9.1e-9 (no-norm
+8.2e-1), the dead-end count 0 on a cut answer (a planted 15 m spur: 1), MMA on a separable convex
+problem 1.3e-4 off its optimum (no-mu 5.1); the FFT filter equals road_simp.Raster.filter to
+1.3e-15.
+
+templates.py: parallel (`par`) or two-way (`grid`) lines at spacing a, angle from the block's
+principal axis, offset o, each line snapped to the cheapest path in D within 15 m of it, scored in
+the eps world (one solve), lines dropped by first-order gain per D to meet the budget and solved
+again; 22 coarse layouts then 7 around the best by P + lambda C; the best scored exactly with the
+partition's measures. No bend (the brief's optional bend along the principal axis).
+
+Runs (all on quadro2, orion stuck in `completing`): pt2-5810 (job 85698, 12 tasks: vor / spec /
+nodal at D 0.05 / 0.10 / 0.15, price 0.1, and spec at price 0.3; rev 1, job 85677, cancelled for the
+colouring fix), ptdiv2-5810 (85728; its first submission's divides split nothing, before ears'
+sinks, 362846a5), tp01 / tp03-5810 (85689 / 85690). A partition run 5.5 -- 6.3 h (67 -- 100 s an
+update, 12.5 GB), a template search 0.8 -- 1.6 h. div64's band answer failed to mesh (the parked "A
+carved atom has no width floor"); its cut answer was rebuilt from the stored fields and scored
+locally (.superpowers/sdd/2026-10-27-partition/rescue_div64.py). At price 0.1, against the other
+reblockers at the targets (their own frames; growth and ears from the growth pilot's scores, the
+lazy greedy and clearance_looped from the 5810 page):
+
+    D     answer                  L_P    L_J2   D      C (k)  faces largest  road km dead  deep50
+    0.05  spec20 start            0.369  0.602  0.050  332    21    46k      5.73    0     0.84
+          spec20 cut              0.406  0.647  0.045  323    20    46k      5.64    0     0.83
+          spec20 band             0.499  0.745  0.048  324    5     461k     6.19    24    0.83
+          vor10 cut               0.286  0.492  0.055  177    10    74k      2.89    0     0.66
+          nodal20 cut             0.470  0.720  0.118  313    23    63k      5.41    0     0.94
+          div20 start / cut       0.234 / 0.316  0.044  141    5     334k     2.47    0     0.43
+          template par a64        0.422  0.673  0.049  216    7     195k     3.60    0     0.67
+          ears paths              0.431  0.676  0.056  176                   3.01          0.53
+          growth k10 greedy       0.564  0.757  0.052  324                   6.13          0.06
+          growth grounded greedy  0.462  0.646  0.052  249                   4.76          0.03
+          lazy dP greedy          0.495         0.051  193                   3.41
+          clearance_looped        0.239         0.051  128                   2.09
+          joint SIMP paved+clear  0.600  0.830  0.053  192
+    0.10  spec40 start            0.505  0.752  0.090  489    41    27k      8.62    0     0.99
+          spec40 cut              0.564  0.805  0.099  461    41    28k      8.12    0     0.99
+          spec40 band             0.644  0.869  0.097  435    15    361k     9.08    26    0.99
+          vor24 cut               0.482  0.733  0.089  327    24    34k      5.45    0     0.90
+          nodal40 cut             0.564  0.807  0.171  473    44    31k      8.10    0     0.99
+          div40 start / cut       0.377 / 0.402  0.061  160    8     284k     2.70    1     0.50
+          template par a120       0.447  0.686  0.076  323    15    94k      5.51    0     0.97
+          ears paths              0.504  0.757  0.103  357                   6.24          0.97
+          growth k10 greedy       0.803  0.959  0.102  787                   13.88         0.70
+          growth grounded greedy  0.678  0.872  0.102  533                   10.21         0.25
+          lazy dP greedy          0.612         0.100  376                   6.76
+          clearance_looped        0.371         0.101  268                   4.45
+    0.15  spec64 start            0.577  0.820  0.120  657    67    14k      11.58   0     1.00
+          spec64 cut              0.630  0.862  0.147  616    65    20k      10.79   0     1.00
+          spec64 band             0.697  0.906  0.146  553    29    307k     11.93   32    1.00
+          vor40 cut               0.592  0.832  0.143  452    40    21k      7.54    0     0.97
+          nodal64 cut             0.638  0.862  0.237  613    68    25k      10.44   0     0.99
+          div64 start / cut       0.511 / 0.518  0.097  223    16    273k     3.64    0     0.50
+          ears paths              0.586  0.831  0.153  512                   9.10          1.00
+          growth k10 greedy       0.864  0.981  0.153  1224                  19.46         1.00
+          growth grounded greedy  0.760  0.939  0.152  848                   16.21         0.76
+          lazy dP greedy          0.678         0.150  517                   9.23
+          clearance_looped        0.421         0.150  434                   7.22
+          joint SIMP paved+clear  0.643  0.862  0.158  188
+
+(road km: the answer's lines, a skeleton's for growth, ears and band; dead: skeleton ends off the
+street on branches of a road's width or more; deep50: the deepest quarter's homes within 50 m of a
+road; the div rows' D, C and the rest are the cut's. The template's best at the 0.10 budget is also
+its best at 0.15: the price stops it at D 0.076. At price 0.3 the spectral cuts give 0.393 / 0.530 /
+0.597 at D 0.050 / 0.101 / 0.142 and C 318k / 451k / 604k, the bands 0.407 / 0.538 / 0.574; the
+templates 0.360 at D 0.040 (a80) and, under the 0.10 and 0.15 budgets, 0.298 at 0.049 (a225): a
+layout is dropped to a budget only when over it, so a looser budget can keep a worse one.)
+
+Every cut answer is a partition: no dead end, every road on a loop, and the damage term's cut share
+0 (no blockage cuts anyone off; the templates 0.036 -- 0.060, a line's end left unattached). Among
+the no-dead-end networks the spectral cut leads the ears' `paths` at D 0.10 and 0.15 (0.564 against
+0.504, 0.630 against 0.586, at 1.3 and 1.2 times its C) and trails at 0.05 (0.406 against 0.431 at
+1.8 times); the template strips (parallel, the two-way grid never best) beat it at 0.05 (0.422 at D
+0.049 and 216k m^2) and trail from 0.10. All trail the networks with dead ends: the lazy ΔP greedy
+by 0.05 -- 0.09 at equal D at 1.2 -- 1.7 times its C, the kappa-10 growth by 0.16 -- 0.24 (at its
+far larger C; at equal C, 324k, growth's 0.564 against the spectral cut's 0.406). The spectral
+partitions serve the deep homes: 83 -- 100% of the deepest quarter within 50 m of a road (growth's
+kappa-10 greedy 6% at 0.05), their sub-blocks 20 -- 46k m^2 at most.
+
+What the update adds over its start: the spectral cut +0.04 / +0.06 / +0.05, the Voronoi's 0.00 /
++0.04 / +0.04, the divides' +0.08 / +0.03 / +0.01; the nodal starts did not get under the budget
+(their cut answers at D 0.118 / 0.171 / 0.237 against 0.05 / 0.10 / 0.15; their starts 0.147 / 0.212
+/ 0.291). Of the starts, the spectral cut is the best (it follows the gaps: D 0.033 for 12 cells
+against Voronoi's 0.058, rev 1's probe); the nodal partition crosses buildings (its eigenfunctions
+ignore the footprints' cost); the divides are cheap and few (5 -- 16 pieces, one of 273 -- 334k m^2:
+the most persistent cuts gather on one side).
+
+Two obstacles, in the formulation and not in its tuning. (1) Grey ridges: 1 - sum phi^2 reads two
+tied fields as road, so a road band can lie inside one label, with the same label on both sides; it
+can end anywhere. MMA builds them where an interface would cost more: the band answers have 4 -- 42
+dead ends, and they carry most of the update's gain over the cut (spec40: band 0.644, cut 0.564);
+the divides runs, starting from few pieces, built their roads as ridges from the first update. The
+Modica-Mortola term would charge a ridge as it charges an interface (both are mixed bands), so it
+was not added; at the end 7 -- 34% of the design pixels are grey (0.05 < rho < 0.95): the interfaces
+smear. (2) The ramp: a building covered past its knee has D's derivative 0, so a start over its
+budget cannot shed D by moving its interfaces; the spectral and Voronoi runs reached their budgets
+only when the continuation narrowed the bands (at updates 85 -- 161, the stage changes), the nodal
+runs and Voronoi 10 never, their multiplier at its ceiling throughout. MMA did not settle in the max
+norm (some field moved by 0.2 at every update), but at most 0.11% of the variables were at the move
+limit over the last ten. Scripts: research/roadless/partition.py, partition_check.py, templates.py;
+.superpowers/sdd/2026-10-27-partition/ (compare.py, compare.csv, rescue_div64.py, progress.md); rows
+in research/roadless/partition_rows/ and templates_rows/ (not committed).

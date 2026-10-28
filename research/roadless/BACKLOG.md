@@ -1087,6 +1087,22 @@ Not pursued, with what would change that:
   ground today, where it should be a road an ear can end on); the free (paving) connectivity at
   kappa 10, against road SIMP's paved answer; and varying loads (internal trips, single
   blockages; Corson 2010, Katifori et al. 2010), which now matter: under P the loops cost 0.17.
+- **Reblocking top-down: a multi-phase partition SIMP and grid templates** (owner 2026-10-27 -- 28;
+  piloted on 5810, NOTES "Reblocking top-down"; partition.py, templates.py,
+  .superpowers/sdd/2026-10-27-partition/): K label fields through the cone filter and a softmax, the
+  roads where the labels change (1 - sum phi^2, normalized), road SIMP's eps world, MMA under D;
+  starts Voronoi, spectral cut, nodal (Dirichlet spectral) and the ears' divides; templates of
+  strips or grids snapped to the gaps. Findings: every cut answer is a partition (no dead end,
+  damage cut 0); the spectral cut leads the ears' paths at D 0.10 and 0.15 (0.564, 0.630 against
+  0.504, 0.586) at 1.2 -- 1.3x its C, trails at 0.05 and trails the lazy ΔP greedy by 0.05 -- 0.09
+  at equal D; strips win at D 0.05 (0.422 at 216k m^2); the update adds 0.04 -- 0.06 over the
+  spectral start. Open, in the formulation: (1) grey ridges, roads inside one label (two tied
+  fields), which carry most of the update's gain (the band answers, 4 -- 42 dead ends): a density
+  that reads only label change (e.g. the filtered fields' argmax jump) is the candidate; (2) the
+  ramp's zero slope past the knee, so an over-budget start cannot shed D (the nodal starts never
+  did): starts under the budget, or a D relaxed through the knee early in the continuation. Not
+  built: the grounded contrast (a System per state), the template bend; varying loads still
+  undefined (the damage term's cut share stands in).
 - **Add/remove subset search** (built 2026-10-09; NOTES "The add/remove search as one
   Strategy"). search.py: a Round (rank, refine, build, evaluate, accept) under a schedule; the
   greedy's pickers, exchange (the polish), grow-then-prune and floating search are its
