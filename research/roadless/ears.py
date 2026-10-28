@@ -19,10 +19,12 @@ first-order gains (dP per unit leak at a cell is -u_c^2; the opening's dP/dkt).
 
 Candidate ears are a Strategy (Candidates): `paths` (Paths), cheapest paths on a PIX m raster of
 the faces (a metre on open ground costs 1, through a building 1 + `bld`; grown ground closed)
-from the faces' boundary, sampled every SRC_M m, to any other boundary pixel of the same face at
-least MIN_EAR_M away in a straight line: per source the target with the most first-order gain
-along the path per path cost (the gains summed down the shortest-path tree), the best `pairs`
-sources' ears built as ROAD_W corridors and costed exactly (dD, dC); and `divides` (Divides,
+from the faces' sinks (EarWorld.sinks: pixels on the street or a grounded road, not a block edge
+with no exit nor a paved way inside the block, where an ear would dead-end), sampled every SRC_M
+m, to any other sink pixel of the same face at least MIN_EAR_M away in a straight line: per
+source the target with the most first-order gain along the path per path cost (the gains summed
+down the shortest-path tree), the best `pairs` sources' ears built as ROAD_W corridors
+(EarWorld.corridor) and costed exactly (dD, dC); and `divides` (Divides,
 owner 2026-10-28), the separatrices of the persistence-simplified Morse-Smale complex of u on each
 face (the function `divides`, pure in its pixel inputs so other optimizers can seed from it; the
 persistence threshold `tau` in the name; the harmonic-measure split where the strict basins
@@ -73,6 +75,7 @@ from numba import njit
 from numpy.typing import NDArray
 from scipy.sparse.csgraph import connected_components, dijkstra
 from scipy.sparse.linalg import splu
+from scipy.spatial import cKDTree
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -92,7 +95,8 @@ MIN_EAR_M = 30.0       # m: an ear's ends at least this far apart in a straight 
 MIN_FACE_M2 = 2000.0   # m^2: a face this small is not split further
 STRETCH_M = 40.0       # m: divides' harmonic split: the face's boundary in stretches this wide
 BLD_G = 0.01           # divides' harmonic split: a pixel edge's conductance through a building
-END_R = gr.PATCH_R + 2.0 * PIX   # m: an ear's corridor at its ends (EarWorld.corridor)
+STEP_M = 0.25          # m: an ear's centreline sampled this finely (EarWorld.corridor)
+LOCATE_K = 12          # EarWorld.locate: candidate triangles per point
 CHUNK = 32             # sources per Dijkstra call (its distance and predecessor rows held)
 REV = 1
 TOL_DEC = 1e-2         # decouple: relative (19570, 3 ears at h 0.25: 2.4e-3; at h 25, 0.24)
@@ -205,12 +209,9 @@ class Paths:
         pf = np.where(ra.tri >= 0, faces.lab[np.maximum(ra.tri, 0)], -1)    # pixel's face
         big = faces.area >= MIN_FACE_M2
         live = (pf >= 0) & big[np.maximum(pf, 0)]
-        # boundary pixels: live, with a neighbour in another face (or grown, or outside)
+        # the ends: sink pixels of the face (a road or the street, not a wall)
         same = pf[ra.ea] == pf[ra.eb]
-        edge = np.zeros(len(pf), dtype=bool)
-        edge[ra.ea[~same]] = True
-        edge[ra.eb[~same]] = True
-        bnd = live & edge
+        bnd = live & e.sinks()
         # per pixel its first-order gain density (the triangles under it)
         gp = np.bincount(_pix_of(ra, g.cen), weights=gain, minlength=len(pf))
         ok = live[ra.ea] & live[ra.eb] & same
@@ -319,7 +320,7 @@ def _ms_cut(u: F64, on: B, edge: B, a: I64, b: I64, *, tau: float) -> B:
 
 def _harmonic_cut(xy: F64, bld: F64, on: B, edge: B, a: I64, b: I64, *,
                   stretch_m: float) -> B:
-    """The harmonic-measure split: the face's boundary in stretches (its boundary pixels on a
+    """The harmonic-measure split: the face's sinks in stretches (its sink pixels on a
     stretch_m grid), per interior pixel the stretch taking most of its current (the harmonic
     measure of each stretch, from one factorization of the face's pixel Laplacian: an edge
     conducts 1 on open ground, BLD_G through a building), and the edges between pixels of
@@ -364,32 +365,32 @@ def _harmonic_cut(xy: F64, bld: F64, on: B, edge: B, a: I64, b: I64, *,
     return cut
 
 
-def divides(u: F64, lab: I64, ea: I64, eb: I64, xy: F64, bld: F64, *, face: int,
+def divides(u: F64, lab: I64, sink: B, ea: I64, eb: I64, xy: F64, bld: F64, *, face: int,
             tau: float, stretch_m: float) -> list[Divide]:
     """Candidate cuts of one face of a pixel graph from its potential, most persistent first
     (brief, `divides`); pure in its inputs, so other optimizers can seed from it.
 
-    u: per pixel the potential (held near 0 on the face's boundary: the street and the grounded
-    roads); lab: per pixel its face (-1 off every face); (ea, eb): the graph's edges
-    (8-neighbour pixels); xy: per pixel its centre; bld: per pixel its building share. The face's
-    boundary pixels (a neighbour off the face) are its sinks. First the strict Morse-Smale
+    u: per pixel the potential (held near 0 at the street and the grounded roads); lab: per pixel
+    its face (-1 off every face); sink: per pixel whether it lies on the street or a grounded
+    road (the face's sinks: the rest of its boundary, a block edge with no exit, is a wall the
+    current does not cross, and a cut ending there would be a dead end); (ea, eb): the graph's
+    edges (8-neighbour pixels); xy: per pixel its centre; bld: per pixel its building share.
+    First the strict Morse-Smale
     divides: every other pixel descends to its lowest neighbour, a basin is the pixels draining
     to one sink, and basins are merged across their passes (the lowest max(u_a, u_b) between
     them) below tau times the face's largest u. Along a continuous street ring every boundary
     pixel is a sink and the passes between neighbouring sinks are low, so the basins degenerate
     into one; then the harmonic-measure split (`_harmonic_cut`, stretches stretch_m wide) gives
     the divides. Either way the divide pixels form a network; its ends are the divide pixels
-    beside the boundary, and each end's cut is the path through the network to another end at
+    beside a sink, and each end's cut is the path through the network to another end at
     least MIN_EAR_M away that keeps highest in u (the network's edges weighted by length over
-    u, a shortest path), so every cut runs boundary to boundary (no dead end)."""
+    u, a shortest path), so every cut runs sink to sink (no dead end)."""
     on = lab == face
     if not on.any():
         return []
     both = on[ea] & on[eb]
     a, b = ea[both], eb[both]
-    edge = np.zeros(len(u), dtype=bool)
-    edge[ea[on[ea] & ~on[eb]]] = True
-    edge[eb[on[eb] & ~on[ea]]] = True
+    edge = on & sink
     umax = float(u[on].max())
     out = _cuts(u, xy, _ms_cut(u, on, edge, a, b, tau=tau), edge, a, b, umax=umax, kind="ms")
     if not out:
@@ -458,10 +459,11 @@ class Divides:
         g, ra = e.g, e.ra
         pf = np.where(ra.tri >= 0, faces.lab[np.maximum(ra.tri, 0)], -1)
         up = e.u_pix
+        sink = e.sinks()
         offered: list[tuple[float, int, Divide]] = []
         for f in np.flatnonzero(faces.area >= MIN_FACE_M2):
-            for d in divides(up, pf, ra.ea, ra.eb, ra.xy, ra.bld, face=int(f), tau=self.tau,
-                             stretch_m=STRETCH_M):
+            for d in divides(up, pf, sink, ra.ea, ra.eb, ra.xy, ra.bld, face=int(f),
+                             tau=self.tau, stretch_m=STRETCH_M):
                 offered.append((d.persistence, int(f), d))
         offered.sort(key=lambda q: -q[0])
         out = []
@@ -522,6 +524,22 @@ class EarWorld:
         self.g = g
         self.ra = raster_of(g)
         self.u_pix = np.zeros(len(self.ra.tri))
+        self.street = np.zeros(g.nt, dtype=bool)
+        self.street[g.m.fx.fm.fa[g.m.c.pf]] = True
+
+    def bounding(self) -> B:
+        """Per triangle whether it bounds a face as a road does: the street's faces' triangles
+        and the grown roads (not the paved ways inside the block: ungrown, open ground of the
+        face, a cut ending on one splits nothing)."""
+        return self.street | (self.g.step >= 0)
+
+    def sinks(self) -> B:
+        """Per pixel whether a bounding triangle (`bounding`) lies within PIX of its centre: the
+        faces' sinks."""
+        g = self.g
+        att = np.flatnonzero(self.bounding())
+        d, _ = cKDTree(g.cen[att]).query(self.ra.xy, k=1, distance_upper_bound=PIX)
+        return np.asarray(np.isfinite(d) & (self.ra.tri >= 0))
 
     def set_u(self, u: F64) -> None:
         """The state's potential per pixel (its nearest triangle's cell's)."""
@@ -541,16 +559,45 @@ class EarWorld:
         return Face(lab=lab, area=area)
 
     def corridor(self, pts: F64) -> I64:
-        """The ungrown triangles within growth.PATCH_R of the path's pixel centres, and within
-        END_R of its two ends: a boundary pixel's centre lies up to a pixel's diagonal from the
-        road or street it touches, and a strip of ungrown triangles left there joins the two
-        halves (5810: every top ear of the first runs split nothing)."""
+        """An ear's corridor along the polyline `pts`, extended at both ends to the nearest
+        bounding triangle (the road or street it joins): the ungrown triangles within
+        growth.PATCH_R of its points, and every triangle its centreline crosses (sampled every
+        STEP_M): on 5810's open ground a triangle can be larger than a road, and one whose
+        centroid lies off the corridor but which straddles it joins the two halves (the first
+        runs' ears split nothing)."""
         g = self.g
-        r = np.full(len(pts), gr.PATCH_R)
-        r[[0, -1]] = END_R
-        lists = [g.tree.query_ball_point(p, r=float(x)) for p, x in zip(pts, r, strict=True)]
-        t = np.unique(np.concatenate([np.asarray(x, dtype=np.int64) for x in lists]))
-        return t[g.step[t] < 0]
+        att = np.flatnonzero(self.bounding())
+        _, k = cKDTree(g.cen[att]).query(pts[[0, -1]], k=1)
+        line = np.vstack([g.cen[att[k[0]]], pts, g.cen[att[k[1]]]])
+        seg = np.diff(line, axis=0)
+        L = np.hypot(*seg.T)
+        dense = [line[:1]]
+        for p0, d, n in zip(line[:-1], seg, np.ceil(L / STEP_M).astype(int), strict=True):
+            dense.append(p0 + np.linspace(0.0, 1.0, max(n, 1) + 1)[1:, None] * d)
+        P = np.vstack(dense)
+        lists = g.tree.query_ball_point(pts, r=gr.PATCH_R)
+        t = np.unique(np.concatenate([np.asarray(x, dtype=np.int64) for x in lists]
+                                     + [self.locate(P)]))
+        return t[(t >= 0) & (g.step[t] < 0)]
+
+    def locate(self, P: F64) -> I64:
+        """Per point the triangle containing it (among its LOCATE_K nearest by centroid; the
+        nearest where none does)."""
+        g = self.g
+        fm = g.m.fx.fm
+        _, cand = g.tree.query(P, k=LOCATE_K)
+        v = fm.xy[fm.tri[cand]]                    # points x K x 3 x 2
+        a, b, c = v[..., 0, :], v[..., 1, :], v[..., 2, :]
+        p = P[:, None, :]
+
+        def cross(o: F64, x: F64, y: F64) -> F64:
+            return np.asarray((x[..., 0] - o[..., 0]) * (y[..., 1] - o[..., 1])
+                              - (x[..., 1] - o[..., 1]) * (y[..., 0] - o[..., 0]))
+
+        d1, d2, d3 = cross(a, b, p), cross(b, c, p), cross(c, a, p)
+        inside = ((d1 >= 0) & (d2 >= 0) & (d3 >= 0)) | ((d1 <= 0) & (d2 <= 0) & (d3 <= 0))
+        first = np.where(inside.any(axis=1), np.argmax(inside, axis=1), 0)
+        return np.asarray(cand[np.arange(len(P)), first], dtype=np.int64)
 
     def values(self, on: B) -> tuple[Any, Any, F64]:
         """(the system, its reach, its operator's values) with `on` grown, unfactored."""
