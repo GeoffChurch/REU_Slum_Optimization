@@ -39,6 +39,7 @@ sheet less its own mesh's baseline).
     uv run python $S add <family> <spec..>             # frames, plates, page, artifact.py
     uv run python $S frames|plates|page <family> <spec..>
     uv run python $S ready                             # finished runs not yet on the page
+    uv run python $S drop <key>                        # a superseded method off the page
 
 families and specs:
   growth <plan>                               growth_rows/<block>/<plan> (growth.Plan's name)
@@ -63,8 +64,12 @@ On the page (2026-10-28), each one `add`:
       0.458, 0.003's 0.465)
   ears ears.divides.p0.1.gl0.25Croad.n2s0.1.M16.K4.D0.15.v2         (rev 2: rev 1 starved the
       large faces, ears.py 8794c3d7)
-  partition cut 'pt.K5.R10.t2,1.5,1.2,1,1.b1,2,4,8,16.q1,2,3,3,3.i40.D{D}.s0.1.spec{n}s0.p1e0.0001v2'
-  partition band (the same spec; the spectral start's 20, 40 and 64 clusters at D 0.05, 0.10, 0.15)
+  partition cut "$R3.D{D}.s0.1.spec{n}s0.p1e0.0001v4"
+  partition band (the same spec; the spectral start's 20, 40 and 64 clusters at D 0.05, 0.10,
+      0.15; rev 4 in rev 2's place: rev 2's band read ties inside a label as road, partition.py)
+  partition cut "$R3.D{D}.s0.1.ears.p1e0.0001v4"          (the ears start: ears' paths at each
+      budget)
+  (R3=pt.K5.R10.band.t0.2,0.1,0.05,0.03,0.02.b1,2,4,8,16.q1,2,3,3,3.e0.2,0.1,0.05,0.02,0.i40)
 `ready` lists the finished runs not on the page, each once, with the spec naming the most budgets
 (D{D} alone, or with {n}); each one `add`, its style in place.
 A combination with no style here (STYLES, the families' `entry`) is refused: give it a class in
@@ -666,14 +671,14 @@ class JointFamily:
 
 
 class PartitionFamily:
-    """A partition SIMP answer (band or cut), its start named per budget where its size changes
-    with D (Runs)."""
-    CLS = {"cut": "ptc", "band": "ptb"}
-    LABEL = {"cut": "partition SIMP, cut", "band": "partition SIMP, band, dead ends"}
+    """A partition SIMP answer (band or cut) from a spectral or an ears start, the start named per
+    budget where its size changes with D (Runs)."""
+    # (start, answer) -> (chart class, label)
+    STYLE = {("spectral", "cut"): ("ptc", "partition SIMP, cut"),
+             ("spectral", "band"): ("ptb", "partition SIMP, band, dead ends"),
+             ("ears", "cut"): ("pte", "partition SIMP from ears, cut")}
 
     def __init__(self, answer: str, plan: str) -> None:
-        if answer not in self.CLS:
-            raise SystemExit(f"{answer}: a page partition answer is {' or '.join(self.CLS)}")
         import partition  # noqa: PLC0415  (its own study, still changing)
         runs = Runs(rows=partition.OUT / metrics.RUNTIME, template=plan)
         self.design = Lined(runs=runs, answer=answer)
@@ -681,24 +686,35 @@ class PartitionFamily:
         plans = [partition.Plan.of(p) for p in plan_names(runs)]
         [self.price] = {p.price.price for p in plans}
         starts = [p.start for p in plans]
-        if not all(isinstance(t, partition.Spectral) for t in starts):
-            raise SystemExit(f"{plan}: no page words for its start (PartitionFamily: spectral)")
-        at = [f"{t.n} at {D:.0%}" for t, D in zip(starts, runs.dirs, strict=True)
-              if isinstance(t, partition.Spectral)]
-        self.start = ("the spectral normalized cut of the buildings into clusters ("
-                      + (", ".join(at[:-1]) + " and " + at[-1] if len(at) > 1 else at[0]) + ")")
+        if all(isinstance(t, partition.Spectral) for t in starts):
+            at = [f"{t.n} at {D:.0%}" for t, D in zip(starts, runs.dirs, strict=True)
+                  if isinstance(t, partition.Spectral)]
+            kind = "spectral"
+            self.start = ("the spectral normalized cut of the buildings into clusters ("
+                          + (", ".join(at[:-1]) + " and " + at[-1] if len(at) > 1 else at[0])
+                          + ")")
+        elif all(isinstance(t, partition.Ears) for t in starts):
+            kind = "ears"
+            self.start = ("the faces of ears' cheapest paths at the same budget (the network "
+                          "\"ears, paths\" shows)")
+        else:
+            raise SystemExit(f"{plan}: no page words for its start (PartitionFamily: spectral, "
+                             "ears)")
+        if (kind, answer) not in self.STYLE:
+            raise SystemExit(f"{plan}: no page style for its {kind} start's {answer} "
+                             "(PartitionFamily.STYLE)")
+        self.cls, self.label = self.STYLE[(kind, answer)]
 
     def entry(self) -> Entry:
         key = self.design.runs.key + f".{self.answer}"
-        name = self.LABEL[self.answer]
         how = ("Partitions the block into labelled sub-blocks and lays the roads where the labels "
                f"change, so every road is on a loop: started from {self.start}, each sub-block a "
                "label (five, no two neighbours alike), the labels moved down the gradient of P "
                f"under the budget ({price_words(self.price)}), solved at each budget shown; "
                + ("the label boundaries as 7 m roads." if self.answer == "cut" else
-                  "the band where the labels mix, as a road at ten times: the optimizer's own "
-                  "roads, whose thin stretches break, leaving dead ends."))
-        return Entry(key=key, name=name, how=how, cls=self.CLS[self.answer], dot="", label=name)
+                  "a band of road width around the labels' boundaries, as a road at ten times: "
+                  "the optimizer's own roads, whose thin stretches break, leaving dead ends."))
+        return Entry(key=key, name=self.label, how=how, cls=self.cls, dot="", label=self.label)
 
     def source(self) -> Source:
         return AnswerSource(self.design)
@@ -786,6 +802,33 @@ def page(fam: Family) -> None:
     print(f"{e.key}: rows and entries into the page", flush=True)
 
 
+def drop(key: str) -> None:
+    """A method off the page (a run superseded: the no-legacy rule): its rows and entries out of
+    every table of index.html (its KEY item by its class), its frames' files (DATA) and its plates
+    deleted. Then `add` its successor and artifact.py."""
+    path = HERE / "index.html"
+    html = path.read_text()
+    tables = {v: local.js(html, v) for v in ("DATA", "NETS", "CLASS", "DOT", "KEY", "POINTS")}
+    if key not in tables["DATA"]:
+        raise SystemExit(f"{key}: not on the page")
+    cls = tables["CLASS"][key]
+    for v in ("DATA", "NETS", "CLASS", "DOT", "POINTS"):
+        tables[v].pop(key, None)
+    tables["KEY"] = [k for k in tables["KEY"] if k[1] != cls]
+    for v, value in tables.items():
+        html = local.with_js(html, v, value, lines=v != "DATA")
+    path.write_text(html)
+    files = sorted(DATA.glob(f"{glob_escape(key)}_*")) + sorted(
+        render.PLATES.glob(f"{glob_escape(key)}_*"))
+    for f in files:
+        f.unlink()
+    print(f"{key}: off the page (class {cls}), {len(files)} files deleted", flush=True)
+
+
+def glob_escape(s: str) -> str:
+    return re.sub(r"([*?\[])", r"[\1]", s)
+
+
 def specs_of(d: Path) -> dict[str, Runs]:
     """The specs (with their runs) that name run folder `d`: its D as {D}, alone or with one other
     number as {n} (a start's size that changes with D), each that resolves to one run a budget."""
@@ -842,6 +885,8 @@ def main(argv: list[str]) -> None:
     match argv:
         case ["ready"]:
             ready()
+        case ["drop", key]:
+            drop(key)
         case ["frames", *rest]:
             frames(family_of(rest))
         case ["plates", *rest]:
