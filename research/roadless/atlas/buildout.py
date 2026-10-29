@@ -1,29 +1,44 @@
-"""A grown run's build-out on any block (owner 2026-10-28: the Demo page's second block), as the
-5810 build-out page builds its own: the block's plain baseline (compute.baseline), the run's frames
-at the slider's budgets D 0.01 .. 0.15 (networks.GrownSource: per budget the shortest prefix of the
-run whose D reaches it, carved into one mesh and solved exactly under RUNTIME: compute.frames_of's
-rasters, lenses, each home's escape time, the sheet), and its per-frame table. The block is the
-command line's, resolved once into a Site (block_site.py); nothing below names one.
+"""A method's build-out on any block, on one budget grid (owner 2026-10-28 -- 29: the Demo page's
+second block, Loop roads against topology under one slider), as the 5810 build-out page builds
+its own: the block's plain baseline (compute.baseline), the method's frames at the grid's budgets
+(per budget the shortest prefix of its build order whose D reaches it, as the lineup cuts every
+method; its corridors carved into one mesh and solved exactly under RUNTIME: compute.frames_of's
+rasters, lenses, each home's escape time, the sheet; and the whole network), and the per-budget
+table. The block is the command line's, resolved once into a Site (block_site.py); nothing below
+names one.
 
-The table (Site.kept/<plan>.json, committed): per slider budget the frame (its stop: the run's
-prefix length, D, road pieces and km, L_P, the conductance added C, and the run's recorded time
-to that state, steps.parquet's cumulative t), the whole run's time and the machine, and the facts
-the Demo's escape-time view is drawn on (the plain baseline's 99th percentile escape time, its
-scale; explore_proto/build.py reads the rest from the Site's files).
+A method (Method, a Strategy, from the command line):
+  grown <plan>   a growth or ears run (growth_rows/<block>/<plan>/), its steps in build order
+                 (networks.Grown: each prefix's triangles unioned and smoothed); its seconds the
+                 run's own to each step (steps.parquet's t);
+  topology       the kept topology run (topology_run.py: atlas/blocks/<block>/topology_roads
+                 .parquet) in the lineup's canonical order (common.canonical_order: drainage
+                 first, each road after the roads it needs to reach the street): topology keeps
+                 no build order of its own (its proposal reads its roads off the graph); its
+                 seconds the whole run's, at the whole network only.
+
+The table (Site.kept/<key>_grid.json, committed): per grid budget the frame (its stop, D, road
+pieces and km, L_P, the conductance added C, the seconds), or what stands there instead: `repeat`
+(the frame is a lower budget's: the method's next prefix jumps past this budget too) or `stopped`
+(the method's whole network falls short of the budget), and `over`, how far the frame's D passes
+the budget (a method with no prefix near a budget: Loop roads' first ear is D 0.057); and the
+whole network's own row. Beside
+it the escape-time scale (the plain baseline's 99th percentile).
 
     B=research/roadless/atlas/buildout.py              # from the repo root, PYTHONPATH=.
     uv run python $B baseline <block>
-    uv run python $B frames <block> <plan>             # a growth_rows/<block>/<plan> run
-    uv run python $B table <block> <plan> <machine>    # <machine>: where the run ran, in words
+    uv run python $B frames <block> grown <plan> | topology
+    uv run python $B table <block> grown <plan> | topology
 """
 from __future__ import annotations
 
 import json
-import re
 import sys
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 
@@ -36,18 +51,66 @@ cp, render, gr = nw.cp, nw.render, nw.gr
 PERCENTILE = 99          # the escape-time view's scale: the plain baseline's homes' percentile
 
 
-def budget_of(plan: str) -> float:
-    """A grown run's D budget, from its plan (ears.Plan or growth.Plan, by its name's head)."""
-    import ears  # noqa: PLC0415  (its own study)
-    spec = re.sub(r"\.v[0-9]+$", "", plan)
-    return float(ears.Plan.of(spec).D if plan.startswith("ears.") else gr.Plan.of(spec).D)
+class Method(Protocol):
+    """A method's build-out on a block (module docstring)."""
+
+    @property
+    def key(self) -> str: ...
+
+    def network(self, b: Any) -> Any:
+        """Its compute.Network on block b (prefixes in build order)."""
+        ...
+
+    def seconds(self, stop: int, *, size: int) -> float | None:
+        """The run's seconds to prefix `stop` (None where the run has no time for it)."""
+        ...
+
+    @property
+    def machine(self) -> str: ...
 
 
-def source(site: Site, plan: str) -> nw.GrownSource:
-    src = nw.GrownSource(plan, budget=budget_of(plan), site=site)
-    if not src.ready():
-        raise SystemExit(f"{src.dir}: no finished run reaching D {src.budget:g}")
-    return src
+class GrownRun:
+    """A growth or ears run's steps (networks.Grown)."""
+
+    def __init__(self, site: Site, plan: str, *, grid: tuple[float, ...]) -> None:
+        self.dir = gr.OUT / site.bid / plan
+        if not (self.dir / "steps.parquet").exists():
+            raise SystemExit(f"{self.dir}: no run")
+        self.key = plan
+        self.grid = grid
+        self.steps = pd.read_parquet(self.dir / "steps.parquet").set_index("step").t
+        self.machine = MACHINE
+
+    def network(self, b: Any) -> Any:
+        return nw.Grown(b, self.dir, targets=self.grid)
+
+    def seconds(self, stop: int, *, size: int) -> float | None:
+        return float(self.steps[stop])
+
+
+class Topology:
+    """The kept topology run in the lineup's canonical order (module docstring)."""
+    key = "topology.a10.s0.w7.canonical"
+
+    def __init__(self, site: Site) -> None:
+        self.roads = gpd.read_parquet(site.kept / "topology_roads.parquet")
+        self.info = json.loads((site.kept / "topology.json").read_text())
+        self.machine = f"one process on {self.info['host']} ({self.info['cpu']})"
+
+    def network(self, b: Any) -> Any:
+        return cp.Roads(b, cp.common.canonical_order(b, self.roads))
+
+    def seconds(self, stop: int, *, size: int) -> float | None:
+        return float(self.info["wall_s"]) if stop == size else None
+
+
+def method_of(site: Site, argv: list[str], *, grid: tuple[float, ...]) -> Method:
+    match argv:
+        case ["grown", plan]:
+            return GrownRun(site, plan, grid=grid)
+        case ["topology"]:
+            return Topology(site)
+    raise SystemExit(__doc__)
 
 
 def baseline(site: Site) -> None:
@@ -55,50 +118,80 @@ def baseline(site: Site) -> None:
     cp.baseline(b, data=site.data)
 
 
-def frames(site: Site, plan: str) -> None:
-    src = source(site, plan)
+def frames(site: Site, method: Method, *, grid: tuple[float, ...]) -> None:
     [b] = cp.common.build_blocks([site.bid])
-    src.frames(plan, b)
+    t0 = time.time()
+    net = method.network(b)
+    site.networks.mkdir(parents=True, exist_ok=True)
+    cp.frames_of(method.key, RUN, b, net, t0, frames=cp.Pass(targets=grid, full=True),
+                 data=site.networks, meshes=site.networks / ".meshes")
 
 
-def table(site: Site, plan: str, machine: str) -> None:
-    """The per-frame table (module docstring) into Site.kept/<plan>.json."""
-    src = source(site, plan)
-    rows = src.rows(plan)
-    info = nw.info_of(plan, "slider", data=src.data)
-    m_of = {f: m for m, f in render.frame_names(info).items()}
-    steps = pd.read_parquet(src.dir / "steps.parquet").set_index("step")
+def table(site: Site, method: Method, *, grid: tuple[float, ...]) -> None:
+    """The per-budget table (module docstring) into Site.kept/<key>_grid.json."""
+    info = nw.info_of(method.key, RUN, data=site.networks)
+    C = nw.sheet.added(method.key, data=site.networks, runs=(RUN,))
+    names = render.frame_names(info)
+    by_m = {r["m"]: r for r in info["frames"]}
+    size = max(by_m)
+    want = {w["target"]: w["m"] for w in info["want"] if w["target"] is not None}
+
+    def frame(m: int) -> dict[str, Any]:
+        r = by_m[m]
+        sec = method.seconds(m, size=size)
+        return dict(stop=m, frame=names[m], D=round(r["D_area"], 4), roads=r["n_roads"],
+                    km=round(r["road_m"] / 1000, 3), L_P=round(r["L_P"], 4),
+                    C=round(C[names[m]]), seconds=None if sec is None else round(sec, 1))
+
+    rows: list[dict[str, Any]] = []
+    first: dict[int, float] = {}
+    for t in grid:
+        if t not in want:
+            rows.append(dict(budget=t, status="stopped", D_whole=round(info["D_full"], 4)))
+            continue
+        m = want[t]
+        status = "frame" if m not in first else "repeat"
+        f = frame(m)
+        rows.append(dict(budget=t, status=status, over=round(f["D"] - t, 4),
+                         **({} if m not in first else dict(repeat_of=first[m])), **f))
+        first.setdefault(m, t)
     u = np.load(site.data / "baseline_times.npz")["u"]
     base = json.loads((site.data / "baseline.json").read_text())
-    out: list[dict[str, Any]] = []
-    for t, r in zip(render.SLIDER, rows, strict=True):
-        assert r is not None                     # a grown run has a row at every budget
-        m = m_of[r["f"]]
-        out.append(dict(budget=t, frame=r["f"], stop=m, D=r["D"], roads=r["n"], km=r["km"],
-                        L_P=r["LP"], C=r["C"], seconds=round(float(steps.t[m]), 1),
-                        whole=bool(r.get("full", False))))
-    doc = dict(block=site.bid, plan=plan, metric=base["metric"], machine=machine,
-               run_seconds=round(float(steps.t.iloc[-1]), 1), run_steps=int(steps.index.max()),
+    doc = dict(block=site.bid, method=method.key, run=RUN, metric=base["metric"],
+               machine=method.machine, grid=list(grid), rule=info["rule"],
                frames_seconds=round(float(info["t_total"]), 1),
                escape_scale=float(np.percentile(u[np.isfinite(u)], PERCENTILE)),
                escape_percentile=PERCENTILE, n_homes=int(np.isfinite(u).sum()),
-               n_buildings=len(u), rows=out)
+               n_buildings=len(u), rows=rows, whole=frame(size))
     site.kept.mkdir(parents=True, exist_ok=True)
-    (site.kept / f"{plan}.json").write_text(json.dumps(doc, indent=1) + "\n")
-    print(f"{'budget':>6} {'stop':>4} {'D':>7} {'km':>5} {'L_P':>6} {'C':>7} {'s':>6}")
-    for r in out:
-        print(f"{r['budget']:6.2f} {r['stop']:4d} {r['D']:7.4f} {r['km']:5.2f} {r['L_P']:6.3f} "
-              f"{r['C']:7d} {r['seconds']:6.1f}")
+    (site.kept / f"{method.key}_grid.json").write_text(json.dumps(doc, indent=1) + "\n")
+    print(f"{method.key}: {'budget':>6} {'status':>7} {'stop':>4} {'D':>7} {'km':>6} {'L_P':>6} "
+          f"{'C':>7} {'s':>7}")
+    for r in rows + [dict(budget=float("nan"), status="whole", **doc["whole"])]:
+        if r["status"] == "stopped":
+            print(f"{r['budget']:6.2f} stopped (whole network at D {r['D_whole']:.4f})")
+            continue
+        sec = "-" if r["seconds"] is None else f"{r['seconds']:.1f}"
+        print(f"{r['budget']:6.2f} {r['status']:>7} {r['stop']:4d} {r['D']:7.4f} {r['km']:6.3f} "
+              f"{r['L_P']:6.3f} {r['C']:7d} {sec:>7}")
+
+
+GRID = tuple(round(0.01 * i, 2) for i in range(1, 16)) + tuple(round(0.05 * i, 2)
+                                                                for i in range(4, 19))
+RUN = "grid"             # the frames' run name (networks' <key>_<run>)
+MACHINE = "one process on a workstation CPU (Intel Xeon w7-3455)"   # where grown runs ran
 
 
 def main(argv: list[str]) -> None:
     match argv:
         case ["baseline", bid]:
             baseline(Site.of(bid))
-        case ["frames", bid, plan]:
-            frames(Site.of(bid), plan)
-        case ["table", bid, plan, machine]:
-            table(Site.of(bid), plan, machine)
+        case ["frames", bid, *spec]:
+            site = Site.of(bid)
+            frames(site, method_of(site, spec, grid=GRID), grid=GRID)
+        case ["table", bid, *spec]:
+            site = Site.of(bid)
+            table(site, method_of(site, spec, grid=GRID), grid=GRID)
         case _:
             raise SystemExit(__doc__)
 
