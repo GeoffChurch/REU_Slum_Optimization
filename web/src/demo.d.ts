@@ -3,7 +3,10 @@
 // This file is what makes a renamed Python field a TypeScript error instead of a
 // blank panel.
 /** One block's inputs to the screen -- its buildings `n`, area and perimeter, the three
- * numbers the score is made of -- with its score and its rank (1 the highest) in the city. */
+ * numbers the score is made of -- with its score, its rank (1 the highest) in the city, and its
+ * outline as the screen bundle draws it (`rings`: exterior first, then any interiors, in the
+ * bundle's local metres, simplified as the bundle simplifies them -- so their drawn length runs
+ * a little under `perimeter_m`, the unsimplified block's). */
 export interface DemoScreenBlock {
   block_id: string;
   n: number;
@@ -11,6 +14,7 @@ export interface DemoScreenBlock {
   perimeter_m: number;
   score: number;
   rank: number;
+  rings: [number, number][][];
 }
 /** The block under the shipped screen (ScreenFacts), and the close-up's margin around it (m):
  * the site's screen map frames its close-up of the block the way the prototype's does. The
