@@ -180,9 +180,11 @@ class Shown:
         return p
 
 
-PATHS = "ears.paths.b20.gl0.25Croad.n2s0.1.M8.K4.D0.15"
 EARS_PATHS = Shown(
-    runs=(OnBlock("ZAF.9.3.1_1_5810", GrownRun(f"{PATHS}.v1", budget=0.15)),),
+    # The plan names spell out their face and ear floors (rev 3, 2026-10-29).
+    runs=(OnBlock("ZAF.9.3.1_1_5810",
+                  GrownRun("ears.paths.b20.f2000.e30.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1",
+                           budget=0.15)),),
     # The owner's name for it (2026-10-29), and the coordinator's sentence for why, verbatim.
     name="Shock Reblock",
     blurb=("Each new road runs from the street, or a road already built, across the block and "
