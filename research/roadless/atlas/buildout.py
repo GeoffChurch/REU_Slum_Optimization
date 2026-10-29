@@ -11,13 +11,11 @@ A method (Method, a Strategy, from the command line):
   grown <plan>   a growth or ears run (growth_rows/<block>/<plan>/), its steps in build order
                  (networks.Grown: each prefix's triangles unioned and smoothed); its seconds the
                  run's own to each step (steps.parquet's t);
-  topology       the kept topology run (topology_run.py: atlas/blocks/<block>/topology_roads
-                 .parquet) in the lineup's canonical order (common.canonical_order: drainage
-                 first, each road after the roads it needs to reach the street); its seconds the
-                 whole run's, at the whole network only;
-  topology built the same network in its own build order (topology_order.py's watched re-run:
-                 its proposal keeps none), its seconds when each prefix's last segment was
-                 added.
+  topology       the kept topology run in its own build order (topology_order.py's watched
+                 re-run: its proposal keeps none), its seconds when each prefix's last segment was
+                 added. (The lineup's canonical, drainage, order was tried first: it flatters
+                 topology less over D 0.01 -- 0.15 on 41785, by 0.030 of L_P on average; the
+                 owner's rule cuts each method in its own order: commit bdbd77c7.)
 
 The table (Site.kept/<key>_grid.json, committed): per grid budget the frame (its stop, D, road
 pieces and km, L_P, the conductance added C, the seconds), or what stands there instead: `repeat`
@@ -29,8 +27,8 @@ it the escape-time scale (the plain baseline's 99th percentile).
 
     B=research/roadless/atlas/buildout.py              # from the repo root, PYTHONPATH=.
     uv run python $B baseline <block>
-    uv run python $B frames <block> grown <plan> | topology [built]
-    uv run python $B table <block> grown <plan> | topology [built]
+    uv run python $B frames <block> grown <plan> | topology
+    uv run python $B table <block> grown <plan> | topology
 """
 from __future__ import annotations
 
@@ -90,22 +88,6 @@ class GrownRun:
         return float(self.steps[stop])
 
 
-class Topology:
-    """The kept topology run in the lineup's canonical order (module docstring)."""
-    key = "topology.a10.s0.w7.canonical"
-
-    def __init__(self, site: Site) -> None:
-        self.roads = gpd.read_parquet(site.kept / "topology_roads.parquet")
-        self.info = json.loads((site.kept / "topology.json").read_text())
-        self.machine = f"one process on {self.info['host']} ({self.info['cpu']})"
-
-    def network(self, b: Any) -> Any:
-        return cp.Roads(b, cp.common.canonical_order(b, self.roads))
-
-    def seconds(self, stop: int, *, size: int) -> float | None:
-        return float(self.info["wall_s"]) if stop == size else None
-
-
 class TopologyBuilt:
     """The kept topology run in its own build order (topology_order.py's watched re-run, the same
     network: topology_built_roads.parquet, each segment in the order the greedy added it, with
@@ -132,8 +114,6 @@ def method_of(site: Site, argv: list[str], *, grid: tuple[float, ...]) -> Method
         case ["grown", plan]:
             return GrownRun(site, plan, grid=grid)
         case ["topology"]:
-            return Topology(site)
-        case ["topology", "built"]:
             return TopologyBuilt(site)
     raise SystemExit(__doc__)
 
