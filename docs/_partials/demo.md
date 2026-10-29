@@ -1,10 +1,15 @@
 <!-- Handwritten partial for docs/demo.md. scripts/gen_site_pages.py prepends the do-not-edit note
-     and fills eight markers (named, not spelled out in full here, for the reason
+     and fills ten markers (named, not spelled out in full here, for the reason
      docs/_partials/intro.md's own note gives -- spelling them out would fill this note too), every
      one of them from examples/demo/demo.json, whose README names its producer on the
      research/roadless branch:
 
      * DEMOPLACE -- the block, its buildings, where it is, and a Google Maps link.
+     * DEMOGEOMETRY -- the screen's formula drawn: the block as the rectangle of its own area,
+       perimeter and buildings, cut into parcels shaded by rows to the street, which the reader
+       reshapes or re-crowds (web/src/widgets/screen-geometry.ts).
+     * DEMOSCREENFACTORS -- the score's two factors for the block and for the city's median block,
+       and the peel's true depth for the block where the flagship run measured it.
      * DEMOSCREENMAP -- the site's own ScreenMap widget (the Screening and Explore pages' screen),
        here with a close-up of the block beside the city map. Not a second screen widget: the
        prototype's map is this one's, extended.
@@ -16,8 +21,8 @@
        setting of the producer, so it is never named here).
      * DEMOTIMES -- its recorded run time beside the original topology algorithm's, extrapolated,
        led by the range.
-     * DEMOBUILDOUT -- the build-out widget: the budget slider, three pictures of each frame, and
-       three plots whose dots follow the slider.
+     * DEMOBUILDOUT -- the build-out widget: the budget slider, each frame's escape-time plate
+       (the one view the owner kept, 2026-10-28), and three plots whose dots follow the slider.
      * DEMOTOPOLOGYNOTE -- the footnote saying how the topology time was extrapolated.
 
      Edit HERE, never docs/demo.md (it is generated and gitignored). This file is committed but
@@ -43,11 +48,24 @@ share.
 
 A metro has far too many blocks to reblock every one of them, so the pipeline opens with one cheap
 number per block and a floor on it. The shipped screen is the depth proxy times density, built from
-each block's building count, area and perimeter: a block scores high only if it is both deep, its
-interior many parcels back from a street, and crowded. Drag the floor to grow or shrink the pool, and
-watch this block in the close-up. The floor is absolute, not a percentile, so it applies the same bar
-however the corpus grows or shrinks; screening only decides which blocks are worth the expensive work
-below. The [Screening](methodology/screening.md) page says how the screen was chosen.
+nothing but each block's building count *n*, area *A* and perimeter *P*: √(*nA*)/*P* · *n*/*A*. A
+block scores high only if it is both deep, its interior many parcels back from a street, and
+crowded.
+
+Why that formula finds deep blocks is geometry. *A*/*P* is a length, how thick the block is, and
+√(*A*/*n*) is the side of one building's share of the ground, a parcel; their ratio counts the rows of
+homes between the block's middle and a street. Below, the block is redrawn as the rectangle with
+its own area, perimeter and buildings, so its score is the block's own. Stretch it, crowd it, or
+switch to a typical block, and watch the two factors move.
+
+<!-- DEMOGEOMETRY -->
+
+<!-- DEMOSCREENFACTORS -->
+
+Scored this way, every block in the city gets one number. Drag the floor to grow or shrink the pool,
+and watch this block in the close-up. The floor is absolute, not a percentile, so it applies the same
+bar however the corpus grows or shrinks; screening only decides which blocks are worth the expensive
+work below. The [Screening](methodology/screening.md) page says how the screen was chosen.
 
 <!-- DEMOSCREENMAP -->
 
@@ -67,9 +85,8 @@ a map, because not every report's street can be placed; each place is stated as 
 <!-- DEMOMETHOD -->
 
 Drag the budget to grow the network: each step lets the method displace a larger share of the homes'
-floor area, and the dots on the plots follow. Switch the picture between the roads, each home's
-escape time, and the time the roads save it: blue is good on both of those, and red on the first is
-a long way out. Below, the method's own run time on this block is set against that of the original
+floor area, the dots on the plots follow, and the rings of equal escape time shrink as the roads
+reach into the block. Below, the method's own run time on this block is set against that of the original
 [topology](methodology/methods/topology.md) algorithm, which on a block this size can only be
 extrapolated.
 

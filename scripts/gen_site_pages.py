@@ -31,6 +31,7 @@ import datetime
 import html
 import importlib.util
 import json
+import math
 import re
 import shutil
 import struct
@@ -1637,6 +1638,12 @@ def _method_count() -> str:
 
 # ------------------------------------------------------------------------- the Demo page
 
+# The Demo page's one name for L_P: the caption above the build-out uses it, and the widget is
+# handed it (`data-metric-label`) rather than spelling its own, so renaming the metric on this page
+# is this line.
+DEMO_METRIC = "permeability"
+
+
 def _demo() -> dict[str, Any] | None:
     """examples/demo/demo.json, or None where the checkout has no bundle (a partial site, like
     every other artifact's absence)."""
@@ -1816,25 +1823,141 @@ def _demo_topology_note() -> str:
         f"displacement budget.</p>")
 
 
+# The rows of parcels from a street at which the screen-geometry diagram's shading reaches its red:
+# handed to the widget (`data-red-rows`) and used for the no-JS picture below, so the two agree.
+GEOMETRY_RED_ROWS = 12
+
+
+def _own_rectangle(blk: dict[str, Any]) -> tuple[float, float]:
+    """(long side, short side) of the rectangle with block `blk`'s area and perimeter -- the
+    rectangle screen-geometry.ts's `ownShape` opens on, so its score is the block's own."""
+    h, area = blk["perimeter_m"] / 2, blk["area_m2"]
+    root = math.sqrt(h * h - 4 * area)
+    return (h + root) / 2, (h - root) / 2
+
+
+def _geometry_svg(blk: dict[str, Any], ramp: list[str]) -> str:
+    """The diagram's opening picture without JavaScript: the block's own rectangle cut into its
+    buildings' parcels, each ring of parcels shaded by its rows from the street (all four sides
+    street), as screen-geometry.ts's `draw` paints it."""
+    long, short = _own_rectangle(blk)
+    side = math.sqrt(blk["area_m2"] / blk["n"])
+    cols, rows = max(1, round(long / side)), max(1, round(short / side))
+    width, pad = 1000.0, 40.0
+    scale = (width - 2 * pad) / long
+    height = short * scale + 2 * pad
+    sx, sy = long / cols * scale, short / rows * scale
+    rects = []
+    for k in range(1, math.ceil(min(cols, rows) / 2) + 1):
+        t = min(1.0, (k - 1) / (GEOMETRY_RED_ROWS - 1))
+        colour = ramp[round(t * (len(ramp) - 1))]
+        x, y = pad + (k - 1) * sx, pad + (k - 1) * sy
+        rects.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{cols * sx - 2 * (k - 1) * sx:.1f}" '
+                     f'height="{rows * sy - 2 * (k - 1) * sy:.1f}" fill="{colour}"/>')
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:.0f} {height:.0f}">'
+            f'<rect width="100%" height="100%" fill="#ffffff"/>{"".join(rects)}'
+            f'<rect x="{pad}" y="{pad}" width="{cols * sx:.1f}" height="{rows * sy:.1f}" '
+            f'fill="none" stroke="#1e293b" stroke-width="4"/></svg>\n')
+
+
+def _demo_geometry() -> str:
+    """The Demo page's diagram of why the screen's formula finds deep, crowded blocks
+    (`web/src/widgets/screen-geometry.ts`): a rectangle with the block's own area, perimeter and
+    buildings -- so the block's own score -- cut into parcels shaded by their rows to the street,
+    which the reader reshapes, re-crowds, or swaps for the city's median block.
+
+    The no-JS picture is that opening rectangle, written here as an SVG (the generator's own
+    drawing, since no producer bakes one), and the widget removes it once it has drawn. The
+    caption's numbers are the bundle's and the formula's; the live readouts are the widget's."""
+    d = _demo()
+    if d is None:
+        return ""
+    blk = d["screen"]["followed"]
+    bundle_url = _copy_asset(DEMO / "demo.json", "demo")
+    if bundle_url is None:
+        return ""
+    svg = ASSETS / "demo" / "geometry.svg"
+    svg.write_text(_geometry_svg(blk, d["encoding"]["escape_ramp"]), encoding="utf-8")
+    long, short = _own_rectangle(blk)
+    caption = (
+        f"Block <code>{blk['block_id']}</code> as the rectangle with its own area "
+        f"({blk['area_m2'] / 10_000:,.1f} ha), perimeter ({blk['perimeter_m']:,.0f} m) and "
+        f"buildings ({blk['n']:,}), {long / short:.1f} times as long as it is wide: the screen "
+        f"sees only those three numbers, so this rectangle scores exactly what the block does. It "
+        f"is cut into one parcel per building, each shaded by how many rows of parcels lie "
+        f"between it and the nearest street, from blue on the street to red "
+        f"{GEOMETRY_RED_ROWS} or more rows in. <em>A/P</em> is the block's thickness (a strip "
+        f"of width w gives about w/2, a square of side L gives L/4); √(A/n) is a parcel's side; "
+        f"so √(nA)/P = (A/P) ÷ √(A/n) is roughly how many parcels deep the block is, and n/A how "
+        f"crowded. Stretch it into a strip and it gets shallower; add buildings and it gets both "
+        f"deeper and more crowded. Switch to a typical block to see one the floor leaves out.")
+    attrs = (f'data-widget="screen-geometry" data-bundle="{bundle_url}" '
+             f'data-red-rows="{GEOMETRY_RED_ROWS}"')
+    return _figure("assets/demo/geometry.svg",
+                   f"Block {blk['block_id']} as a rectangle of its own area, perimeter and "
+                   f"buildings, its parcels shaded by rows to the street", caption, attrs=attrs)
+
+
+def _demo_screen_factors() -> str:
+    """The score's two factors for the block and for the city's median block, side by side, read
+    from the bundle and multiplied out here -- the arithmetic the diagram above does live. Where
+    the flagship region's own peel measured this block's true depth (examples/multiblock_depth_
+    density's meta.json names its deepest block and how many rings in its deepest home sits), a
+    sentence sets the proxy's "parcels deep" against it."""
+    d = _demo()
+    if d is None:
+        return ""
+    sc = d["screen"]
+    rows = []
+    for label, blk in (("This block", sc["followed"]), ("A typical block", sc["typical"])):
+        a, n, per = blk["area_m2"], blk["n"], blk["perimeter_m"]
+        deep, crowd = math.sqrt(n * a) / per, n / a
+        rows.append([f"{label}, <code>{blk['block_id']}</code>", f"{n:,}", f"{a / 10_000:,.1f}",
+                     f"{a / per:,.0f}", f"{math.sqrt(a / n):.1f}", f"{deep:.1f}",
+                     f"{crowd * 10_000:,.0f}", f"{deep * crowd:.4f}",
+                     f"{blk['rank']:,} of {sc['n_blocks']:,}"])
+    table = _table(["", "buildings n", "area A, ha", "thickness A/P, m", "parcel side √(A/n), m",
+                    "parcels deep √(nA)/P", "buildings per ha", "score", "rank"], rows)
+    meta_path = MB / "meta.json"
+    peel = ""
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        if meta["deepest_block"] == d["block_id"]:
+            f = sc["followed"]
+            deep = math.sqrt(f["n"] * f["area_m2"]) / f["perimeter_m"]
+            peel = (f"\n\nThe proxy is a count of parcels, not of real homes: the full peel, which "
+                    f"tessellates the block and counts rings of parcels in from the street, puts "
+                    f"this block's deepest home {meta['deepest_depth']:.0f} rings in, against "
+                    f"the proxy's {deep:.0f} parcels deep. A/P measures how thick a block is, not "
+                    f"where its deepest point lies -- a square's is a quarter of its side, while "
+                    f"its deepest home is half a side in -- so on a compact block the proxy runs "
+                    f"below the peel. The screen uses it to rank blocks, not to measure them.")
+    return table + peel
+
+
+
 def _demo_build_out() -> str:
-    """The Demo page's build-out: the bundle's method on the block under a budget slider, three
-    pictures of each frame and three plots whose dots follow it (`web/src/widgets/build-out.ts`).
+    """The Demo page's build-out: the bundle's method on the block under a budget slider, each
+    frame's escape-time plate and three plots whose dots follow it
+    (`web/src/widgets/build-out.ts`). One view: the owner kept the escape-time plate with its
+    isochrones and dropped the roads-only and time-saved views (2026-10-28) -- the roads are on
+    this plate too, in the grey the caption names.
 
-    The fallback is the network view's sprite sheet itself, cropped to the frame the widget opens
-    on by `object-fit`/`object-position` -- no fourth image to bake or let drift. Marked
-    skip-lightbox: zoomed, it would show the whole sheet, every frame stacked. The widget removes
-    it once it has drawn, like every mount point's fallback on this site.
+    The fallback is the sprite sheet itself, cropped to the frame the widget opens on by
+    `object-fit`/`object-position` -- no second image to bake or let drift. Marked skip-lightbox:
+    zoomed, it would show the whole sheet, every frame stacked. The widget removes it once it has
+    drawn, like every mount point's fallback on this site.
 
-    The caption carries what each view and each plot means, with every number read from the
-    bundle; the widget itself writes only labels and the frame's own readouts."""
+    The caption carries what the plate and the plots mean, every number read from the bundle; the
+    widget writes only labels and the frame's own readouts. `data-metric-label` hands it
+    DEMO_METRIC, so the page names L_P in one place."""
     d = _demo()
     if d is None:
         return ""
     sheets = d["sheets"]
     bundle_url = _copy_asset(DEMO / "demo.json", "demo")
-    urls = {v: _copy_asset(DEMO / sheets[v], "demo") for v in ("network", "time", "saved")}
-    img_url = urls["network"]
-    if bundle_url is None or img_url is None or None in urls.values():
+    img_url = _copy_asset(DEMO / sheets["sheet"], "demo")
+    if bundle_url is None or img_url is None:
         return ""
     m, e = d["method"], d["encoding"]
     frames = m["frames"]
@@ -1845,27 +1968,25 @@ def _demo_build_out() -> str:
     name = html.escape(m["name"])
     caption = (
         f"Block <code>{d['block_id']}</code> as {name} builds it out, from no new road to a "
-        f"{frames[-1]['budget']:.0%} displacement budget, one frame per point of budget. "
-        f"<strong>Roads</strong>: each new road at its {e['road_width_m']:.0f} m width, and each "
-        f"building it takes shaded from intact to wholly destroyed, which it is once "
-        f"{e['gone_share']:.0%} of it is gone or once a road cuts it in two. "
-        f"<strong>Escape time</strong>: how hard it is for each home's people to walk out to the "
+        f"{frames[-1]['budget']:.0%} displacement budget, one frame per point of budget. Each "
+        f"home is coloured by its escape time: how hard it is for its people to walk out to the "
         f"street, as a share of the 99th-percentile home's with no new road "
-        f"({e['escape_scale']:,.0f} in the model's own units); blue is a short way out and red a "
-        f"long one, and each dark line is an isochrone, every {e['iso_step']:.0%} of that scale. "
-        f"<strong>Time saved</strong>: the share of each home's escape time the new roads save, "
-        f"from none to {e['saved_max']:.0%} or more. Grey on either is a destroyed building or a "
-        f"road. In the plots, permeability is 1 − P(roads) / P(no roads), where P is the effort "
-        f"every home's walk out spends, so 0 is no change; conductance added is how much easier "
-        f"the roads make the ground to cross, in m² of open ground, a road conducting "
+        f"({e['escape_scale']:,.0f} in the model's own units). Blue is a short way out and red a "
+        f"long one, and each dark line is an isochrone, every {e['iso_step']:.0%} of that scale: "
+        f"homes inside a ring take longer than homes outside it, and the rings shrink as roads go "
+        f"in. Grey is a new road, drawn at its {e['road_width_m']:.0f} m width, or a destroyed "
+        f"building: one {e['gone_share']:.0%} or more of which the roads take, or that a road "
+        f"cuts in two. In the plots, {DEMO_METRIC} is 1 − P(roads) / P(no roads), where P is the "
+        f"effort every home's walk out spends, so 0 is no change; conductance added is how much "
+        f"easier the roads make the ground to cross, in m² of open ground, a road conducting "
         f"{e['road_conductance']:.0f} times what open ground does. <em>Built in</em> is the "
         f"method's own recorded run time to that frame.")
-    attrs = f'data-widget="build-out" data-bundle="{bundle_url}"'
+    attrs = (f'data-widget="build-out" data-bundle="{bundle_url}" '
+             f'data-metric-label="{DEMO_METRIC}"')
     return _figure(img_url,
-                   f"Block {d['block_id']} and the roads {name} builds on it to a "
-                   f"{first['budget']:.0%} displacement budget",
+                   f"Block {d['block_id']}'s homes coloured by escape time, with the roads "
+                   f"{name} builds to a {first['budget']:.0%} displacement budget",
                    caption, attrs=attrs, skip_lightbox=True, img_style=style)
-
 
 
 # Marker name -> producer. A partial's <!-- NAME --> holes are filled from here; tests assert this
@@ -1896,6 +2017,8 @@ MARKERS: dict[str, Callable[[], str]] = {
     # The Demo page's: one block, screened, its fires, and one method built out on it, all read
     # from examples/demo/demo.json (see that directory's README for its producer).
     "DEMOPLACE": _demo_place,
+    "DEMOGEOMETRY": _demo_geometry,
+    "DEMOSCREENFACTORS": _demo_screen_factors,
     "DEMOSCREENMAP": _demo_screen_map,
     "DEMOSCREENFACTS": _demo_screen_facts,
     "DEMOFIRES": _demo_fires,
@@ -1928,7 +2051,7 @@ def _render_partial(name: str) -> str:
 
 
 def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
-                title: str | None = None) -> None:
+                title: str | None = None, hide: tuple[str, ...] = ()) -> None:
     """Write one generated page, fixing asset paths for BOTH link forms, which MkDocs treats
     differently:
 
@@ -1956,7 +2079,12 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
     # "Looped Tree" -- because it does not read the H1 for nav purposes. Emitting the title here
     # keeps method_labels.py the single source of the display name for the heading AND the nav,
     # instead of a hand-written copy in mkdocs.yml that silently goes stale.
-    front = f'---\ntitle: "{title}"\n---\n' if title else ""
+    #
+    # `hide` lists Material's page-level `hide:` keys ("toc", "navigation"): the Demo page drops its
+    # table of contents for the width its build-out needs.
+    hidden = "hide:\n" + "".join(f"  - {h}\n" for h in hide) if hide else ""
+    meta = (f'title: "{title}"\n' if title else "") + hidden
+    front = f"---\n{meta}---\n" if meta else ""
     text = front + GENERATED_NOTE + body.rstrip() + "\n"
     if depth:
         text = text.replace("](assets/", "](" + "../" * depth + "assets/")
@@ -2002,7 +2130,10 @@ def main() -> None:
     _write_page(DOCS / "explore.md", _render_partial("explore"), depth=0, url_depth=1,
                 title="Explore")
     # docs/demo.md serves at <base>/demo/ -- explore.md's depths, for explore.md's reasons.
-    _write_page(DOCS / "demo.md", _render_partial("demo"), depth=0, url_depth=1, title="Demo")
+    # No table of contents: the page has three sections, and the build-out's plate and plots
+    # need the column it would take to sit side by side (owner, 2026-10-28).
+    _write_page(DOCS / "demo.md", _render_partial("demo"), depth=0, url_depth=1, title="Demo",
+                hide=("toc",))
 
     results_dir = DOCS / "results"
     if results_dir.exists():

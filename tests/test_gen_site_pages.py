@@ -1132,7 +1132,8 @@ def test_the_demo_mounts_the_sites_screen_map_with_a_close_up_and_the_build_out(
     """One screen widget on the site, not two: the Demo page's city map is ScreenMap, asking for a
     close-up; then the build-out. And ONLY the Demo page asks for the close-up -- Screening and
     Explore keep the markup they had."""
-    assert re.findall(r'data-widget="([a-z-]+)"', demo_body) == ["screen-map", "build-out"]
+    assert re.findall(r'data-widget="([a-z-]+)"', demo_body) == [
+        "screen-geometry", "screen-map", "build-out"]
     pad = _demo_bundle()["screen"]["closeup_pad_m"]
     assert f'data-closeup-pad-m="{pad:g}"' in demo_body
     for page in ("explore", "screening"):
@@ -1144,23 +1145,89 @@ def test_the_demo_rewrites_its_bundle_urls_for_its_served_depth() -> None:
     the build-out's bundle and its fallback sheet included."""
     page = render_page("demo")
     assert 'data-bundle="../assets/demo/demo.json"' in page
-    assert 'src="../assets/demo/loop_network.webp"' in page
+    assert 'src="../assets/demo/loop_time.webp"' in page
+    assert 'src="../assets/demo/geometry.svg"' in page
     for attr in ("src", "href", "data-bundle", "data-bundle-capetown", "data-bundle-nairobi"):
         assert f'{attr}="assets/' not in page, attr
 
 
-def test_the_demo_ships_every_sheet_the_widget_fetches(monkeypatch: pytest.MonkeyPatch,
+def test_the_demo_ships_the_one_sheet_the_build_out_shows(monkeypatch: pytest.MonkeyPatch,
                                                          tmp_path: Path) -> None:
-    """The widget fetches the three views' sheets from beside the bundle (build-out.ts's
-    `besideBundle`); the generator must copy all three there, not only the fallback's."""
+    """The owner kept the escape-time view alone (2026-10-28): the bundle names one sheet, the
+    generator ships it beside the bundle (where build-out.ts's `besideBundle` looks), and nothing
+    on the page offers a view switch or a `view` URL key any more."""
     import scripts.gen_site_pages as gsp
 
     monkeypatch.setattr(gsp, "DOCS", tmp_path)
     monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
-    gsp._demo_build_out()
+    figure = gsp._demo_build_out()
     sheets = _demo_bundle()["sheets"]
-    for view in ("network", "time", "saved"):
-        assert (tmp_path / "assets" / "demo" / sheets[view]).is_file(), view
+    assert set(sheets) == {"width", "frame_height", "rows", "sheet"}
+    assert (tmp_path / "assets" / "demo" / sheets["sheet"]).is_file()
+    widget = (ROOT / "web" / "src" / "widgets" / "build-out.ts").read_text(encoding="utf-8")
+    assert '"view"' not in widget, "the build-out widget still carries a view URL key"
+    assert "Grey is a new road" in figure and "destroyed" in figure, (
+        "the caption must say what grey is on the escape-time plate")
+
+
+def test_the_demo_hides_its_table_of_contents(tmp_path: Path,
+                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    """Owner, 2026-10-28: the Demo page drops its table of contents for the width the build-out
+    needs. Checked on the written page, front matter and all, as `main()` writes it."""
+    import scripts.gen_site_pages as gsp
+
+    src = (ROOT / "scripts" / "gen_site_pages.py").read_text(encoding="utf-8")
+    call = re.search(r'_write_page\(DOCS / "demo\.md",[^\n]*\n[^\n]*', src)
+    assert call is not None and 'hide=("toc",)' in call.group(0)
+    out = tmp_path / "demo.md"
+    gsp._write_page(out, "body", depth=0, url_depth=1, title="Demo", hide=("toc",))
+    assert out.read_text(encoding="utf-8").startswith('---\ntitle: "Demo"\nhide:\n  - toc\n---\n')
+
+
+def test_the_demo_names_its_metric_once(demo_body: str) -> None:
+    """The metric's name may change (the owner is weighing "ease of access"), so the Demo page
+    spells it in one place, DEMO_METRIC, and hands it to the build-out widget, which spells none of
+    its own."""
+    import scripts.gen_site_pages as gsp
+
+    assert f'data-metric-label="{gsp.DEMO_METRIC}"' in demo_body
+    widget = (ROOT / "web" / "src" / "widgets" / "build-out.ts").read_text(encoding="utf-8")
+    code = re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", widget, flags=re.S))
+    assert "plotsFor" in code, "the comment strip ate the code; this test is vacuous"
+    # The string literals, with any template's ${...} code taken out: the bundle's own field
+    # `f.permeability` is code, not a label.
+    literals = [re.sub(r"\$\{[^}]*\}", "", lit)
+                for lit in re.findall(r'"[^"\n]*"|`[^`]*`', code)]
+    spelled = [lit for lit in literals if re.search(r"[Pp]ermeability", lit)]
+    assert not spelled, (
+        f"build-out.ts spells the metric's name in {spelled}; take it from data-metric-label")
+
+
+def test_the_geometry_diagram_opens_on_the_blocks_own_rectangle() -> None:
+    """The diagram's claim is that its opening rectangle scores exactly what the block does: same
+    area, same perimeter, same buildings. Rebuild that rectangle the way the generator does and
+    score it with the shipped formula."""
+    import scripts.gen_site_pages as gsp
+
+    for blk in (_demo_bundle()["screen"]["followed"], _demo_bundle()["screen"]["typical"]):
+        long, short = gsp._own_rectangle(blk)
+        area, perimeter = long * short, 2 * (long + short)
+        assert area == pytest.approx(blk["area_m2"]) and perimeter == pytest.approx(
+            blk["perimeter_m"])
+        n = blk["n"]
+        assert (n * area) ** 0.5 / perimeter * n / area == pytest.approx(blk["score"], rel=1e-6)
+
+
+def test_the_factors_table_sets_the_proxy_against_the_peel(demo_body: str) -> None:
+    """Both blocks' factors are tabulated, and where the flagship run peeled this very block, its
+    true depth is quoted beside the proxy's -- from that run's meta.json, never typed."""
+    import json
+
+    sc = _demo_bundle()["screen"]
+    assert sc["followed"]["block_id"] in demo_body and sc["typical"]["block_id"] in demo_body
+    meta = json.loads((ROOT / "examples" / "multiblock_depth_density" / "meta.json").read_text())
+    assert meta["deepest_block"] == sc["followed"]["block_id"], "the peel sentence would be absent"
+    assert f"deepest home {meta['deepest_depth']:.0f} rings in" in demo_body
 
 
 def test_the_fires_are_listed_and_carry_nothing_a_map_could_draw(demo_body: str) -> None:
