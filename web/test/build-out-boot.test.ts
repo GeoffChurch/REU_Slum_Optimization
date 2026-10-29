@@ -88,6 +88,8 @@ const shift = (s: DemoSeries, k: number): string => {
   return `translate(${x}%, ${y}%)`;
 };
 const pct1 = (v: number): string => `${(v * 100).toFixed(1)}%`;
+const isTime = (svg: FakeElement): boolean =>
+  (svg.getAttribute("aria-label") ?? "").includes("against run time");
 
 test("one series boots on its default budget and removes the fallback", async () => {
   const { host } = await mount(PAGE);
@@ -115,7 +117,7 @@ test("a slider step moves the plate, the readouts and every plot's dot to that b
   assert.equal(readouts(host)[0]![2], pct1(f.permeability));
   assert.equal(readouts(host)[0]![3], duration(f.seconds!));
   const svgs = host.findAll("svg");
-  assert.equal(svgs.length, 3, "three plots");
+  assert.equal(svgs.length, PAGE.plots.length, "a plot per kind the build-out names");
   for (const svg of svgs) {
     // Each of 5810's budgets is its own network, so its row-th marker is this budget's point.
     const marker = circles(svg, "sbu-curve sbu-series-0")[f.row]!;
@@ -196,7 +198,9 @@ test("a network shared by several budgets is one dot, and the note says whose it
   assert.ok(k > 0, "no shared network in the committed build-out");
   const distinct = new Set(s.cells.map((c) => c.step.row)).size;
   for (const svg of host.findAll("svg")) {
-    assert.equal(circles(svg, "sbu-curve sbu-series-0").length, distinct,
+    // Run time has no point for the block with no new road (no time, no place on a log scale).
+    const timed = isTime(svg) ? 1 : 0;
+    assert.equal(circles(svg, "sbu-curve sbu-series-0").length, distinct - timed,
                  "one dot per network, not per budget");
   }
   step(host, k);
@@ -251,4 +255,51 @@ test("a measured time reads as the page's generator states it", () => {
     { cases: [number, string][] };
   assert.ok(fixture.cases.length > 0);
   for (const [s, want] of fixture.cases) assert.equal(measuredTime(s), want, String(s));
+});
+
+test("the face-off plots run time on a log scale, two series, dots following the slider",
+     async () => {
+  const { host } = await compared();
+  const svgs = host.findAll("svg");
+  assert.deepEqual(COMPARED.plots, ["displacement", "road", "time"]);
+  assert.equal(svgs.length, 3);
+  const time = svgs.find(isTime);
+  assert.ok(time !== undefined, "no run-time plot");
+  // Human units on the axis.
+  const labels = time.findAll("text").map((t) => t.textContent);
+  for (const want of ["1 min", "1 h"]) assert.ok(labels.includes(want), `${want} not in ${labels}`);
+  // At a budget where both have a network, each dot sits on its series' point for that network,
+  // and the axis is logarithmic: equal factors of time are equal distances.
+  const k = 3;
+  step(host, k);
+  COMPARED.series.forEach((s, i) => {
+    const f = s.cells[k]!.step;
+    const pts = [...new Map(s.cells.filter((c) => c.step.seconds > 0)
+      .map((c) => [c.step.row, c.step])).values()];
+    const at = pts.findIndex((q) => q.row === f.row);
+    const marker = circles(time, `sbu-curve sbu-series-${i}`)[at]!;
+    const [dot] = circles(time, `sbu-cursor sbu-series-${i}`);
+    assert.equal(dot!.getAttribute("cx"), marker.getAttribute("cx"), s.method);
+    assert.notEqual(dot!.getAttribute("visibility"), "hidden");
+  });
+  const xs = COMPARED.series.map((s) => s.cells[k]!.step.seconds);
+  const cx = COMPARED.series.map((_, i) => Number(circles(time, `sbu-cursor sbu-series-${i}`)[0]!
+    .getAttribute("cx")));
+  const [lo, hi] = ["10 s", "1 h"].map((l) => Number(time.findAll("text")
+    .find((t) => t.textContent === l)!.getAttribute("x")));
+  const perDecade = (hi! - lo!) / Math.log10(360);
+  assert.ok(Math.abs((cx[1]! - cx[0]!) - perDecade * Math.log10(xs[1]! / xs[0]!)) < 0.5,
+            "the run-time axis is not logarithmic");
+  // The block with no new road took no time: no dot on run time.
+  step(host, 0);
+  COMPARED.series.forEach((_, i) => {
+    assert.equal(circles(time, `sbu-cursor sbu-series-${i}`)[0]!.getAttribute("visibility"),
+                 "hidden");
+  });
+});
+
+test("the Demo's own build-out plots no run time", async () => {
+  const { host } = await mount(PAGE);
+  assert.deepEqual(PAGE.plots, ["displacement", "road"]);
+  assert.ok(!host.findAll("svg").some(isTime));
 });
