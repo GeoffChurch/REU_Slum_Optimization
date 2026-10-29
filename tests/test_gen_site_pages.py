@@ -896,12 +896,13 @@ def test_the_screen_map_caption_quotes_the_floor_and_is_honest_about_nairobi(
         f"read from capetown.json/nairobi.json.")
 
 
-def test_the_screen_map_figure_describes_all_three_of_its_encodings(screening_body: str) -> None:
-    """The PNG encodes three things -- gold ground truth, red selected outline, blue follow ring --
-    and until this test the site copy described two. Task 6 added the ring to the picture and to
-    examples/screen-map/README.md, and left the alt text and caption behind: a reader met an
-    unexplained blue circle, and a screen-reader user met nothing at all, because a canvas and a PNG
-    carry no accessible text beyond what the alt and caption say.
+def test_the_screen_map_figure_describes_all_of_its_encodings(screening_body: str) -> None:
+    """The map encodes a block's fill -- red selected, gold surveyed informal and not selected, grey
+    neither -- and a blue follow ring, and the site copy once described only some of them. Task 6
+    added the ring to the picture and to examples/screen-map/README.md, and left the alt text and
+    caption behind: a reader met an unexplained blue circle, and a screen-reader user met nothing
+    at all, because a canvas and a PNG carry no accessible text beyond what the alt and caption
+    say.
 
     ALT AND CAPTION ARE CHECKED SEPARATELY, not as one blob. They are read in different situations
     -- the alt stands in for the image, the caption sits beside it -- so a fix that named the ring
@@ -919,10 +920,14 @@ def test_the_screen_map_figure_describes_all_three_of_its_encodings(screening_bo
     alt = re.search(r'alt="([^"]*)"', figure)
     assert alt is not None, "the screen-map figure lost its alt text"
 
-    for encoding in ("gold", "red outline", "blue ring"):
-        assert encoding in alt.group(1), f"{encoding!r} missing from the alt text"
-    for encoding in ("gold", "red outline", "blue ring"):
-        assert encoding in figure, f"{encoding!r} missing from the caption"
+    # Three fills and the ring (owner, 2026-10-29): red is the selection, whatever the survey says;
+    # gold the surveyed informal blocks it leaves; grey the rest. No outline encodes anything now.
+    for encoding in ("red fills", "gold", "grey", "blue ring"):
+        assert encoding in alt.group(1).lower(), f"{encoding!r} missing from the alt text"
+    for encoding in ("red fills", "gold", "grey", "blue ring", "whatever the survey says"):
+        assert encoding in figure.lower(), f"{encoding!r} missing from the caption"
+    assert "outline" not in re.sub(r"a ring\s+rather than an outline", "", figure), (
+        "the caption still describes an outline encoding")
 
     # The ring's block id comes off the bundle's own `follow`, never typed -- the same rule the
     # floor numbers above follow, and what makes a re-bake onto a different block move this caption
@@ -1520,11 +1525,11 @@ def test_an_unknown_topology_kind_refuses_to_build(monkeypatch: pytest.MonkeyPat
 
 
 def test_the_survey_note_is_one_sentence_and_points_at_the_caveat(demo_body: str) -> None:
-    """The survey's gold does not flag the block though it is plainly informal: said once, in one
+    """The City's survey does not flag the block though it is plainly informal: said once, in one
     sentence, with the bake-off's caveat on the survey's age linked."""
     b = _demo_bundle()["block"]
     assert not b["proxy"]["informal"] and b["plainly_informal"], "update this test"
-    [note] = re.findall(r"<p>The City's survey[^\n]*</p>", demo_body)
+    [note] = re.findall(r"<p>The City's informal-settlement survey[^\n]*</p>", demo_body)
     assert note.count(". ") == 0 and "plainly informal" in note
     assert '<a href="../results/bakeoff/#caveats">' in note
 

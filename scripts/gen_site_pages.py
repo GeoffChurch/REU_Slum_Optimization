@@ -758,11 +758,12 @@ def _screen_map_figure() -> str:
     names, beside its pre-existing one for plain `data-bundle=` -- miss one and that city's fetch
     404s behind an intact-looking PNG, the exact trap this task's brief is named for.
 
-    **Three encodings, all three described.** The PNG carries gold ground truth, the red selected
-    outline, and -- since Task 6 -- a blue ring on the block the rest of the site follows. Alt text
-    and caption both name all three: a marker that exists only in the pixels is one a screen-reader
-    user is never told about, and a legend that lists two of three encodings is worse than none,
-    because the third then reads as unexplained decoration. The ring's block id is read from
+    **Every encoding described.** A block's fill says what it is -- red if the floor selects it,
+    whatever the survey says; gold if not but the City's survey marks it informal; grey otherwise
+    (owner, 2026-10-29) -- and a blue ring marks the block the rest of the site follows. Alt text
+    and caption both name all of them: a marker that exists only in the pixels is one a
+    screen-reader user is never told about, and a legend that lists some encodings is worse than
+    none, because the rest then read as unexplained decoration. The ring's block id is read from
     `capetown.json`'s `follow` (subscripted, not `.get`: `gen_screen_map.py` asserts the followed
     city's bundle carries the field, so a bake that dropped it should raise here rather than quietly
     publish a caption with a hole in it) -- so a re-bake that follows a different block moves this
@@ -801,10 +802,11 @@ def _screen_map_figure() -> str:
     attrs = (f'data-widget="screen-map" data-bundle-capetown="{capetown_url}" '
              f'data-bundle-nairobi="{nairobi_url}"')
     caption = (
-        f"Cape Town at the shipped <code>depth_density_proxy</code> floor: gold marks real "
-        f"informal settlements from the City of Cape Town's own survey, the red outline the "
+        f"Cape Town at the shipped <code>depth_density_proxy</code> floor. Red fills the "
         f"<strong>{cape_floor['n']:,}</strong> of {capetown['n_blocks']:,} blocks the screen "
-        f"selects — precision <strong>{_pct(cape_floor['precision'])}</strong>, recall "
+        f"selects, whatever the survey says; gold, the informal settlements in the City of Cape "
+        f"Town's own survey that it does not; grey, the rest — precision "
+        f"<strong>{_pct(cape_floor['precision'])}</strong>, recall "
         f"<strong>{_pct(cape_floor['recall'])}</strong> against that survey. The blue ring marks "
         f"<code>{follow['block_id']}</code>, the one block the rest of this site follows — a ring "
         f"rather than an outline because a whole metro fitted into one figure leaves that block "
@@ -814,9 +816,10 @@ def _screen_map_figure() -> str:
         f"check them against, so no precision or recall is shown for that city."
     )
     return _figure(img_url,
-                   "Cape Town screened at the shipped depth_density_proxy floor: gold marks real "
-                   "informal settlements, the red outline marks the blocks the screen selects, and "
-                   "a blue ring marks the one block the rest of the site follows",
+                   "Cape Town screened at the shipped depth_density_proxy floor: red fills the "
+                   "blocks the screen selects, gold the surveyed informal settlements it does not, "
+                   "grey the rest, and a blue ring marks the one block the rest of the site "
+                   "follows",
                    caption, attrs=attrs)
 
 
@@ -1730,20 +1733,18 @@ def _demo_screen_facts() -> str:
 
 
 def _demo_survey_note() -> str:
-    """One sentence on the survey the map's gold comes from, as it bears on this block: a block it
-    does not flag can still be plainly informal, since it predates the buildings (the bake-off's
-    Caveats)."""
+    """One sentence on the City's survey (the map's gold, on a block the screen leaves), as it bears
+    on this block: a block it does not flag can still be plainly informal, since it predates the
+    buildings (the bake-off's Caveats)."""
     d = _demo()
     if d is None:
         return ""
     b = d["block"]
     if b["proxy"]["informal"]:
-        return ("<p>The City's informal-settlement survey, the gold on the map, flags this "
-                "block.</p>")
+        return "<p>The City's informal-settlement survey flags this block.</p>"
     if not b["plainly_informal"]:
-        return ("<p>The City's informal-settlement survey, the gold on the map, does not flag this "
-                "block.</p>")
-    return ('<p>The City\'s survey, the gold on the map, misses this block, though it is plainly '
+        return "<p>The City's informal-settlement survey does not flag this block.</p>"
+    return ('<p>The City\'s informal-settlement survey misses this block, though it is plainly '
             'informal: the survey predates its buildings (the '
             '<a href="../results/bakeoff/#caveats">bake-off\'s caveats</a>).</p>')
 
