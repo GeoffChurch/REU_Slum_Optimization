@@ -5,11 +5,13 @@
      research/roadless branch:
 
      * DEMOPLACE -- the block, its buildings, where it is, and a Google Maps link.
-     * DEMOGEOMETRY -- the screen's formula drawn: the block as the rectangle of its own area,
-       perimeter and buildings, cut into parcels shaded by rows to the street, which the reader
-       reshapes or re-crowds (web/src/widgets/screen-geometry.ts).
-     * DEMOSCREENFACTORS -- the score's two factors for the block and for the city's median block,
-       and the peel's true depth for the block where the flagship run measured it.
+     * DEMOGEOMETRY -- the screen's formula drawn on the block's real outline, ticked every parcel
+       side along its street (its frontage slots), with a reference disk, square and strip of the
+       same area, the city's median block, and a buildings slider
+       (web/src/widgets/screen-geometry.ts). No shape is presumed: the depth factor is the homes
+       behind each frontage slot.
+     * DEMOSCREENFACTORS -- the score's factors for the block and for the city's median block, and
+       the peel's true depth for the block where the flagship run measured it.
      * DEMOSCREENMAP -- the site's own ScreenMap widget (the Screening and Explore pages' screen),
        here with a close-up of the block beside the city map. Not a second screen widget: the
        prototype's map is this one's, extended.
@@ -52,11 +54,13 @@ nothing but each block's building count *n*, area *A* and perimeter *P*: √(*nA
 block scores high only if it is both deep, its interior many parcels back from a street, and
 crowded.
 
-Why that formula finds deep blocks is geometry. *A*/*P* is a length, how thick the block is, and
-√(*A*/*n*) is the side of one building's share of the ground, a parcel; their ratio counts the rows of
-homes between the block's middle and a street. Below, the block is redrawn as the rectangle with
-its own area, perimeter and buildings, so its score is the block's own. Stretch it, crowd it, or
-switch to a typical block, and watch the two factors move.
+Why that formula finds deep blocks is geometry, and it needs no particular shape. Give each building
+an equal square of ground; its side is √(*A*/*n*). Count how many of those squares fit along the
+street: that is the block's frontage. Then √(*nA*)/*P* is simply how many homes stand behind each
+square of frontage, and *n*/*A* how crowded they are. A block scores high when many homes share each
+stretch of street and they are packed close. Below, the street of this block is ticked off one parcel
+at a time; swap its outline for a disk, a square or a strip of the same area, switch to a typical
+block, or change how many buildings it holds.
 
 <!-- DEMOGEOMETRY -->
 

@@ -1203,19 +1203,19 @@ def test_the_demo_names_its_metric_once(demo_body: str) -> None:
         f"build-out.ts spells the metric's name in {spelled}; take it from data-metric-label")
 
 
-def test_the_geometry_diagram_opens_on_the_blocks_own_rectangle() -> None:
-    """The diagram's claim is that its opening rectangle scores exactly what the block does: same
-    area, same perimeter, same buildings. Rebuild that rectangle the way the generator does and
-    score it with the shipped formula."""
-    import scripts.gen_site_pages as gsp
-
+def test_the_depth_factor_is_homes_per_frontage_slot(demo_body: str) -> None:
+    """The diagram's reading, which presumes no shape: with s = √(A/n), the block's street holds
+    P/s parcels (frontage slots), and the screen's depth factor √(nA)/P is n ÷ (P/s) exactly, the
+    homes behind each slot. Checked on both blocks the bundle carries, against the bundle's own
+    score, and as the factors table prints it."""
     for blk in (_demo_bundle()["screen"]["followed"], _demo_bundle()["screen"]["typical"]):
-        long, short = gsp._own_rectangle(blk)
-        area, perimeter = long * short, 2 * (long + short)
-        assert area == pytest.approx(blk["area_m2"]) and perimeter == pytest.approx(
-            blk["perimeter_m"])
-        n = blk["n"]
-        assert (n * area) ** 0.5 / perimeter * n / area == pytest.approx(blk["score"], rel=1e-6)
+        n, area, perimeter = blk["n"], blk["area_m2"], blk["perimeter_m"]
+        side = (area / n) ** 0.5
+        per_slot = n / (perimeter / side)
+        assert per_slot == pytest.approx((n * area) ** 0.5 / perimeter, rel=1e-12)
+        assert per_slot * n / area == pytest.approx(blk["score"], rel=1e-9)
+        assert per_slot / side ** 2 == pytest.approx(n / (perimeter * side), rel=1e-12)
+        assert f"<td>{per_slot:.1f}</td>" in demo_body or f"| {per_slot:.1f} |" in demo_body
 
 
 def test_the_factors_table_sets_the_proxy_against_the_peel(demo_body: str) -> None:

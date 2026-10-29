@@ -1211,9 +1211,9 @@ body,
 
 /* ----------------------------------------------------------- the screen-geometry diagram */
 
-/* Built by web/src/widgets/screen-geometry.ts: a block picker and two sliders, the rectangle on a
-   white plate (its ramp and street ink are the build-out plate's, drawn for white), its key, and
-   the factors read out. */
+/* Built by web/src/widgets/screen-geometry.ts: a block picker, an outline picker and a buildings
+   slider, the block on a white plate (its street ink is the build-out plate's, drawn for white)
+   with its magnified inset, and the factors read out. */
 .sbu-geometry__controls {
   display: flex;
   flex-wrap: wrap;
@@ -1224,7 +1224,7 @@ body,
   border-bottom: 1px solid var(--sbu-rule);
 }
 
-.sbu-geometry__blocks {
+.sbu-geometry__group {
   display: inline-flex;
   flex-wrap: wrap;
   padding: 2px;
@@ -1232,7 +1232,7 @@ body,
   border-radius: 999px;
 }
 
-.sbu-geometry__blocks button {
+.sbu-geometry__group button {
   font: inherit;
   font-size: var(--sbu-step--1);
   font-weight: 700;
@@ -1245,7 +1245,7 @@ body,
 }
 
 /* Pressed is the brand red with white on it: 8.92:1 in both schemes (the --sbu-red-fill token). */
-.sbu-geometry__blocks button[aria-pressed="true"] {
+.sbu-geometry__group button[aria-pressed="true"] {
   background: var(--sbu-red-fill);
   color: #ffffff;
 }
@@ -1284,22 +1284,12 @@ body,
   display: block;
 }
 
-.sbu-geometry__key {
-  max-width: 24rem;
-  margin: 0.5rem 0;
-  font-size: var(--sbu-step--1);
-  color: var(--sbu-ink-muted);
-}
-
-.sbu-geometry__ramp {
-  height: 0.7rem;
-  border: 1px solid var(--sbu-rule-strong);
-  border-radius: 2px;
-}
-
-.sbu-geometry__ticks {
-  display: flex;
-  justify-content: space-between;
+/* On a phone the widget's 2:1 canvas leaves the block a sliver beside its inset; a square one
+   gives it the height. `!important` because the widget sets its aspect inline. */
+@media screen and (max-width: 44.9375em) {
+  .sbu-geometry__plate canvas {
+    aspect-ratio: 1 / 1 !important;
+  }
 }
 
 .md-typeset .sbu-geometry__read {

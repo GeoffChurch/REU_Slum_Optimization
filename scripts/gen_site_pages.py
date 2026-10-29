@@ -1823,52 +1823,62 @@ def _demo_topology_note() -> str:
         f"displacement budget.</p>")
 
 
-# The rows of parcels from a street at which the screen-geometry diagram's shading reaches its red:
-# handed to the widget (`data-red-rows`) and used for the no-JS picture below, so the two agree.
-GEOMETRY_RED_ROWS = 12
+def _slot_ticks(rings: list[list[list[float]]], step: float) -> list[tuple[float, float]]:
+    """A point every `step` metres along every ring: screen-geometry.ts's `slotTicks`, without
+    the normals, for the no-JS picture."""
+    out = []
+    for ring in rings:
+        offset = 0.0
+        for (x0, y0), (x1, y1) in zip(ring, ring[1:] + ring[:1], strict=True):
+            length = math.hypot(x1 - x0, y1 - y0)
+            if length == 0:
+                continue
+            d = offset
+            while d < length:
+                out.append((x0 + (x1 - x0) * d / length, y0 + (y1 - y0) * d / length))
+                d += step
+            offset = d - length
+    return out
 
 
-def _own_rectangle(blk: dict[str, Any]) -> tuple[float, float]:
-    """(long side, short side) of the rectangle with block `blk`'s area and perimeter -- the
-    rectangle screen-geometry.ts's `ownShape` opens on, so its score is the block's own."""
-    h, area = blk["perimeter_m"] / 2, blk["area_m2"]
-    root = math.sqrt(h * h - 4 * area)
-    return (h + root) / 2, (h - root) / 2
+def _geometry_svg(blk: dict[str, Any], street: str) -> str:
+    """The diagram's opening picture without JavaScript: the block's own outline, with a dot every
+    parcel side along its street -- one per frontage slot -- as screen-geometry.ts draws it,
+    without the inset or the row of parcels."""
+    rings = blk["rings"]
+    xs = [x for r in rings for x, _ in r]
+    ys = [y for r in rings for _, y in r]
+    width, pad = 1000.0, 20.0
+    scale = (width - 2 * pad) / (max(xs) - min(xs))
+    height = (max(ys) - min(ys)) * scale + 2 * pad
 
+    def pt(x: float, y: float) -> tuple[float, float]:
+        return pad + (x - min(xs)) * scale, height - pad - (y - min(ys)) * scale
 
-def _geometry_svg(blk: dict[str, Any], ramp: list[str]) -> str:
-    """The diagram's opening picture without JavaScript: the block's own rectangle cut into its
-    buildings' parcels, each ring of parcels shaded by its rows from the street (all four sides
-    street), as screen-geometry.ts's `draw` paints it."""
-    long, short = _own_rectangle(blk)
+    path = " ".join("M" + " L".join("{:.1f},{:.1f}".format(*pt(x, y)) for x, y in r) + " Z"
+                    for r in rings)
     side = math.sqrt(blk["area_m2"] / blk["n"])
-    cols, rows = max(1, round(long / side)), max(1, round(short / side))
-    width, pad = 1000.0, 40.0
-    scale = (width - 2 * pad) / long
-    height = short * scale + 2 * pad
-    sx, sy = long / cols * scale, short / rows * scale
-    rects = []
-    for k in range(1, math.ceil(min(cols, rows) / 2) + 1):
-        t = min(1.0, (k - 1) / (GEOMETRY_RED_ROWS - 1))
-        colour = ramp[round(t * (len(ramp) - 1))]
-        x, y = pad + (k - 1) * sx, pad + (k - 1) * sy
-        rects.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{cols * sx - 2 * (k - 1) * sx:.1f}" '
-                     f'height="{rows * sy - 2 * (k - 1) * sy:.1f}" fill="{colour}"/>')
+    dots = "".join('<circle cx="{:.1f}" cy="{:.1f}" r="1.6"/>'.format(*pt(x, y))
+                   for x, y in _slot_ticks(rings, side))
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:.0f} {height:.0f}">'
-            f'<rect width="100%" height="100%" fill="#ffffff"/>{"".join(rects)}'
-            f'<rect x="{pad}" y="{pad}" width="{cols * sx:.1f}" height="{rows * sy:.1f}" '
-            f'fill="none" stroke="#1e293b" stroke-width="4"/></svg>\n')
+            f'<rect width="100%" height="100%" fill="#ffffff"/>'
+            f'<path d="{path}" fill="#ebe6de" fill-rule="evenodd" stroke="{street}" '
+            f'stroke-width="2"/><g fill="{street}">{dots}</g></svg>\n')
 
 
 def _demo_geometry() -> str:
     """The Demo page's diagram of why the screen's formula finds deep, crowded blocks
-    (`web/src/widgets/screen-geometry.ts`): a rectangle with the block's own area, perimeter and
-    buildings -- so the block's own score -- cut into parcels shaded by their rows to the street,
-    which the reader reshapes, re-crowds, or swaps for the city's median block.
+    (`web/src/widgets/screen-geometry.ts`), on the block's real outline: no shape is presumed.
+    s = √(A/n) is a parcel's side, P/s the parcels that fit along the street (frontage slots), and
+    √(nA)/P = n ÷ (P/s) exactly -- the homes behind each slot -- so the score is homes per slot
+    over s², homes per m² of the one-parcel band along the street. The reader swaps the outline
+    for a disk, square or strip of the same area (shape enters only through P), switches to the
+    city's median block, or changes the buildings.
 
-    The no-JS picture is that opening rectangle, written here as an SVG (the generator's own
-    drawing, since no producer bakes one), and the widget removes it once it has drawn. The
-    caption's numbers are the bundle's and the formula's; the live readouts are the widget's."""
+    The no-JS picture is the block's outline dotted every s along its street, an SVG this function
+    draws from the bundle's rings; the widget removes it once it has drawn. The caption is
+    block-neutral, since the reader can switch block; the widget's own note names the block on
+    show and its numbers."""
     d = _demo()
     if d is None:
         return ""
@@ -1877,33 +1887,32 @@ def _demo_geometry() -> str:
     if bundle_url is None:
         return ""
     svg = ASSETS / "demo" / "geometry.svg"
-    svg.write_text(_geometry_svg(blk, d["encoding"]["escape_ramp"]), encoding="utf-8")
-    long, short = _own_rectangle(blk)
+    svg.write_text(_geometry_svg(blk, d["encoding"]["street"]), encoding="utf-8")
     caption = (
-        f"Block <code>{blk['block_id']}</code> as the rectangle with its own area "
-        f"({blk['area_m2'] / 10_000:,.1f} ha), perimeter ({blk['perimeter_m']:,.0f} m) and "
-        f"buildings ({blk['n']:,}), {long / short:.1f} times as long as it is wide: the screen "
-        f"sees only those three numbers, so this rectangle scores exactly what the block does. It "
-        f"is cut into one parcel per building, each shaded by how many rows of parcels lie "
-        f"between it and the nearest street, from blue on the street to red "
-        f"{GEOMETRY_RED_ROWS} or more rows in. <em>A/P</em> is the block's thickness (a strip "
-        f"of width w gives about w/2, a square of side L gives L/4); √(A/n) is a parcel's side; "
-        f"so √(nA)/P = (A/P) ÷ √(A/n) is roughly how many parcels deep the block is, and n/A how "
-        f"crowded. Stretch it into a strip and it gets shallower; add buildings and it gets both "
-        f"deeper and more crowded. Switch to a typical block to see one the floor leaves out.")
-    attrs = (f'data-widget="screen-geometry" data-bundle="{bundle_url}" '
-             f'data-red-rows="{GEOMETRY_RED_ROWS}"')
+        "The screen sees three numbers per block: its buildings <em>n</em>, its area <em>A</em> "
+        "and its perimeter <em>P</em>. Give each building an equal share of the ground, a square "
+        "parcel of side <em>s</em> = √(<em>A</em>/<em>n</em>); then <em>P</em>/<em>s</em> parcels "
+        "fit along the street, and each tick on the outline marks one of these frontage slots. "
+        "The depth factor √(<em>nA</em>)/<em>P</em> is exactly <em>n</em> ÷ (<em>P</em>/"
+        "<em>s</em>): how many homes stand behind each slot, whatever the block's shape. The red "
+        "squares are parcels to scale along the longest straight stretch of street, magnified in "
+        "the inset. The score, homes per slot times <em>n</em>/<em>A</em>, is how crowded the "
+        "one-parcel band along the street would be if every home had to fit there. Swap the "
+        "outline for a disk, a square or a strip of the same area: only <em>P</em> changes, and "
+        "the strip, with the most street, puts the fewest homes behind each slot.")
+    attrs = f'data-widget="screen-geometry" data-bundle="{bundle_url}"'
     return _figure("assets/demo/geometry.svg",
-                   f"Block {blk['block_id']} as a rectangle of its own area, perimeter and "
-                   f"buildings, its parcels shaded by rows to the street", caption, attrs=attrs)
+                   f"Block {blk['block_id']}'s outline with a dot every parcel side along its "
+                   f"street, one per frontage slot", caption, attrs=attrs)
 
 
 def _demo_screen_factors() -> str:
-    """The score's two factors for the block and for the city's median block, side by side, read
-    from the bundle and multiplied out here -- the arithmetic the diagram above does live. Where
-    the flagship region's own peel measured this block's true depth (examples/multiblock_depth_
+    """The score's factors for the block and for the city's median block, side by side, read from
+    the bundle and worked out here -- the arithmetic the diagram above does live: parcel side s,
+    frontage slots P/s, homes per slot n ÷ (P/s), homes per hectare, and their product. Where the
+    flagship region's own peel measured this block's true depth (examples/multiblock_depth_
     density's meta.json names its deepest block and how many rings in its deepest home sits), a
-    sentence sets the proxy's "parcels deep" against it."""
+    paragraph sets homes per slot against it."""
     d = _demo()
     if d is None:
         return ""
@@ -1911,29 +1920,30 @@ def _demo_screen_factors() -> str:
     rows = []
     for label, blk in (("This block", sc["followed"]), ("A typical block", sc["typical"])):
         a, n, per = blk["area_m2"], blk["n"], blk["perimeter_m"]
-        deep, crowd = math.sqrt(n * a) / per, n / a
+        side = math.sqrt(a / n)
+        slots = per / side
         rows.append([f"{label}, <code>{blk['block_id']}</code>", f"{n:,}", f"{a / 10_000:,.1f}",
-                     f"{a / per:,.0f}", f"{math.sqrt(a / n):.1f}", f"{deep:.1f}",
-                     f"{crowd * 10_000:,.0f}", f"{deep * crowd:.4f}",
+                     f"{side:.1f}", f"{slots:,.0f}", f"{n / slots:.1f}",
+                     f"{n / a * 10_000:,.0f}", f"{blk['score']:.4f}",
                      f"{blk['rank']:,} of {sc['n_blocks']:,}"])
-    table = _table(["", "buildings n", "area A, ha", "thickness A/P, m", "parcel side √(A/n), m",
-                    "parcels deep √(nA)/P", "buildings per ha", "score", "rank"], rows)
+    table = _table(["", "buildings n", "area A, ha", "parcel side s, m", "frontage slots P/s",
+                    "homes per slot", "homes per ha", "score", "rank"], rows)
     meta_path = MB / "meta.json"
     peel = ""
     if meta_path.exists():
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         if meta["deepest_block"] == d["block_id"]:
             f = sc["followed"]
-            deep = math.sqrt(f["n"] * f["area_m2"]) / f["perimeter_m"]
-            peel = (f"\n\nThe proxy is a count of parcels, not of real homes: the full peel, which "
-                    f"tessellates the block and counts rings of parcels in from the street, puts "
-                    f"this block's deepest home {meta['deepest_depth']:.0f} rings in, against "
-                    f"the proxy's {deep:.0f} parcels deep. A/P measures how thick a block is, not "
-                    f"where its deepest point lies -- a square's is a quarter of its side, while "
-                    f"its deepest home is half a side in -- so on a compact block the proxy runs "
-                    f"below the peel. The screen uses it to rank blocks, not to measure them.")
+            per_slot = f["n"] / (f["perimeter_m"] / math.sqrt(f["area_m2"] / f["n"]))
+            peel = (f"\n\nHomes per slot is not rows deep, except in a strip. In a strip each "
+                    f"slot's column of parcels runs straight in to the middle, so the homes behind "
+                    f"a slot are the rows to the middle. In a square or a disk the columns narrow "
+                    f"into wedges as they reach in, and the homes behind a slot come to about half "
+                    f"the deepest home's rows. So the full peel, which tessellates this block and "
+                    f"counts rings of parcels in from the street, puts its deepest home "
+                    f"{meta['deepest_depth']:.0f} rings in, against {per_slot:.0f} homes per slot. "
+                    f"The screen uses homes per slot to rank blocks, not to measure them.")
     return table + peel
-
 
 
 def _demo_build_out() -> str:
