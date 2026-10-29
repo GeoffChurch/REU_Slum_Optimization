@@ -106,6 +106,10 @@ export class RecordingContext {
    * throw. */
   font = "";
   fillText(): void {}
+  /** Clipping is not recorded either: a draw clipped to an inset records the same calls. */
+  save(): void {}
+  restore(): void {}
+  clip(): void {}
   stroke(): void { this.record("stroke"); }
   /** No `Path2D` overload: nothing in this project ever passes one (checked -- `region.ts`,
    * `city.ts` and `canvas.ts` all call `fill()` bare or `fill("evenodd")`, always against the
