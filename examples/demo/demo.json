@@ -136,7 +136,8 @@
    "by_small_s": 8515763.523534348,
    "by_top_s": 11223601727.801607,
    "small_exponent": 2.4475712754078724,
-   "top_exponent": 5.764680038220273
+   "top_exponent": 5.764680038220273,
+   "original_factor": 6.21
   }
  },
  "comparison": {
@@ -159,7 +160,8 @@
    "n_rest": 285,
    "rest_median_s": 0.63,
    "fit_central_s": 7553.2562910126035,
-   "fit_runs": 6
+   "fit_runs": 6,
+   "original_factor": 3.3
   }
  },
  "screen": {
@@ -196,7 +198,6 @@
   ],
   "iso_step": 0.1,
   "road_width_m": 7.0,
-  "road_conductance": 10.0,
   "gone_share": 0.1,
   "ghost_fill": "#ece8e2",
   "ghost_edge": "#7d7468",

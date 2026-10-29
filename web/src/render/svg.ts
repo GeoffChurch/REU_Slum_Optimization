@@ -430,6 +430,9 @@ export function drawGuide(svg: SVGSVGElement, v: View, axis: "x" | "y", value: n
 export interface Cursor {
   readonly dot: SVGCircleElement;
   move(x: number, y: number): void;
+  /** Show or hide the dot and its drop lines: a series with no point at the current position
+   * (a build-out step with no run time, on a log time axis) has nothing to mark. */
+  show(visible: boolean): void;
 }
 
 export function drawCursor(svg: SVGSVGElement, v: View, colour: string,
@@ -450,6 +453,11 @@ export function drawCursor(svg: SVGSVGElement, v: View, colour: string,
   svg.append(dot);
   return {
     dot,
+    show(visible) {
+      for (const e of [dot, toLeft, toBottom]) {
+        e.setAttribute("visibility", visible ? "visible" : "hidden");
+      }
+    },
     move(x, y) {
       const [sx, sy] = toScreen(v, x, y);
       dot.setAttribute("cx", String(sx));

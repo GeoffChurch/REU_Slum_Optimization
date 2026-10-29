@@ -9,7 +9,7 @@ matches the City of Cape Town's own informal-structure survey
 (775 of 18,309 blocks are really informal by that survey,
 via `reblock.data.informal`).
 
-![Cape Town at the shipped depth_density_proxy floor: gold = real informal settlement, red outline = selected, blue ring = the block the rest of the site follows](screen_map.png)
+![Cape Town at the shipped depth_density_proxy floor: red = selected by the screen, gold = informal by the City's survey and not selected, grey = neither; blue ring = the block the rest of the site follows](screen_map.png)
 
 The blue ring marks `ZAF.9.3.1_1_5810` (index 15,849 of the columns below)
 -- the single block every later stage of the site is about: perm-graph, displacement-field and

@@ -51,8 +51,6 @@ type Cell = DemoMet | DemoShort;
 
 const pct = (v: number, digits: number): string => `${(v * 100).toFixed(digits)}%`;
 const km = (v: number): string => `${v.toFixed(2)} km`;
-const m2 = (v: number): string =>
-  (v >= 1000 ? `${Math.round(v / 1000)}k m²` : `${Math.round(v)} m²`);
 const capital = (w: string): string => w.charAt(0).toUpperCase() + w.slice(1);
 /** gen_site_pages.py's `_SPANS`, longest first. */
 const SPANS = [["centuries", 100 * 3.156e7], ["years", 3.156e7], ["months", 2.63e6],
@@ -109,30 +107,66 @@ export function cellNote(budgets: readonly number[], s: DemoSeries, k: number): 
   }
 }
 
-/** One of the three plots: permeability (y, shared) against one cost of a step (x). */
+/** One plot: permeability (y, shared) against one cost of a step (x). */
 interface PlotSpec {
-  readonly title: string;
+  /** What the x axis is, after "against", in the plot's title. */
+  readonly against: string;
   readonly xLabel: string;
+  /** Whether a step has a point here: run time has none for the block with no new road, which
+   * took no time and has no place on a log scale. */
+  readonly has: (f: DemoStep) => boolean;
+  /** The step's x in the plot's own coordinates (run time's are log10 seconds). */
   readonly x: (f: DemoStep) => number;
+  /** The x axis over the plotted xs: its ends and ticks. */
+  readonly axis: (xs: readonly number[]) => { lo: number; hi: number; ticks: number[] };
   readonly formatX: (t: number) => string;
   /** What the plot's heading says about a step after its permeability. */
   readonly at: (f: DemoStep) => string;
 }
 
-/** `metric` is the page's name for L_P (`data-metric-label`, lower case), so a rename is one
- * change in the generator rather than a hunt through this file's strings. */
-const plotsFor = (metric: string): readonly PlotSpec[] => [
-  { title: `${capital(metric)} against displacement`, xLabel: "displaced, share of floor area",
-    x: (f) => f.displacement, formatX: (t) => pct(t, 0),
-    at: (f) => `${pct(f.displacement, 1)} displaced` },
-  { title: "… against new road", xLabel: "new road, km",
-    x: (f) => f.road_km, formatX: (t) => String(Number(t.toFixed(1))),
-    at: (f) => km(f.road_km) },
-  { title: "… against conductance added", xLabel: "conductance added, m²",
-    x: (f) => f.conductance_m2,
-    formatX: (t) => (t === 0 ? "0" : `${Number((t / 1000).toFixed(1))}k`),
-    at: (f) => `${m2(f.conductance_m2)} added` },
+type PlotKind = DemoBuildOut["plots"][number];
+
+/** Run time's ticks: round human units, a decade or so apart. */
+const TIME_TICKS: readonly (readonly [number, string])[] = [
+  [1, "1 s"], [10, "10 s"], [60, "1 min"], [600, "10 min"], [3600, "1 h"], [36000, "10 h"],
+  [86400, "1 day"], [864000, "10 days"],
 ];
+
+/** The x axis from 0 to a nice step past the largest x (`axisTo`). */
+const fromZero = (xs: readonly number[]): { lo: number; hi: number; ticks: number[] } => {
+  const { top, ticks } = axisTo(Math.max(...xs), 4);
+  return { lo: 0, hi: top, ticks };
+};
+
+/** The plot a build-out names. Exhaustive over the bundle's kinds, so a new kind is a type error
+ * here rather than a silently missing plot. */
+function plotOf(kind: PlotKind): PlotSpec {
+  switch (kind) {
+    case "displacement":
+      return { against: "displacement", xLabel: "displaced, share of floor area",
+               has: () => true, x: (f) => f.displacement, axis: fromZero,
+               formatX: (t) => pct(t, 0), at: (f) => `${pct(f.displacement, 1)} displaced` };
+    case "road":
+      return { against: "new road", xLabel: "new road, km", has: () => true,
+               x: (f) => f.road_km, axis: fromZero,
+               formatX: (t) => String(Number(t.toFixed(1))), at: (f) => km(f.road_km) };
+    case "time":
+      // Log-scaled: the two methods' times differ by two orders of magnitude.
+      return {
+        against: "run time", xLabel: "run time since the start (log scale)",
+        has: (f) => f.seconds > 0, x: (f) => Math.log10(f.seconds),
+        axis: (xs) => {
+          const lo = Math.min(...xs), hi = Math.max(...xs);
+          const logs = TIME_TICKS.map(([s]) => Math.log10(s));
+          const from = Math.max(...logs.filter((t) => t <= lo + 1e-9));
+          const to = Math.min(...logs.filter((t) => t >= hi - 1e-9));
+          return { lo: from, hi: to, ticks: logs.filter((t) => t >= from && t <= to) };
+        },
+        formatX: (t) => TIME_TICKS.find(([s]) => Math.abs(Math.log10(s) - t) < 1e-9)![1],
+        at: (f) => duration(f.seconds),
+      };
+  }
+}
 
 /** A chart axis from 0 up to the first `niceTicks` step at or past `max`: `niceTicks` alone stops
  * at the last step INSIDE [0, max], which would leave the curve's top above the frame. The ticks
@@ -150,17 +184,18 @@ function axisTo(max: number, target: number): { top: number; ticks: number[] } {
 /** The plot rect inside the svg, in CSS pixels: room on the left for the rotated title and the
  * percentage labels, below for the tick labels and the title. */
 const GUTTER = { left: 50, right: 16, top: 8, bottom: 36 } as const;
-/** The figure width (px) from which several methods' plots sit three across, and the gap between
+/** The figure width (px) from which several methods' plots sit side by side, and the gap between
  * them: a chart narrower than about 180 px cannot hold its tick labels. */
 const ACROSS_PX = 600;
 const PLOT_GAP_PX = 24;
 function plotHeight(width: number): number {
   return Math.min(200, Math.max(140, Math.round(width * 0.44)));
 }
-function plotView(width: number, height: number, xTop: number, yTop: number): View {
-  const scaleX = (width - GUTTER.left - GUTTER.right) / xTop;
+function plotView(width: number, height: number, xLo: number, xHi: number,
+                  yTop: number): View {
+  const scaleX = (width - GUTTER.left - GUTTER.right) / (xHi - xLo);
   const scaleY = (height - GUTTER.top - GUTTER.bottom) / yTop;
-  return { scaleX, scaleY, tx: GUTTER.left, ty: height - GUTTER.bottom };
+  return { scaleX, scaleY, tx: GUTTER.left - xLo * scaleX, ty: height - GUTTER.bottom };
 }
 
 /** The bundle crosses a network boundary, and its declaration (demo.d.ts) cannot promise what
@@ -346,7 +381,7 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
               src: string): void {
   checkBundle(b);
   const metric = requireAttr(host.dataset.metricLabel, "data-metric-label", LABEL);
-  const PLOTS = plotsFor(metric);
+  const PLOTS = b.plots.map(plotOf);
   const multi = b.series.length > 1;
   const last = b.budgets.length - 1;
   const state: StateSource<BuildOutState> = makeState({ budget: b.default_step });
@@ -395,17 +430,18 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
     });
     plots.append(key);
   }
-  const plotParts = PLOTS.map((spec) => {
+  const plotParts = PLOTS.map((spec, j) => {
     const box = div("sbu-buildout__plot");
     const title = para("sbu-buildout__plot-title");
     const name = document.createElement("span");
-    name.textContent = spec.title;
+    // `metric` is the page's name for L_P (`data-metric-label`), spelled out once, in the first.
+    name.textContent = `${j === 0 ? capital(metric) : "…"} against ${spec.against}`;
     const now = document.createElement("span");
     title.append(name, now);
     const chart = div("sbu-buildout__chart");
     box.append(title, chart);
     plots.append(box);
-    return { spec, now, chart };
+    return { spec, now, chart, title: `${capital(metric)} against ${spec.against}` };
   });
   stage.append(left, plots);
   wrap.append(bar, stage);
@@ -431,17 +467,17 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
     for (const s of svgs) s.remove();
     const height = plotHeight(width);
     svgs = [];
-    cursors = plotParts.map(({ spec, chart }) => {
-      const xAxis = axisTo(Math.max(...all.map(spec.x)), 4);
-      const view = plotView(width, height, xAxis.top, yAxis.top);
+    cursors = plotParts.map(({ spec, chart, title }) => {
+      const xAxis = spec.axis(all.filter(spec.has).map(spec.x));
+      const view = plotView(width, height, xAxis.lo, xAxis.hi, yAxis.top);
       const svg = createSvg(chart, width, height);
       svg.setAttribute("role", "img");
-      svg.setAttribute("aria-label",
-                       `${spec.title.replace("…", capital(metric))}, every network`);
+      svg.setAttribute("aria-label", `${title}, every network`);
       // The y axis's 0 goes unlabelled: the x axis's 0 sits under it at the same corner.
       drawAxes(svg, view, xAxis.ticks, yAxis.ticks, spec.xLabel, metric, spec.formatX,
                (t) => (t === 0 ? "" : pct(t, 0)), 0.15);
-      distinct.forEach((steps, i) => {
+      distinct.forEach((all, i) => {
+        const steps = all.filter(spec.has);
         const xs = steps.map(spec.x);
         const ys = steps.map((f) => f.permeability);
         const cls = `sbu-curve sbu-series-${i}`;
@@ -498,9 +534,15 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
     plotParts.forEach(({ spec, now }, j) => {
       now.textContent = columns.map((c, i) => {
         const f = steps[i]!;
-        return `${multi ? `${c.series.method} ` : ""}${pct(f.permeability, 1)} at ${spec.at(f)}`;
+        const who = multi ? `${c.series.method} ` : "";
+        return spec.has(f) ? `${who}${pct(f.permeability, 1)} at ${spec.at(f)}` : `${who}–`;
       }).join(" · ");
-      steps.forEach((f, i) => cursors[j]![i]!.move(spec.x(f), f.permeability));
+      steps.forEach((f, i) => {
+        const cursor = cursors[j]![i]!;
+        // A step with no point here (the block before any road, on run time) has no dot.
+        cursor.show(spec.has(f));
+        if (spec.has(f)) cursor.move(spec.x(f), f.permeability);
+      });
     });
   };
 
@@ -508,9 +550,9 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
   observeSize(plots, ({ width }) => runOrReport(host, LABEL, () => {
     if (width === drawnWidth) return;
     const first = drawnWidth < 0;
-    // Several methods, on a wide enough figure: the three plots laid across, sharing the width;
+    // Several methods, on a wide enough figure: the plots laid across, sharing the width;
     // otherwise stacked, each taking all of it. Set here, since each chart is sized to it.
-    const across = multi && width >= ACROSS_PX ? 3 : 1;
+    const across = multi && width >= ACROSS_PX ? PLOTS.length : 1;
     plots.style.gridTemplateColumns = `repeat(${across}, minmax(0, 1fr))`;
     plots.style.columnGap = `${PLOT_GAP_PX}px`;
     layout(Math.floor((width - PLOT_GAP_PX * (across - 1)) / across));

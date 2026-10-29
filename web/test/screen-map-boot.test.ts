@@ -222,8 +222,8 @@ function selectedPaths(cv: unknown): Call[] {
     .filter((c) => c.op === "stroke" && c.strokeStyle === E.selected_color);
 }
 
-/** Whether `blockIndex` is outlined `E.selected_color` in the CURRENT frame on the MAIN canvas.
- * A block that is NOT selected is never stroked on the main canvas at all under this design (it
+/** Whether `blockIndex` is painted `E.selected_color` in the CURRENT frame on the MAIN canvas.
+ * A block that is NOT selected is never painted on the main canvas at all under this design (it
  * shows through from the blitted offscreen base layer instead), so absence here means "not
  * selected", not "selected in some other colour". */
 function isSelected(cv: unknown, view: View, bundle: CityBundle, blockIndex: number): boolean {
@@ -290,12 +290,15 @@ test("the number of selected blocks drawn equals what the model selects", async 
   // route, read into the bundle at bake time) -- the same two-paths-agreeing guard Task 8's own
   // screen-model.test.ts relies on.
   assert.equal(selectedStrokes.length, shipped.n);
+  // Each selected block is filled red and edged red at twice the base outline's width, as
+  // `_render_screen_map` draws it: the wider edge covers the block's whole base-layer footprint,
+  // gold or grey, at Cape Town's sub-pixel block sizes (render/city.ts).
   for (const c of selectedStrokes) {
-    // Matches `_render_screen_map`'s own selected linewidth exactly -- an outline at the base
-    // layer's own width would be nearly invisible against it, and a filled rather than stroked
-    // selection is the whole defect this fix round closes (see render/city.ts's own docstring).
-    assert.equal(c.lineWidth, E.block_lw * 2, `selected outline drawn at ${c.lineWidth}, not block_lw * 2`);
+    assert.equal(c.lineWidth, E.block_lw * 2, `selected edge drawn at ${c.lineWidth}, not block_lw * 2`);
   }
+  const selectedFills = lastFrame(cv as never)
+    .filter((c) => c.op === "fill" && c.fillStyle === E.selected_color);
+  assert.equal(selectedFills.length, sel.count);
 });
 
 test("moving the floor changes the drawn selection", async () => {
@@ -486,27 +489,20 @@ test("a known informal block's own outline does not overpaint its gold fill", as
     + `its gold fill at this block's sub-pixel size`);
 });
 
-test("a selected block that is really informal still shows gold underneath the red outline",
+test("a selected block that is really informal is filled red on the frame, over its gold",
   async () => {
-    // The reviewer's finding: an OPAQUE selected fill erased informal_color, making a hit
-    // indistinguishable from a false positive and silently redefining "gold" as "missed" rather
-    // than "ground truth". The fix strokes the selection instead of filling it, so this must
-    // hold: the block is currently selected, its own base-layer fill is STILL informal_color
-    // (paintFrame never touches the offscreen canvas), and the main canvas never fills that
-    // block at all -- only strokes it, leaving the blitted gold underneath untouched.
+    // Owner, 2026-10-29: selection is a red FILL, whatever the survey says -- gold now means
+    // "informal and not selected". The block keeps its gold on the base layer (paintFrame never
+    // touches the offscreen canvas); the frame fills it red over the blit. What the reader then
+    // sees is pixels, which city-raster.test.ts measures.
     const { cv } = await mount();
     const hitIndex = findHit(ct, "depth_density_proxy");
-
     assert.ok(isSelected(cv, VIEW_CT, ct, hitIndex), "sanity: the chosen block should be selected");
-
-    const offscreen = offscreenOf(cv);
-    assert.equal(baseFillColorOf(offscreen, VIEW_CT, ct, hitIndex), E.informal_color,
-      "the block's own base-layer fill should still be informal_color");
-
-    const fillsForBlock = callsForBlock(lastFrame(cv as never), VIEW_CT, ct, hitIndex)
+    assert.equal(baseFillColorOf(offscreenOf(cv), VIEW_CT, ct, hitIndex), E.informal_color);
+    const fills = callsForBlock(lastFrame(cv as never), VIEW_CT, ct, hitIndex)
       .filter((c) => c.op === "fill");
-    assert.equal(fillsForBlock.length, 0,
-      "the main canvas filled the selected block -- that would erase the gold underneath");
+    assert.deepEqual(fills.map((c) => [c.fillStyle, c.fillRule]),
+                     [[E.selected_color, "evenodd"]]);
   });
 
 test("floor-slider redraws are requestAnimationFrame-coalesced, not synchronous", async () => {

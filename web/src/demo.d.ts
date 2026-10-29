@@ -52,7 +52,8 @@ export interface Timed {
  * largest run, the smaller runs' exponent (`small_exponent`) gives `by_small_s` and the two
  * largest runs' slope (`top_exponent`) `by_top_s`. Which of the two is the lower depends on
  * which side of the largest run the block falls: above it the steeper slope gives more time,
- * below it less. */
+ * below it less. `original_factor` is how many times as long the original algorithm would take
+ * at that size, by the port-speed fit (PortSpeed.factor). */
 export interface DemoTopologyExtrapolated {
   kind: "extrapolated";
   alpha: number;
@@ -65,14 +66,16 @@ export interface DemoTopologyExtrapolated {
   by_top_s: number;
   small_exponent: number;
   top_exponent: number;
+  original_factor: number;
 }
 /** Topology (our port) run on the block itself at `alpha`, on one thread, watched as it built
  * (atlas/topology_order.py): its wall time, where it ran in words, and the share of the homes'
  * floor area its network displaces (it builds until every parcel touches a road); where the
  * time went -- setup (`setup_s`), the first and second roads' landing times since the start,
- * how many roads came after them and the median time each took; and beside it the six-run
- * fit's time at this block's size (`fit_central_s`, from `fit_runs` runs), which the
- * measurement checks as a further point. */
+ * how many roads came after them and the median time each took; beside it the six-run fit's
+ * time at this block's size (`fit_central_s`, from `fit_runs` runs), which the measurement
+ * checks as a further point; and `original_factor`, how many times as long the original
+ * algorithm would take at this size, by the port-speed fit (PortSpeed.factor). */
 export interface DemoTopologyMeasured {
   kind: "measured";
   alpha: number;
@@ -87,6 +90,7 @@ export interface DemoTopologyMeasured {
   rest_median_s: number;
   fit_central_s: number;
   fit_runs: number;
+  original_factor: number;
 }
 /** The block the page follows: its id, buildings, place in words, centroid and a Google Maps
  * link; whether it is plainly an informal settlement on the ground (Block's), whatever the
@@ -139,10 +143,10 @@ export interface DemoMethod {
 }
 /** The plates' colours and the quantities their legend states. `escape_ramp` maps escape time
  * from 0 to 100% of a block's `escape_scale`, short blue to long red, with an isochrone every
- * `iso_step` of it. `road` is a new road's corridor, `road_width_m` wide, conducting
- * `road_conductance` times what open ground does. A wholly destroyed building -- once
- * `gone_share` of it is gone, or a road cuts it in two -- is a ghost (`ghost_fill`, outlined
- * `ghost_edge`); a partly damaged one keeps its escape-time colour and the same outline. The
+ * `iso_step` of it. `road` is a new road's corridor, `road_width_m` wide. A wholly destroyed
+ * building -- once `gone_share` of it is gone, or a road cuts it in two -- is a ghost
+ * (`ghost_fill`, outlined `ghost_edge`); a partly damaged one keeps its escape-time colour and
+ * the same outline. The
  * block's edge: `street` (where people walk out), `edge` (a railway's or a ditch's line),
  * `water` (a ditch).
  * `depth_ramp` is the peel figure's (reblock.render's depth colouring, ring 1 to the deepest),
@@ -155,7 +159,6 @@ export interface DemoEncoding {
   escape_ramp: string[];
   iso_step: number;
   road_width_m: number;
-  road_conductance: number;
   gone_share: number;
   ghost_fill: string;
   ghost_edge: string;
@@ -209,13 +212,12 @@ export interface DemoRecorded {
   machine: string;
 }
 /** A network the build-out shows: the share of the homes' floor area it displaces, its new
- * road, its L_P (`permeability`), the conductance it adds (m² of open ground), the method's run
+ * road, its L_P (`permeability`), the method's run
  * time to it since the run began (`seconds`), and its frame's row in the series' sheet. */
 export interface DemoStep {
   displacement: number;
   road_km: number;
   permeability: number;
-  conductance_m2: number;
   seconds: number;
   row: number;
 }
@@ -245,14 +247,16 @@ export interface DemoSeries {
 /** One block's build-out under one budget slider: its escape-time scale (the model's units at
  * its plain baseline's 99th-percentile home, 100% on every plate), the slider's budgets (0 the
  * block with no new road), the position it opens on, and one series per method shown, each
- * with a cell per budget; and the plates' encoding (DemoBundle's, repeated so the widget needs
- * no second file). Written beside demo.json as its own file, which the page's build-out widget
- * fetches. */
+ * with a cell per budget; the plots under the plates, escape time saved against each of
+ * `plots` (displacement, new road, or run time since the start, on a log scale); and the
+ * plates' encoding (DemoBundle's, repeated so the widget needs no second file). Written beside
+ * demo.json as its own file, which the page's build-out widget fetches. */
 export interface DemoBuildOut {
   block_id: string;
   escape_scale: number;
   budgets: number[];
   default_step: number;
   series: DemoSeries[];
+  plots: ("displacement" | "road" | "time")[];
   encoding: DemoEncoding;
 }

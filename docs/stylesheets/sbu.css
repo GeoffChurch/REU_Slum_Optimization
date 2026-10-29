@@ -24,6 +24,7 @@
   --sbu-red-deep: #7a0000;        /* hover            - 11.49:1, AAA */
   --sbu-midnight: #16243e;        /* secondary, supporting only */
   --sbu-grey: #828282;            /* 3.84:1 - NON-TEXT USE ONLY */
+  --sbu-green-ink: #1a6630;       /* "fastest" -  7.03:1 on white, 6.70:1 on the card fill - AAA/AA */
 
   /* surfaces + ink */
   --sbu-bg: #ffffff;
@@ -56,6 +57,7 @@
   --sbu-red-deep: #f29a9a;        /* hover: lighter, not darker, on a dark ground */
   --sbu-midnight: #16243e;
   --sbu-grey: #828282;
+  --sbu-green-ink: #6fcf8a;       /* "fastest" - 10.01:1 on --sbu-bg, 8.09:1 on --sbu-surface - AAA */
 
   --sbu-bg: #0f0f10;
   --sbu-surface: #16243e;         /* official Midnight Blue as the elevated surface */
@@ -1356,99 +1358,56 @@ body,
 
 /* ------------------------------------------------------- the Demo's methods comparison */
 
-/* Two columns, ours and the earlier method's: each a plain heading, its run time large, the line
-   saying how it was had, and (on the comparison block) its network and scores. */
-.sbu-compare {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem 2rem;
-  margin: 1rem 0;
-  padding-top: 0.9rem;
-  border-top: 2px solid var(--sbu-red-fill);
-}
-
-[data-md-color-scheme="slate"] .sbu-compare {
-  border-top-color: var(--sbu-red-ink);
-}
-
-@media screen and (max-width: 44.9375em) {
-  .sbu-compare {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.sbu-compare__col {
-  min-width: 0;
-}
-
-.md-typeset .sbu-compare__head {
-  margin: 0;
-  font-size: var(--sbu-step--1);
-  font-weight: 700;
-  color: var(--sbu-ink-muted);
-}
-
-.md-typeset .sbu-compare__time {
-  margin: 0;
-  font-family: var(--sbu-display);
-  font-size: var(--sbu-step-3);
-  font-weight: 600;
-  line-height: 1.15;
-  font-variant-numeric: tabular-nums;
-}
-
-.md-typeset .sbu-compare__time sup {
-  font-family: var(--sbu-body);
-  font-size: 0.45em;
-}
-
-.md-typeset .sbu-compare__sub {
-  margin: 0.1rem 0 0.6rem;
-  font-size: var(--sbu-step--1);
-  color: var(--sbu-ink-muted);
-}
-
-/* Side by side, the two lines under the times are held to two lines' height, so the plates under
-   them start level whichever line wraps. */
-@media screen and (min-width: 45em) {
-  .md-typeset .sbu-compare__sub {
-    min-height: 3.1em;
-  }
-}
-
-.md-typeset .sbu-compare__col img {
-  display: block;
-  width: 100%;
-  height: auto;
-  margin: 0;
-}
-
-.md-typeset .sbu-compare__scores {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin: 0.5rem 0 0;
-}
-
-.md-typeset .sbu-compare__scores dt {
-  font-size: var(--sbu-step--1);
-  color: var(--sbu-ink-muted);
-}
-
-.md-typeset .sbu-compare__scores dd {
-  margin: 0;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
 /* The comparison's one-line finding, read from the build-out: the sentence the figure argues. */
 .md-typeset .sbu-compare__takeaway {
   font-weight: 700;
   max-width: var(--sbu-measure);
 }
 
-.md-typeset .sbu-compare__block {
+/* The comparison's run times: a block per row, a method per column. Each cell says how its time
+   was had; the fastest method's cells are green AND say "fastest", so the colour is never the only
+   cue. */
+/* Fixed layout at the column's width: four columns share it and their words wrap, so a phone
+   never scrolls sideways. */
+.md-typeset .sbu-runtimes {
+  display: table;
+  table-layout: fixed;
+  width: 100%;
+  margin: 1rem 0 1.4rem;
   font-size: var(--sbu-step--1);
+}
+
+.md-typeset .sbu-runtimes th,
+.md-typeset .sbu-runtimes td {
+  vertical-align: top;
+  padding: 0.5rem 0.7rem;
+}
+
+.md-typeset .sbu-runtimes td strong {
+  display: block;
+  font-family: var(--sbu-display);
+  font-size: var(--sbu-step-1);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+@media screen and (max-width: 44.9375em) {
+  .md-typeset .sbu-runtimes th,
+  .md-typeset .sbu-runtimes td {
+    padding: 0.4rem 0.3rem;
+    hyphens: auto;
+  }
+}
+
+.md-typeset .sbu-runtimes td span,
+.md-typeset .sbu-runtimes th span {
+  display: block;
   color: var(--sbu-ink-muted);
+}
+
+.md-typeset .sbu-runtimes td.sbu-runtimes__fastest,
+.md-typeset .sbu-runtimes td.sbu-runtimes__fastest span {
+  color: var(--sbu-green-ink);
 }
 
 /* ------------------------------------------------------------------- the page's QR code */
