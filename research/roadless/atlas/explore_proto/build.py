@@ -51,7 +51,6 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))           # research/roadless: growth, road_simp
 sys.path.insert(0, str(HERE.parent / "roads5810"))
 import geopandas as gpd  # noqa: E402
-import growth  # noqa: E402
 import matplotlib  # noqa: E402
 import matplotlib.colors as mcolors  # noqa: E402
 import matplotlib.patheffects as pe  # noqa: E402
@@ -241,7 +240,8 @@ class DemoTopologyExtrapolated:
     largest run, the smaller runs' exponent (`small_exponent`) gives `by_small_s` and the two
     largest runs' slope (`top_exponent`) `by_top_s`. Which of the two is the lower depends on
     which side of the largest run the block falls: above it the steeper slope gives more time,
-    below it less."""
+    below it less. `original_factor` is how many times as long the original algorithm would take
+    at that size, by the port-speed fit (PortSpeed.factor)."""
     kind: Literal["extrapolated"]
     alpha: int
     runs: tuple[Timed, ...]
@@ -253,6 +253,7 @@ class DemoTopologyExtrapolated:
     by_top_s: float
     small_exponent: float
     top_exponent: float
+    original_factor: float
 
 
 @dataclass(frozen=True)
@@ -261,9 +262,10 @@ class DemoTopologyMeasured:
     (atlas/topology_order.py): its wall time, where it ran in words, and the share of the homes'
     floor area its network displaces (it builds until every parcel touches a road); where the
     time went -- setup (`setup_s`), the first and second roads' landing times since the start,
-    how many roads came after them and the median time each took; and beside it the six-run
-    fit's time at this block's size (`fit_central_s`, from `fit_runs` runs), which the
-    measurement checks as a further point."""
+    how many roads came after them and the median time each took; beside it the six-run fit's
+    time at this block's size (`fit_central_s`, from `fit_runs` runs), which the measurement
+    checks as a further point; and `original_factor`, how many times as long the original
+    algorithm would take at this size, by the port-speed fit (PortSpeed.factor)."""
     kind: Literal["measured"]
     alpha: int
     n_buildings: int
@@ -277,9 +279,11 @@ class DemoTopologyMeasured:
     rest_median_s: float
     fit_central_s: float
     fit_runs: int
+    original_factor: float
 
 
-def extrapolated(runs: tuple[Timed, ...], alpha: int, n: int) -> DemoTopologyExtrapolated:
+def extrapolated(runs: tuple[Timed, ...], alpha: int, n: int, *,
+                 original_factor: float) -> DemoTopologyExtrapolated:
     """A least-squares power law through every run (log seconds on log n), and a range anchored on
     the largest run: the exponent of the runs below it and the slope between the two
     largest. The runs steepen with size, so the fit through all of them under-predicts the
@@ -296,7 +300,8 @@ def extrapolated(runs: tuple[Timed, ...], alpha: int, n: int) -> DemoTopologyExt
     return DemoTopologyExtrapolated(
         kind="extrapolated", alpha=alpha, runs=runs, n_buildings=n, exponent=float(b), se=se,
         central_s=float(np.exp(a) * n ** b), by_small_s=float(top.seconds * (n / top.n) ** bs),
-        by_top_s=float(top.seconds * (n / top.n) ** bt), small_exponent=float(bs), top_exponent=bt)
+        by_top_s=float(top.seconds * (n / top.n) ** bt), small_exponent=float(bs), top_exponent=bt,
+        original_factor=original_factor)
 
 
 class TopologyTime(Protocol):
@@ -306,13 +311,70 @@ class TopologyTime(Protocol):
 
 
 @dataclass(frozen=True)
+class PortSpeed:
+    """atlas/topology_speed: topology's original (`original`) and our port (`port`) run on the
+    same blocks, a JSON record per block and version beside the table (`dir`/table.csv)."""
+    dir: Path
+    original: str
+    port: str
+
+    def _rows(self) -> list[Any]:
+        return list(pd.read_csv(self.dir / "table.csv", dtype={"failed": str}).itertuples())
+
+    @staticmethod
+    def _ok_n_speedup(ok: list[Any]) -> tuple[np.ndarray, np.ndarray]:
+        return (np.array([r.n for r in ok], dtype=float),
+                np.array([r.speedup for r in ok], dtype=float))
+
+    def fit(self) -> tuple[float, float]:
+        """The least-squares line through log speed-up on log n, over the blocks both versions
+        finished: (slope, intercept)."""
+        n, sp = self._ok_n_speedup([r for r in self._rows() if not isinstance(r.failed, str)])
+        slope, intercept = np.polyfit(np.log(n), np.log(sp), 1)
+        return float(slope), float(intercept)
+
+    def factor(self, n: int) -> float:
+        """How many times as long the original would take at `n` buildings, by the fit."""
+        slope, intercept = self.fit()
+        return float(np.exp(intercept) * n ** slope)
+
+    def of(self) -> DemoPortSpeed:
+        rows = self._rows()
+        failed = [r for r in rows if isinstance(r.failed, str)]
+        ok = [r for r in rows if not isinstance(r.failed, str)]
+        if any(bool(r.censored) for r in ok):
+            raise SystemExit(f"{self.dir}: a censored run; the table's speed-ups are not times")
+        for r in ok:                         # the table's columns are the versions named here
+            for v, col in ((self.original, r.original_s), (self.port, r.fork_s)):
+                rec = json.loads((self.dir / f"{r.block}_{v}.json").read_text())
+                if abs(rec["wall_s"] - col) > 1e-9:
+                    raise SystemExit(f"{self.dir}: {r.block}'s {v} record disagrees with the table")
+        n, sp = self._ok_n_speedup(ok)
+        slope, _ = self.fit()
+        return DemoPortSpeed(
+            port=self.port, original=self.original, n_blocks=len(ok), n_min=int(n.min()),
+            n_max=int(n.max()), speedup_min=round(float(sp.min()), 2),
+            speedup_median=round(float(np.median(sp)), 2), speedup_max=round(float(sp.max()), 2),
+            same_networks=all(bool(r.same) for r in ok),
+            exponent=round(slope, 2),
+            n_failed=len(failed))
+
+
+# The original's last commit before the performance changes, and the port's (2026-10-29).
+PORT_SPEED = PortSpeed(HERE.parent / "topology_speed",
+                       original="5972772", port="ff74af2")
+
+@dataclass(frozen=True)
 class Extrapolated:
-    """From the six timed runs (TOPOLOGY_RUNS) to the block's building count."""
+    """From the six timed runs (TOPOLOGY_RUNS) to the block's building count; the original's time
+    by the port-speed fit (`port`) at that count."""
     runs: tuple[Timed, ...]
     alpha: int
+    port: PortSpeed
 
     def of(self, site: Site, n: int) -> DemoTopologyExtrapolated:
-        return extrapolated(self.runs, self.alpha, n)
+        return extrapolated(self.runs, self.alpha, n,
+                            original_factor=round(self.port.factor(n), 2))
 
 
 @dataclass(frozen=True)
@@ -325,6 +387,7 @@ class Measured:
     refused."""
     runs: tuple[Timed, ...]
     alpha: int
+    port: PortSpeed
 
     def of(self, site: Site, n: int) -> DemoTopologyMeasured:
         kept = json.loads((site.kept / "topology.json").read_text())
@@ -348,46 +411,13 @@ class Measured:
             setup_s=round(float(run["greedy_start_s"]), 1),
             first_road_s=round(float(land[0]), 1), second_road_s=round(float(land[1]), 1),
             n_rest=len(land) - 2, rest_median_s=round(float(np.median(each[1:])), 2),
-            fit_central_s=extrapolated(self.runs, self.alpha, n).central_s,
-            fit_runs=len(self.runs))
+            fit_central_s=extrapolated(self.runs, self.alpha, n,
+                                       original_factor=self.port.factor(n)).central_s,
+            fit_runs=len(self.runs), original_factor=round(self.port.factor(n), 2))
 
 
-@dataclass(frozen=True)
-class PortSpeed:
-    """atlas/topology_speed: topology's original (`original`) and our port (`port`) run on the
-    same blocks, a JSON record per block and version beside the table (`dir`/table.csv)."""
-    dir: Path
-    original: str
-    port: str
-
-    def of(self) -> DemoPortSpeed:
-        rows = list(pd.read_csv(self.dir / "table.csv", dtype={"failed": str}).itertuples())
-        failed = [r for r in rows if isinstance(r.failed, str)]
-        ok = [r for r in rows if not isinstance(r.failed, str)]
-        if any(bool(r.censored) for r in ok):
-            raise SystemExit(f"{self.dir}: a censored run; the table's speed-ups are not times")
-        for r in ok:                         # the table's columns are the versions named here
-            for v, col in ((self.original, r.original_s), (self.port, r.fork_s)):
-                rec = json.loads((self.dir / f"{r.block}_{v}.json").read_text())
-                if abs(rec["wall_s"] - col) > 1e-9:
-                    raise SystemExit(f"{self.dir}: {r.block}'s {v} record disagrees with the table")
-        n = np.array([r.n for r in ok], dtype=float)
-        sp = np.array([r.speedup for r in ok], dtype=float)
-        return DemoPortSpeed(
-            port=self.port, original=self.original, n_blocks=len(ok), n_min=int(n.min()),
-            n_max=int(n.max()), speedup_min=round(float(sp.min()), 2),
-            speedup_median=round(float(np.median(sp)), 2), speedup_max=round(float(sp.max()), 2),
-            same_networks=all(bool(r.same) for r in ok),
-            exponent=round(float(np.polyfit(np.log(n), np.log(sp), 1)[0]), 2),
-            n_failed=len(failed))
-
-
-# The original's last commit before the performance changes, and the port's (2026-10-29).
-PORT_SPEED = PortSpeed(HERE.parent / "topology_speed",
-                       original="5972772", port="ff74af2")
-
-EXTRAPOLATED = Extrapolated(TOPOLOGY_RUNS, TOPOLOGY_ALPHA)
-MEASURED = Measured(TOPOLOGY_RUNS, TOPOLOGY_ALPHA)
+EXTRAPOLATED = Extrapolated(TOPOLOGY_RUNS, TOPOLOGY_ALPHA, PORT_SPEED)
+MEASURED = Measured(TOPOLOGY_RUNS, TOPOLOGY_ALPHA, PORT_SPEED)
 
 
 # ------------------------------------------------------------------ the blocks
@@ -458,8 +488,9 @@ PAGE = Block("ZAF.9.3.1_1_5810", "the Bloekombos and Wallacedene area of Kraaifo
 # a standard drainage-first order did.
 COMPARED = Compared(
     "ZAF.9.3.1_1_41785", "Philippi", zoom=18, topology=MEASURED,
-    ours=Grid(f"{PATHS[:-len('.D0.15')]}.D0.91.v2", stem="loop",
-              stops_because="no loop left to add"),
+    # Rev 3's face and ear floors (100 m², 30 m), low enough to reach topology's range (2026-10-29).
+    ours=Grid("ears.paths.b20.f100.e30.gl0.25Croad.n2s0.1.M8.K4.D0.91.v3", stem="loop",
+              stops_because="no road left that would split a sub-block"),
     earlier=Grid("topology.a10.s0.w7.built", stem="topology",
                  stops_because="its network is complete"))
 
@@ -793,12 +824,11 @@ class DemoPeel:
 @dataclass(frozen=True)
 class DemoStep:
     """A network the build-out shows: the share of the homes' floor area it displaces, its new
-    road, its L_P (`permeability`), the conductance it adds (m² of open ground), the method's run
+    road, its L_P (`permeability`), the method's run
     time to it since the run began (`seconds`), and its frame's row in the series' sheet."""
     displacement: float
     road_km: float
     permeability: float
-    conductance_m2: float
     seconds: float
     row: int
 
@@ -858,14 +888,16 @@ class DemoBuildOut:
     """One block's build-out under one budget slider: its escape-time scale (the model's units at
     its plain baseline's 99th-percentile home, 100% on every plate), the slider's budgets (0 the
     block with no new road), the position it opens on, and one series per method shown, each
-    with a cell per budget; and the plates' encoding (DemoBundle's, repeated so the widget needs
-    no second file). Written beside demo.json as its own file, which the page's build-out widget
-    fetches."""
+    with a cell per budget; the plots under the plates, escape time saved against each of
+    `plots` (displacement, new road, or run time since the start, on a log scale); and the
+    plates' encoding (DemoBundle's, repeated so the widget needs no second file). Written beside
+    demo.json as its own file, which the page's build-out widget fetches."""
     block_id: str
     escape_scale: float
     budgets: tuple[float, ...]
     default_step: int
     series: tuple[DemoSeries, ...]
+    plots: tuple[Literal["displacement", "road", "time"], ...]
     encoding: DemoEncoding
 
 
@@ -930,10 +962,10 @@ class DemoMethod:
 class DemoEncoding:
     """The plates' colours and the quantities their legend states. `escape_ramp` maps escape time
     from 0 to 100% of a block's `escape_scale`, short blue to long red, with an isochrone every
-    `iso_step` of it. `road` is a new road's corridor, `road_width_m` wide, conducting
-    `road_conductance` times what open ground does. A wholly destroyed building -- once
-    `gone_share` of it is gone, or a road cuts it in two -- is a ghost (`ghost_fill`, outlined
-    `ghost_edge`); a partly damaged one keeps its escape-time colour and the same outline. The
+    `iso_step` of it. `road` is a new road's corridor, `road_width_m` wide. A wholly destroyed
+    building -- once `gone_share` of it is gone, or a road cuts it in two -- is a ghost
+    (`ghost_fill`, outlined `ghost_edge`); a partly damaged one keeps its escape-time colour and
+    the same outline. The
     block's edge: `street` (where people walk out), `edge` (a railway's or a ditch's line),
     `water` (a ditch).
     `depth_ramp` is the peel figure's (reblock.render's depth colouring, ring 1 to the deepest),
@@ -945,7 +977,6 @@ class DemoEncoding:
     escape_ramp: tuple[str, ...]
     iso_step: float
     road_width_m: float
-    road_conductance: float
     gone_share: float
     ghost_fill: str
     ghost_edge: str
@@ -1128,13 +1159,12 @@ def cells_of(site: Site, budgets: tuple[float, ...]
                              f"the page's slider offers")
         cells.append(DemoMet(kind="met", step=DemoStep(
             displacement=r["D"], road_km=r["km"], permeability=r["LP"],
-            conductance_m2=float(r["C"]), seconds=sec, row=fs.index(r["f"]))))
+            seconds=sec, row=fs.index(r["f"]))))
     return cells, fs
 
 
 # The block with no new road: every series' first row.
-BASELINE_STEP = DemoStep(displacement=0.0, road_km=0.0, permeability=0.0, conductance_m2=0.0,
-                         seconds=0.0, row=0)
+BASELINE_STEP = DemoStep(displacement=0.0, road_km=0.0, permeability=0.0, seconds=0.0, row=0)
 PAGE_BUDGETS = (0.0, *nw.SLIDER)
 
 
@@ -1182,7 +1212,7 @@ def page_block(sc: Screen, pl: Peeled, out: Path, enc: DemoEncoding) -> DemoBloc
         block_id=PAGE.bid, escape_scale=round(world(site).scale, 1), budgets=PAGE_BUDGETS,
         default_step=DEFAULT,
         series=(method_series(site, PAGE_BUDGETS, f"Our method: {METHOD.name}", out),),
-        encoding=enc))
+        plots=("displacement", "road"), encoding=enc))
     lat, lon = centroid_wgs84(PAGE.bid)
     return DemoBlock(
         block_id=PAGE.bid, n_buildings=proxy.n, place=PAGE.place, lat=lat, lon=lon,
@@ -1209,7 +1239,7 @@ def grid_series(site: Site, w: World, g: Grid, budgets: tuple[float, ...], *, me
 
     def step(r: dict[str, Any]) -> DemoStep:
         return DemoStep(displacement=r["D"], road_km=r["km"], permeability=r["L_P"],
-                        conductance_m2=float(r["C"]), seconds=float(r["seconds"]),
+                        seconds=float(r["seconds"]),
                         row=fs.index(r["frame"]))
 
     whole = step(t["whole"])
@@ -1264,7 +1294,9 @@ def comparison(sc: Screen, out: Path, enc: DemoEncoding) -> DemoComparison:
             if isinstance(a, DemoMet) and isinstance(b, DemoMet) and k > 0]
     buildout = write_buildout(out, DemoBuildOut(
         block_id=COMPARED.bid, escape_scale=round(w.scale, 1), budgets=budgets,
-        default_step=both[-1], series=(ours, earlier), encoding=enc))
+        default_step=both[-1], series=(ours, earlier),
+        # The face-off adds run time: how fast each method gets there is half the comparison.
+        plots=("displacement", "road", "time"), encoding=enc))
     lat, lon = centroid_wgs84(COMPARED.bid)
     return DemoComparison(
         block_id=COMPARED.bid, n_buildings=proxy.n, place=COMPARED.place,
@@ -1288,7 +1320,7 @@ def site(root: Path) -> None:
     enc = DemoEncoding(
         road=render.ROAD, street=rnd.STREET, edge=rnd.EDGE, water=nw.cp.gm.WATER_FILL,
         escape_ramp=tuple(mcolors.to_hex(SEQ(t)) for t in np.linspace(0, 1, 11)),
-        iso_step=ISO_STEP, road_width_m=road_simp.ROAD_W, road_conductance=growth.ROAD_KAPPA,
+        iso_step=ISO_STEP, road_width_m=road_simp.ROAD_W,
         gone_share=GONE_SHARE, ghost_fill=GHOST_FILL, ghost_edge=GHOST_EDGE,
         depth_ramp=tuple(mcolors.to_hex(depth(t)) for t in np.linspace(0, 1, 9)))
     block, compared = page_block(sc, pl, out, enc), comparison(sc, out, enc)
