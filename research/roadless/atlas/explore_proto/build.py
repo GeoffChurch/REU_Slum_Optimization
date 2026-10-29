@@ -1,35 +1,35 @@
 """The public site's Demo page's bundle (owner 2026-10-28: "make this a new 'demo' page on the
-website"; then "show a second block, ZAF.9.3.1_1_41785, with Loop roads run on it"). For each block
-the page shows (BLOCKS): the method's build-out under the slider's budgets D 0.01 .. 0.15 as
-escape-time plates, each home coloured by its escape time on its own block's scale (the plain
-baseline's 99th percentile as 100%), short blue to long red, with isochrones every ISO_STEP of
-that scale (the homes' times interpolated between their centroids, smoothed, inside the block);
-the screens' verdicts on it, the shipped proxy's and the two-stage depth_density screen's; its
-place; the fires reported near it; and the original topology algorithm's run time on it,
-measured or extrapolated (a TopologyTime Strategy per block).
+website"; then a methods comparison on a second block). The page follows one block (PAGE, 5810):
+the method's build-out on it under the slider's budgets D 0.01 .. 0.15 as escape-time plates, each
+home coloured by its escape time on the block's own scale (the plain baseline's 99th percentile as
+100%), short blue to long red, with isochrones every ISO_STEP of that scale (the homes' times
+interpolated between their centroids, smoothed, inside the block); the screens' verdicts on it,
+the shipped proxy's and the two-stage depth_density screen's; its place; the fires reported near
+it; and the original topology algorithm's run time on it (a TopologyTime Strategy: extrapolated,
+since it was never run there). Beside that, a comparison on a block small enough for topology to
+run at all (COMPARED, 41785): the method's full build-out and topology's network, each drawn as
+the same escape-time plate, with their scores and run times, topology's measured.
 
 main cannot merge this branch, so `site <checkout>` writes it into a main checkout as a committed
-bundle (SITE_DIR: demo.json, one escape-time sprite sheet per block, a README naming this script)
-and its TypeScript declaration (SITE_DTS, generated from the dataclasses below, so a renamed field
-is a type error on main). Every number the page shows is in demo.json, the fires' facts included
-(FIRES, quoted from their reports); the site's generator reads it and the page's prose types none.
+bundle (SITE_DIR: demo.json, the page block's escape-time sprite sheet, the comparison's two
+plates, a README naming this script) and its TypeScript declaration (SITE_DTS, generated from the
+dataclasses below, so a renamed field is a type error on main). Every number the page shows is in
+demo.json, the fires' facts included (FIRES, quoted from their reports); the site's generator reads
+it and the page's prose types none.
 
-Reuses the build-out pipeline (atlas/buildout.py, roads5810's networks.py, compute.py, render.py):
-a block's frames, stored rasters and escape times are its Site's (block_site.Site.of, resolved
-once per shown block below; no flow is recomputed here), and render.py's plate helpers. The
-colour map is this script's own (SEQ).
+Reuses the build-out pipeline (atlas/buildout.py, atlas/topology_run.py, roads5810's networks.py,
+compute.py, render.py): a block's frames, stored rasters and escape times are its Site's
+(block_site.Site.of; no flow is recomputed here), and render.py's plate helpers. The colour map is
+this script's own (SEQ).
 
 The method is one setting (METHOD): a Shown, which names its run on each block (an OnBlock's
 Pick), the reader-facing name and blurb, and how its run time is read (a Runtime Strategy).
 Swapping to the partition SIMP's cut is `METHOD = PARTITION_CUT`, once networks.py `add` has
-written its frames (on 5810, the networks page's block, only).
-
-The prototype page this began as (a `page` target and page.html: a one-block artifact with the
-roads-only and time-saved views and a lightened copy of the screen map) is gone: the site's Demo
-page dominates it, and the owner dropped the two other views (2026-10-28).
+written its frames (on 5810, the networks page's block, only; the comparison then needs one on
+41785 too).
 
     B=research/roadless/atlas/explore_proto/build.py     # from the repo root, PYTHONPATH=.
-    uv run python $B plates                # every shown block's escape-time plates (minutes)
+    uv run python $B plates                # the escape-time plates (minutes)
     uv run python $B site ~/src/wt_demo    # the bundle into a main checkout
 """
 from __future__ import annotations
@@ -327,19 +327,30 @@ class Measured:
             fit_central_s=extrapolated(self.runs, self.alpha, n).central_s,
             fit_runs=len(self.runs))
 
+    def network(self, site: Site) -> tuple[str, str]:
+        """The run's scored network in the Site's networks: (key, run), as topology.json names
+        them (topology_run.py `score`)."""
+        info = json.loads((site.kept / "topology.json").read_text())
+        return info["scored_key"], info["scored_run"]
+
+    def scores(self, site: Site) -> tuple[float, float, float]:
+        """The scored network's displacement, L_P and new road (km), topology.json's."""
+        info = json.loads((site.kept / "topology.json").read_text())
+        return float(info["D"]), float(info["L_P"]), float(info["road_m"]) / 1000
+
 
 EXTRAPOLATED = Extrapolated(TOPOLOGY_RUNS, TOPOLOGY_ALPHA)
 MEASURED = Measured(TOPOLOGY_RUNS, TOPOLOGY_ALPHA)
 
 
-# ------------------------------------------------------------------ the blocks the page shows
+# ------------------------------------------------------------------ the blocks
 
 @dataclass(frozen=True)
 class Block:
-    """A block the page shows: its id, where it is in words, the Google Maps zoom that frames it,
-    whether it is plainly an informal settlement on the ground whatever the City's survey says
-    (imagery, and the news reports of fires around it; False makes no claim), and how topology's
-    run time on it is known. The first is the page's default."""
+    """The block the page follows: its id, where it is in words, the Google Maps zoom that frames
+    it, whether it is plainly an informal settlement on the ground whatever the City's survey says
+    (imagery, and the news reports of fires around it), and how topology's run time on it is
+    known."""
     bid: str
     place: str
     zoom: int
@@ -347,14 +358,22 @@ class Block:
     topology: TopologyTime
 
 
-BLOCKS = (
-    Block("ZAF.9.3.1_1_5810", "the Bloekombos and Wallacedene area of Kraaifontein", zoom=17,
-          plainly_informal=True, topology=EXTRAPOLATED),
-    # Philippi: OpenStreetMap's suburb at its centre (Nominatim's reverse lookup, 2026-10-28).
-    # About 165 m across, so a closer zoom than 5810's.
-    # Topology measured here (atlas/topology_run.py, 2026-10-29): 1.88 h on one thread.
-    Block("ZAF.9.3.1_1_41785", "Philippi", zoom=18, plainly_informal=False, topology=MEASURED),
-)
+@dataclass(frozen=True)
+class Compared:
+    """The block the methods are compared on: one where topology has run (a Measured time, whose
+    record names its scored network), with its place in words and Maps zoom."""
+    bid: str
+    place: str
+    zoom: int
+    topology: Measured
+
+
+PAGE = Block("ZAF.9.3.1_1_5810", "the Bloekombos and Wallacedene area of Kraaifontein", zoom=17,
+             plainly_informal=True, topology=EXTRAPOLATED)
+# The shipped screen's top block, and small enough (638 buildings) for topology to finish: 1.88 h
+# on one thread (atlas/topology_run.py, 2026-10-29). Philippi: OpenStreetMap's suburb at its
+# centre (Nominatim's reverse lookup, 2026-10-28); about 165 m across, so a closer zoom.
+COMPARED = Compared("ZAF.9.3.1_1_41785", "Philippi", zoom=18, topology=MEASURED)
 
 
 # ------------------------------------------------------------------ colour map (OKLab)
@@ -470,33 +489,57 @@ def plate_name(site: Site, f: str) -> Path:
     return FRAMES / site.bid / f"{METHOD.stem}_{f}.webp"
 
 
-def plates(block: Block) -> None:
-    """The block's plain baseline and every frame of the method's runs on it, into FRAMES."""
-    site = Site.of(block.bid)
+def topology_plate(site: Site) -> Path:
+    return FRAMES / site.bid / "topology.webp"
+
+
+def method_plates(site: Site, w: World) -> None:
+    """Every frame of the method's runs on the block, into FRAMES."""
+    pick = METHOD.pick(site.bid)
+    key, src = pick.key(), pick.source(site)
+    for run in src.runs():
+        info = nw.info_of(key, run.name, data=site.networks)
+        names = render.frame_names(info)
+        for mm, plate in stored_plates(site, w, key, run.name):
+            plate(plate_name(site, names[mm]))
+
+
+def stored_plates(site: Site, w: World, key: str, run: str):  # type: ignore[no-untyped-def]
+    """Per stop of a stored run (compute.frames_of's files in the Site's networks), its stop and
+    a function drawing its escape-time plate to a path."""
+    d = np.load(site.networks / f"{key}_{run}.npz", allow_pickle=True)          # our own: WKB
+    t = np.load(site.networks / f"{key}_{run}_times.npz")
+    if not np.allclose(d["frame"], np.asarray(w.fr.frame, dtype=float)):
+        raise AssertionError(f"{key} {run}: its frame is not the baseline's")
+    for mm in [int(s) for s in d["stops"]]:
+        [corridor] = shapely.from_wkb(d[f"corridor_{mm}"])
+        gone, u = d[f"c_{mm}"] >= 1.0, t[f"u_{mm}"]
+        yield mm, lambda out, u=u, gone=gone, corridor=corridor: homes_plate(
+            w, u, gone=gone, corridor=corridor, out=out)
+
+
+def plates() -> None:
+    """The page block's plain baseline and every frame of the method on it; the compared block's
+    method frames and topology's scored network, all into FRAMES."""
+    site = Site.of(PAGE.bid)
     plate_name(site, "000").parent.mkdir(parents=True, exist_ok=True)
     w = world(site)
     homes_plate(w, w.u_plain, gone=np.zeros(len(w.polys), dtype=bool), corridor=None,
                 out=plate_name(site, "000"))
-    pick = METHOD.pick(block.bid)
-    key, src = pick.key(), pick.source(site)
-    for run in src.runs():
-        info = nw.info_of(key, run.name, data=site.networks)
-        d = np.load(site.networks / f"{key}_{run.name}.npz", allow_pickle=True)   # our own: WKB
-        t = np.load(site.networks / f"{key}_{run.name}_times.npz")
-        if not np.allclose(d["frame"], np.asarray(w.fr.frame, dtype=float)):
-            raise AssertionError(f"{key} {run.name}: its frame is not the baseline's")
-        names = render.frame_names(info)
-        for mm in [int(s) for s in d["stops"]]:
-            [corridor] = shapely.from_wkb(d[f"corridor_{mm}"])
-            homes_plate(w, t[f"u_{mm}"], gone=d[f"c_{mm}"] >= 1.0, corridor=corridor,
-                        out=plate_name(site, names[mm]))
+    method_plates(site, w)
+    site = Site.of(COMPARED.bid)
+    plate_name(site, "000").parent.mkdir(parents=True, exist_ok=True)
+    w = world(site)
+    method_plates(site, w)
+    key, run = COMPARED.topology.network(site)
+    [(_, plate)] = list(stored_plates(site, w, key, run))
+    plate(topology_plate(site))
 
 
 # ------------------------------------------------------------------ the screens
 
 SCREEN = cp.ROOT / "examples" / "screen-map" / "capetown.json"   # the site's ScreenMap bundle
 SCREEN_METRIC = "depth_density_proxy"   # the shipped screen (its floor read from the bundle)
-LOCAL_PAD = 450.0        # m: the screen map's close-up margin around the block
 PEEL_EXAMPLE = "depth_density"          # the two-stage screen: conf/example/depth_density.yaml
 
 
@@ -554,21 +597,19 @@ class Report:
 
 @dataclass(frozen=True)
 class Fire:
-    """One fire reported near a block (`near`, its id): its month (ISO, YYYY-MM), where the
+    """One fire reported near the page's block: its month (ISO, YYYY-MM), where the
     reports place it (with OpenStreetMap's distance to the block where the street can be found),
     what they say happened, and the reports. Each was checked against its article (2026-10-28);
     none is placed inside the block, and the page draws none of them on a map (owner 2026-10-28:
     some reports' streets cannot be placed)."""
-    near: str
     month: str
     where: str
     what: str
     reports: tuple[Report, ...]
 
 
-BLOEKOMBOS = "ZAF.9.3.1_1_5810"   # the fires below were gathered around this block
 FIRES = (
-    Fire(BLOEKOMBOS, "2016-05",
+    Fire("2016-05",
          "Japhta and Dlayedwa streets, Bloekombos, Kraaifontein. OpenStreetMap puts Dlayedwa "
          "Street about 80 m outside the block.",
          "Two shacks were set alight, allegedly with a petrol bomb, and four members of one "
@@ -576,7 +617,7 @@ FIRES = (
          "with water and could not.",
          (Report("Cape Times", "2016-05-23", "Four die in suspected arson attack",
                  "https://iol.co.za/capetimes/news/2016-05-23-four-die-in-suspected-arson-attack/"),)),
-    Fire(BLOEKOMBOS, "2020-02",
+    Fire("2020-02",
          "Wallacedene, Kraaifontein, beside the block.",
          "A fire at about 2am burned 28 shacks, displaced 83 people and killed two. Fire engines "
          "could not drive in: a community leader said “we have no roads and the shacks are "
@@ -584,7 +625,7 @@ FIRES = (
          "taps gave no water, and residents pulled down shacks to stop it spreading.",
          (Report("GroundUp", "2020-02-25", "Couple dies in shack fire in Kraaifontein",
                  "https://groundup.news/article/couple-dies-shack-fire-kraaifontein/"),)),
-    Fire(BLOEKOMBOS, "2022-06",
+    Fire("2022-06",
          "Pietersen Road, Wallacedene. OpenStreetMap puts Pietersen Road about 1.2 km south of "
          "the block.",
          "Three shacks burned, 11 people were displaced and three siblings died.",
@@ -592,7 +633,7 @@ FIRES = (
                  "Three siblings die in Cape Town fire that displaced 11 people",
                  "https://www.news24.com/southafrica/news/three-siblings-die-in-cape-town-fire-"
                  "that-displaced-11-people-20220617"),)),
-    Fire(BLOEKOMBOS, "2024-10",
+    Fire("2024-10",
          "Manuel Street, Wallacedene.",
          "Four people died, three of them children, in one of 48 shack fires across Cape Town "
          "that weekend. JP Smith, the City's mayoral committee member for safety and security, "
@@ -602,7 +643,7 @@ FIRES = (
                  "Nine people perish in weekend informal settlement fires in Cape Town",
                  "https://www.timeslive.co.za/news/south-africa/2024-10-28-nine-people-perish-in-"
                  "weekend-informal-settlement-fires-in-cape-town/"),)),
-    Fire(BLOEKOMBOS, "2025-07",
+    Fire("2025-07",
          "Maroela Road, Wallacedene. OpenStreetMap puts the Wallacedene stretch of Maroela Road "
          "about 630 m south of the block; the road also passes within about 16 m of the block's "
          "south edge.",
@@ -627,19 +668,15 @@ GONE_SHARE = 0.1
 
 @dataclass(frozen=True)
 class DemoProxy:
-    """The block under the shipped screen: its buildings `n`, area and perimeter (the three numbers
-    the score is made of), its score, its rank (1 the highest) among all `n_blocks` of the city,
-    whether the City's informal-settlement survey flags it, and its outline as the screen bundle
-    draws it (`rings`: exterior first, then any interiors, in the bundle's local metres,
-    simplified as the bundle simplifies them, so their drawn length runs a little under
-    `perimeter_m`, the unsimplified block's)."""
+    """The block under the shipped screen: its buildings `n`, area and perimeter (the three
+    numbers the score is made of), its score, its rank (1 the highest) among all of the city's
+    blocks, and whether the City's informal-settlement survey flags it."""
     n: int
     area_m2: float
     perimeter_m: float
     score: float
     rank: int
     informal: bool
-    rings: tuple[tuple[tuple[float, float], ...], ...]
 
 
 @dataclass(frozen=True)
@@ -656,7 +693,7 @@ class DemoPeel:
 class DemoFrame:
     """One slider position: the network the method has built by the displacement budget `budget`
     (a share of the homes' floor area; 0 the block with no new road). `displacement` is the share
-    it reaches (at least `budget`; a run's ears can overshoot several budgets at once, so several
+    it reaches (at least `budget`; a run's step can overshoot several budgets at once, so several
     positions can share one network), `road_km` its new road, `permeability` its L_P,
     `conductance_m2` the conductance it adds (m² of open ground), `seconds` the method's run time
     to it, `row` its frame's row in the block's sprite sheet."""
@@ -681,7 +718,7 @@ class DemoSheet:
 
 @dataclass(frozen=True)
 class DemoBlock:
-    """One block the page shows: its id, buildings, place in words, centroid and a Google Maps
+    """The block the page follows: its id, buildings, place in words, centroid and a Google Maps
     link; whether it is plainly an informal settlement on the ground (Block's), whatever the
     survey (`proxy.informal`) says; the screens' verdicts on it; the fires reported near it; the
     method's build-out on it (its frames, its plates, the escape-time scale -- the model's units
@@ -706,18 +743,48 @@ class DemoBlock:
 
 
 @dataclass(frozen=True)
+class DemoNetwork:
+    """One method's network on the compared block, drawn as the page's escape-time plate on that
+    block's scale (`plate`, beside demo.json, `width` x `height` px), and its scores: the share of
+    floor area it displaces, its L_P and its new road."""
+    plate: str
+    width: int
+    height: int
+    displacement: float
+    permeability: float
+    road_km: float
+
+
+@dataclass(frozen=True)
+class DemoComparison:
+    """The methods compared on a block where topology has run: the block (id, buildings, place,
+    Maps link, its rank under the shipped screen, its escape-time scale), the method's full
+    build-out (`ours`, its run time and where it ran) and topology's network (`earlier`, its run
+    time measured there)."""
+    block_id: str
+    n_buildings: int
+    place: str
+    maps_url: str
+    proxy_rank: int
+    escape_scale: float
+    ours: DemoNetwork
+    ours_seconds: float
+    ours_machine: str
+    earlier: DemoNetwork
+    earlier_time: DemoTopologyMeasured
+
+
+@dataclass(frozen=True)
 class DemoScreen:
     """The screens, city-wide: the shipped proxy (`metric`) at its `floor`, its `pool`, and that
-    pool's precision and recall against the City's survey, over `n_blocks`; the screen map's
-    close-up margin around a block (m); and the two-stage screen (`peel_metric`), which peels
-    the proxy's top `peel_keep_n`."""
+    pool's precision and recall against the City's survey, over `n_blocks`; and the two-stage
+    screen (`peel_metric`), which peels the proxy's top `peel_keep_n`."""
     metric: str
     floor: float
     pool: int
     precision: float
     recall: float
     n_blocks: int
-    closeup_pad_m: float
     peel_metric: str
     peel_keep_n: int
 
@@ -738,7 +805,9 @@ class DemoEncoding:
     `iso_step` of it. `road` is the grey of a new road's corridor and of a wholly destroyed
     building, which a building is once `gone_share` of it is gone; roads are `road_width_m` wide
     and conduct `road_conductance` times what open ground does. The block's edge: `street`
-    (where people walk out), `edge` (a railway's or a ditch's line), `water` (a ditch)."""
+    (where people walk out), `edge` (a railway's or a ditch's line), `water` (a ditch).
+    `depth_ramp` is the peel figure's (reblock.render's depth colouring, ring 1 to the deepest),
+    evenly spaced stops."""
     road: str
     street: str
     edge: str
@@ -748,13 +817,15 @@ class DemoEncoding:
     road_width_m: float
     road_conductance: float
     gone_share: float
+    depth_ramp: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class DemoBundle:
-    """The Demo page's numbers: its blocks (the first the page's default), the screens, the
-    method, and the plates' encoding."""
-    blocks: tuple[DemoBlock, ...]
+    """The Demo page's numbers: the block it follows, the methods compared on another, the
+    screens, the method, and the plates' encoding."""
+    block: DemoBlock
+    comparison: DemoComparison
     screen: DemoScreen
     method: DemoMethod
     encoding: DemoEncoding
@@ -815,17 +886,18 @@ SITE_README = """\
 
 # The Demo page's bundle
 
-What the site's Demo page reads: {n_blocks} Cape Town blocks ({blocks}), each followed from the
-city-wide screens to the roads one method builds through it.
+What the site's Demo page reads: Cape Town block `{bid}`, followed from the city-wide screens to
+the roads one method builds through it, and a comparison of that method with the original topology
+algorithm on block `{cid}`, where topology has run.
 
-- `demo.json`: every number the page shows. Per block: its place, the shipped screen's verdict
-  on it (checked against `../screen-map/capetown.json`) and the two-stage depth_density screen's,
-  the fires reported near it (each quoted from its report and checked against the article; none
-  is placed inside a block, and the page draws none of them on a map), the method's frames under
-  a displacement budget with its recorded run time, and the original topology algorithm's run
-  time on it, measured or extrapolated from {n_runs} recorded runs on smaller blocks.
-- {sheets}: each block's escape-time plates as one sprite sheet (the block with no new road
-  first).
+- `demo.json`: every number the page shows -- the block's place, the shipped screen's verdict on
+  it (checked against `../screen-map/capetown.json`) and the two-stage depth_density screen's, the
+  fires reported near it (each quoted from its report and checked against the article; none is
+  placed inside the block, and the page draws none of them on a map), the method's frames under a
+  displacement budget with its recorded run time, topology's run time (extrapolated there), and
+  the comparison's scores and run times (topology's measured).
+- `{sheet}`: the block's escape-time plates as one sprite sheet (the block with no new road
+  first); `{ours}` and `{earlier}`: the two networks on `{cid}`, the same plate.
 
 `web/src/demo.d.ts` is generated beside it from the same dataclasses, so a renamed field is a
 TypeScript error.
@@ -857,6 +929,13 @@ def sprite(site: Site, fs: list[str], out: Path) -> tuple[int, int]:
     return WIDTH, h
 
 
+def single(src: Path, out: Path) -> tuple[int, int]:
+    """One plate at WIDTH px into `out`; (width, height)."""
+    im = scaled(src)
+    im.convert("RGB").save(out, quality=QUALITY, method=6)
+    return im.width, im.height
+
+
 def maps_url(lat: float, lon: float, zoom: int) -> str:
     """Google Maps' satellite view centred on (lat, lon)."""
     return (f"https://www.google.com/maps/@?api=1&map_action=map&center={lat:.5f}%2C{lon:.5f}"
@@ -871,11 +950,11 @@ def centroid_wgs84(bid: str) -> tuple[float, float]:
     return float(lat), float(lon)
 
 
-def frames_of(block: Block, site: Site) -> tuple[list[DemoFrame], list[str]]:
+def frames_of(site: Site) -> tuple[list[DemoFrame], list[str]]:
     """The slider's frames on the block (the block with no new road first) and the sheet's frame
     names, in row order. Refuses a row with no network, or one where the run stopped short of
     the budget: the page shows a network that meets every budget."""
-    pick = METHOD.pick(block.bid)
+    pick = METHOD.pick(site.bid)
     key, src = pick.key(), pick.source(site)
     rows = src.rows(key)
     secs = METHOD.runtime.seconds(key, src, rows, site)
@@ -884,51 +963,80 @@ def frames_of(block: Block, site: Site) -> tuple[list[DemoFrame], list[str]]:
                         conductance_m2=0.0, seconds=0.0, row=0)]
     for t, r, s in zip(nw.SLIDER, rows, secs, strict=True):
         if r is None or s is None or r.get("full", False):
-            raise SystemExit(f"{block.bid}: no network meeting the {t:g} budget")
+            raise SystemExit(f"{site.bid}: no network meeting the {t:g} budget")
         frames.append(DemoFrame(budget=t, displacement=r["D"], road_km=r["km"],
                                 permeability=r["LP"], conductance_m2=float(r["C"]), seconds=s,
                                 row=fs.index(r["f"])))
     return frames, fs
 
 
-def demo_block(block: Block, sc: Screen, pl: Peeled, out: Path) -> DemoBlock:
-    """Everything the page shows about `block`; its sprite sheet into `out`."""
-    site = Site.of(block.bid)
+def proxy_of(sc: Screen, bid: str) -> DemoProxy:
     b = sc.bundle
-    i = b["block_id"].index(block.bid)
-    n, area = int(b["n"][i]), float(b["area_m2"][i])
-    peel_score = pl.scores[block.bid]
-    rings = peel_score * area / n               # depth_density = peel depth x n/A
+    i = b["block_id"].index(bid)
+    return DemoProxy(n=int(b["n"][i]), area_m2=float(b["area_m2"][i]),
+                     perimeter_m=float(b["perimeter_m"][i]), score=float(sc.score[i]),
+                     rank=int((sc.score > sc.score[i]).sum()) + 1,
+                     informal=bool(b["informal"][i]))
+
+
+def page_block(sc: Screen, pl: Peeled, out: Path) -> DemoBlock:
+    """Everything the page shows about PAGE; its sprite sheet into `out`."""
+    site = Site.of(PAGE.bid)
+    proxy = proxy_of(sc, PAGE.bid)
+    peel_score = pl.scores[PAGE.bid]
+    rings = peel_score * proxy.area_m2 / proxy.n          # depth_density = peel depth x n/A
     # The bundle rounds areas (to 0.1 m²), so the quotient lands within a hair of a whole number;
     # another block's n or A would miss it by far more.
     if abs(rings - round(rings)) > 1e-3:
-        raise AssertionError(f"{block.bid}: depth_density {peel_score} over n/A is not a whole "
+        raise AssertionError(f"{PAGE.bid}: depth_density {peel_score} over n/A is not a whole "
                              f"number of rings ({rings}); the bundle's n or A is not the screen's")
-    frames, fs = frames_of(block, site)
-    file = f"{METHOD.stem}_{block.bid}.webp"
+    frames, fs = frames_of(site)
+    file = f"{METHOD.stem}_{PAGE.bid}.webp"
     width, height = sprite(site, fs, out / file)
-    lat, lon = centroid_wgs84(block.bid)
+    lat, lon = centroid_wgs84(PAGE.bid)
     return DemoBlock(
-        block_id=block.bid, n_buildings=n, place=block.place, lat=lat, lon=lon,
-        maps_url=maps_url(lat, lon, block.zoom), plainly_informal=block.plainly_informal,
-        proxy=DemoProxy(n=n, area_m2=area, perimeter_m=float(b["perimeter_m"][i]),
-                        score=float(sc.score[i]), rank=int((sc.score > sc.score[i]).sum()) + 1,
-                        informal=bool(b["informal"][i]),
-                        rings=tuple(tuple((float(x), float(y)) for x, y in ring)
-                                    for ring in b["rings"][i])),
+        block_id=PAGE.bid, n_buildings=proxy.n, place=PAGE.place, lat=lat, lon=lon,
+        maps_url=maps_url(lat, lon, PAGE.zoom), plainly_informal=PAGE.plainly_informal,
+        proxy=proxy,
         peel=DemoPeel(score=float(peel_score),
                       rank=1 + sum(1 for v in pl.scores.values() if v > peel_score),
                       rings=round(rings)),
-        fires=tuple(f for f in FIRES if f.near == block.bid),
-        frames=tuple(frames), sheet=DemoSheet(file=file, width=width, frame_height=height,
-                                              rows=len(fs)),
+        fires=FIRES, frames=tuple(frames),
+        sheet=DemoSheet(file=file, width=width, frame_height=height, rows=len(fs)),
         escape_scale=round(world(site).scale, 1), machine=METHOD.runtime.machine,
-        topology=block.topology.of(site, n))
+        topology=PAGE.topology.of(site, proxy.n))
+
+
+def comparison(sc: Screen, out: Path) -> DemoComparison:
+    """The methods compared on COMPARED: the method's full build-out and topology's network,
+    their plates into `out`."""
+    site = Site.of(COMPARED.bid)
+    proxy = proxy_of(sc, COMPARED.bid)
+    frames, fs = frames_of(site)
+    full = frames[-1]
+    name = f"{METHOD.stem}_{COMPARED.bid}.webp"
+    w, h = single(plate_name(site, fs[full.row]), out / name)
+    ours = DemoNetwork(plate=name, width=w, height=h, displacement=full.displacement,
+                       permeability=full.permeability, road_km=full.road_km)
+    d, lp, km = COMPARED.topology.scores(site)
+    name = f"topology_{COMPARED.bid}.webp"
+    w, h = single(topology_plate(site), out / name)
+    earlier = DemoNetwork(plate=name, width=w, height=h, displacement=d, permeability=lp,
+                          road_km=round(km, 2))
+    lat, lon = centroid_wgs84(COMPARED.bid)
+    return DemoComparison(
+        block_id=COMPARED.bid, n_buildings=proxy.n, place=COMPARED.place,
+        maps_url=maps_url(lat, lon, COMPARED.zoom), proxy_rank=proxy.rank,
+        escape_scale=round(world(site).scale, 1), ours=ours, ours_seconds=full.seconds,
+        ours_machine=METHOD.runtime.machine, earlier=earlier,
+        earlier_time=COMPARED.topology.of(site, proxy.n))
 
 
 def site(root: Path) -> None:
     """The Demo page's bundle (SITE_DIR) and its declaration (SITE_DTS) into the main checkout
     `root`."""
+    from reblock import render as reblock_render  # noqa: PLC0415  (the depth figure's colouring)
+
     if not (root / "mkdocs.yml").is_file() or not (root / "web" / "src").is_dir():
         raise SystemExit(f"{root} is not a checkout of the site (no mkdocs.yml or web/src)")
     out = root / SITE_DIR
@@ -936,41 +1044,43 @@ def site(root: Path) -> None:
         shutil.rmtree(out)
     out.mkdir(parents=True)
     sc, pl = screen(), peeled()
-    blocks = tuple(demo_block(blk, sc, pl, out) for blk in BLOCKS)
+    block, compared = page_block(sc, pl, out), comparison(sc, out)
     floor = sc.floor
+    depth = matplotlib.colormaps[reblock_render._CMAP]
     bundle = DemoBundle(
-        blocks=blocks,
+        block=block, comparison=compared,
         screen=DemoScreen(metric=SCREEN_METRIC, floor=float(floor["value"]), pool=int(floor["n"]),
                           precision=float(floor["precision"]), recall=float(floor["recall"]),
-                          n_blocks=len(sc.score), closeup_pad_m=LOCAL_PAD,
-                          peel_metric=PEEL_EXAMPLE, peel_keep_n=pl.keep_n),
+                          n_blocks=len(sc.score), peel_metric=PEEL_EXAMPLE,
+                          peel_keep_n=pl.keep_n),
         method=DemoMethod(name=METHOD.name, blurb=METHOD.blurb, default_frame=DEFAULT),
         encoding=DemoEncoding(
             road=render.ROAD, street=rnd.STREET, edge=rnd.EDGE, water=nw.cp.gm.WATER_FILL,
             escape_ramp=tuple(mcolors.to_hex(SEQ(t)) for t in np.linspace(0, 1, 11)),
             iso_step=ISO_STEP, road_width_m=road_simp.ROAD_W,
-            road_conductance=growth.ROAD_KAPPA, gone_share=GONE_SHARE))
+            road_conductance=growth.ROAD_KAPPA, gone_share=GONE_SHARE,
+            depth_ramp=tuple(mcolors.to_hex(depth(t)) for t in np.linspace(0, 1, 9))))
     (out / "demo.json").write_text(json.dumps(dataclasses.asdict(bundle), indent=1,
                                               ensure_ascii=False) + "\n")
     (out / "README.md").write_text(SITE_README.format(
-        n_blocks=len(blocks), blocks=", ".join(f"`{b.block_id}`" for b in blocks),
-        n_runs=len(TOPOLOGY_RUNS), sheets=", ".join(f"`{b.sheet.file}`" for b in blocks)))
+        bid=block.block_id, cid=compared.block_id, sheet=block.sheet.file,
+        ours=compared.ours.plate, earlier=compared.earlier.plate))
     (root / SITE_DTS).write_text(dts(DemoBundle))
     mb = sum(p.stat().st_size for p in out.iterdir()) / 1e6
     print(f"{out}: {len(list(out.iterdir()))} files, {mb:.1f} MB; {root / SITE_DTS}", flush=True)
-    for blk in blocks:
-        t = blk.topology
-        print(f"  {blk.block_id}: proxy #{blk.proxy.rank} {blk.proxy.score:.4f}; peel "
-              f"#{blk.peel.rank} {blk.peel.score:.4f} ({blk.peel.rings} rings); "
-              f"{len(set(f.row for f in blk.frames))} frames; topology {t.kind}", flush=True)
+    print(f"  {block.block_id}: proxy #{block.proxy.rank} {block.proxy.score:.4f}; peel "
+          f"#{block.peel.rank} {block.peel.score:.4f} ({block.peel.rings} rings); topology "
+          f"{block.topology.kind}; compared on {compared.block_id}: ours D "
+          f"{compared.ours.displacement} in {compared.ours_seconds} s, topology D "
+          f"{compared.earlier.displacement:.3f} in {compared.earlier_time.seconds:.0f} s",
+          flush=True)
 
 
 def main(argv: list[str]) -> None:
     matplotlib.use("Agg")
     match argv:
         case ["plates"]:
-            for block in BLOCKS:
-                plates(block)
+            plates()
         case ["site", root]:
             site(Path(root).expanduser().resolve())
         case _:
