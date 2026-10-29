@@ -1427,6 +1427,30 @@ body,
   padding: 0.5rem 0.7rem;
 }
 
+/* Headers as the site's other tables have them (`table:not([class]) th`, above): body font at the
+   cells' size, bold, ink, on the card fill over a red rule -- and aligned with the cells, left. */
+.md-typeset .sbu-runtimes th {
+  font-family: var(--sbu-body);
+  font-size: var(--sbu-step--1);
+  font-weight: 700;
+  color: var(--sbu-ink);
+  text-align: left;
+}
+
+.md-typeset .sbu-runtimes thead th {
+  background-color: var(--sbu-surface);
+  border-bottom: 2px solid var(--sbu-red-fill);
+}
+
+[data-md-color-scheme="slate"] .md-typeset .sbu-runtimes thead th {
+  border-bottom-color: var(--sbu-red-ink);
+}
+
+.md-typeset .sbu-runtimes tbody th,
+.md-typeset .sbu-runtimes td {
+  border-top: 1px solid var(--sbu-rule);
+}
+
 .md-typeset .sbu-runtimes td strong {
   display: block;
   font-family: var(--sbu-display);
@@ -1446,6 +1470,7 @@ body,
 .md-typeset .sbu-runtimes td span,
 .md-typeset .sbu-runtimes th span {
   display: block;
+  font-weight: 400;
   color: var(--sbu-ink-muted);
 }
 
