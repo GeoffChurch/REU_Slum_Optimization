@@ -45,7 +45,7 @@ exclude_docs: |
 
 theme:
   name: material
-  custom_dir: overrides   # only partials/copyright.html, which adds the REU affiliation line
+  custom_dir: overrides   # partials/copyright.html (the REU affiliation line); main.html (QR slot)
   favicon: brand/favicon.png
   # The HORIZONTAL lockup (1184x200) -- the vertical one is near-square and turns to mush at the
   # ~21px the header allows. The mark is 2-colour with no reversed variant and must not be
@@ -95,6 +95,7 @@ extra_javascript:
 # pages audited for it, so a deploy is never paired with a cached old copy (hooks/cache_bust.py).
 hooks:
   - hooks/cache_bust.py
+  - hooks/qr_slot.py      # every page carries its QR-code slot (overrides/main.html)
 
 plugins:
   - search

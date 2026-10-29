@@ -1450,3 +1450,79 @@ body,
   font-size: var(--sbu-step--1);
   color: var(--sbu-ink-muted);
 }
+
+/* ------------------------------------------------------------------- the page's QR code */
+
+/* "Open this view on your phone" (web/src/qr/qr.ts): at the foot of the navigation sidebar, only
+   where that sidebar stays on screen -- Material's 76.25em breakpoint, below which it becomes the
+   drawer -- and never in print. Sticky, so it stays in view however long the nav. */
+.sbu-qr {
+  display: none;
+}
+
+@media screen and (min-width: 76.25em) {
+  .md-sidebar--primary .sbu-qr {
+    display: block;
+    position: sticky;
+    bottom: 0;
+    padding: 0.6rem 0.6rem 0.8rem;
+    background: var(--md-default-bg-color);
+  }
+}
+
+.md-typeset .sbu-qr__label,
+.sbu-qr__label {
+  margin: 0 0 0.35rem;
+  font-size: 0.64rem;
+  color: var(--sbu-ink-muted);
+}
+
+/* The code on white, with its own quiet zone, in both schemes: scanners want dark on light. */
+.sbu-qr__open {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: #ffffff;
+  cursor: zoom-in;
+}
+
+.sbu-qr__open:focus-visible,
+.sbu-qr__close:focus-visible {
+  outline: 3px solid var(--sbu-red-ink);
+  outline-offset: 2px;
+}
+
+.sbu-qr__code {
+  display: block;
+  width: 120px;
+  height: 120px;
+}
+
+.sbu-qr__dialog {
+  padding: 1rem;
+  border: 0;
+  border-radius: 4px;
+  background: #ffffff;
+  text-align: center;
+}
+
+.sbu-qr__dialog::backdrop {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.sbu-qr__big {
+  display: block;
+  width: min(80vmin, 40rem);
+  height: auto;
+}
+
+.sbu-qr__close {
+  margin-top: 0.6rem;
+  padding: 0.3rem 0.9rem;
+  border: 1px solid #5c5c5c;
+  border-radius: 3px;
+  background: #ffffff;
+  color: #111111;
+  font: inherit;
+  cursor: pointer;
+}

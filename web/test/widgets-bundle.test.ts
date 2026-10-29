@@ -121,6 +121,9 @@ test("the shipped bundle registers every widget name a generated page emits", ()
         if (event === "DOMContentLoaded") domReady = fn;
       },
       querySelectorAll: () => mounts,
+      // No QR slot: the bundle's QR code (qr/qr.ts) stays out of this test, which is about the
+      // widgets' own registration.
+      querySelector: (): null => null,
       createElement: (): FakeNode => ({ textContent: "" }),
     },
     window: { location: { search: "" } },

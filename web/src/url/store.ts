@@ -33,6 +33,15 @@ export function browserLocation(): UrlLocation {
   };
 }
 
+/** `loc`, with `after` called after every write: how a page-wide listener (the QR code, which
+ * encodes the address) follows the URL state without the store knowing it exists. */
+export function notifying(loc: UrlLocation, after: () => void): UrlLocation {
+  return {
+    search: () => loc.search(),
+    replace: (search) => { loc.replace(search); after(); },
+  };
+}
+
 export interface Timers {
   set(fn: () => void, ms: number): number;
   clear(id: number): void;
