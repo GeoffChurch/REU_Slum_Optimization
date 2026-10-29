@@ -184,7 +184,7 @@ EARS_PATHS = Shown(
     blurb=("Each new road runs from the street, or a road already built, across the block and "
            "back to a street or road, so every road is on a loop and none is a dead end. At each "
            "step the method tries the cheapest routes through the gaps between buildings and "
-           "builds the one that most improves permeability for the homes it displaces."),
+           "builds the one that saves the most escape time for the homes it displaces."),
     stem="loop",
     runtime=GrownSteps(machine="one process on a workstation CPU (Intel Xeon w7-3455)"))
 
@@ -194,7 +194,7 @@ PARTITION_CUT = Shown(
     name="Sub-block roads",
     blurb=("Divides the block into sub-blocks and lays a road wherever two sub-blocks meet, so "
            "every road is on a loop. The sub-blocks start from clusters of buildings and move "
-           "until the roads between them most improve permeability within the budget; each "
+           "until the roads between them save the most escape time within the budget; each "
            "budget is solved afresh."),
     stem="part",
     runtime=AnswerRows(machine="partition_rows' t_total (rows do not name the machine)"))
