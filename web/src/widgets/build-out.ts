@@ -289,7 +289,8 @@ function swatch(text: string, paint: (sw: HTMLElement) => void): HTMLSpanElement
 }
 
 /** The plates' legend: escape time's ramp (to 100% of the block's scale and past it, hence the
- * "+"), the road, and a destroyed building's ghost -- distinct encodings, since a road and a
+ * "+"), the road, and damage's fade, from a home's colour to the destroyed sand -- distinct
+ * encodings, since a road and a
  * destroyed home are different losses -- and a damaged home's outline. */
 function legend(e: DemoEncoding): HTMLDivElement {
   const box = div("sbu-buildout__legend");
@@ -297,14 +298,17 @@ function legend(e: DemoEncoding): HTMLDivElement {
     ramp(e.escape_ramp,
          [0, 0.25, 0.5, 0.75, 1].map((t) => (t === 1 ? `${pct(t, 0)}+` : pct(t, 0)))),
     swatch("New road", (sw) => { sw.style.background = e.road; }),
-    swatch("Destroyed building", (sw) => {
-      sw.style.background = e.ghost_fill;
-      sw.style.borderColor = e.ghost_edge;
-    }),
-    swatch("Damaged, still a home", (sw) => {
-      sw.style.background = e.escape_ramp[1]!;
-      sw.style.borderColor = e.ghost_edge;
-    }));
+    damageKey(e));
+  return box;
+}
+
+/** Damage's fade, as its own small ramp: a building's colour from intact to destroyed, which it
+ * is once `gone_share` of it is taken or a road cuts it in two. */
+function damageKey(e: DemoEncoding): HTMLDivElement {
+  const box = div("sbu-buildout__damage");
+  box.append(ramp(e.damage_ramp, ["intact", "destroyed"]),
+             para("sbu-buildout__damage-note",
+                  `destroyed: ${pct(e.gone_share, 0)} taken, or cut in two`));
   return box;
 }
 

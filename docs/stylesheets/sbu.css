@@ -1118,6 +1118,18 @@ body,
   border-radius: 2px;
 }
 
+/* Damage's fade, beside the road's swatch: a short ramp and what "destroyed" means. */
+.sbu-buildout__damage {
+  width: 100%;
+  max-width: 14rem;
+}
+
+.md-typeset .sbu-buildout__damage-note {
+  margin: 0;
+  font-size: var(--sbu-step--1);
+  color: var(--sbu-ink-muted);
+}
+
 .sbu-buildout__ramp {
   width: 100%;
   max-width: 24rem;

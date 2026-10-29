@@ -1250,15 +1250,19 @@ def test_the_demo_ships_every_sheet_beside_its_build_out(
 
 
 def test_both_build_out_captions_tell_road_from_a_destroyed_building(demo_body: str) -> None:
-    """Owner, 2026-10-29: a destroyed building is not road. Both build-outs' captions name the
-    two encodings and a damaged home's, and no caption calls a destroyed building grey."""
+    """Owner, 2026-10-29: a destroyed building is not road, and damage is a fade. Both build-outs'
+    captions name the road and the fade to sand, with what "destroyed" means read from the
+    bundle; none calls a destroyed building grey, or a pale ghost as before the fade."""
+    e = _demo_bundle()["encoding"]
     captions = re.findall(r"<figcaption>(.*?)</figcaption>", demo_body, flags=re.S)
     keyed = [c for c in captions if "Dark slate is new road" in c]
     assert len(keyed) == 2, captions
     for c in keyed:
-        assert "a pale footprint with a thin outline is a building the roads destroyed" in c
-        assert "keeps its colour inside the same outline" in c
-    assert not re.search(r"[Gg]rey is|road,? or a destroyed building", demo_body)
+        assert "fades, outlined, from its colour toward sand, and is full sand once destroyed" in c
+        assert f"{e['gone_share']:.0%} or more of it taken, or cut in two" in c
+    assert not re.search(r"[Gg]rey is|road,? or a destroyed building|pale footprint", demo_body)
+    # The legend's ramp runs from an intact home's colour to the destroyed sand.
+    assert e["damage_ramp"][-1] == e["destroyed"] and len(e["damage_ramp"]) >= 3
 
 
 def test_the_comparison_leads_with_what_the_build_out_shows(demo_body: str) -> None:

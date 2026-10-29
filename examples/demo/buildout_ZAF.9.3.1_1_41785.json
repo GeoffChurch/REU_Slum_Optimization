@@ -756,8 +756,15 @@
   "iso_step": 0.1,
   "road_width_m": 7.0,
   "gone_share": 0.1,
-  "ghost_fill": "#ece8e2",
-  "ghost_edge": "#7d7468",
+  "destroyed": "#d6bb79",
+  "damage_edge": "#7d7468",
+  "damage_ramp": [
+   "#9ea0e2",
+   "#aca8cb",
+   "#b9b0b3",
+   "#c7b698",
+   "#d6bb79"
+  ],
   "depth_ramp": [
    "#ffffcc",
    "#ffeda0",

@@ -1974,12 +1974,11 @@ def _buildout(name: str) -> dict[str, Any]:
 
 def _plate_key(e: dict[str, Any]) -> str:
     """What a build-out plate's colours and lines are, in one sentence-run: escape time's ramp,
-    the road, a destroyed building and a damaged home, each its own encoding."""
+    the road, and damage's fade, each its own encoding."""
     return (f"blue a short way out, red a long one, a line every {e['iso_step']:.0%}. Dark slate "
-            f"is new road, {e['road_width_m']:.0f} m wide; a pale footprint with a thin outline "
-            f"is a building the roads destroyed ({e['gone_share']:.0%} or more of it taken, or "
-            f"cut in two); a home that keeps its colour inside the same outline lost less and is "
-            f"still lived in.")
+            f"is new road, {e['road_width_m']:.0f} m wide. A building the roads damage fades, "
+            f"outlined, from its colour toward sand, and is full sand once destroyed: "
+            f"{e['gone_share']:.0%} or more of it taken, or cut in two.")
 
 
 def _build_out_figure(name: str, widget: str, alt: str, caption: str) -> str:

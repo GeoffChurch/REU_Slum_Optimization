@@ -147,10 +147,10 @@ export interface DemoMethod {
 }
 /** The plates' colours and the quantities their legend states. `escape_ramp` maps escape time
  * from 0 to 100% of a block's `escape_scale`, short blue to long red, with an isochrone every
- * `iso_step` of it. `road` is a new road's corridor, `road_width_m` wide. A wholly destroyed
- * building -- once `gone_share` of it is gone, or a road cuts it in two -- is a ghost
- * (`ghost_fill`, outlined `ghost_edge`); a partly damaged one keeps its escape-time colour and
- * the same outline. The
+ * `iso_step` of it. `road` is a new road's corridor, `road_width_m` wide. A damaged building
+ * fades from its escape-time colour to `destroyed`, which it reaches once `gone_share` of it is
+ * gone or a road cuts it in two, outlined in `damage_edge`; `damage_ramp` is that fade's legend,
+ * from a short escape time to destroyed, in OKLab. The
  * block's edge: `street` (where people walk out), `edge` (a railway's or a ditch's line),
  * `water` (a ditch).
  * `depth_ramp` is the peel figure's (reblock.render's depth colouring, ring 1 to the deepest),
@@ -164,8 +164,9 @@ export interface DemoEncoding {
   iso_step: number;
   road_width_m: number;
   gone_share: number;
-  ghost_fill: string;
-  ghost_edge: string;
+  destroyed: string;
+  damage_edge: string;
+  damage_ramp: string[];
   depth_ramp: string[];
 }
 /** Topology's run times on the page are our optimized port's (`port`, a commit of
