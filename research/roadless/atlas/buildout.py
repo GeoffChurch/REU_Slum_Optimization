@@ -13,9 +13,11 @@ A method (Method, a Strategy, from the command line):
                  run's own to each step (steps.parquet's t);
   topology       the kept topology run (topology_run.py: atlas/blocks/<block>/topology_roads
                  .parquet) in the lineup's canonical order (common.canonical_order: drainage
-                 first, each road after the roads it needs to reach the street): topology keeps
-                 no build order of its own (its proposal reads its roads off the graph); its
-                 seconds the whole run's, at the whole network only.
+                 first, each road after the roads it needs to reach the street); its seconds the
+                 whole run's, at the whole network only;
+  topology built the same network in its own build order (topology_order.py's watched re-run:
+                 its proposal keeps none), its seconds when each prefix's last segment was
+                 added.
 
 The table (Site.kept/<key>_grid.json, committed): per grid budget the frame (its stop, D, road
 pieces and km, L_P, the conductance added C, the seconds), or what stands there instead: `repeat`
@@ -27,8 +29,8 @@ it the escape-time scale (the plain baseline's 99th percentile).
 
     B=research/roadless/atlas/buildout.py              # from the repo root, PYTHONPATH=.
     uv run python $B baseline <block>
-    uv run python $B frames <block> grown <plan> | topology
-    uv run python $B table <block> grown <plan> | topology
+    uv run python $B frames <block> grown <plan> | topology [built]
+    uv run python $B table <block> grown <plan> | topology [built]
 """
 from __future__ import annotations
 
@@ -104,12 +106,35 @@ class Topology:
         return float(self.info["wall_s"]) if stop == size else None
 
 
+class TopologyBuilt:
+    """The kept topology run in its own build order (topology_order.py's watched re-run, the same
+    network: topology_built_roads.parquet, each segment in the order the greedy added it, with
+    the second it was added)."""
+    key = "topology.a10.s0.w7.built"
+
+    def __init__(self, site: Site) -> None:
+        self.roads = gpd.read_parquet(site.kept / "topology_built_roads.parquet")
+        if not (np.diff(self.roads["index"].to_numpy()) == 1).all():
+            raise SystemExit("topology_built_roads.parquet is not in build order")
+        self.info = json.loads((site.kept / "topology_built.json").read_text())
+        self.machine = f"one process on {self.info['host']} ({self.info['cpu']})"
+
+    def network(self, b: Any) -> Any:
+        return cp.Roads(b, self.roads)
+
+    def seconds(self, stop: int, *, size: int) -> float | None:
+        """When the prefix's last segment was added, from the run's start."""
+        return float(self.roads.t.iloc[stop - 1])
+
+
 def method_of(site: Site, argv: list[str], *, grid: tuple[float, ...]) -> Method:
     match argv:
         case ["grown", plan]:
             return GrownRun(site, plan, grid=grid)
         case ["topology"]:
             return Topology(site)
+        case ["topology", "built"]:
+            return TopologyBuilt(site)
     raise SystemExit(__doc__)
 
 
