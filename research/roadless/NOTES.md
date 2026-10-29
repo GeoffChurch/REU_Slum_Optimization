@@ -11365,3 +11365,106 @@ the 5810 page as "partition SIMP + spurs" (the 0.05 and 0.10 cuts' four points; 
 past the slider).
 Scripts (.superpowers/sdd/2026-10-27-partition/): rev4_table.py, spurs.py, spurs_table.py,
 migrate_v4.py, grid_check.py, faces_fix.py; spurs' rows in spurs/ and spurs_rows/ (not committed).
+
+### Escape time under blockage: one road stretch, or a fire at a home, on 5810 (2026-10-29)
+
+Owner 2026-10-28: does escape time saved under blockage separate loop networks from dead-end ones by
+a margin worth building into a greedy (a dead-end price mu in ears: spurs as a second candidate
+kind, each dead end charged mu and refunded when an ear closes it)? A measurement first;
+research/roadless/blockage.py. The world is the 5810 build-out page's kappa-10 one, each network's
+stored frames rebuilt exactly (compute.carved: the same networks carved into the same cached meshes;
+every frame's L_P reproduced): carved roads conducting at ten times open ground, the street ring the
+ground, rail and water cut out. Not the grounded leak of growth.py and ears.py: there every road
+point is an exit, so a blocked stretch only loses its own leak and blockage does nothing.
+
+Networks at their frames nearest D 0.05 / 0.10 / 0.15: Loop roads (ears paths v1), the partition
+SIMP's spectral cut (rev 4), partition plus spurs (its four points), the lazy ΔP greedy, the
+kappa-10 growth and clearance_looped. Dead ends are counted on each corridor's 1 m skeleton as the
+partition pilot counts them (partition.skeleton).
+
+Single road blockage. The skeleton cut into stretches of about 10 m (every second one measured: a
+systematic quadrature along the skeleton, its error half the gap between its two interleaved halves,
+at most 3e-4 of L_P); a blocked stretch closes every passage of the flow model's cell graph whose
+centroids the corridor's chord square to the line at the stretch's middle separates (k 2 -- 141
+passages, median 16); the ground beside the corridor still conducts. Exact, by a re-solve on the one
+pattern (the reach with those passages at zero, the values again, cuDSS's refactorization; 1.2 --
+1.7 s a stretch on the local GPU), checked on three stretches per network-D against the rank-k
+Woodbury update on the base factorization (k solves): agreement to 1e-6 relative where dP is above
+1, to 6e-5 absolute below it. Blocking can seal cells from the street (a carved corridor through
+buildings, and in this metric a standing footprint conducts nothing): such pockets are found
+(locally, then over the whole graph if the local search misses one: a singular system leaves cuDSS's
+plan unusable, so the plan is made again) and taken off the unknowns with their homes' loads,
+counted. E[dP] is uniform per metre of road; L_P^block = 1 - E[P_blocked] / P0.
+
+A fire at a home. A disk of 15 m radius on a home's centroid: every cell inside impassable (its
+passages closed, off the unknowns), the homes whose centroids lie inside carry no load (they are the
+fire; the others escape), the cells it seals off taken off with their loads as above (about 2.1 --
+2.3 homes a fire with roads, 2.35 without: a courtyard whose one way out burns). Averaged over 100
+homes, every k-th in Morton order of their centroids (error from the two halves: 1e-4 -- 4e-4 of
+L_P); L_P^fire = 1 - E_x[P_roads(x)] / E_x[P_none(x)], the no-road baseline of the same mesh under
+the same fire. Radius, quadrature and windows are parameters at the script's edge (Params).
+
+    network          D     L_P    L_P^blk loss    L_P^fire loss    dead lev>.9 seal  km    worst
+    Loop roads       0.056 0.431  0.4276  0.0035  0.4304   0.0007  0    0.97   0.001 3.10  0.038
+                     0.103 0.504  0.5019  0.0018  0.5031   0.0006  0    0.97   0.004 6.45  0.059
+                     0.153 0.586  0.5849  0.0011  0.5855   0.0006  0    0.96   0.005 9.57  0.043
+    partition cut    0.049 0.511  0.5097  0.0014  0.5107   0.0004  0    0.89   0.000 6.65  0.038
+                     0.097 0.621  0.6201  0.0009  0.6208   0.0003  0    0.94   0.005 8.73  0.030
+                     0.146 0.669  0.6682  0.0007  0.6687   0.0003  0    0.93   0.002 11.11 0.024
+    cut + spurs      0.059 0.575  0.5734  0.0012  0.5744   0.0003  15   0.89   0.001 7.89  0.022
+                     0.071 0.612  0.6106  0.0011  0.6113   0.0004  19   0.89   0.000 8.64  0.033
+                     0.109 0.667  0.6661  0.0008  0.6666   0.0003  11   0.94   0.005 10.41 0.013
+                     0.119 0.692  0.6911  0.0007  0.6916   0.0003  18   0.93   0.002 11.28 0.015
+    lazy ΔP greedy   0.051 0.495  0.4915  0.0031  0.4930   0.0016  27   0.93   0.000 3.41  0.047
+                     0.100 0.612  0.6102  0.0015  0.6106   0.0011  39   0.96   0.004 6.76  0.031
+                     0.150 0.678  0.6774  0.0010  0.6776   0.0009  60   0.95   0.006 9.23  0.020
+    kappa-10 growth  0.052 0.564  0.5628  0.0008  0.5634   0.0002  57   0.93   0.008 6.09  0.014
+                     0.101 0.801  0.8006  0.0006  0.8010   0.0002  76   0.93   0.017 13.76 0.030
+                     0.151 0.862  0.8620  0.0004  0.8623   0.0002  97   0.93   0.012 19.21 0.015
+    clearance_looped 0.051 0.239  0.2362  0.0031  0.2389   0.0005  13   0.99   0.018 2.09  0.022
+                     0.101 0.371  0.3688  0.0022  0.3702   0.0008  13   0.98   0.009 4.45  0.027
+                     0.150 0.421  0.4196  0.0013  0.4201   0.0008  34   0.97   0.007 7.22  0.022
+
+(loss: L_P less the measure before it; dead: skeleton dead ends; lever>0.9: the share of road length
+whose stretch's leverage, 1 - sum g du^2 / dP, passes 0.9; sealing: the share whose blockage seals
+at least one home off from the street; worst: the worst stretch's dP / P0; road km the network's
+lines, a skeleton's for the grown ones.)
+
+Every measure is small and follows road length, not loops. A single blocked stretch costs 0.04 --
+0.35% of P (L_P down 0.0004 -- 0.0035), less the more road the network has: a stretch costs about
+its share of the network's current, and more road means more parallel ways (3 km: 3e-3 of P0, 6 -- 9
+km: 1e-3, 19 km: 4e-4). A fire costs 0.0002 -- 0.0016 of L_P beyond what it costs the plain block.
+The worst single stretch costs 1.3 -- 5.9% of P0 (Loop roads' trunk at D 0.10).
+
+Loop roads and the partition cut do not gain on the dead-end networks by a margin that matters.
+Under single blockage Loop roads lose slightly more than the lazy ΔP greedy at the same D (0.0035
+against 0.0031 at 0.05, 0.0018 against 0.0015 at 0.10, 0.0011 against 0.0010 at 0.15: few loaded
+trunks); the cut gains 0.0017 / 0.0006 / 0.0003 on the lazy greedy and loses 0.0006 / 0.0003 /
+0.0003 to the kappa-10 growth, whose 57 -- 97 dead ends cost it least of all. Under fire the
+no-dead-end networks gain a little more on the lazy greedy (Loop roads 0.0009 / 0.0005 / 0.0003, the
+cut 0.0012 / 0.0008 / 0.0006) and still lose to the growth (0.0002 a fire). Every gain is under
+0.002 of L_P, against gaps between the methods of 0.02 -- 0.3: no ranking at equal D changes.
+Leverage does not separate them either: its share above 0.9 is 0.89 -- 0.99 for every network, loops
+included, because a stretch's whole cross-section forces its current into ground ten times weaker
+and, on a loop of length L, a stretch of length l has g R near 1 - l / L (0.99 for 10 m on a
+kilometre). What does see dead ends is sealing: 0.8 -- 1.7% of the growth's road length and up to
+1.8% of clearance_looped's seals homes off when blocked (fingers through buildings, which conduct
+nothing here), against at most 0.5% of the others'; but a blockage seals 0.03 homes on average at
+most, and those homes' loads are excluded from P (a lower bound), so escape time does not price it.
+
+The dead-end price mu. What these numbers attribute to dead ends is at most the lazy greedy's extra
+fire loss, about 0.001 of L_P over 27 -- 60 dead ends, i.e. under 4e-5 of P0 per dead end (about 1e2
+in P on 5810), and the growth's 97 dead ends cost nothing measurable; an ear's exact gain on 5810
+runs 1e4 -- 4e5 in P (the lazy greedy's steps). A mu of that size would be 0.1 -- 1% of an ear's
+gain and would not change a pick: not worth trying for escape time, under blockage or fire. If dead
+ends are to be priced it should be for what they seal (the homes a single blockage cuts off, an
+access criterion), not for escape time; that needs its own objective (the worst single blockage's
+sealed homes, say) before a mu means anything.
+
+Times: 1.2 -- 1.7 s a blocked stretch and 2.6 -- 3 s a fire (two solves and the seal searches) on
+the local GPU, two processes; 19 network-D points in about 3.5 h wall. Script
+research/roadless/blockage.py (`run|block|fire|probe <network>`, `table`); rows in
+.superpowers/sdd/2026-10-28-blockage/ (per stretch, per fire, table.csv; not committed). A first
+pass lost its numbers to one singular blocked system (an isolated cell: cuDSS's plan then returned
+nan for every later state, which a pandas mean skipped): now every sealed pocket is found and taken
+off before the solve, the plan made again if one is missed, and a stretch with no P refused.
