@@ -669,8 +669,8 @@ class DemoBlock:
     survey (`proxy.informal`) says; the screens' verdicts on it; the fires reported near it; the
     method's build-out on it (its frames, its plates, the escape-time scale -- the model's units
     at the block's plain baseline's 99th-percentile home, 100% on its plates -- and where it
-    ran); and the original
-    topology algorithm's run time on it, measured or extrapolated (`kind`)."""
+    ran); and the original topology algorithm's run time on it, measured or extrapolated
+    (`kind`)."""
     block_id: str
     n_buildings: int
     place: str
