@@ -33,11 +33,12 @@ half was almost unused, since a road only adds a way through).
 
 The public site's Demo page (owner 2026-10-28, "make this a new 'demo' page on the website") is
 this prototype ported onto main, which cannot merge this branch: `site <checkout>` writes what the
-page needs into a main checkout as a committed bundle (SITE_DIR: demo.json, the three sprite
-sheets, a README naming this script) and the bundle's TypeScript declaration (SITE_DTS, generated
-from the bundle's dataclasses below, so a renamed field is a type error on main). Every number the
-page shows is in demo.json, the fires' facts included (FIRES, quoted from their reports); the
-site's generator reads it and the page's prose types none.
+page needs into a main checkout as a committed bundle (SITE_DIR: demo.json, the escape-time
+sprite sheet -- the one view the site shows -- and a README naming this script) and the bundle's
+TypeScript declaration (SITE_DTS, generated from the bundle's dataclasses below, so a renamed
+field is a type error on main). Every number the page shows is in demo.json, the fires' facts
+included (FIRES, quoted from their reports); the site's generator reads it and the page's prose
+types none.
 
     PYTHONPATH=. uv run python research/roadless/atlas/explore_proto/build.py plates   # ~10 min
     PYTHONPATH=. uv run python research/roadless/atlas/explore_proto/build.py page
@@ -820,9 +821,23 @@ GONE_SHARE = 0.1
 
 
 @dataclass(frozen=True)
+class DemoScreenBlock:
+    """One block's inputs to the screen -- its buildings `n`, area and perimeter, the three
+    numbers the score is made of -- with its score and its rank (1 the highest) in the city."""
+    block_id: str
+    n: int
+    area_m2: float
+    perimeter_m: float
+    score: float
+    rank: int
+
+
+@dataclass(frozen=True)
 class DemoScreen:
     """The block under the shipped screen (ScreenFacts), and the close-up's margin around it (m):
-    the site's screen map frames its close-up of the block the way the prototype's does."""
+    the site's screen map frames its close-up of the block the way the prototype's does. The
+    page's diagram of the score's geometry opens on `followed` (the block) and offers `typical`,
+    the city's median block by score, beside it."""
     metric: str
     score: float
     rank: int
@@ -832,6 +847,8 @@ class DemoScreen:
     precision: float
     recall: float
     closeup_pad_m: float
+    followed: DemoScreenBlock
+    typical: DemoScreenBlock
 
 
 @dataclass(frozen=True)
@@ -863,37 +880,32 @@ class DemoMethod:
 
 @dataclass(frozen=True)
 class DemoSheets:
-    """The plates as sprite sheets beside demo.json, one per view, each `rows` frames of `width` x
-    `frame_height` px stacked top to bottom: the roads (`network`), each home's escape time
-    (`time`), and the share of it the roads save (`saved`)."""
+    """The escape-time plates as one sprite sheet beside demo.json (`sheet`): `rows` frames of
+    `width` x `frame_height` px stacked top to bottom. The site shows this view alone (owner
+    2026-10-28: "just keep the escape time view with the nice topographical overlay"); the roads
+    are on it too, in `DemoEncoding.road`."""
     width: int
     frame_height: int
     rows: int
-    network: str
-    time: str
-    saved: str
+    sheet: str
 
 
 @dataclass(frozen=True)
 class DemoEncoding:
-    """The plates' colours and the quantities their legends state. `escape_ramp` maps escape time
+    """The plate's colours and the quantities its legend states. `escape_ramp` maps escape time
     from 0 to 100% of `escape_scale` (the model's units: the 99th-percentile home with no new
-    road), short blue to long red, with an isochrone every `iso_step` of it; `saved_ramp` maps the
-    share saved from none to `saved_max`. Roads are `road_width_m` wide and conduct
-    `road_conductance` times what open ground does; a building counts as wholly destroyed once
-    `gone_share` of it is gone. The block's edge: `street` (where people walk out), `edge` (a
+    road), short blue to long red, with an isochrone every `iso_step` of it. `road` is the grey
+    of a new road's corridor and of a wholly destroyed building, which a building is once
+    `gone_share` of it is gone; roads are `road_width_m` wide and conduct `road_conductance` times
+    what open ground does. The block's edge: `street` (where people walk out), `edge` (a
     railway's or a ditch's line), `water` (a ditch)."""
-    building: str
-    destroyed: str
     road: str
     street: str
     edge: str
     water: str
     escape_ramp: tuple[str, ...]
-    saved_ramp: tuple[str, ...]
     escape_scale: float
     iso_step: float
-    saved_max: float
     road_width_m: float
     road_conductance: float
     gone_share: float
@@ -997,8 +1009,9 @@ to the roads one method builds through it.
   draws none of them on a map), the method's frames under a displacement budget with its recorded
   run time, the plates' colours, and the original topology algorithm's run time on this block,
   extrapolated from {n_runs} recorded runs on smaller blocks.
-- {sheets}: the method's plates, one sprite sheet per view ({rows} frames each, the block with no
-  new road first).
+- `{sheet}`: the method's escape-time plates as one sprite sheet ({rows} frames, the block with
+  no new road first). The prototype's other two views (the roads alone, the time saved) are not
+  shipped: the site shows this one (owner 2026-10-28).
 
 `web/src/demo.d.ts` is generated beside it from the same dataclasses, so a renamed field is a
 TypeScript error.
@@ -1008,6 +1021,14 @@ branch, which cannot merge into `main` (it carries a private submit group and a 
 the frames are the 5810 build-out pilot's stored ones (`{plan}`), so this directory is how they
 reach the public site.
 """
+
+
+def screen_block(sc: Screen, i: int) -> DemoScreenBlock:
+    """Block `i` of the screen bundle: its inputs, score and rank."""
+    b = sc.bundle
+    return DemoScreenBlock(block_id=b["block_id"][i], n=int(b["n"][i]),
+                           area_m2=float(b["area_m2"][i]), perimeter_m=float(b["perimeter_m"][i]),
+                           score=float(sc.score[i]), rank=int((sc.score > sc.score[i]).sum()) + 1)
 
 
 def site(root: Path) -> None:
@@ -1023,11 +1044,8 @@ def site(root: Path) -> None:
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)
-    names = {v: f"{METHOD.stem}_{v}.webp" for v in VIEWS}
-    size = None
-    for v in VIEWS:
-        size = sprite(b.fs, v, out / names[v])
-    assert size is not None
+    name = f"{METHOD.stem}_time.webp"
+    size = sprite(b.fs, "time", out / name)
     frames = [DemoFrame(budget=0.0, displacement=0.0, road_km=0.0, permeability=0.0,
                         conductance_m2=0.0, seconds=0.0, row=0)]
     for t, r, s in zip(render.SLIDER, b.rows, b.secs, strict=True):
@@ -1035,23 +1053,24 @@ def site(root: Path) -> None:
         frames.append(DemoFrame(budget=t, displacement=r["D"], road_km=r["km"],
                                 permeability=r["LP"], conductance_m2=float(r["C"]), seconds=s,
                                 row=b.fs.index(r["f"])))
-    sc = screen_facts(screen())
+    scr = screen()
+    sc = screen_facts(scr)
+    median = int(np.argsort(scr.score, kind="stable")[len(scr.score) // 2])  # the typical block
     ex = b.ex
     bundle = DemoBundle(
         block_id=cp.BID, n_buildings=b.n_homes, place=PLACE, lat=b.lat, lon=b.lon,
         maps_url=maps_url(b.lat, b.lon),
-        screen=DemoScreen(**sc._asdict(), closeup_pad_m=LOCAL_PAD),
+        screen=DemoScreen(**sc._asdict(), closeup_pad_m=LOCAL_PAD,
+                          followed=screen_block(scr, scr.follow),
+                          typical=screen_block(scr, median)),
         fires=FIRES,
         method=DemoMethod(name=METHOD.name, blurb=METHOD.blurb, machine=METHOD.runtime.machine,
                           default_frame=DEFAULT, frames=tuple(frames)),
-        sheets=DemoSheets(width=size[0], frame_height=size[1], rows=len(b.fs),
-                          network=names["network"], time=names["time"], saved=names["saved"]),
+        sheets=DemoSheets(width=size[0], frame_height=size[1], rows=len(b.fs), sheet=name),
         encoding=DemoEncoding(
-            building=rnd.BUILDING, destroyed=rnd.CLEARED, road=render.ROAD, street=rnd.STREET,
-            edge=rnd.EDGE, water=nw.cp.gm.WATER_FILL,
+            road=render.ROAD, street=rnd.STREET, edge=rnd.EDGE, water=nw.cp.gm.WATER_FILL,
             escape_ramp=tuple(mcolors.to_hex(SEQ(t)) for t in np.linspace(0, 1, 11)),
-            saved_ramp=tuple(mcolors.to_hex(SAVED(t)) for t in np.linspace(0, 1, 11)),
-            escape_scale=round(b.scale, 1), iso_step=ISO_STEP, saved_max=SAVED_MAX,
+            escape_scale=round(b.scale, 1), iso_step=ISO_STEP,
             road_width_m=road_simp.ROAD_W, road_conductance=growth.ROAD_KAPPA,
             gone_share=GONE_SHARE),
         topology=DemoTopology(
@@ -1062,7 +1081,7 @@ def site(root: Path) -> None:
                                               ensure_ascii=False) + "\n")
     (out / "README.md").write_text(SITE_README.format(
         bid=cp.BID, n_runs=len(TOPOLOGY_RUNS), rows=len(b.fs), plan=METHOD.pick.key(),
-        sheets=", ".join(f"`{n}`" for n in names.values())))
+        sheet=name))
     (root / SITE_DTS).write_text(dts(DemoBundle))
     mb = sum(p.stat().st_size for p in out.iterdir()) / 1e6
     print(f"{out}: {len(list(out.iterdir()))} files, {mb:.1f} MB; {root / SITE_DTS}", flush=True)
