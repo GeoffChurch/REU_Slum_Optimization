@@ -14,6 +14,7 @@ import { growth } from "../model/accretion.js";
 import { sizeCanvas } from "../render/canvas.js";
 import { blockAt, draw } from "../render/region.js";
 import { fitBbox, toWorld, type Bbox, type View } from "../view/transform.js";
+import { controlLabel, controlRow, rangeInput, readoutLine } from "../dom/controls.js";
 
 /** `seed` is a **block_id**, `budget` a building_count on the slider's own scale. `seed` is an
  * identity rather than a position deliberately: it is citable in a URL (piece E), and an array
@@ -116,11 +117,9 @@ function boot(host: HTMLElement, makeState: StateFactory<RegionGrowState>, b: Ho
   // being swallowed by the browser's own double-tap-to-zoom gesture recognizer on touch.
   cv.style.touchAction = "none";
 
-  const controls = document.createElement("div");
+  const controls = controlRow();
 
-  const budgetLabel = document.createElement("label");
-  const slider = document.createElement("input");
-  slider.type = "range";                      // native: keyboard- and screen-reader-reachable
+  const slider = rangeInput();                // native: keyboard- and screen-reader-reachable
   slider.min = String(b.budget.min);
   slider.max = String(b.budget.max);
   slider.step = String(b.budget.step);
@@ -130,9 +129,9 @@ function boot(host: HTMLElement, makeState: StateFactory<RegionGrowState>, b: Ho
   // ONE number -- `render` below draws from this same `state.get().budget`.
   slider.value = String(state.get().budget);
   slider.addEventListener("input", () => state.set({ budget: Number(slider.value) }));
-  budgetLabel.append("Budget ", slider);
+  const budgetLabel = controlLabel("Budget ", slider);
 
-  const readout = document.createElement("p");
+  const readout = readoutLine();
   // The one line that changes on every frame -- reseed, slider drag, both -- announced. A canvas
   // carries no accessible text at all, so without this a screen-reader user moving the slider
   // hears the budget they set and NOTHING about the region it grew. `polite` rather than

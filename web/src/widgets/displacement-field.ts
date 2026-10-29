@@ -14,6 +14,9 @@ import { contributions, flatten, outline, sumC } from "../model/displacement.js"
 import { sizeCanvas } from "../render/canvas.js";
 import { drawField, handles, type Handle } from "../render/field.js";
 import { fitBbox, nearest, toScreen, toWorld, type Bbox, type View } from "../view/transform.js";
+import {
+  checkboxInput, controlLabel, controlRow, rangeInput, readoutLine,
+} from "../dom/controls.js";
 
 /** Both roads, always -- `second` says whether road 2 is switched ON, not whether it exists. Keeping
  * road 2's geometry in state while it is off means toggling it back on returns it exactly where the
@@ -151,11 +154,9 @@ function boot(host: HTMLElement, makeState: StateFactory<FieldState>, b: FieldBu
   // than only appear to.
   cv.style.touchAction = "none";
 
-  const controls = document.createElement("div");
+  const controls = controlRow();
 
-  const widthLabel = document.createElement("label");
-  const slider = document.createElement("input");
-  slider.type = "range";                       // native: keyboard- and screen-reader-reachable
+  const slider = rangeInput();                 // native: keyboard- and screen-reader-reachable
   // The floor IS `PermeabilityParams.min_road_width_m`: permeability.py:205 RAISES below it, as too
   // narrow for two directions. A widget that let a reader build a road the pipeline rejects would
   // be teaching a model this project does not have. Every bound is baked, none is a literal here.
@@ -176,16 +177,14 @@ function boot(host: HTMLElement, makeState: StateFactory<FieldState>, b: FieldBu
     const w = Number(slider.value);
     state.set({ roads: state.get().roads.map((r) => ({ ...r, width_m: w })) });
   });
-  widthLabel.append("Road width ", slider);
+  const widthLabel = controlLabel("Road width ", slider);
 
-  const secondLabel = document.createElement("label");
-  const secondBox = document.createElement("input");
-  secondBox.type = "checkbox";
+  const secondBox = checkboxInput();
   secondBox.checked = state.get().second;
   secondBox.addEventListener("change", () => state.set({ second: secondBox.checked }));
-  secondLabel.append(secondBox, " Second road");
+  const secondLabel = controlLabel(secondBox, " Second road");
 
-  const readout = document.createElement("p");
+  const readout = readoutLine();
   // The one line that changes on every drag frame, announced. A canvas carries no accessible text
   // at all, so without this a screen-reader user moving the slider with the arrow keys hears the
   // width they set and NOTHING about what it cost -- the entire subject of the figure, silent.

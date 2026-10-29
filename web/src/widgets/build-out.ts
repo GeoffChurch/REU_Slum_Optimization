@@ -14,6 +14,7 @@ import { createSvg, drawAxes, drawCursor, drawMarkers, drawPolyline,
          type Cursor } from "../render/svg.js";
 import { niceTicks } from "../view/ticks.js";
 import type { View } from "../view/transform.js";
+import { rangeInput } from "../dom/controls.js";
 
 /** One block's build-out under one budget slider, for one method or several side by side
  * (a DemoBuildOut: its budgets, and a series per method with a cell per budget).
@@ -63,12 +64,12 @@ function span(s: number): readonly [number, string] {
     (got, [u, len]) => got ?? (s >= 1.5 * len ? [s / len, u] : null), null) ?? [s, "seconds"];
 }
 
-/** A measured whole run's time, to three figures (1.89 hours): gen_site_pages.py's
+/** A measured whole run's time, to two significant figures (1.9 hours): gen_site_pages.py's
  * `_measured_time`, so the column's heading and the page's prose state one run alike
  * (web/test/fixtures/measured-times.json holds the cases both are tested against). */
 export function measuredTime(s: number): string {
   const [v, unit] = span(s);
-  return `${Number(v.toPrecision(3))} ${unit}`;
+  return `${Number(v.toPrecision(2))} ${unit}`;
 }
 
 /** Any other run time, to two figures below ten (42 minutes, 1.6 hours): gen_site_pages.py's
@@ -349,7 +350,7 @@ function column(s: DemoSeries, src: string, metric: string, headed: boolean,
     const how = s.run.kind === "recorded" ? "recorded" : "measured";
     // The heading's time is the whole run's; each step's "Built in" is the same run's time to it.
     col.append(para("sbu-buildout__head", s.label),
-               // A measured run as the page's prose states it (1.89 hours), a recorded one as
+               // A measured run as the page's prose states it (1.9 hours), a recorded one as
                // the page states ours.
                para("sbu-buildout__time", s.run.kind === "measured"
                  ? measuredTime(s.run.seconds) : duration(s.run.seconds)),
@@ -403,8 +404,7 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
   const bar = div("sbu-buildout__bar");
   const sliderLabel = document.createElement("label");
   sliderLabel.className = "sbu-buildout__budget";
-  const slider = document.createElement("input");
-  slider.type = "range";
+  const slider = rangeInput();
   slider.min = "0";
   slider.max = String(last);
   slider.step = "1";

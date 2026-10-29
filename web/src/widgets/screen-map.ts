@@ -14,6 +14,9 @@ import { ranking, scores, selectAt, type MetricName, type Selection } from "../m
 import { createLayer } from "../render/city.js";
 import { sizeCanvas } from "../render/canvas.js";
 import { fitBbox, type Bbox, type View } from "../view/transform.js";
+import {
+  checkboxInput, controlLabel, controlRow, rangeInput, readoutLine, selectInput,
+} from "../dom/controls.js";
 
 /** The name every failure of this widget is reported under -- see region-grow.ts's own `LABEL`
  * for why one constant rather than a string repeated at each call site. */
@@ -271,34 +274,29 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
   cv.style.width = "100%";
   cv.style.aspectRatio = "1 / 1";
 
-  const controls = document.createElement("div");
+  const controls = controlRow();
 
-  const metricLabel = document.createElement("label");
-  const metricSelect = document.createElement("select");
+  const metricSelect = selectInput();
   for (const m of METRIC_NAMES) {
     const opt = document.createElement("option");
     opt.value = m;
     opt.textContent = m;
     metricSelect.append(opt);
   }
-  metricLabel.append("Metric ", metricSelect);
+  const metricLabel = controlLabel("Metric ", metricSelect);
 
-  const floorLabel = document.createElement("label");
-  const floorSlider = document.createElement("input");
-  floorSlider.type = "range";
-  floorLabel.append("Floor ", floorSlider);
+  const floorSlider = rangeInput();
+  const floorLabel = controlLabel("Floor ", floorSlider);
 
-  const cityLabel = document.createElement("label");
-  const cityToggle = document.createElement("input");
-  cityToggle.type = "checkbox";
-  cityLabel.append(cityToggle, " Show Nairobi instead of Cape Town");
+  const cityToggle = checkboxInput();
+  const cityLabel = controlLabel(cityToggle, " Show Nairobi instead of Cape Town");
 
   // Static, no `aria-live`: see `describeFollow`. It sits between the canvas and the controls so a
   // screen reader meets the picture's own description where the picture is, before the controls
   // that change it.
   const followNote = document.createElement("p");
 
-  const readout = document.createElement("p");
+  const readout = readoutLine();
   // The one line that changes on every frame -- floor drag, metric switch, city toggle --
   // announced. A canvas carries no accessible text at all, so without this a screen-reader user
   // moving the slider hears nothing about which blocks it now selects (region-grow.ts's own

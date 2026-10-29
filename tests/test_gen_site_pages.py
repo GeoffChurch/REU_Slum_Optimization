@@ -1165,6 +1165,20 @@ def test_the_demo_shows_the_screen_formula_with_both_factors_braced() -> None:
     assert "buildings $n$, its area $A$ and its perimeter $P$" in why
 
 
+def test_the_demo_shows_the_screen_map_at_half_size_and_only_the_demo() -> None:
+    """Owner, 2026-10-29: on the Demo the screen map is half its width (so half its height),
+    centred, by a Demo-only wrapper around the shared figure; Screening and Explore keep it full
+    size."""
+    demo, screening = render_page("demo"), render_page("screening")
+    assert re.search(
+        r'<div class="sbu-demo-screenmap" markdown>\s*<figure data-widget="screen-map"', demo)
+    assert "sbu-demo-screenmap" not in screening and 'data-widget="screen-map"' in screening
+    css = (ROOT / "docs" / "stylesheets" / "sbu.css").read_text(encoding="utf-8")
+    rule = re.search(
+        r'\.sbu-demo-screenmap figure\[data-widget="screen-map"\] > canvas,[^{]*\{([^}]*)\}', css)
+    assert rule is not None and "width: 50% !important" in rule.group(1)
+
+
 def test_the_demo_hides_its_table_of_contents(tmp_path: Path,
                                               monkeypatch: pytest.MonkeyPatch) -> None:
     """Owner, 2026-10-28: the Demo page drops its table of contents for the width the build-out
@@ -1584,9 +1598,9 @@ def test_the_measured_note_says_where_topologys_time_went(demo_body: str) -> Non
 
 def test_a_measured_time_reads_as_the_build_out_widget_states_it() -> None:
     """The generator and the build-out widget state a measured run alike (owner, 2026-10-29: the
-    column read "1.9 hours" over prose saying "1.88 hours"): both are tested against one set of
-    cases, web/test/fixtures/measured-times.json, which web/test/build-out-boot.test.ts reads
-    too."""
+    column read "1.9 hours" over prose saying "1.89 hours"; now both say "1.9 hours"): both are
+    tested against one set of cases, web/test/fixtures/measured-times.json, which
+    web/test/build-out-boot.test.ts reads too."""
     import json
 
     import scripts.gen_site_pages as gsp

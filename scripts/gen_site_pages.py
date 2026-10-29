@@ -1659,11 +1659,12 @@ def _duration(seconds: float) -> str:
 
 
 def _measured_time(seconds: float) -> str:
-    """A measured run time to three figures (1.88 hours), where an estimate gets two. The
-    build-out widget states the same times (build-out.ts `measuredTime`);
-    web/test/fixtures/measured-times.json holds the cases both are tested against."""
+    """A measured run time to two significant figures (1.9 hours), as Shock Reblock's (1.9
+    minutes) reads beside it (owner, 2026-10-29); never in exponent form. The build-out widget
+    states the same times (build-out.ts `measuredTime`); web/test/fixtures/measured-times.json
+    holds the cases both are tested against."""
     v, unit = _span(seconds)
-    return f"{v:.3g} {unit}"
+    return f"{float(f'{v:.2g}'):g} {unit}"
 
 
 def _short(block_id: str) -> str:

@@ -24,6 +24,7 @@ import { polylineParam, type UrlCodec } from "../url/param.js";
 import {
   fitBbox, nearest, toScreen, toWorld, type Bbox, type View,
 } from "../view/transform.js";
+import { controlButton, controlRow, readoutLine } from "../dom/controls.js";
 
 /** The name every failure of this widget is reported under -- see region-grow.ts's own `LABEL`
  * for why one constant rather than a string repeated at each call site. */
@@ -184,11 +185,10 @@ function boot(host: HTMLElement, makeState: StateFactory<DrawRoadState>, ab: Aut
   // picture at all.
   cv.tabIndex = 0;
 
-  const controls = document.createElement("div");
-  const bootButton = document.createElement("button");
-  bootButton.textContent = BOOT_IDLE;
+  const controls = controlRow();
+  const bootButton = controlButton(BOOT_IDLE);
 
-  const readout = document.createElement("p");
+  const readout = readoutLine();
   // The line that changes on every edit -- the permeability of the road just solved, the refusal
   // of one that is not a road yet, the failure of a solve. A canvas carries no accessible text at
   // all, so without this a screen-reader user drawing a road hears nothing about the answer

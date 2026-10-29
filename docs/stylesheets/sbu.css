@@ -983,11 +983,6 @@ body,
   border-bottom: 1px solid var(--sbu-rule);
 }
 
-.sbu-buildout__budget input:focus-visible {
-  outline: 3px solid var(--sbu-red-ink);
-  outline-offset: 2px;
-}
-
 .sbu-buildout__budget {
   display: flex;
   flex: 1 1 14rem;
@@ -1001,7 +996,6 @@ body,
 .sbu-buildout__budget input {
   flex: 1 1 auto;
   min-width: 0;
-  accent-color: var(--sbu-red-fill);
 }
 
 .sbu-buildout__budget output {
@@ -1378,28 +1372,6 @@ body,
   margin: 0 0 0.5rem;
 }
 
-.sbu-peel__btn {
-  min-width: 2.2rem;
-  padding: 0.25rem 0.6rem;
-  border: 1px solid var(--sbu-rule-strong);
-  border-radius: 3px;
-  background: var(--md-default-bg-color);
-  color: var(--sbu-ink);
-  font: inherit;
-  font-size: var(--sbu-step--1);
-  cursor: pointer;
-}
-
-.sbu-peel__btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.sbu-peel__btn:focus-visible {
-  outline: 3px solid var(--sbu-red-ink);
-  outline-offset: 2px;
-}
-
 .md-typeset .sbu-peel__hint {
   margin: 0 0 0 0.4rem;
   font-size: var(--sbu-step--1);
@@ -1610,4 +1582,104 @@ body,
   .sbu-formula--narrow {
     display: block;
   }
+
+/* ------------------------------------------------------------------- shared controls */
+
+/* Every widget's controls (web/src/dom/controls.ts makes them): the native elements, in the
+   site's look rather than the browser's -- the brand red where the browser would draw blue, a
+   bordered select and button on the page's own ground, a visible keyboard focus -- in both colour
+   schemes. A widget adds layout classes of its own; colour, type and focus come from here. */
+.sbu-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.4rem;
+  margin: 0.8rem 0 0;
+}
+
+.sbu-control,
+.sbu-control-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+  font-size: var(--sbu-step--1);
+  font-weight: 700;
+  color: var(--sbu-ink-muted);
+}
+
+.sbu-range,
+.sbu-check {
+  accent-color: var(--sbu-red-fill);
+}
+
+[data-md-color-scheme="slate"] .sbu-range,
+[data-md-color-scheme="slate"] .sbu-check {
+  accent-color: var(--sbu-red-ink);
+}
+
+.sbu-range {
+  min-width: 8rem;
+  flex: 1 1 10rem;
+}
+
+.sbu-check {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+}
+
+.sbu-select,
+.sbu-button {
+  min-width: 2.2rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--sbu-rule-strong);
+  border-radius: 3px;
+  background: var(--md-default-bg-color);
+  color: var(--sbu-ink);
+  font: inherit;
+  font-size: var(--sbu-step--1);
+  font-weight: 400;
+}
+
+.sbu-button {
+  cursor: pointer;
+}
+
+.sbu-button:hover:not(:disabled) {
+  border-color: var(--sbu-red-ink);
+}
+
+.sbu-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.sbu-range:focus-visible,
+.sbu-check:focus-visible,
+.sbu-select:focus-visible,
+.sbu-button:focus-visible {
+  outline: 3px solid var(--sbu-red-ink);
+  outline-offset: 2px;
+}
+
+.md-typeset .sbu-readout {
+  flex-basis: 100%;
+  margin: 0.2rem 0 0;
+  font-size: var(--sbu-step--1);
+  color: var(--sbu-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The Demo's screen map at half its width, so half its height, centred (owner, 2026-10-29): the
+   city is context there, not the subject. Demo-only, by the wrapper the Demo's partial puts around
+   the shared figure, which Screening and Explore show full size. The canvas's width is set inline
+   by the widget (screen-map.ts: it must beat Material's `img` rule), hence !important; the
+   controls and readout under it keep the column. */
+.sbu-demo-screenmap figure[data-widget="screen-map"] > canvas,
+.sbu-demo-screenmap figure[data-widget="screen-map"] > a > img,
+.sbu-demo-screenmap figure[data-widget="screen-map"] > img {
+  display: block;
+  width: 50% !important;
+  margin-inline: auto;
 }

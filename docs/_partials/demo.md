@@ -56,7 +56,11 @@ $$\text{score} \;=\; \underbrace{\frac{\sqrt{nA}}{P}}_{\text{depth}}
 
 </div>
 
+<div class="sbu-demo-screenmap" markdown>
+
 <!-- SCREENMAP -->
+
+</div>
 
 <!-- DEMOSCREENFACTS -->
 

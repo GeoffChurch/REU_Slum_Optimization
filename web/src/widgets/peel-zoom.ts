@@ -6,6 +6,7 @@ import { numberParam, type UrlCodec } from "../url/param.js";
 import { requireAttr } from "../dom/attrs.js";
 import { runOrReport } from "../dom/error.js";
 import { observeSize } from "../dom/resize.js";
+import { controlButton } from "../dom/controls.js";
 
 /** The Demo's peel figure as one zoomable frame (owner, 2026-10-29): the flagship run's depth
  * render, whole at first; a two-finger pinch, Ctrl/⌘-wheel, the +/− buttons or a double
@@ -98,10 +99,7 @@ export function twoFingers(v: PeelView, from: readonly [Point, Point], to: reado
 }
 
 function button(cls: string, text: string, label: string): HTMLButtonElement {
-  const b = document.createElement("button");
-  b.type = "button";
-  b.className = `sbu-peel__btn ${cls}`;
-  b.textContent = text;
+  const b = controlButton(text, cls);
   b.setAttribute("aria-label", label);
   return b;
 }

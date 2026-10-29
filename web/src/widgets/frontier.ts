@@ -12,6 +12,9 @@ import { observeSize } from "../dom/resize.js";
 import { createSvg, drawAxes, drawGuide, drawMarkers, drawPolyline } from "../render/svg.js";
 import { niceTicks } from "../view/ticks.js";
 import { fitAxes, nearest, toScreen, toWorld, type View } from "../view/transform.js";
+import {
+  controlButton, controlLabel, controlRow, rangeInput, readoutLine,
+} from "../dom/controls.js";
 
 /** Least index whose value reaches `target`, or -1. Binary search, valid because the baked arrays
  * are monotone in prefix -- the same search budget.prefix_to_permeability performs in Python, over
@@ -370,13 +373,12 @@ function boot(host: HTMLElement, makeState: StateFactory<FrontierState>, b: Fron
   // Pointer events on the guides are drags, not scrolls: without this a touch drag pans the page.
   chartHost.style.touchAction = "none";
 
-  const controls = document.createElement("div");
+  const controls = controlRow();
 
   // Both native range inputs -- the keyboard and screen-reader path to the same two targets the
   // pointer drags. `min` is 0 on both axes because both are fractions rooted at zero, which the
   // bundle itself asserts (tests/test_frontier_bundle.py::test_starts_at_zero).
-  const xSlider = document.createElement("input");
-  xSlider.type = "range";
+  const xSlider = rangeInput();
   xSlider.min = "0";
   xSlider.max = String(xMax);
   xSlider.step = String(step);
@@ -388,14 +390,13 @@ function boot(host: HTMLElement, makeState: StateFactory<FrontierState>, b: Fron
   // the same two numbers in its legend (`matched displacement = 10%`, i.e. `{:.0%}`) -- so the two
   // charts state the two standards identically, and a dragged guide still names itself.
   const xValue = document.createElement("span");
-  const xLabelEl = document.createElement("label");
+
   // Named off the axis titles themselves, and phrased as the CONSTRAINT each target expresses: the
   // x guide is a ceiling on cost, the y guide a floor on benefit, which is what the readout below
   // then answers against ("N of 8 methods reach ... within ...").
-  xLabelEl.append(`Most ${chart.x_label} allowed: `, xValue, " ", xSlider);
+  const xLabelEl = controlLabel(`Most ${chart.x_label} allowed: `, xValue, " ", xSlider);
 
-  const ySlider = document.createElement("input");
-  ySlider.type = "range";
+  const ySlider = rangeInput();
   ySlider.min = "0";
   ySlider.max = String(yMax);
   ySlider.step = String(step);
@@ -404,19 +405,17 @@ function boot(host: HTMLElement, makeState: StateFactory<FrontierState>, b: Fron
     state.set({ targetPermeability: clamp(Number(ySlider.value), 0, yMax) });
   });
   const yValue = document.createElement("span");
-  const yLabelEl = document.createElement("label");
-  yLabelEl.append(`Least ${chart.y_label} required: `, yValue, " ", ySlider);
+  const yLabelEl = controlLabel(`Least ${chart.y_label} required: `, yValue, " ", ySlider);
 
   // Legend entries are real <button>s, so isolating one method is reachable by keyboard and
   // announces its state; each is painted in its own curve's colour, which is the only place the
   // legend and the chart have to agree.
   const legend = document.createElement("div");
+  legend.className = "sbu-control-group";
   const buttons = new Map<string, HTMLButtonElement>();
   for (const key of keys) {
     const style = styles.get(key)!;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = style.label;
+    const btn = controlButton(style.label);
     btn.style.color = style.colour;
     btn.addEventListener("click", () => {
       state.set({ isolated: state.get().isolated === key ? null : key });
@@ -425,7 +424,7 @@ function boot(host: HTMLElement, makeState: StateFactory<FrontierState>, b: Fron
     legend.append(btn);
   }
 
-  const summary = document.createElement("p");
+  const summary = readoutLine();
   // The one line that changes on every drag, announced: a screen-reader user moving the slider with
   // the arrow keys hears the answer change, instead of the picture changing silently.
   summary.setAttribute("aria-live", "polite");
