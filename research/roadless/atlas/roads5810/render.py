@@ -5,7 +5,7 @@ then frames.json.
 
     S=research/roadless/atlas/roads5810/render.py      # from the repo root
     PYTHONPATH=. uv run python $S plates baseline
-    PYTHONPATH=. uv run python $S plates <method> <pass> <data dir>  # compute.DATA, or a study's
+    PYTHONPATH=. uv run python $S plates <method> <pass> <data dir>  # PAGE.data, or a study's
     PYTHONPATH=. uv run python $S index                   # frames.json, the colour bars
     PYTHONPATH=. uv run python $S times <method> <pass> <data dir>  # the Time plates
 
@@ -25,8 +25,8 @@ The block's edge on every plate as gap_maps.draw_edge draws it (owner 2026-10-28
 is a railway): the street dark, a railway along it a line with cross-ticks, broken at its
 crossings, water blue; from the page metric's own barriers (`edge`).
 Each plate is written as lossy WebP into `plates` (PLATES, beside the page: every plate it
-names, local.py's check); a network's rasters are read from `data` (compute.DATA, or a study's
-own folder), the plain baseline always from compute.DATA.
+names, local.py's check); a network's rasters are read from `data` (compute.PAGE.data, or a
+study's own folder), the plain baseline always the page's block's (compute.PAGE.data).
 """
 from __future__ import annotations
 
@@ -90,10 +90,10 @@ def scratch(out: Path) -> Path:
 
 
 def edge(stored) -> gm.Edge:  # type: ignore[no-untyped-def]
-    """The block's edge as the plates draw it (gm.edge_of) under the page metric's own
-    barriers (metrics.RUNTIME's); raises unless its polygon is the `stored` baseline's (the
-    plates' frame: baseline.npz)."""
-    [b] = cp.common.build_blocks([cp.BID])
+    """The `stored` baseline's block's edge (baseline.npz names it) as the plates draw it
+    (gm.edge_of) under the page metric's own barriers (metrics.RUNTIME's); raises unless its
+    polygon is the stored baseline's (the plates' frame)."""
+    [b] = cp.common.build_blocks([str(stored["block"])])
     e = gm.edge_of(b, barriers=cp.gcl.complex_of(
         cp.metrics.RUNTIME, factorization=cp.gap_factor.SuperLU()).exits.barriers)
     [boundary] = shapely.from_wkb(stored["boundary"])
@@ -213,7 +213,7 @@ def plates_times(method: str, run: str, *, data: Path, plates: Path) -> None:
     info = json.loads((data / f"{method}_{run}.json").read_text())
     d = np.load(data / f"{method}_{run}.npz", allow_pickle=True)          # our own file: WKB
     t = np.load(data / f"{method}_{run}_times.npz")
-    b = np.load(cp.DATA / "baseline.npz", allow_pickle=True)
+    b = np.load(cp.PAGE.data / "baseline.npz", allow_pickle=True)
     if not np.array_equal(t["stops"], d["stops"]):
         raise AssertionError(f"{method}_{run}: the escape times' stops are not the frames'")
     fr = frame_from(d)
@@ -250,8 +250,8 @@ def frame_names(info: dict) -> dict[int, str]:  # type: ignore[type-arg]
 
 
 def plates_baseline(*, plates: Path) -> None:
-    base = json.loads((cp.DATA / "baseline.json").read_text())
-    d = np.load(cp.DATA / "baseline.npz", allow_pickle=True)          # our own file: WKB as objects
+    base = json.loads((cp.PAGE.data / "baseline.json").read_text())
+    d = np.load(cp.PAGE.data / "baseline.npz", allow_pickle=True)     # our own file: WKB as objects
     fr = frame_from(d)
     polys = shapely.from_wkb(d["polys"])
     e = edge(d)
@@ -261,17 +261,17 @@ def plates_baseline(*, plates: Path) -> None:
     for name, key, norm in (("current", "j", jn), ("power", "p", pn)):
         flow_plate(d[key], norm, fr, polys, k, ramp=rnd.RAMP, outline=False, edge=e,
                    out=plates / f"baseline_{name}.{EXT}")
-    u = np.load(cp.DATA / "baseline_times.npz")["u"]
+    u = np.load(cp.PAGE.data / "baseline_times.npz")["u"]
     time_plate(fr, polys, u, norm=time_norm(u), ramp=rnd.RAMP, gone=np.zeros(len(polys), bool),
                corridor=None, edge=e, out=plates / f"baseline_time.{EXT}")
 
 
 def plates_method(method: str, run: str, *, data: Path, plates: Path) -> None:
     """The plates of <method>_<run>'s frames (compute.frames_of's files in `data`) into `plates`."""
-    base = json.loads((cp.DATA / "baseline.json").read_text())
+    base = json.loads((cp.PAGE.data / "baseline.json").read_text())
     info = json.loads((data / f"{method}_{run}.json").read_text())
     d = np.load(data / f"{method}_{run}.npz", allow_pickle=True)    # our own file: WKB as objects
-    b = np.load(cp.DATA / "baseline.npz", allow_pickle=True)
+    b = np.load(cp.PAGE.data / "baseline.npz", allow_pickle=True)
     fr = frame_from(d)
     if not np.allclose(d["frame"], b["frame"]) or not np.allclose(d["lim"], b["lim"]):
         raise AssertionError("the method's frame is not the baseline's")
@@ -358,7 +358,7 @@ def index(*, data: Path, plates: Path) -> None:
                                    P0_run_mesh=i["base"]["P"]))
                 every.append(dict(r, base_P=i["base"]["P"]))
         frames.sort(key=lambda f: f["D_area"])
-        stored = pd.read_parquet(STORED / f"{cp.BID}__{method}.parquet")
+        stored = pd.read_parquet(STORED / f"{cp.PAGE.bid}__{method}.parquet")
         cmp = []
         for _, s in stored.iterrows():
             hits = [r for r in every if r["m"] == int(s.m)]
@@ -383,7 +383,7 @@ def index(*, data: Path, plates: Path) -> None:
                             peak_rss_gb=i["peak_rss_gb"]) for run, i in infos.items()})
         checks[method] = cmp
     out = dict(
-        block=cp.BID, metric=base["metric"],
+        block=cp.PAGE.bid, metric=base["metric"],
         prefix_rule=("road_rescore.prefix_len under common.MEASURE (RampedDestroyed tau 0.10), "
                      "area weights: the SHORTEST canonical prefix whose D_area reaches the target "
                      "(the lineup's rule, so its rows check), the whole network where it never "
@@ -406,7 +406,7 @@ def index(*, data: Path, plates: Path) -> None:
 if __name__ == "__main__":
     PLATES.mkdir(exist_ok=True)
     if sys.argv[1:] == ["index"]:
-        index(data=cp.DATA, plates=PLATES)
+        index(data=cp.PAGE.data, plates=PLATES)
     elif sys.argv[1:] == ["plates", "baseline"]:
         plates_baseline(plates=PLATES)
     elif len(sys.argv) == 5 and sys.argv[1] == "plates":

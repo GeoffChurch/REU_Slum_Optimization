@@ -4,8 +4,9 @@ render.py's paint at 1200 px over the same extent), the lenses, each home's esca
 conductance and the energy identity.
 
     S=research/roadless/atlas/roads5810/compute.py     # from the repo root
-    PYTHONPATH=. uv run python $S baseline            # the plain mesh's baseline (the shared D 0)
+    PYTHONPATH=. uv run python $S baseline <block>    # its plain mesh's baseline (the shared D 0)
     PYTHONPATH=. uv run python $S <method> <pass>     # cycle_native|clearance_looped coarse|fine
+                                                      # (the lineup's, on the page's block, PAGE)
 
 A network (Network, a Strategy: Roads here, the lineup's and the studies' road networks; a grown
 region's steps and an optimizer's answer per budget in networks.py) is its prefixes in build
@@ -16,13 +17,13 @@ reaches the target) at its pass's targets (PASSES) where the whole network reach
 road_rescore.network_rows carves the lineup's (built in `meshes`, kept for a rerun), each prefix
 a road state (Model.road_state, or Model.cleared_road_state beside a clearing: the corridor's
 atoms open, its triangles at the proposed road's boost), and the mesh's own baseline (no road)
-the gains' denominator. Writes into `data` (DATA for the baseline and the lineup's two networks,
-a study's own folder for its networks):
+the gains' denominator. Writes into `data` (the block's Site.data, atlas/block_site.py, for the
+baseline and the lineup's two networks; its Site.networks for networks.py's):
 <method>_<run>.npz (the rasters, the atoms and per atom the stop from which it is open, carved or
 its building cleared, the corridors, each building's ramped share), <method>_<run>.json,
 <method>_<run>_times.npz (each home's escape time, the Time plates') and <method>_<run>_sheet.json
-(the sheet conductance per stop, sheet.py's `C`). The rasters stay in the site's scratch (DATA);
-only the plates render.py draws from them live beside the page.
+(the sheet conductance per stop, sheet.py's `C`). The rasters stay in the site's scratch
+(block_site.SCRATCH); only the plates render.py draws from them live beside the page.
 """
 from __future__ import annotations
 
@@ -41,8 +42,8 @@ from numpy.typing import NDArray
 ROOT = Path(__file__).resolve().parents[4]
 SITE = ROOT / ".superpowers" / "sdd" / "2026-10-22-site"     # the site's scratch
 FLOW = SITE / "flow5810"      # the Block 5810 Pipeline page's flow plates: their energy and paint
-DATA = SITE / "roads5810"     # the baseline's and the lineup's two networks' rasters, and meshes
 sys.path.insert(0, str(ROOT / "research" / "roadless"))
+sys.path.insert(0, str(ROOT / "research" / "roadless" / "atlas"))
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
 import gap_complex as gc  # noqa: E402
@@ -51,10 +52,11 @@ import gap_maps as gm  # noqa: E402
 import geopandas as gpd  # noqa: E402
 import metrics  # noqa: E402
 import road_rescore as rr  # noqa: E402
+from block_site import Site  # noqa: E402  (atlas/block_site.py)
 
 from reblock.budget import road_corridor  # noqa: E402
 
-BID = "ZAF.9.3.1_1_5810"
+PAGE = Site.of("ZAF.9.3.1_1_5810")     # the 5810 build-out page's block (its edge)
 LINEUP = ROOT / "research/roadless/road_rows/lineup-f8fa4e53"
 class Pass(NamedTuple):
     """A run's frames: its targets, whether the whole network is one."""
@@ -117,12 +119,12 @@ SCALARS = ("P_energy", "power_cells", "power_tri", "rel_err", "rel_err_tri", "ki
            "top5_power", "top5_current", "open_area", "unknowns")
 
 
-def baseline(*, data: Path) -> None:
-    """The plain mesh's baseline (the clearing plates' `before`): its rasters, the area-weighted
-    medians of |j| and the power density over its open ground (the plates' scales), its lenses."""
+def baseline(b, *, data: Path) -> None:  # type: ignore[no-untyped-def]
+    """Block `b`'s plain mesh's baseline (the clearing plates' `before`): its rasters, the
+    area-weighted medians of |j| and the power density over its open ground (the plates' scales),
+    its lenses; the npz names its block (render.edge reads it)."""
     t0 = time.time()
     metric = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())
-    [b] = common.build_blocks([BID])
     m = metric.clearing(b, demand=common.PopulationDemand())
     t_model = time.time() - t0
     fr = frame_of(m)
@@ -132,12 +134,14 @@ def baseline(*, data: Path) -> None:
     mj = rnd.wmedian(s["jt"][lt], ta[lt])
     mp = rnd.wmedian(s["pt"][lt], ta[lt])
     polys = m.geo.polys
-    np.savez(data / "baseline.npz", j=s["j"], p=s["p"], polys=shapely.to_wkb(polys),
+    data.mkdir(parents=True, exist_ok=True)
+    np.savez(data / "baseline.npz", block=b.block_id, j=s["j"], p=s["p"],
+             polys=shapely.to_wkb(polys),
              boundary=shapely.to_wkb(np.asarray([m.geo.boundary], dtype=object)),
              streets=shapely.to_wkb(np.asarray([m.geo.streets], dtype=object)),
              frame=np.asarray(fr.frame, dtype=float), lim=np.asarray(fr.lim, dtype=float))
-    info = dict(metric=metric.name, block=BID, frame=fr.frame._asdict(), median_j=mj, median_p=mp,
-                P=m.base.P, Pq=m.base.Pq, J2=m.base.J2, n_enclosed=m.base.n_enclosed,
+    info = dict(metric=metric.name, block=b.block_id, frame=fr.frame._asdict(), median_j=mj,
+                median_p=mp, P=m.base.P, Pq=m.base.Pq, J2=m.base.J2, n_enclosed=m.base.n_enclosed,
                 **{k: s[k] for k in SCALARS}, t_model=t_model, t_total=time.time() - t0)
     (data / "baseline.json").write_text(json.dumps(info, indent=1))
     np.savez(data / "baseline_times.npz", u=m.base.u, live=m.base.live)     # the Time plates'
@@ -218,7 +222,7 @@ def network(name: str, run: str, *, frames: Pass, networks: Path, data: Path,
     """The frames of the network `name` stored in `networks` (<name>.parquet and its canonical
     order, <name>.ordered.parquet), named <name>_<run> in `data`."""
     t0 = time.time()
-    [b] = common.build_blocks([BID])
+    [b] = common.build_blocks([PAGE.bid])
     net = gpd.read_parquet(networks / f"{name}.parquet")
     ordered = gpd.read_parquet(networks / f"{name}.ordered.parquet")
     again = common.canonical_order(b, net)
@@ -315,7 +319,7 @@ def frames_of(name: str, run: str, b, net: Network, t0: float, *,  # type: ignor
     np.savez(data / f"{name}_{run}.npz", **out)
     np.savez(data / f"{name}_{run}_times.npz", **times)
     (data / f"{name}_{run}_sheet.json").write_text(json.dumps(sheets, indent=1))
-    info = dict(method=name, metric=metric.name, block=BID, D_full=D_full,
+    info = dict(method=name, metric=metric.name, block=b.block_id, D_full=D_full,
                 rule="the shortest prefix whose D_area reaches the target (Network.prefix_len: "
                      "the lineup's road_rescore.prefix_len for roads)",
                 want=[dict(target=t, m=mm) for t, mm in want], nt=int(fx.fm.nt),
@@ -328,10 +332,13 @@ def frames_of(name: str, run: str, b, net: Network, t0: float, *,  # type: ignor
 
 if __name__ == "__main__":
     arg, *rest = sys.argv[1:]
-    if arg == "baseline":
-        baseline(data=DATA)
+    if arg == "baseline" and len(rest) == 1:
+        [blk] = common.build_blocks(rest)
+        baseline(blk, data=Site.of(blk.block_id).data)
     elif arg in ("cycle_native", "clearance_looped") and len(rest) == 1 and rest[0] in PASSES:
-        network(arg, rest[0], frames=PASSES[rest[0]], networks=LINEUP / "scratch/networks" / BID,
-                data=DATA, meshes=DATA / ".meshes")
+        network(arg, rest[0], frames=PASSES[rest[0]],
+                networks=LINEUP / "scratch/networks" / PAGE.bid, data=PAGE.data,
+                meshes=PAGE.data / ".meshes")
     else:
-        raise SystemExit(f"{sys.argv[1:]}: baseline, or cycle_native|clearance_looped coarse|fine")
+        raise SystemExit(f"{sys.argv[1:]}: baseline <block>, or cycle_native|clearance_looped "
+                         "coarse|fine")

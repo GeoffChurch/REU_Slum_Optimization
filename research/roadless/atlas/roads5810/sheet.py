@@ -31,16 +31,16 @@ import gap_factor  # noqa: E402
 import metrics  # noqa: E402
 import render  # noqa: E402
 
-BID = "ZAF.9.3.1_1_5810"
-SITE = ROOT / ".superpowers/sdd/2026-10-22-site/roads5810"       # the lineup's two networks
+cp = render.cp
+PAGE = cp.PAGE                    # the page's block: its lineup's and networks.py's frames
 FLOW = ROOT / ".superpowers/sdd/2026-10-22-flow-roads"          # the flow-roads study's networks
-NETWORKS = ROOT / ".superpowers/sdd/2026-10-28-networks5810"    # networks.py's (its DATA)
-STUDIES = (FLOW, NETWORKS)
+STUDIES = (FLOW, PAGE.networks)   # the page's study folders (networks.py's: PAGE.networks)
 STUDY_RUN = r"slider|dp|greedy|at[0-9]{3}"     # a study network's runs (networks.py's: at<DDD>)
 SCRATCH = ROOT / ".superpowers/sdd/2026-10-26-clearings5810"    # clear5810.SCRATCH
 CLEARINGS = ("simp", "j2", "ff", "greedy", "cheap")             # clear5810's keys
 # per page network its frames' runs (the lineup's page rows mix its two passes) and their folder
-RUNS = {"cycle_native": (SITE, ("coarse", "fine")), "clearance_looped": (SITE, ("coarse", "fine"))}
+RUNS = {"cycle_native": (PAGE.data, ("coarse", "fine")),
+        "clearance_looped": (PAGE.data, ("coarse", "fine"))}
 TOL = 1e-9        # relative: a frame two runs share, the same carving prefix's sheet
 
 
@@ -51,7 +51,7 @@ def metric():  # type: ignore[no-untyped-def]
 def clearings() -> None:
     """Each clearing's frames' sheets on the plain mesh (clear5810's model). Writes
     SCRATCH/sheet.json: the baseline's and per method, per frame fff its sheet."""
-    [b] = common.build_blocks([BID])
+    [b] = common.build_blocks([PAGE.bid])
     m = metric().clearing(b, demand=common.PopulationDemand())
     out: dict = dict(base=m.sheet(m.factors(np.zeros(m.n))), methods={})  # type: ignore[type-arg]
     for key in CLEARINGS:
@@ -62,22 +62,20 @@ def clearings() -> None:
     print(f"{len(CLEARINGS)} clearings' sheets", flush=True)
 
 
-def runs_of(method: str) -> tuple[Path, tuple[str, ...]]:
-    """A page network's folder and runs: the lineup's two (RUNS), or the runs (STUDY_RUN) of
-    the one study folder (STUDIES) whose frames are `method`'s."""
-    if method in RUNS:
-        return RUNS[method]
-    found = [(d, tuple(sorted(r))) for d in STUDIES
+def runs_of(method: str, *, studies: tuple[Path, ...]) -> tuple[Path, tuple[str, ...]]:
+    """A network's folder and runs: the runs (STUDY_RUN) of the one folder of `studies` whose
+    frames are `method`'s."""
+    found = [(d, tuple(sorted(r))) for d in studies
              if (r := [p.name[len(method) + 1:-len(".json")] for p in d.glob(f"{method}_*.json")
                        if re.fullmatch(STUDY_RUN, p.name[len(method) + 1:-len(".json")])])]
     [(data, runs)] = found
     return data, runs
 
 
-def added(method: str) -> dict[str, float]:
-    """Per frame DDD of a page network the conductance its stop adds (m^2) over its mesh's own
-    baseline; a frame two runs share agrees in both (the same prefix of the same corridors)."""
-    data, runs = runs_of(method)
+def added(method: str, *, data: Path, runs: tuple[str, ...]) -> dict[str, float]:
+    """Per frame DDD of a network (its `runs` in `data`) the conductance its stop adds (m^2) over
+    its mesh's own baseline; a frame two runs share agrees in both (the same prefix of the same
+    corridors)."""
     out: dict[str, float] = {}
     for run in runs:
         s = json.loads((data / f"{method}_{run}_sheet.json").read_text())
@@ -98,8 +96,12 @@ def page() -> None:
     for var in ("DATA", "CDATA"):
         rows = json.loads(re.search(rf"var {var} = (\{{.*?\}});\n", html)[1])  # type: ignore[index]
         for method, frames in rows.items():
-            c = (added(method) if var == "DATA"
-                 else {f: v - cs["base"] for f, v in cs["methods"][method].items()})
+            if var == "DATA":
+                data, runs = (RUNS[method] if method in RUNS
+                              else runs_of(method, studies=STUDIES))
+                c = added(method, data=data, runs=runs)
+            else:
+                c = {f: v - cs["base"] for f, v in cs["methods"][method].items()}
             for r in frames:
                 if r is not None:          # a per-budget method's slider step below its first
                     r["C"] = round(c[r["f"]])

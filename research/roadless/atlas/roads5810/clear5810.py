@@ -56,6 +56,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[3]
 ROADLESS = ROOT / "research" / "roadless"
 sys.path.insert(0, str(ROADLESS))
+sys.path.insert(0, str(HERE.parent))
 import clear  # noqa: E402
 import common  # noqa: E402
 import gap_clear as gcl  # noqa: E402
@@ -66,8 +67,10 @@ import relax  # noqa: E402
 import road_rescore as rr  # noqa: E402
 import search  # noqa: E402
 import walled  # noqa: E402
+from block_site import Site  # noqa: E402  (atlas/block_site.py)
 
 BID = "ZAF.9.3.1_1_5810"
+SITE = Site.of(BID)                    # the baseline's (compute.baseline)
 TARGETS = tuple(round(0.01 * i, 2) for i in range(1, 16))     # the page's slider
 CHECK_AT = 0.05            # the budget a run's rows path is shown at (`run`)
 POWER = rr.CX_POWER        # the presets' objective: P (relax_rows' and polish_rows' `_p1`)
@@ -388,8 +391,8 @@ def frames(method: Method) -> None:
     baseline's `u_base`) and SCRATCH/<key>.json."""
     cp = load("compute", HERE / "compute.py")
     t0 = time.time()
-    base = json.loads((cp.DATA / "baseline.json").read_text())
-    bnpz = np.load(cp.DATA / "baseline.npz", allow_pickle=True)       # the site's: WKB as objects
+    base = json.loads((SITE.data / "baseline.json").read_text())
+    bnpz = np.load(SITE.data / "baseline.npz", allow_pickle=True)       # the site's: WKB as objects
     metric = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())
     [b] = common.build_blocks([BID])
     m = metric.clearing(b, demand=POP)
@@ -472,9 +475,8 @@ def plates(method: Method) -> None:
     and the flow's are the same saved set (`x_<fff>`)."""
     rd = load("roads5810_render", HERE / "render.py")
     plates_dir: Path = rd.PLATES
-    cp = rd.cp
-    base = json.loads((cp.DATA / "baseline.json").read_text())
-    bnpz = np.load(cp.DATA / "baseline.npz", allow_pickle=True)       # the site's: WKB as objects
+    base = json.loads((SITE.data / "baseline.json").read_text())
+    bnpz = np.load(SITE.data / "baseline.npz", allow_pickle=True)       # the site's: WKB as objects
     d = np.load(SCRATCH / f"{method.key}.npz")
     if not np.array_equal(d["frame"], bnpz["frame"]) or not np.array_equal(d["lim"], bnpz["lim"]):
         raise RuntimeError("the frames' extent is not the baseline plates'")
@@ -524,8 +526,7 @@ def page() -> None:
     per target its row (target order), each frame's plates named."""
     ms = methods()
     greedy_checked(ms)
-    base = json.loads((ROOT / ".superpowers/sdd/2026-10-22-site/roads5810/baseline.json")
-                      .read_text())
+    base = json.loads((SITE.data / "baseline.json").read_text())
     out: dict[str, Any] = dict(
         block=BID, metric=metrics.RUNTIME, power=POWER, targets=list(TARGETS),
         baseline=dict(P=base["P"], median_j=base["median_j"], median_p=base["median_p"]),

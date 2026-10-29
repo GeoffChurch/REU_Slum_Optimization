@@ -16,6 +16,11 @@ the chart's `UDATA`), networks.py (the pilots of 2026-10-27 on the page: Laplaci
 joint SIMP's answers, and one command each for ears, the partition SIMP and the grid templates),
 artifact.py (the page as a claude.ai artifact, https://claude.ai/artifact/UnDkhPymCPcmxWXbHASys3:
 each method's frames of a view one sprite sheet, in plates/artifact/), and plates/ (git-ignored:
-every plate the page names). The rasters stay in the site's scratch
-(compute.DATA, .superpowers/sdd/2026-10-22-site/), the flow plates' energy and paint in its
-flow5810/, the networks' own scripts in their studies."""
+every plate the page names). The rasters stay in the site's scratch, one directory per block
+(block_site.py: .superpowers/sdd/2026-10-22-site/blocks/<block>/), the flow plates' energy and
+paint in its flow5810/, the networks' own scripts in their studies.
+
+block_site.py (a block's build-out directories, a Site resolved once at a script's edge),
+buildout.py (a grown run's build-out on any block: its baseline, frames and per-frame table, the
+Demo page's second block), topology_run.py (the original topology algorithm timed on a block), and
+blocks/<block>/ (what is small and kept per block: the build-out's table, topology's roads)."""

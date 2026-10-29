@@ -17,9 +17,12 @@ from pathlib import Path
 import numpy as np
 import shapely
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from block_site import Site  # noqa: E402  (atlas/block_site.py)
+
 HERE = Path(__file__).resolve().parent
 SCRATCH = HERE.parents[3] / ".superpowers" / "sdd" / "2026-10-26-clearings5810"
-BASE = HERE.parents[3] / ".superpowers" / "sdd" / "2026-10-22-site" / "roads5810"
+BASE = Site.of("ZAF.9.3.1_1_5810").data      # the page's baseline (compute.baseline)
 TARGETS = tuple(round(0.01 * i, 2) for i in range(1, 16))     # clear5810.TARGETS
 OUT = HERE / "depth.json"
 

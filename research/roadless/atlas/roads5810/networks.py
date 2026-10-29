@@ -106,14 +106,15 @@ import relax  # noqa: E402
 import render  # noqa: E402
 import road_simp as rs  # noqa: E402
 import sheet  # noqa: E402
+from block_site import Site  # noqa: E402  (atlas/block_site.py: compute put it on the path)
 
 from reblock.budget import road_corridor  # noqa: E402
 from reblock.destroyed import IncrementalDestroyed  # noqa: E402
 from reblock.methods.betweenness.thinning import skeletonize  # noqa: E402
 
 common, gc, gcl = cp.common, cp.gc, cp.gcl
-BID = cp.BID
-DATA = sheet.NETWORKS                 # the frames' rasters, jsons, times, sheets and meshes
+PAGE = cp.PAGE                        # the page's block; its networks' frames in PAGE.networks
+BID = PAGE.bid                        # names the page's designs' rows (Runs, Lined, Joint)
 SLIDER = render.SLIDER                # D 0.01 .. 0.15
 SKEL_PIX = 1.0                        # m: the skeleton's raster (road_simp.PIXEL's)
 GRID_M = 1e-3                         # m: a grown region's union grid (frames.py's `region`)
@@ -295,7 +296,7 @@ class One:
 # ------------------------------------------------------------------ sources
 
 class Run(NamedTuple):
-    """A source's run: its name (<method>_<run> in DATA) and how to build its Network."""
+    """A source's run: its name (<method>_<run> in its Site's networks) and its budget."""
     name: str
     budget: float | None          # an answer's budget; None for a grown run's slider
 
@@ -311,7 +312,7 @@ class Source(Protocol):
     def runs(self) -> list[Run]: ...
 
     def frames(self, key: str, b) -> None:  # type: ignore[no-untyped-def]
-        """compute.frames_of for each run, into DATA."""
+        """compute.frames_of for each run, into its Site's networks."""
         ...
 
     def rows(self, key: str) -> list[dict[str, Any] | None]:
@@ -325,16 +326,25 @@ def page_row(r: dict[str, Any], f: str, C: dict[str, float]) -> dict[str, Any]:
                 LP=round(r["L_P"], 3), C=round(C[f]))
 
 
-def info_of(key: str, run: str) -> dict[str, Any]:
-    return json.loads((DATA / f"{key}_{run}.json").read_text())
+def info_of(key: str, run: str, *, data: Path) -> dict[str, Any]:
+    """Run `run` of network `key`'s frames' record in `data` (a Site's networks)."""
+    return json.loads((data / f"{key}_{run}.json").read_text())
+
+
+def added_of(key: str, *, data: Path) -> dict[str, float]:
+    """Per frame the conductance network `key` adds (sheet.added over its runs in `data`)."""
+    folder, runs = sheet.runs_of(key, studies=(data,))
+    return sheet.added(key, data=folder, runs=runs)
 
 
 class GrownSource:
-    """A growth or ears run's steps (Grown), one run `slider`."""
+    """A growth or ears run's steps (Grown) on a Site's block, one run `slider`, its frames in the
+    Site's networks."""
     points = False
 
-    def __init__(self, plan: str, *, budget: float) -> None:
-        self.dir = gr.OUT / BID / plan
+    def __init__(self, plan: str, *, budget: float, site: Site) -> None:
+        self.dir = gr.OUT / site.bid / plan
+        self.data = site.networks
         self.budget = budget
 
     def ready(self) -> bool:
@@ -348,13 +358,14 @@ class GrownSource:
         t0 = time.time()
         net = Grown(b, self.dir, targets=SLIDER)
         full = max(SLIDER) not in net.stop_of
+        self.data.mkdir(parents=True, exist_ok=True)
         cp.frames_of(key, "slider", b, net, t0, frames=cp.Pass(targets=SLIDER, full=full),
-                     data=DATA, meshes=DATA / ".meshes")
+                     data=self.data, meshes=self.data / ".meshes")
 
     def rows(self, key: str) -> list[dict[str, Any] | None]:
-        info = info_of(key, "slider")
+        info = info_of(key, "slider", data=self.data)
         names = render.frame_names(info)
-        C = sheet.added(key)
+        C = added_of(key, data=self.data)
         by_target = {round(t, 2): r for r in info["frames"] for t in r["targets"] if t is not None}
         [whole] = [r for r in info["frames"] if None in r["targets"]] or [None]
         out: list[dict[str, Any] | None] = []
@@ -501,8 +512,9 @@ class AnswerSource:
     """A Design's answers, a run each (`at<DDD>`), drawn as points."""
     points = True
 
-    def __init__(self, design: Design) -> None:
+    def __init__(self, design: Design, *, site: Site) -> None:
         self.design = design
+        self.data = site.networks
 
     def ready(self) -> bool:
         bs = self.design.budgets()
@@ -517,19 +529,19 @@ class AnswerSource:
             t0 = time.time()
             a = self.design.answer(b, run.budget)
             cp.frames_of(key, run.name, b, One(b, a), t0, frames=cp.Pass(targets=(), full=True),
-                         data=DATA, meshes=self.design.meshes())
-            [r] = info_of(key, run.name)["frames"]
+                         data=self.data, meshes=self.design.meshes())
+            [r] = info_of(key, run.name, data=self.data)["frames"]
             if abs(r["L_P"] - a.L_P) > 1e-6:
                 raise AssertionError(f"{key} {run.name}: L_P {r['L_P']} against the answer's "
                                      f"own {a.L_P}")
             print(f"{key} {run.name}: L_P {r['L_P']:.6f} (its own {a.L_P:.6f})", flush=True)
 
     def rows(self, key: str) -> list[dict[str, Any] | None]:
-        C = sheet.added(key)
+        C = added_of(key, data=self.data)
         got: dict[int, dict[str, Any]] = {}
         for run in self.runs():
             assert run.budget is not None
-            info = info_of(key, run.name)
+            info = info_of(key, run.name, data=self.data)
             [r] = info["frames"]
             got[round(run.budget * 100)] = dict(page_row(r, render.frame_names(info)[r["m"]], C),
                                                 b=run.budget)
@@ -613,7 +625,7 @@ class Growth:
         return Entry(key=self.plan, name=name, how=how, cls=style[0], dot=style[1], label=name)
 
     def source(self) -> Source:
-        return GrownSource(self.plan, budget=self.p.D)
+        return GrownSource(self.plan, budget=self.p.D, site=PAGE)
 
 
 class Ears:
@@ -642,7 +654,7 @@ class Ears:
         return Entry(key=self.plan, name=name, how=how, cls=self.CLS[cand], dot="lkd", label=name)
 
     def source(self) -> Source:
-        return GrownSource(self.plan, budget=self.p.D)
+        return GrownSource(self.plan, budget=self.p.D, site=PAGE)
 
 
 class JointFamily:
@@ -673,7 +685,7 @@ class JointFamily:
                      dot="", label=name)
 
     def source(self) -> Source:
-        return AnswerSource(self.design)
+        return AnswerSource(self.design, site=PAGE)
 
 
 class PartitionFamily:
@@ -723,7 +735,7 @@ class PartitionFamily:
         return Entry(key=key, name=self.label, how=how, cls=self.cls, dot="", label=self.label)
 
     def source(self) -> Source:
-        return AnswerSource(self.design)
+        return AnswerSource(self.design, site=PAGE)
 
 
 class SpursFamily:
@@ -744,7 +756,7 @@ class SpursFamily:
         return Entry(key=key, name=name, how=how, cls="pts", dot="", label=name)
 
     def source(self) -> Source:
-        return AnswerSource(self.design)
+        return AnswerSource(self.design, site=PAGE)
 
 
 class TemplatesFamily:
@@ -764,7 +776,7 @@ class TemplatesFamily:
         return Entry(key=key, name=name, how=how, cls="tp", dot="", label=name)
 
     def source(self) -> Source:
-        return AnswerSource(self.design)
+        return AnswerSource(self.design, site=PAGE)
 
 
 def family_of(argv: list[str]) -> Family:
@@ -791,7 +803,7 @@ def frames(fam: Family) -> None:
     src = fam.source()
     if not src.ready():
         raise SystemExit(f"{fam.entry().key}: its rows are not finished")
-    DATA.mkdir(parents=True, exist_ok=True)
+    PAGE.networks.mkdir(parents=True, exist_ok=True)
     [b] = common.build_blocks([BID])
     src.frames(fam.entry().key, b)
 
@@ -799,8 +811,8 @@ def frames(fam: Family) -> None:
 def plates(fam: Family) -> None:
     key = fam.entry().key
     for run in fam.source().runs():
-        render.plates_method(key, run.name, data=DATA, plates=render.PLATES)
-        render.plates_times(key, run.name, data=DATA, plates=render.PLATES)
+        render.plates_method(key, run.name, data=PAGE.networks, plates=render.PLATES)
+        render.plates_times(key, run.name, data=PAGE.networks, plates=render.PLATES)
 
 
 def page(fam: Family) -> None:
@@ -833,8 +845,8 @@ def page(fam: Family) -> None:
 
 def drop(key: str) -> None:
     """A method off the page (a run superseded: the no-legacy rule): its rows and entries out of
-    every table of index.html (its KEY item by its class), its frames' files (DATA) and its plates
-    deleted. Then `add` its successor and artifact.py."""
+    every table of index.html (its KEY item by its class), its frames' files (PAGE.networks) and
+    its plates deleted. Then `add` its successor and artifact.py."""
     path = HERE / "index.html"
     html = path.read_text()
     tables = {v: local.js(html, v) for v in ("DATA", "NETS", "CLASS", "DOT", "KEY", "POINTS")}
@@ -847,7 +859,7 @@ def drop(key: str) -> None:
     for v, value in tables.items():
         html = local.with_js(html, v, value, lines=v != "DATA")
     path.write_text(html)
-    files = sorted(DATA.glob(f"{glob_escape(key)}_*")) + sorted(
+    files = sorted(PAGE.networks.glob(f"{glob_escape(key)}_*")) + sorted(
         render.PLATES.glob(f"{glob_escape(key)}_*"))
     for f in files:
         f.unlink()
