@@ -456,19 +456,39 @@ def field(w: World, u: np.ndarray, ok: np.ndarray) -> tuple[np.ndarray, np.ndarr
     return X, Y, Z
 
 
-def homes_plate(w: World, u: np.ndarray, *, gone: np.ndarray, corridor,  # type: ignore[no-untyped-def]
+# Damage, on the escape-time plate (owner 2026-10-29: a destroyed building must not read as road).
+# The damage share `c` is the build-out page's network view's (roads5810's DESTROYED ramp): 0
+# untouched, 1 wholly destroyed -- which a building is once GONE_SHARE of it is taken or a road
+# cuts it in two -- and partly damaged in between. A wholly destroyed building is a GHOST: a pale
+# fill with a thin warm-grey outline, so the road beside it stays the only dark slate. A partly
+# damaged one still has its people, so it keeps its escape-time colour and gains the same outline.
+GHOST_FILL = "#ece8e2"       # a pale neutral, lighter than any escape-time stop, on the white plate
+GHOST_EDGE = "#7d7468"       # the outline of every damaged building, wholly or partly
+GHOST_LW = 0.7               # px at the plate's 100 dpi
+
+
+def homes_plate(w: World, u: np.ndarray, *, c: np.ndarray, corridor,  # type: ignore[no-untyped-def]
                 out: Path) -> None:
     """The escape-time plate (render.time_plate's figure on SEQ): each home filled by its time on
-    the block's scale (nan: no home, outlined), the gone buildings and the corridor in
-    render.ROAD, and the isochrones every ISO_STEP of the scale, dark lines on a white halo."""
+    the block's scale (nan: no home, outlined), the damage by `c` (the GHOST encoding above), the
+    corridor in render.ROAD, and the isochrones every ISO_STEP of the scale, dark lines on a white
+    halo."""
     f = w.fr.frame
     fig = plt.figure(figsize=(f.nx / 100, f.ny / 100), dpi=100)
     ax = fig.add_axes((0, 0, 1, 1))
     norm = mcolors.Normalize(0.0, w.scale, clip=True)
+    gone = c >= 1.0
+    partly = (c > 0.0) & ~gone
     has = np.isfinite(u) & ~gone
     gpd.GeoSeries(list(w.polys[has])).plot(ax=ax, color=SEQ(norm(u[has])), lw=0)
     gpd.GeoSeries(list(w.polys[~has & ~gone])).boundary.plot(ax=ax, color=rnd.BUILDING, lw=0.4)
-    gpd.GeoSeries(list(w.polys[gone])).plot(ax=ax, color=render.ROAD, lw=0)
+    # The ghosts under the road, so the road reads as one unbroken 7 m band and each ghost shows
+    # the rest of the footprint the road took.
+    if gone.any():
+        gpd.GeoSeries(list(w.polys[gone])).plot(ax=ax, facecolor=GHOST_FILL,
+                                                edgecolor=GHOST_EDGE, lw=GHOST_LW)
+    if partly.any():
+        gpd.GeoSeries(list(w.polys[partly])).boundary.plot(ax=ax, color=GHOST_EDGE, lw=GHOST_LW)
     if corridor is not None:
         gpd.GeoSeries([corridor]).plot(ax=ax, color=render.ROAD, lw=0)
     X, Y, Z = field(w, u, np.isfinite(u) & ~gone)
@@ -513,9 +533,9 @@ def stored_plates(site: Site, w: World, key: str, run: str):  # type: ignore[no-
         raise AssertionError(f"{key} {run}: its frame is not the baseline's")
     for mm in [int(s) for s in d["stops"]]:
         [corridor] = shapely.from_wkb(d[f"corridor_{mm}"])
-        gone, u = d[f"c_{mm}"] >= 1.0, t[f"u_{mm}"]
-        yield mm, lambda out, u=u, gone=gone, corridor=corridor: homes_plate(
-            w, u, gone=gone, corridor=corridor, out=out)
+        c, u = d[f"c_{mm}"], t[f"u_{mm}"]
+        yield mm, lambda out, u=u, c=c, corridor=corridor: homes_plate(
+            w, u, c=c, corridor=corridor, out=out)
 
 
 def plates() -> None:
@@ -524,12 +544,14 @@ def plates() -> None:
     site = Site.of(PAGE.bid)
     plate_name(site, "000").parent.mkdir(parents=True, exist_ok=True)
     w = world(site)
-    homes_plate(w, w.u_plain, gone=np.zeros(len(w.polys), dtype=bool), corridor=None,
+    homes_plate(w, w.u_plain, c=np.zeros(len(w.polys)), corridor=None,
                 out=plate_name(site, "000"))
     method_plates(site, w)
     site = Site.of(COMPARED.bid)
     plate_name(site, "000").parent.mkdir(parents=True, exist_ok=True)
     w = world(site)
+    homes_plate(w, w.u_plain, c=np.zeros(len(w.polys)), corridor=None,
+                out=plate_name(site, "000"))
     method_plates(site, w)
     key, run = COMPARED.topology.network(site)
     [(_, plate)] = list(stored_plates(site, w, key, run))
@@ -690,26 +712,53 @@ class DemoPeel:
 
 
 @dataclass(frozen=True)
-class DemoFrame:
-    """One slider position: the network the method has built by the displacement budget `budget`
-    (a share of the homes' floor area; 0 the block with no new road). `displacement` is the share
-    it reaches (at least `budget`; a run's step can overshoot several budgets at once, so several
-    positions can share one network), `road_km` its new road, `permeability` its L_P,
-    `conductance_m2` the conductance it adds (m² of open ground), `seconds` the method's run time
-    to it, `row` its frame's row in the block's sprite sheet."""
-    budget: float
+class DemoStep:
+    """A network the build-out shows: the share of the homes' floor area it displaces, its new
+    road, its L_P (`permeability`), the conductance it adds (m² of open ground), the method's run
+    time to it (`seconds`; None where the method has no time to a stretch of its build order --
+    topology builds its whole network at once), and its frame's row in the series' sheet."""
     displacement: float
     road_km: float
     permeability: float
     conductance_m2: float
-    seconds: float
+    seconds: float | None
     row: int
 
 
 @dataclass(frozen=True)
+class DemoMet:
+    """The budget met: the shortest stretch of the method's build order that displaces at least
+    the budget (`step`; one road can overshoot several budgets, so several can share a step)."""
+    kind: Literal["met"]
+    step: DemoStep
+
+
+@dataclass(frozen=True)
+class DemoShort:
+    """The method stopped below the budget: `step` is its whole network, displacing less."""
+    kind: Literal["short"]
+    step: DemoStep
+
+
+@dataclass(frozen=True)
+class DemoNone:
+    """No network of the method's for this budget."""
+    kind: Literal["none"]
+
+
+@dataclass(frozen=True)
+class DemoRecorded:
+    """A method's whole run time, recorded by its own run, and where it ran in words."""
+    kind: Literal["recorded"]
+    seconds: float
+    machine: str
+
+
+@dataclass(frozen=True)
 class DemoSheet:
-    """The block's escape-time plates as one sprite sheet beside demo.json (`file`): `rows` frames
-    of `width` x `frame_height` px stacked top to bottom."""
+    """A series' escape-time plates as one sprite sheet beside its build-out file (`file`):
+    `rows` frames of `width` x `frame_height` px stacked top to bottom, the block with no new
+    road first."""
     file: str
     width: int
     frame_height: int
@@ -717,14 +766,38 @@ class DemoSheet:
 
 
 @dataclass(frozen=True)
+class DemoSeries:
+    """One method on the build-out: its name, the label the page heads it with, its plates, its
+    whole run time (recorded, or measured for topology), and what it shows at each of the
+    build-out's budgets."""
+    method: str
+    label: str
+    sheet: DemoSheet
+    run: DemoRecorded | DemoTopologyMeasured
+    cells: tuple[DemoMet | DemoShort | DemoNone, ...]
+
+
+@dataclass(frozen=True)
+class DemoBuildOut:
+    """One block's build-out under one budget slider: its escape-time scale (the model's units at
+    its plain baseline's 99th-percentile home, 100% on every plate), the slider's budgets (0 the
+    block with no new road), the position it opens on, and one series per method shown, each
+    with a cell per budget. Written beside demo.json as its own file, which the page's
+    build-out widget fetches."""
+    block_id: str
+    escape_scale: float
+    budgets: tuple[float, ...]
+    default_step: int
+    series: tuple[DemoSeries, ...]
+
+
+@dataclass(frozen=True)
 class DemoBlock:
     """The block the page follows: its id, buildings, place in words, centroid and a Google Maps
     link; whether it is plainly an informal settlement on the ground (Block's), whatever the
-    survey (`proxy.informal`) says; the screens' verdicts on it; the fires reported near it; the
-    method's build-out on it (its frames, its plates, the escape-time scale -- the model's units
-    at the block's plain baseline's 99th-percentile home, 100% on its plates -- and where it
-    ran); and the original topology algorithm's run time on it, measured or extrapolated
-    (`kind`)."""
+    survey (`proxy.informal`) says; the screens' verdicts on it; the fires reported near it; its
+    build-out's file (`buildout`); and the original topology algorithm's run time on it,
+    measured or extrapolated (`kind`)."""
     block_id: str
     n_buildings: int
     place: str
@@ -735,43 +808,22 @@ class DemoBlock:
     proxy: DemoProxy
     peel: DemoPeel
     fires: tuple[Fire, ...]
-    frames: tuple[DemoFrame, ...]
-    sheet: DemoSheet
-    escape_scale: float
-    machine: str
+    buildout: str
     topology: DemoTopologyExtrapolated | DemoTopologyMeasured
-
-
-@dataclass(frozen=True)
-class DemoNetwork:
-    """One method's network on the compared block, drawn as the page's escape-time plate on that
-    block's scale (`plate`, beside demo.json, `width` x `height` px), and its scores: the share of
-    floor area it displaces, its L_P and its new road."""
-    plate: str
-    width: int
-    height: int
-    displacement: float
-    permeability: float
-    road_km: float
 
 
 @dataclass(frozen=True)
 class DemoComparison:
     """The methods compared on a block where topology has run: the block (id, buildings, place,
-    Maps link, its rank under the shipped screen, its escape-time scale), the method's full
-    build-out (`ours`, its run time and where it ran) and topology's network (`earlier`, its run
-    time measured there)."""
+    Maps link, its rank under the shipped screen), its build-out's file (`buildout`: our method
+    and topology on one slider), and topology's measured run there."""
     block_id: str
     n_buildings: int
     place: str
     maps_url: str
     proxy_rank: int
-    escape_scale: float
-    ours: DemoNetwork
-    ours_seconds: float
-    ours_machine: str
-    earlier: DemoNetwork
-    earlier_time: DemoTopologyMeasured
+    buildout: str
+    topology: DemoTopologyMeasured
 
 
 @dataclass(frozen=True)
@@ -802,10 +854,12 @@ class DemoMethod:
 class DemoEncoding:
     """The plates' colours and the quantities their legend states. `escape_ramp` maps escape time
     from 0 to 100% of a block's `escape_scale`, short blue to long red, with an isochrone every
-    `iso_step` of it. `road` is the grey of a new road's corridor and of a wholly destroyed
-    building, which a building is once `gone_share` of it is gone; roads are `road_width_m` wide
-    and conduct `road_conductance` times what open ground does. The block's edge: `street`
-    (where people walk out), `edge` (a railway's or a ditch's line), `water` (a ditch).
+    `iso_step` of it. `road` is a new road's corridor, `road_width_m` wide, conducting
+    `road_conductance` times what open ground does. A wholly destroyed building -- once
+    `gone_share` of it is gone, or a road cuts it in two -- is a ghost (`ghost_fill`, outlined
+    `ghost_edge`); a partly damaged one keeps its escape-time colour and the same outline. The
+    block's edge: `street` (where people walk out), `edge` (a railway's or a ditch's line),
+    `water` (a ditch).
     `depth_ramp` is the peel figure's (reblock.render's depth colouring, ring 1 to the deepest),
     evenly spaced stops."""
     road: str
@@ -817,6 +871,8 @@ class DemoEncoding:
     road_width_m: float
     road_conductance: float
     gone_share: float
+    ghost_fill: str
+    ghost_edge: str
     depth_ramp: tuple[str, ...]
 
 
@@ -844,7 +900,8 @@ def ts_type(t: Any) -> str:
     if typing.get_origin(t) is tuple:
         args = typing.get_args(t)
         if len(args) == 2 and args[1] is Ellipsis:
-            return f"{ts_type(args[0])}[]"
+            item = ts_type(args[0])
+            return f"({item})[]" if " | " in item else f"{item}[]"
         return "[" + ", ".join(ts_type(a) for a in args) + "]"
     if typing.get_origin(t) is types.UnionType:
         return " | ".join("null" if a is type(None) else ts_type(a) for a in typing.get_args(t))
@@ -853,20 +910,26 @@ def ts_type(t: Any) -> str:
     raise TypeError(f"no TypeScript spelling for {t!r}")
 
 
-def dts(top: type) -> str:
-    """`top` and every dataclass it holds as TypeScript interfaces, each documented by its
-    docstring, the held ones first."""
+def dts(*tops: type) -> str:
+    """`tops` and every dataclass they hold, however deep in a tuple or a union, as TypeScript
+    interfaces, each documented by its docstring, the held ones first."""
     order: list[type] = []
+
+    def held(t: Any) -> list[type]:
+        if dataclasses.is_dataclass(t):
+            return [t]  # type: ignore[list-item]
+        return [d for a in typing.get_args(t) for d in held(a)]
 
     def visit(cls: type) -> None:
         for hint in typing.get_type_hints(cls).values():
-            for t in (hint, *typing.get_args(hint)):
-                if dataclasses.is_dataclass(t) and t not in order:
-                    visit(t)  # type: ignore[arg-type]
+            for t in held(hint):
+                if t not in order:
+                    visit(t)
         if cls not in order:
             order.append(cls)
 
-    visit(top)
+    for top in tops:
+        visit(top)
     out = ["// GENERATED by research/roadless/atlas/explore_proto/build.py (branch",
            "// research/roadless) -- do not edit. Regenerate there: build.py site <this checkout>",
            "// This file is what makes a renamed Python field a TypeScript error instead of a",
@@ -887,17 +950,16 @@ SITE_README = """\
 # The Demo page's bundle
 
 What the site's Demo page reads: Cape Town block `{bid}`, followed from the city-wide screens to
-the roads one method builds through it, and a comparison of that method with the original topology
-algorithm on block `{cid}`, where topology has run.
+the roads one method builds through it, and that method beside the original topology algorithm
+on block `{cid}`, where topology has run.
 
-- `demo.json`: every number the page shows -- the block's place, the shipped screen's verdict on
-  it (checked against `../screen-map/capetown.json`) and the two-stage depth_density screen's, the
-  fires reported near it (each quoted from its report and checked against the article; none is
-  placed inside the block, and the page draws none of them on a map), the method's frames under a
-  displacement budget with its recorded run time, topology's run time (extrapolated there), and
-  the comparison's scores and run times (topology's measured).
-- `{sheet}`: the block's escape-time plates as one sprite sheet (the block with no new road
-  first); `{ours}` and `{earlier}`: the two networks on `{cid}`, the same plate.
+- `demo.json`: the page's facts -- the block's place, the shipped screen's verdict on it (checked
+  against `../screen-map/capetown.json`) and the two-stage depth_density screen's, the fires
+  reported near it (each quoted from its report and checked against the article; none is placed
+  inside the block, and the page draws none of them on a map), topology's run time on each block
+  (extrapolated on the first, measured on the second), and the encoding.
+- `{page}` and `{compared}`: the two build-outs the page's slider widgets fetch -- budgets, and per
+  method its escape-time sprite sheet (beside them) and what it shows at each budget.
 
 `web/src/demo.d.ts` is generated beside it from the same dataclasses, so a renamed field is a
 TypeScript error.
@@ -929,13 +991,6 @@ def sprite(site: Site, fs: list[str], out: Path) -> tuple[int, int]:
     return WIDTH, h
 
 
-def single(src: Path, out: Path) -> tuple[int, int]:
-    """One plate at WIDTH px into `out`; (width, height)."""
-    im = scaled(src)
-    im.convert("RGB").save(out, quality=QUALITY, method=6)
-    return im.width, im.height
-
-
 def maps_url(lat: float, lon: float, zoom: int) -> str:
     """Google Maps' satellite view centred on (lat, lon)."""
     return (f"https://www.google.com/maps/@?api=1&map_action=map&center={lat:.5f}%2C{lon:.5f}"
@@ -950,24 +1005,61 @@ def centroid_wgs84(bid: str) -> tuple[float, float]:
     return float(lat), float(lon)
 
 
-def frames_of(site: Site) -> tuple[list[DemoFrame], list[str]]:
-    """The slider's frames on the block (the block with no new road first) and the sheet's frame
-    names, in row order. Refuses a row with no network, or one where the run stopped short of
-    the budget: the page shows a network that meets every budget."""
+def cells_of(site: Site, budgets: tuple[float, ...]
+             ) -> tuple[list[DemoMet | DemoShort | DemoNone], list[str]]:
+    """The method's cells on the block at `budgets` (0 the plain baseline, then the slider's: the
+    stored run's rows, render.SLIDER's), and its sheet's frame names in row order. Budgets the
+    stored run has no row for are refused: the page states what the method did, never pads it."""
     pick = METHOD.pick(site.bid)
     key, src = pick.key(), pick.source(site)
     rows = src.rows(key)
     secs = METHOD.runtime.seconds(key, src, rows, site)
+    by_budget = dict(zip(nw.SLIDER, zip(rows, secs, strict=True), strict=True))
     fs = ["000"] + list(dict.fromkeys(r["f"] for r in rows if r is not None))
-    frames = [DemoFrame(budget=0.0, displacement=0.0, road_km=0.0, permeability=0.0,
-                        conductance_m2=0.0, seconds=0.0, row=0)]
-    for t, r, s in zip(nw.SLIDER, rows, secs, strict=True):
-        if r is None or s is None or r.get("full", False):
-            raise SystemExit(f"{site.bid}: no network meeting the {t:g} budget")
-        frames.append(DemoFrame(budget=t, displacement=r["D"], road_km=r["km"],
-                                permeability=r["LP"], conductance_m2=float(r["C"]), seconds=s,
-                                row=fs.index(r["f"])))
-    return frames, fs
+    cells: list[DemoMet | DemoShort | DemoNone] = []
+    for t in budgets:
+        if t == 0.0:
+            cells.append(DemoMet(kind="met", step=BASELINE_STEP))
+            continue
+        if t not in by_budget:
+            raise SystemExit(f"{site.bid}: the stored run has no row at the {t:g} budget")
+        r, sec = by_budget[t]
+        if r is None:
+            cells.append(DemoNone(kind="none"))
+            continue
+        step = DemoStep(displacement=r["D"], road_km=r["km"], permeability=r["LP"],
+                        conductance_m2=float(r["C"]), seconds=sec, row=fs.index(r["f"]))
+        cells.append(DemoShort(kind="short", step=step) if r.get("full", False)
+                     else DemoMet(kind="met", step=step))
+    return cells, fs
+
+
+# The block with no new road: every series' first row.
+BASELINE_STEP = DemoStep(displacement=0.0, road_km=0.0, permeability=0.0, conductance_m2=0.0,
+                         seconds=0.0, row=0)
+PAGE_BUDGETS = (0.0, *nw.SLIDER)
+
+
+def method_series(site: Site, budgets: tuple[float, ...], label: str,
+                  out: Path) -> DemoSeries:
+    """The method on the block at `budgets`, its sheet into `out`."""
+    cells, fs = cells_of(site, budgets)
+    file = f"{METHOD.stem}_{site.bid}.webp"
+    width, height = sprite(site, fs, out / file)
+    whole = max(c.step.seconds for c in cells if not isinstance(c, DemoNone)
+                and c.step.seconds is not None)
+    return DemoSeries(method=METHOD.name, label=label,
+                      sheet=DemoSheet(file=file, width=width, frame_height=height, rows=len(fs)),
+                      run=DemoRecorded(kind="recorded", seconds=whole,
+                                       machine=METHOD.runtime.machine),
+                      cells=tuple(cells))
+
+
+def write_buildout(out: Path, b: DemoBuildOut) -> str:
+    name = f"buildout_{b.block_id}.json"
+    (out / name).write_text(json.dumps(dataclasses.asdict(b), indent=1, ensure_ascii=False)
+                            + "\n")
+    return name
 
 
 def proxy_of(sc: Screen, bid: str) -> DemoProxy:
@@ -980,7 +1072,7 @@ def proxy_of(sc: Screen, bid: str) -> DemoProxy:
 
 
 def page_block(sc: Screen, pl: Peeled, out: Path) -> DemoBlock:
-    """Everything the page shows about PAGE; its sprite sheet into `out`."""
+    """Everything the page shows about PAGE; its build-out (one series, the method) into `out`."""
     site = Site.of(PAGE.bid)
     proxy = proxy_of(sc, PAGE.bid)
     peel_score = pl.scores[PAGE.bid]
@@ -990,9 +1082,10 @@ def page_block(sc: Screen, pl: Peeled, out: Path) -> DemoBlock:
     if abs(rings - round(rings)) > 1e-3:
         raise AssertionError(f"{PAGE.bid}: depth_density {peel_score} over n/A is not a whole "
                              f"number of rings ({rings}); the bundle's n or A is not the screen's")
-    frames, fs = frames_of(site)
-    file = f"{METHOD.stem}_{PAGE.bid}.webp"
-    width, height = sprite(site, fs, out / file)
+    buildout = write_buildout(out, DemoBuildOut(
+        block_id=PAGE.bid, escape_scale=round(world(site).scale, 1), budgets=PAGE_BUDGETS,
+        default_step=DEFAULT,
+        series=(method_series(site, PAGE_BUDGETS, f"Our method: {METHOD.name}", out),)))
     lat, lon = centroid_wgs84(PAGE.bid)
     return DemoBlock(
         block_id=PAGE.bid, n_buildings=proxy.n, place=PAGE.place, lat=lat, lon=lon,
@@ -1001,35 +1094,68 @@ def page_block(sc: Screen, pl: Peeled, out: Path) -> DemoBlock:
         peel=DemoPeel(score=float(peel_score),
                       rank=1 + sum(1 for v in pl.scores.values() if v > peel_score),
                       rings=round(rings)),
-        fires=FIRES, frames=tuple(frames),
-        sheet=DemoSheet(file=file, width=width, frame_height=height, rows=len(fs)),
-        escape_scale=round(world(site).scale, 1), machine=METHOD.runtime.machine,
-        topology=PAGE.topology.of(site, proxy.n))
+        fires=FIRES, buildout=buildout, topology=PAGE.topology.of(site, proxy.n))
+
+
+def topology_series(site: Site, budgets: tuple[float, ...], whole: DemoTopologyMeasured,
+                    out: Path) -> DemoSeries:
+    """Topology on the compared block at `budgets`. STAND-IN until its build order's prefixes are
+    scored (owner 2026-10-29, in progress on this branch): only its whole network is known, so
+    every budget below the network's own displacement has no network (DemoNone), the budget at
+    it is met by the whole network, in the run's measured time, and any above it is short."""
+    key, run = COMPARED.topology.network(site)
+    info = nw.info_of(key, run, data=site.networks)
+    [frame] = info["frames"]
+    C = nw.added_of(key, data=site.networks)
+    names = render.frame_names(info)
+    step = DemoStep(displacement=round(frame["D_area"], 4),
+                    road_km=round(frame["road_m"] / 1000, 2),
+                    permeability=round(frame["L_P"], 3),
+                    conductance_m2=float(round(C[names[frame["m"]]])),
+                    seconds=whole.seconds, row=1)
+    cells: list[DemoMet | DemoShort | DemoNone] = []
+    for t in budgets:
+        if t == 0.0:
+            cells.append(DemoMet(kind="met", step=BASELINE_STEP))
+        elif t < step.displacement and round(t, 4) != step.displacement:
+            cells.append(DemoNone(kind="none"))
+        elif round(t, 4) == step.displacement:
+            cells.append(DemoMet(kind="met", step=step))
+        else:
+            cells.append(DemoShort(kind="short", step=step))
+    file = f"topology_{site.bid}.webp"
+    ims = [scaled(plate_name(site, "000")), scaled(topology_plate(site))]
+    sheet = Image.new("RGB", (WIDTH, ims[0].height * 2), "white")
+    for i, im in enumerate(ims):
+        sheet.paste(im, (0, i * ims[0].height))
+    sheet.save(out / file, quality=QUALITY, method=6)
+    return DemoSeries(method="topology", label="Earlier method: topology",
+                      sheet=DemoSheet(file=file, width=WIDTH, frame_height=ims[0].height, rows=2),
+                      run=whole, cells=tuple(cells))
 
 
 def comparison(sc: Screen, out: Path) -> DemoComparison:
-    """The methods compared on COMPARED: the method's full build-out and topology's network,
-    their plates into `out`."""
+    """The methods compared on COMPARED under one slider: the method's frames and topology's,
+    their sheets and the build-out file into `out`. The budgets are the page's slider's, then
+    topology's own displacement (STAND-IN: the grid to come runs every 5% up to it)."""
     site = Site.of(COMPARED.bid)
     proxy = proxy_of(sc, COMPARED.bid)
-    frames, fs = frames_of(site)
-    full = frames[-1]
-    name = f"{METHOD.stem}_{COMPARED.bid}.webp"
-    w, h = single(plate_name(site, fs[full.row]), out / name)
-    ours = DemoNetwork(plate=name, width=w, height=h, displacement=full.displacement,
-                       permeability=full.permeability, road_km=full.road_km)
-    d, lp, km = COMPARED.topology.scores(site)
-    name = f"topology_{COMPARED.bid}.webp"
-    w, h = single(topology_plate(site), out / name)
-    earlier = DemoNetwork(plate=name, width=w, height=h, displacement=d, permeability=lp,
-                          road_km=round(km, 2))
+    whole = COMPARED.topology.of(site, proxy.n)
+    budgets = (*PAGE_BUDGETS, round(whole.displacement, 4))
+    ours = method_series(site, PAGE_BUDGETS, f"Our method: {METHOD.name}", out)
+    last = ours.cells[-1]
+    assert isinstance(last, DemoMet)                     # the stored run meets every slider budget
+    # Above the slider the method's stored run has stopped: its whole network, short of the budget.
+    ours = dataclasses.replace(ours, cells=(*ours.cells, DemoShort(kind="short", step=last.step)))
+    buildout = write_buildout(out, DemoBuildOut(
+        block_id=COMPARED.bid, escape_scale=round(world(site).scale, 1), budgets=budgets,
+        default_step=len(PAGE_BUDGETS) - 1,
+        series=(ours, topology_series(site, budgets, whole, out))))
     lat, lon = centroid_wgs84(COMPARED.bid)
     return DemoComparison(
         block_id=COMPARED.bid, n_buildings=proxy.n, place=COMPARED.place,
-        maps_url=maps_url(lat, lon, COMPARED.zoom), proxy_rank=proxy.rank,
-        escape_scale=round(world(site).scale, 1), ours=ours, ours_seconds=full.seconds,
-        ours_machine=METHOD.runtime.machine, earlier=earlier,
-        earlier_time=COMPARED.topology.of(site, proxy.n))
+        maps_url=maps_url(lat, lon, COMPARED.zoom), proxy_rank=proxy.rank, buildout=buildout,
+        topology=whole)
 
 
 def site(root: Path) -> None:
@@ -1058,21 +1184,20 @@ def site(root: Path) -> None:
             road=render.ROAD, street=rnd.STREET, edge=rnd.EDGE, water=nw.cp.gm.WATER_FILL,
             escape_ramp=tuple(mcolors.to_hex(SEQ(t)) for t in np.linspace(0, 1, 11)),
             iso_step=ISO_STEP, road_width_m=road_simp.ROAD_W,
-            road_conductance=growth.ROAD_KAPPA, gone_share=GONE_SHARE,
+            road_conductance=growth.ROAD_KAPPA, gone_share=GONE_SHARE, ghost_fill=GHOST_FILL,
+            ghost_edge=GHOST_EDGE,
             depth_ramp=tuple(mcolors.to_hex(depth(t)) for t in np.linspace(0, 1, 9))))
     (out / "demo.json").write_text(json.dumps(dataclasses.asdict(bundle), indent=1,
                                               ensure_ascii=False) + "\n")
     (out / "README.md").write_text(SITE_README.format(
-        bid=block.block_id, cid=compared.block_id, sheet=block.sheet.file,
-        ours=compared.ours.plate, earlier=compared.earlier.plate))
-    (root / SITE_DTS).write_text(dts(DemoBundle))
+        bid=block.block_id, cid=compared.block_id, page=block.buildout, compared=compared.buildout))
+    (root / SITE_DTS).write_text(dts(DemoBundle, DemoBuildOut))
     mb = sum(p.stat().st_size for p in out.iterdir()) / 1e6
     print(f"{out}: {len(list(out.iterdir()))} files, {mb:.1f} MB; {root / SITE_DTS}", flush=True)
     print(f"  {block.block_id}: proxy #{block.proxy.rank} {block.proxy.score:.4f}; peel "
           f"#{block.peel.rank} {block.peel.score:.4f} ({block.peel.rings} rings); topology "
-          f"{block.topology.kind}; compared on {compared.block_id}: ours D "
-          f"{compared.ours.displacement} in {compared.ours_seconds} s, topology D "
-          f"{compared.earlier.displacement:.3f} in {compared.earlier_time.seconds:.0f} s",
+          f"{block.topology.kind}; compared on {compared.block_id}, topology D "
+          f"{compared.topology.displacement:.3f} in {compared.topology.seconds:.0f} s",
           flush=True)
 
 
