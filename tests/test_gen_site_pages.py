@@ -1132,51 +1132,6 @@ def test_the_demo_partial_types_no_numerals() -> None:
     assert not digits, f"digits typed into the Demo partial's prose: {digits}"
 
 
-def test_the_demo_mounts_its_switch_then_its_figures_and_the_map_follows_the_page(
-        demo_body: str) -> None:
-    """The block switch first, then the figures that follow it. One screen widget on the site,
-    not two: the Demo's city map is ScreenMap, asking for a close-up and to follow the page's
-    block. ONLY the Demo page asks for either -- Screening and Explore keep the markup they had."""
-    assert re.findall(r'data-widget="([a-z-]+)"', demo_body) == [
-        "block-switch", "screen-geometry", "screen-map", "build-out"]
-    pad = _demo_bundle()["screen"]["closeup_pad_m"]
-    assert f'data-closeup-pad-m="{pad:g}"' in demo_body
-    assert re.search(r'<figure data-widget="screen-map"[^>]* data-follow-block[ >]', demo_body)
-    for page in ("explore", "screening"):
-        body = render_page(page)
-        assert "data-closeup-pad-m" not in body and "data-follow-block" not in body, page
-
-def test_the_demo_rewrites_its_bundle_urls_for_its_served_depth() -> None:
-    """docs/demo.md serves at <base>/demo/, url_depth 1: every asset it points at needs one `../`,
-    the build-out's bundle and its fallback sheet (the default block's) included."""
-    page = render_page("demo")
-    first = _demo_bundle()["blocks"][0]["sheet"]["file"]
-    assert 'data-bundle="../assets/demo/demo.json"' in page
-    assert f'src="../assets/demo/{first}"' in page
-    assert 'src="../assets/demo/geometry.svg"' in page
-    for attr in ("src", "href", "data-bundle", "data-bundle-capetown", "data-bundle-nairobi"):
-        assert f'{attr}="assets/' not in page, attr
-
-def test_the_demo_ships_every_blocks_sheet_and_no_view_switch(monkeypatch: pytest.MonkeyPatch,
-                                                             tmp_path: Path) -> None:
-    """One escape-time sheet per block (the owner kept that view alone, 2026-10-28), each shipped
-    beside the bundle where build-out.ts's `besideBundle` looks for it -- the widget switches
-    sheets when the page switches block -- and no view switch or `view` URL key left."""
-    import scripts.gen_site_pages as gsp
-
-    monkeypatch.setattr(gsp, "DOCS", tmp_path)
-    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
-    figure = gsp._demo_build_out()
-    blocks = _demo_bundle()["blocks"]
-    assert len(blocks) > 1, "the page shows more than one block; this test would check one"
-    for b in blocks:
-        assert set(b["sheet"]) == {"file", "width", "frame_height", "rows"}
-        assert (tmp_path / "assets" / "demo" / b["sheet"]["file"]).is_file(), b["block_id"]
-    widget = (ROOT / "web" / "src" / "widgets" / "build-out.ts").read_text(encoding="utf-8")
-    assert '"view"' not in widget, "the build-out widget still carries a view URL key"
-    assert "Grey is a new road" in figure and "destroyed" in figure, (
-        "the caption must say what grey is on the escape-time plate")
-
 def test_the_demo_hides_its_table_of_contents(tmp_path: Path,
                                               monkeypatch: pytest.MonkeyPatch) -> None:
     """Owner, 2026-10-28: the Demo page drops its table of contents for the width the build-out
@@ -1225,158 +1180,205 @@ def test_the_demo_names_its_metric_once(demo_body: str) -> None:
         f"build-out.ts spells the metric's name in {spelled}; take it from data-metric-label")
 
 
-def test_the_depth_factor_is_homes_per_frontage_slot(demo_body: str) -> None:
-    """The diagram's reading, which presumes no shape: with s = √(A/n), the block's street holds
-    P/s parcels (frontage slots), and the screen's depth factor √(nA)/P is n ÷ (P/s) exactly, the
-    homes behind each slot. Checked on every block the bundle carries, against its own score, and
-    as the factors table prints it."""
-    for blk in _demo_bundle()["blocks"]:
-        p = blk["proxy"]
-        n, area, perimeter = p["n"], p["area_m2"], p["perimeter_m"]
-        side = (area / n) ** 0.5
-        per_slot = n / (perimeter / side)
-        assert per_slot == pytest.approx((n * area) ** 0.5 / perimeter, rel=1e-12)
-        assert per_slot * n / area == pytest.approx(p["score"], rel=1e-9)
-        assert per_slot / side ** 2 == pytest.approx(n / (perimeter * side), rel=1e-12)
-        assert f"| {per_slot:.1f} |" in demo_body, blk["block_id"]
+def test_the_demo_mounts_the_sites_screen_map_untouched_and_the_build_out(demo_body: str) -> None:
+    """Owner, 2026-10-28: no block switch, no screen-geometry diagram, no close-up. The Demo's
+    screen map is the very figure Screening and Explore show, and the widget carries no close-up
+    or page-following code left to rot."""
+    import scripts.gen_site_pages as gsp
 
-def test_the_factors_table_sets_homes_per_slot_against_each_blocks_peel(demo_body: str) -> None:
-    """Every block's factors are tabulated beside its true depth from the two-stage screen's peel
-    (the bundle's, never typed), and the paragraph under the table sets the two against each
-    other for every block. The typical block is gone (owner, 2026-10-28)."""
+    assert re.findall(r'data-widget="([a-z-]+)"', demo_body) == ["screen-map", "build-out"]
+    assert gsp._screen_map_figure() in demo_body
+    for page in ("explore", "screening", "demo"):
+        body = render_page(page)
+        assert "data-closeup-pad-m" not in body and "data-follow-block" not in body, page
+    web = ROOT / "web" / "src"
+    assert not (web / "render" / "closeup.ts").exists()
+    assert not (web / "widgets" / "screen-geometry.ts").exists()
+    assert not (web / "widgets" / "block-switch.ts").exists()
+    widget = (web / "widgets" / "screen-map.ts").read_text(encoding="utf-8")
+    assert "closeup" not in widget.lower() and "followBlock" not in widget
+    assert "data-demo-block" not in demo_body and "typical" not in demo_body
+
+
+def test_the_demo_rewrites_its_asset_urls_for_its_served_depth() -> None:
+    """docs/demo.md serves at <base>/demo/, url_depth 1: every asset it points at needs one `../`
+    -- the build-out's bundle and fallback sheet, the comparison's plates, the peel figure."""
+    page = render_page("demo")
     bundle = _demo_bundle()
-    for b in bundle["blocks"]:
-        p = b["proxy"]
-        per_slot = p["n"] / (p["perimeter_m"] / (p["area_m2"] / p["n"]) ** 0.5)
-        assert (f"{b['peel']['rings']} rings against {per_slot:.0f} homes per slot on block "
-                f"{b['block_id'].rsplit('_', 1)[1]}") in demo_body
-    assert "typical" not in json_text(bundle) and "typical block" not in demo_body
+    assert 'data-bundle="../assets/demo/demo.json"' in page
+    for name in (bundle["block"]["sheet"]["file"], bundle["comparison"]["ours"]["plate"],
+                 bundle["comparison"]["earlier"]["plate"]):
+        assert f'src="../assets/demo/{name}"' in page, name
+    assert 'src="../assets/multiblock_depth_density/before_depth.png"' in page
+    for attr in ("src", "href", "data-bundle", "data-bundle-capetown", "data-bundle-nairobi"):
+        assert f'{attr}="assets/' not in page, attr
 
-def test_the_fires_are_listed_and_carry_nothing_a_map_could_draw(demo_body: str) -> None:
-    """Owner, 2026-10-28: the fires go on no map, since some reports' streets cannot be placed.
-    Each block's list shows every fire the bundle has near it, a block with none says so, and the
-    bundle gives a fire no coordinates at all, so no widget could draw one without the producer
-    changing first."""
-    blocks = _demo_bundle()["blocks"]
-    fires = [f for b in blocks for f in b["fires"]]
-    assert fires, "no fires in the bundle; this test would check nothing"
-    assert demo_body.count('<p class="sbu-fires__when">') == len(fires)
-    assert demo_body.count("No news reports of fires near this block") == sum(
-        1 for b in blocks if not b["fires"])
-    for b in blocks:
-        for f in b["fires"]:
-            assert set(f) == {"near", "month", "where", "what", "reports"}, f
-            assert f["near"] == b["block_id"]
-            for r in f["reports"]:
-                assert r["url"] in demo_body
 
-def test_the_demo_screen_facts_refuse_a_bundle_that_disagrees_with_the_map(
+def test_the_demo_ships_the_sheet_and_both_plates_and_no_view_switch(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The page block's escape-time sheet (the one view the owner kept) beside the bundle, where
+    build-out.ts's `besideBundle` looks, and the comparison's two plates; no view switch or
+    `view` URL key; the caption says what grey is."""
+    import scripts.gen_site_pages as gsp
+
+    monkeypatch.setattr(gsp, "DOCS", tmp_path)
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
+    figure = gsp._demo_build_out()
+    gsp._demo_compare()
+    bundle = _demo_bundle()
+    assert set(bundle["block"]["sheet"]) == {"file", "width", "frame_height", "rows"}
+    for name in (bundle["block"]["sheet"]["file"], bundle["comparison"]["ours"]["plate"],
+                 bundle["comparison"]["earlier"]["plate"]):
+        assert (tmp_path / "assets" / "demo" / name).is_file(), name
+    widget = (ROOT / "web" / "src" / "widgets" / "build-out.ts").read_text(encoding="utf-8")
+    assert '"view"' not in widget, "the build-out widget still carries a view URL key"
+    assert "Grey is new road" in figure and "destroyed" in figure
+
+
+def test_the_screens_two_factors_are_the_blocks_and_multiply_to_its_score(demo_body: str) -> None:
+    """The intuition the prose gives in two sentences, as key figures: with s = √(A/n), the
+    homes behind each parcel-wide stretch of street are n ÷ (P/s) = √(nA)/P exactly, for any
+    shape, and times homes per area they are the shipped score."""
+    p = _demo_bundle()["block"]["proxy"]
+    n, area, perimeter = p["n"], p["area_m2"], p["perimeter_m"]
+    side = (area / n) ** 0.5
+    per_slot = n / (perimeter / side)
+    assert per_slot == pytest.approx((n * area) ** 0.5 / perimeter, rel=1e-12)
+    assert per_slot * n / area == pytest.approx(p["score"], rel=1e-9)
+    assert (f"<dd>{per_slot:.0f}</dd><dt>homes behind each parcel-wide stretch of street"
+            in demo_body)
+    assert f"<dd>{n / area * 10_000:,.0f}</dd><dt>homes per hectare" in demo_body
+
+
+def test_the_demo_figures_refuse_a_bundle_that_disagrees_with_the_map(
         monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """The figure rows are baked on research/roadless, the map's bundle on main; a re-bake of one
-    alone must fail the build, not publish a pool or a block the map beside it contradicts --
-    checked for the pool and for a block that is not the page's default."""
+    alone must fail the build -- checked for the pool and for the comparison block."""
     import json
 
     import scripts.gen_site_pages as gsp
 
     assert gsp._demo_screen_facts(), "the committed bundles disagree already"
     monkeypatch.setattr(gsp, "DEMO", tmp_path)
-    for spoil in ("pool", "second block's n"):
+    for spoil in ("pool", "comparison's n"):
         bundle = _demo_bundle()
         if spoil == "pool":
             bundle["screen"]["pool"] += 1
         else:
-            bundle["blocks"][1]["proxy"]["n"] += 1
+            bundle["comparison"]["n_buildings"] += 1
         (tmp_path / "demo.json").write_text(json.dumps(bundle), encoding="utf-8")
         with pytest.raises(SystemExit, match="disagrees"):
             gsp._demo_screen_facts()
 
-def test_each_blocks_topology_time_is_measured_or_extrapolated_never_both(
+
+def test_the_peel_figure_reads_its_numbers_and_crops_the_deep_core(
         demo_body: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Topology's time on a block is a tagged union in the bundle, read once (`_topology_of`). An
-    extrapolation leads with its range (owner, 2026-10-28) -- the two anchored estimates in
-    order, whichever is the lower -- and its footnote marker says it was estimated. A measurement
-    (41785's, 2026-10-29) replaces it whole: its own time to three figures, the ratio to the
-    method's, the share its network displaces (the bundle's, from topology.json), a footnote
-    setting it beside the fit, and a marker saying it was measured. An unknown kind refuses to
-    build."""
+    """The slower screen's figure: the flagship run's depth render, its numbers (the deepest ring
+    and the proxy's top) read off that run's meta.json and checked against the bundle, the rank
+    off the bundle; and its magnified detail, a CSS crop at PEEL_DETAIL, still centred on the
+    render's deepest colour -- a re-render that moved the core would otherwise crop pale
+    parcels silently."""
     import json
+
+    from PIL import Image
 
     import scripts.gen_site_pages as gsp
 
-    kinds = set()
-    for b in _demo_bundle()["blocks"]:
-        t = b["topology"]
-        kinds.add(t["kind"])
-        short = b["block_id"].rsplit("_", 1)[1]
-        passages = re.findall(rf'<div class="sbu-demo-block" data-demo-block="{short}"[^>]*>\n'
-                              rf"(.*?)\n</div>", demo_body, flags=re.S)
-        [times] = [x for x in passages if "sbu-demo-times" in x]
-        if t["kind"] == "extrapolated":
-            lo, hi = sorted((t["by_small_s"], t["by_top_s"]))
-            (vlo, ulo), (vhi, uhi) = gsp._span(lo), gsp._span(hi)
-            head = (f"{vlo:.1f} to {vhi:.1f} {uhi}" if ulo == uhi
-                    else f"{ulo.capitalize()} to {uhi}")
-            assert f'<dd>{head}<sup><a href="#topology-time-' in times, b["block_id"]
-            assert 'aria-label="How this was estimated"' in times
-        else:
-            v, unit = gsp._span(t["seconds"])
-            assert f"<dd>{v:.3g} {unit}<sup>" in times, b["block_id"]
-            assert 'aria-label="How this was measured"' in times
-            assert f"displaces {t['displacement']:.0%} of the homes' floor area" in times
-            ours = max(f["seconds"] for f in b["frames"])
-            ratio = float(f"{t['seconds'] / ours:.2g}")
-            assert f"about {ratio:,.0f} times longer" in times
-            assert (f"puts a block this size at about {gsp._duration(t['fit_central_s'])}"
-                    in demo_body)
-    assert kinds == {"extrapolated", "measured"}, f"the committed bundle's kinds are {kinds}"
-    assert "How this was had" not in demo_body
+    meta = json.loads((ROOT / "examples" / "multiblock_depth_density" / "meta.json").read_text())
+    b = _demo_bundle()["block"]
+    assert f"The deepest home is {meta['deepest_depth']:.0f} rings in" in demo_body
+    assert (f"rank {b['peel']['rank']:,} of the shipped screen's top {meta['flagged']:,}"
+            in demo_body)
+    assert f"Ring {meta['deepest_depth']:.0f}, the deepest" in demo_body
+    png = Image.open(ROOT / "examples" / "multiblock_depth_density" / "before_depth.png")
+    cx, cy = gsp.PEEL_DETAIL
+    half = png.width / gsp.PEEL_ZOOM / 4            # the middle half of the magnified window
+    window = png.convert("RGB").crop((round(cx * png.width - half), round(cy * png.height - half),
+                                      round(cx * png.width + half), round(cy * png.height + half)))
+    pixels: list[tuple[int, int, int]] = list(window.getdata())
+    deep = sum(1 for r, g, _ in pixels if r > 150 and g < 90) / len(pixels)
+    assert deep > 0.3, f"the crop's middle is {deep:.0%} deep-red parcels, not the core"
     bundle = _demo_bundle()
-    bundle["blocks"][0]["topology"]["kind"] = "guessed"
+    bundle["block"]["peel"]["rings"] += 1
     (tmp_path / "demo.json").write_text(json.dumps(bundle), encoding="utf-8")
     monkeypatch.setattr(gsp, "DEMO", tmp_path)
+    with pytest.raises(SystemExit, match="disagrees"):
+        gsp._demo_peel()
+
+
+def test_the_fires_are_listed_and_carry_nothing_a_map_could_draw(demo_body: str) -> None:
+    """Owner, 2026-10-28: the fires go on no map, since some reports' streets cannot be placed.
+    The list shows every fire the bundle has, and the bundle gives a fire no coordinates at all,
+    so no widget could draw one without the producer changing first."""
+    fires = _demo_bundle()["block"]["fires"]
+    assert fires, "no fires in the bundle; this test would check nothing"
+    assert demo_body.count('<p class="sbu-fires__when">') == len(fires)
+    for f in fires:
+        assert set(f) == {"month", "where", "what", "reports"}, f
+        for r in f["reports"]:
+            assert r["url"] in demo_body
+
+
+def test_every_big_time_names_its_method_and_says_how_it_was_had(demo_body: str) -> None:
+    """Owner, 2026-10-28: no bare "21 seconds". Every large time in the comparison sits under its
+    method's heading, our method's or the earlier one's; topology's is measured on the
+    comparison block and estimated on the page's (a tagged union read once, `_topology_of`), each
+    with a footnote whose marker says which. The page block's times live here, not under the
+    build-out."""
+    import scripts.gen_site_pages as gsp
+
+    bundle = _demo_bundle()
+    section = demo_body.split("## Our method and the earlier one")[1]
+    pairs = re.findall(r'<p class="sbu-compare__head">([^<]*)</p>\s*'
+                       r'<p class="sbu-compare__time">([^<]*)', section)
+    assert len(pairs) == 4 and demo_body.count('class="sbu-compare__time"') == 4, pairs
+    name = bundle["method"]["name"]
+    assert [h for h, _ in pairs] == [f"Our method: {name}", "Earlier method: topology"] * 2
+    c, b = bundle["comparison"], bundle["block"]
+    assert c["earlier_time"]["kind"] == "measured" and b["topology"]["kind"] == "extrapolated"
+    v, unit = gsp._span(c["earlier_time"]["seconds"])
+    assert pairs[1][1] == f"{v:.3g} {unit}"
+    lo, hi = sorted((b["topology"]["by_small_s"], b["topology"]["by_top_s"]))
+    (vlo, ulo), (vhi, uhi) = gsp._span(lo), gsp._span(hi)
+    assert pairs[3][1] == (f"{vlo:.1f} to {vhi:.1f} {uhi}" if ulo == uhi
+                           else f"{ulo.capitalize()} to {uhi}")
+    assert section.count('aria-label="How this was measured"') == 1
+    assert section.count('aria-label="How this was estimated"') == 1
+    assert f"displaces {c['earlier']['displacement']:.0%} of the floor area" in section
+    ours = gsp._duration(max(f["seconds"] for f in b["frames"]))
+    assert ours not in demo_body.split("## Our method and the earlier one")[0], (
+        "the page block's run time is back under the build-out")
+
+
+def test_an_unknown_topology_kind_refuses_to_build(monkeypatch: pytest.MonkeyPatch,
+                                                   tmp_path: Path) -> None:
+    import json
+    import shutil
+
+    import scripts.gen_site_pages as gsp
+
+    bundle = _demo_bundle()
+    for net in (bundle["comparison"]["ours"], bundle["comparison"]["earlier"]):
+        shutil.copy(ROOT / "examples" / "demo" / net["plate"], tmp_path / net["plate"])
+    monkeypatch.setattr(gsp, "DEMO", tmp_path)
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
+    (tmp_path / "demo.json").write_text(json.dumps(bundle), encoding="utf-8")
+    assert gsp._demo_compare(), "the comparison renders nothing; this test would check nothing"
+    bundle["block"]["topology"]["kind"] = "guessed"
+    (tmp_path / "demo.json").write_text(json.dumps(bundle), encoding="utf-8")
     with pytest.raises(SystemExit, match="unknown topology kind"):
-        gsp._demo_times()
+        gsp._demo_compare()
 
 
-def test_every_per_block_passage_is_there_for_every_block_and_only_the_first_shows(
-        demo_body: str) -> None:
-    """The block switch shows a block's passages by unhiding them (block-switch.ts), so every
-    per-block producer must emit one per block, the default (first) visible and the rest hidden,
-    and the switch's buttons must name exactly the bundle's blocks, in its order."""
-    ids = [b["block_id"].rsplit("_", 1)[1] for b in _demo_bundle()["blocks"]]
-    tags = re.findall(r'<div class="sbu-demo-block" data-demo-block="([^"]+)"( hidden)?>',
-                      demo_body)
-    per_marker = len(tags) // len(ids)
-    assert per_marker >= 5 and len(tags) == per_marker * len(ids), tags
-    assert [t for t, _ in tags] == ids * per_marker
-    assert all((h == "") == (t == ids[0]) for t, h in tags)
-    assert re.findall(r'<button type="button" data-block="([^"]+)"', demo_body) == ids
+def test_the_survey_note_is_one_sentence_and_points_at_the_caveat(demo_body: str) -> None:
+    """The survey's gold does not flag the block though it is plainly informal: said once, in one
+    sentence, with the bake-off's caveat on the survey's age linked."""
+    b = _demo_bundle()["block"]
+    assert not b["proxy"]["informal"] and b["plainly_informal"], "update this test"
+    [note] = re.findall(r"<p>The City's survey[^\n]*</p>", demo_body)
+    assert note.count(". ") == 0 and "plainly informal" in note
+    assert '<a href="../results/bakeoff/#caveats">' in note
 
-
-def test_the_two_screens_ranks_each_say_what_they_rank_by(demo_body: str) -> None:
-    """The shipped screen and the two-stage depth_density screen rank this page's blocks in
-    opposite orders, so each rank names its screen and its field: the proxy over every block, the
-    peel over the proxy's top it peels."""
-    sc = _demo_bundle()["screen"]
-    for b in _demo_bundle()["blocks"]:
-        assert f"<dd>{b['proxy']['rank']:,} of {sc['n_blocks']:,}</dd><dt>its rank by that " \
-               f"score, over every block in Cape Town</dt>" in demo_body
-        assert f"<dd>{b['peel']['rank']:,} of {sc['peel_keep_n']:,}</dd><dt>its rank by " \
-               f"{sc['peel_metric']}, which tessellates and peels the shipped screen's top " in \
-               demo_body
-
-
-def test_the_survey_note_says_the_unflagged_block_is_plainly_informal(demo_body: str) -> None:
-    """Neither block is flagged by the City's survey, though one is plainly informal: the note
-    says so from the bundle, and points at the bake-off's caveat on the survey's age, so a reader
-    does not take the missing gold as evidence."""
-    blocks = _demo_bundle()["blocks"]
-    assert not any(b["proxy"]["informal"] for b in blocks), "a block is now flagged; update"
-    [plain] = [b for b in blocks if b["plainly_informal"]]
-    assert f"block {plain['block_id'].rsplit('_', 1)[1]}, in {plain['place']}, is plainly an " \
-           f"informal settlement" in demo_body
-    assert '<a href="../results/bakeoff/#caveats">' in demo_body
 
 def test_demo_is_generated_gitignored_in_the_nav_and_seen_by_the_widget_guard() -> None:
     """explore.md's three guards, for demo.md: committed, it drifts; outside nav, it is an orphan

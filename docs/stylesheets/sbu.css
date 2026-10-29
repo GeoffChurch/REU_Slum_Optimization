@@ -873,49 +873,6 @@ body,
 
 /* ------------------------------------------------------------------------------ the Demo page */
 
-/* The block switch (web/src/widgets/block-switch.ts): the site's segmented control, as the
-   diagram's pickers are. Hidden in the markup until the widget mounts; the flex here would
-   otherwise outrank the user-agent rule that hides it. */
-.md-typeset .sbu-demo-switch {
-  display: inline-flex;
-  flex-wrap: wrap;
-  padding: 2px;
-  margin: 0 0 0.6rem;
-  border: 1px solid var(--sbu-rule-strong);
-  border-radius: 999px;
-}
-
-.md-typeset .sbu-demo-switch[hidden] {
-  display: none;
-}
-
-.md-typeset .sbu-demo-switch button {
-  font: inherit;
-  font-size: var(--sbu-step--1);
-  font-weight: 700;
-  padding: 0.25rem 1rem;
-  border: 0;
-  border-radius: 999px;
-  background: none;
-  color: var(--sbu-ink-muted);
-  cursor: pointer;
-}
-
-.md-typeset .sbu-demo-switch button span {
-  font-weight: 400;
-}
-
-/* Pressed is the brand red with white on it: 8.92:1 in both schemes (the --sbu-red-fill token). */
-.md-typeset .sbu-demo-switch button[aria-pressed="true"] {
-  background: var(--sbu-red-fill);
-  color: #ffffff;
-}
-
-.md-typeset .sbu-demo-switch button:focus-visible {
-  outline: 3px solid var(--sbu-red-ink);
-  outline-offset: 2px;
-}
-
 /* A sentence the build-out adds when a budget shares an earlier budget's network. */
 .md-typeset .sbu-buildout__same {
   margin: 0;
@@ -927,33 +884,6 @@ body,
 .md-typeset .sbu-demo-place {
   font-size: var(--sbu-step--1);
   color: var(--sbu-ink-muted);
-}
-
-/* ScreenMap's close-up (`data-closeup-pad-m`, the Demo page only): the city map and the close-up
-   side by side where there is room, everything else the widget inserts -- the follow note, the
-   controls, the caption, and the fallback image until it is removed -- across both columns. A grid
-   on the figure itself rather than a wrapper the TypeScript would have to build: the two canvases
-   stay direct children, as the Screening and Explore mounts' one canvas is. */
-.md-typeset figure[data-closeup-pad-m] {
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  gap: 0.6rem 1.4rem;
-  align-items: start;
-}
-
-.md-typeset figure[data-closeup-pad-m] > * {
-  grid-column: 1 / -1;
-  min-width: 0;
-}
-
-.md-typeset figure[data-closeup-pad-m] > canvas {
-  grid-column: auto;
-}
-
-@media screen and (max-width: 44.9375em) {
-  .md-typeset figure[data-closeup-pad-m] > canvas {
-    grid-column: 1 / -1;
-  }
 }
 
 /* The fires near the block: a dated list, the date in the display face beside each report. */
@@ -1001,16 +931,6 @@ body,
   }
 }
 
-/* The two run times: the key-figures row, its long range-first value set a step smaller. */
-.md-typeset .sbu-demo-times {
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-}
-
-.md-typeset .sbu-demo-times dd sup {
-  font-family: var(--sbu-body);
-  font-size: 0.55em;
-}
-
 .md-typeset .sbu-footnote {
   font-size: var(--sbu-step--1);
   line-height: 1.55;
@@ -1021,19 +941,17 @@ body,
 
 /* Material sizes a <figure> to fit its content, and a widget's content is all `width: 100%` --
    so the figure shrinks to its caption's measure (--sbu-measure) and the plate and plots with it.
-   The Demo page's three figures take the column instead; the Demo page hides its table of
-   contents to make that column wide enough for the build-out's plate and plots side by side. */
+   The Demo page's build-out and peel figures take the column instead; the Demo page hides its
+   table of contents to make that column wide enough for the plate and plots side by side. */
 .md-typeset figure[data-widget="build-out"],
-.md-typeset figure[data-widget="screen-geometry"],
-.md-typeset figure[data-closeup-pad-m] {
+.md-typeset figure.sbu-peel {
   width: 100%;
 }
 
 /* Their captions keep the measure but sit at the column's left edge, under the figure they
    describe, rather than centred in a column that is now wider than the measure. */
 .md-typeset figure[data-widget="build-out"] > figcaption,
-.md-typeset figure[data-widget="screen-geometry"] > figcaption,
-.md-typeset figure[data-closeup-pad-m] > figcaption {
+.md-typeset figure.sbu-peel > figcaption {
   margin-left: 0;
 }
 
@@ -1061,9 +979,7 @@ body,
   border-bottom: 1px solid var(--sbu-rule);
 }
 
-.sbu-buildout__budget input:focus-visible,
-.sbu-geometry button:focus-visible,
-.sbu-geometry input:focus-visible {
+.sbu-buildout__budget input:focus-visible {
   outline: 3px solid var(--sbu-red-ink);
   outline-offset: 2px;
 }
@@ -1259,114 +1175,170 @@ body,
   stroke-width: 2.5px;
 }
 
-/* ----------------------------------------------------------- the screen-geometry diagram */
+/* ---------------------------------------------------------------- the Demo's peel figure */
 
-/* Built by web/src/widgets/screen-geometry.ts: a block picker, an outline picker and a buildings
-   slider, the block on a white plate (its street ink is the build-out plate's, drawn for white)
-   with its magnified inset, and the factors read out. */
-.sbu-geometry__controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem 1.5rem;
-  padding: 0.55rem 0;
-  border-top: 1px solid var(--sbu-rule);
-  border-bottom: 1px solid var(--sbu-rule);
+/* The flagship run's depth figure whole, and its deep core magnified beside it: the same image,
+   the detail a CSS crop (gen_site_pages.py's PEEL_DETAIL), with the cropped window marked on the
+   whole. Both on white, like every render on this site. */
+.sbu-peel__views {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 1rem;
+  align-items: start;
 }
 
-.sbu-geometry__group {
-  display: inline-flex;
-  flex-wrap: wrap;
-  padding: 2px;
-  border: 1px solid var(--sbu-rule-strong);
-  border-radius: 999px;
+@media screen and (max-width: 44.9375em) {
+  .sbu-peel__views {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
-.sbu-geometry__group button {
-  font: inherit;
-  font-size: var(--sbu-step--1);
-  font-weight: 700;
-  padding: 0.2rem 0.85rem;
-  border: 0;
-  border-radius: 999px;
-  background: none;
-  color: var(--sbu-ink-muted);
-  cursor: pointer;
-}
-
-/* Pressed is the brand red with white on it: 8.92:1 in both schemes (the --sbu-red-fill token). */
-.sbu-geometry__group button[aria-pressed="true"] {
-  background: var(--sbu-red-fill);
-  color: #ffffff;
-}
-
-.sbu-geometry__slider {
-  display: flex;
-  flex: 1 1 12rem;
-  align-items: center;
-  gap: 0.6rem;
-  font-size: var(--sbu-step--1);
-  font-weight: 700;
-  color: var(--sbu-ink-muted);
-}
-
-.sbu-geometry__slider input {
-  flex: 1 1 auto;
+.sbu-peel__whole,
+.sbu-peel__detail {
+  position: relative;
   min-width: 0;
-  accent-color: var(--sbu-red-fill);
 }
 
-.sbu-geometry__slider output {
-  min-width: 4.5ch;
-  color: var(--sbu-ink);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
+.md-typeset .sbu-peel__whole img {
+  display: block;
+  width: 100%;
+  margin: 0;
 }
 
-.sbu-geometry__plate {
-  margin-top: 0.8rem;
+.sbu-peel__mark {
+  position: absolute;
+  border: 2px solid var(--sbu-ink);
+  box-shadow: 0 0 0 1px #ffffff;
+  pointer-events: none;
+}
+
+.sbu-peel__detail {
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
   background: #ffffff;
   border: 1px solid var(--sbu-rule-strong);
   border-radius: 3px;
 }
 
-.sbu-geometry__plate canvas {
-  display: block;
+.md-typeset .sbu-peel__detail img {
+  position: absolute;
+  max-width: none;
+  height: auto;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
 }
 
-/* On a phone the widget's 2:1 canvas leaves the block a sliver beside its inset; a square one
-   gives it the height. `!important` because the widget sets its aspect inline. */
-@media screen and (max-width: 44.9375em) {
-  .sbu-geometry__plate canvas {
-    aspect-ratio: 1 / 1 !important;
-  }
-}
-
-.md-typeset .sbu-geometry__read {
+.sbu-peel__legend {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
-  margin: 0.4rem 0;
-  border-top: 1px solid var(--sbu-rule);
-  border-bottom: 1px solid var(--sbu-rule);
-}
-
-.md-typeset .sbu-geometry__read > div {
-  padding: 0.35rem 0.5rem 0.35rem 0;
-  min-width: 0;
-}
-
-.md-typeset .sbu-geometry__read dt {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0 0.6rem;
+  align-items: center;
+  max-width: 30rem;
+  margin: 0.6rem 0 0;
   font-size: var(--sbu-step--1);
   color: var(--sbu-ink-muted);
 }
 
-.md-typeset .sbu-geometry__read dd {
+.sbu-peel__ramp {
+  grid-column: 1 / -1;
+  height: 0.7rem;
+  border: 1px solid var(--sbu-rule-strong);
+  border-radius: 2px;
+}
+
+.sbu-peel__legend span:nth-child(3) {
+  grid-column: 3;
+}
+
+/* ------------------------------------------------------- the Demo's methods comparison */
+
+/* Two columns, ours and the earlier method's: each a plain heading, its run time large, the line
+   saying how it was had, and (on the comparison block) its network and scores. */
+.sbu-compare {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 2rem;
+  margin: 1rem 0;
+  padding-top: 0.9rem;
+  border-top: 2px solid var(--sbu-red-fill);
+}
+
+[data-md-color-scheme="slate"] .sbu-compare {
+  border-top-color: var(--sbu-red-ink);
+}
+
+@media screen and (max-width: 44.9375em) {
+  .sbu-compare {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.sbu-compare__col {
+  min-width: 0;
+}
+
+.md-typeset .sbu-compare__head {
+  margin: 0;
+  font-size: var(--sbu-step--1);
+  font-weight: 700;
+  color: var(--sbu-ink-muted);
+}
+
+.md-typeset .sbu-compare__time {
+  margin: 0;
+  font-family: var(--sbu-display);
+  font-size: var(--sbu-step-3);
+  font-weight: 600;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.md-typeset .sbu-compare__time sup {
+  font-family: var(--sbu-body);
+  font-size: 0.45em;
+}
+
+.md-typeset .sbu-compare__sub {
+  margin: 0.1rem 0 0.6rem;
+  font-size: var(--sbu-step--1);
+  color: var(--sbu-ink-muted);
+}
+
+/* Side by side, the two lines under the times are held to two lines' height, so the plates under
+   them start level whichever line wraps. */
+@media screen and (min-width: 45em) {
+  .md-typeset .sbu-compare__sub {
+    min-height: 3.1em;
+  }
+}
+
+.md-typeset .sbu-compare__col img {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0;
+}
+
+.md-typeset .sbu-compare__scores {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0.5rem 0 0;
+}
+
+.md-typeset .sbu-compare__scores dt {
+  font-size: var(--sbu-step--1);
+  color: var(--sbu-ink-muted);
+}
+
+.md-typeset .sbu-compare__scores dd {
   margin: 0;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
 
-.md-typeset .sbu-geometry__note {
+.md-typeset .sbu-compare__key,
+.md-typeset .sbu-compare__block {
   font-size: var(--sbu-step--1);
   color: var(--sbu-ink-muted);
 }
