@@ -96,9 +96,44 @@ test("a plain wheel scrolls the page; only Ctrl or Cmd with it zooms", () => {
   assert.ok(state().get().zoom > before);
 });
 
-test("unzoomed, a one-finger swipe is the page's; zoomed, the widget takes the drag", () => {
+/** A touch event with these fingers down (client points), the way a browser hands one over. */
+function touch(points: [number, number][], changed: [number, number][] = points):
+    { prevented: boolean; preventDefault(): void; touches: unknown; changedTouches: unknown;
+      timeStamp: number } {
+  const list = (ps: [number, number][]): unknown =>
+    Object.assign(ps.map(([x, y]) => ({ clientX: x, clientY: y })), { length: ps.length });
+  return { prevented: false, preventDefault(): void { this.prevented = true; },
+           touches: list(points), changedTouches: list(changed), timeStamp: 0 };
+}
+
+test("one finger on a touch screen never pans, zoomed or not: it is the page's scroll", () => {
   const { frame, state } = mount();
-  assert.equal(frame.style.touchAction, "pan-x pan-y");
-  state().set({ zoom: 2, cx: 0.5, cy: 0.5 });
-  assert.equal(frame.style.touchAction, "none");
+  const zoomed: PeelView = { zoom: 3, cx: 0.5, cy: 0.5 };
+  state().set(zoomed);
+  frame.dispatch("touchstart", touch([[300, 300]]));
+  const moves = [touch([[300, 360]]), touch([[220, 420]])];
+  for (const ev of moves) frame.dispatch("touchmove", ev);
+  frame.dispatch("touchend", touch([], [[220, 420]]));
+  assert.deepEqual(state().get(), zoomed, "a one-finger drag moved the image");
+  assert.ok(moves.every((ev) => !ev.prevented), "a one-finger drag was kept from scrolling");
+  // The browser keeps one finger in both states: nothing in the frame's own style takes it.
+  assert.equal(frame.style.touchAction, undefined);
+  // And it says how to move the image instead.
+  const notice = frame.findAll("div").find((d) => d.textContent.includes("two fingers"));
+  assert.equal(notice?.dataset.shown, "yes");
+});
+
+test("two fingers on a touch screen pan the image, and keep the page still", () => {
+  const { frame, state } = mount();
+  state().set({ zoom: 3, cx: 0.5, cy: 0.5 });
+  frame.dispatch("touchstart", touch([[300, 300], [400, 300]]));
+  const move = touch([[240, 300], [340, 300]]);          // both 60 px left: a pan, no pinch
+  frame.dispatch("touchmove", move);
+  const v = state().get();
+  assert.ok(move.prevented, "a two-finger gesture also scrolled the page");
+  assert.ok(Math.abs(v.zoom - 3) < 1e-9);
+  assert.ok(Math.abs(v.cx - (0.5 + 60 / WIDTH / 3)) < 1e-9, `cx ${v.cx}`);
+  // Spreading them pinches the zoom up.
+  frame.dispatch("touchmove", touch([[200, 300], [380, 300]]));
+  assert.ok(state().get().zoom > 3);
 });

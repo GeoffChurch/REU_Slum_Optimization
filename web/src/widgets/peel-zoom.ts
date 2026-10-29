@@ -8,13 +8,14 @@ import { runOrReport } from "../dom/error.js";
 import { observeSize } from "../dom/resize.js";
 
 /** The Demo's peel figure as one zoomable frame (owner, 2026-10-29): the flagship run's depth
- * render, whole at first; pinch, Ctrl/⌘-wheel, the +/− buttons or a double tap/click zoom in, a
- * drag pans once zoomed, and a button resets. The view is URL state, so a link -- or the page's QR code -- carries a zoomed
- * view.
+ * render, whole at first; a two-finger pinch, Ctrl/⌘-wheel, the +/− buttons or a double
+ * tap/click zoom in, two fingers or a mouse drag pan once zoomed, and a button resets. The view is
+ * URL state, so a link -- or the page's QR code -- carries a zoomed view.
  *
- * Nothing hijacks the page's scroll: a plain wheel and a one-finger swipe on an unzoomed frame
- * scroll the page as anywhere else (the frame's `touch-action` lets the browser have them); only a
- * deliberate gesture -- a modified wheel, two fingers, a drag on a zoomed image -- moves the view.
+ * Nothing hijacks the page's scroll, as on a map: a plain wheel, and one finger on a touch screen
+ * whether zoomed or not, scroll the page as anywhere else; a one-finger drag only says, briefly,
+ * "Use two fingers to move the image". The view moves for a deliberate gesture: a Ctrl/⌘-wheel,
+ * two fingers (pan and pinch), or a mouse or pen drag on a zoomed image.
  *
  * No library: pointer events and one CSS transform on the image. The page's generator writes the
  * frame, the image (marked skip-lightbox: a lightbox would fight the gestures) and the image's
@@ -76,6 +77,25 @@ const WHEEL = 0.002;         // zoom per pixel of a modified wheel's delta, expo
 const TAP_MS = 300;          // two taps this close make a double tap
 const TAP_PX = 24;           // ... landing this close together
 const DRAG_PX = 4;           // a pointer that moves this far is a drag, not a tap
+const NOTICE_MS = 1500;      // how long the two-finger notice stays before it fades
+
+interface Point { x: number; y: number }
+
+/** Two fingers moving from `from` to `to` (client points; `rect` the frame's box): the image
+ * follows their midpoint and scales by the change in their spread, about that midpoint. */
+export function twoFingers(v: PeelView, from: readonly [Point, Point], to: readonly [Point, Point],
+                           rect: { left: number; top: number; width: number; height: number },
+                           maxZoom: number): PeelView {
+  const mid = (p: readonly [Point, Point]): Point =>
+    ({ x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 });
+  const spread = (p: readonly [Point, Point]): number =>
+    Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+  const [m0, m1] = [mid(from), mid(to)];
+  const panned = panBy(v, (m1.x - m0.x) / rect.width, (m1.y - m0.y) / rect.height, maxZoom);
+  const factor = spread(from) > 0 ? spread(to) / spread(from) : 1;
+  return zoomAt(panned, factor, (m1.x - rect.left) / rect.width, (m1.y - rect.top) / rect.height,
+                maxZoom);
+}
 
 function button(cls: string, text: string, label: string): HTMLButtonElement {
   const b = document.createElement("button");
@@ -119,8 +139,7 @@ export const peelZoom: Widget<PeelView> = (host, makeState) => {
   const render = (): void => {
     const v = state.get();
     img.style.transform = transformOf(v);
-    // Unzoomed, a one-finger swipe is the page's to scroll; zoomed, a drag pans the image.
-    frame.style.touchAction = v.zoom > 1 ? "none" : "pan-x pan-y";
+
     frame.dataset.zoomed = v.zoom > 1 ? "yes" : "no";
     zoomIn.disabled = v.zoom >= maxZoom() - 1e-9;
     zoomOut.disabled = v.zoom <= 1;
@@ -141,51 +160,89 @@ export const peelZoom: Widget<PeelView> = (host, makeState) => {
     set(zoomAt(state.get(), Math.exp(-ev.deltaY * WHEEL), fx, fy, maxZoom()));
   }, { passive: false });
 
-  // Pointers down on the frame: one pans (zoomed) or taps; two pinch.
-  const down = new Map<number, { x: number; y: number }>();
-  let moved = false;
+  /** A tap at a client point: the second of two close in time and place zooms in there. */
   let lastTap: { t: number; x: number; y: number } | null = null;
-  frame.addEventListener("pointerdown", (ev: PointerEvent) => {
-    down.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
-    if (down.size === 1) moved = false;
-    if (state.get().zoom > 1 || down.size === 2) frame.setPointerCapture(ev.pointerId);
-  });
-  frame.addEventListener("pointermove", (ev: PointerEvent) => {
-    const prev = down.get(ev.pointerId);
-    if (prev === undefined) return;
-    const r = frame.getBoundingClientRect();
-    if (down.size === 2) {
-      const [a, b] = [...down.values()];
-      const other = a === prev ? b! : a!;
-      const before = Math.hypot(prev.x - other.x, prev.y - other.y);
-      const after = Math.hypot(ev.clientX - other.x, ev.clientY - other.y);
-      const [fx, fy] = at((ev.clientX + other.x) / 2, (ev.clientY + other.y) / 2);
-      if (before > 0) set(zoomAt(state.get(), after / before, fx, fy, maxZoom()));
-      moved = true;
-    } else if (state.get().zoom > 1) {
-      set(panBy(state.get(), (ev.clientX - prev.x) / r.width, (ev.clientY - prev.y) / r.height,
-                maxZoom()));
-    }
-    if (Math.hypot(ev.clientX - prev.x, ev.clientY - prev.y) > DRAG_PX) moved = true;
-    down.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
-  });
-  const up = (ev: PointerEvent): void => {
-    const was = down.size;
-    down.delete(ev.pointerId);
-    if (ev.type !== "pointerup" || was !== 1 || moved) return;
-    // A tap: the second of two close in time and place zooms in there.
-    const t = ev.timeStamp;
+  const tap = (t: number, x: number, y: number): void => {
     if (lastTap !== null && t - lastTap.t < TAP_MS
-        && Math.hypot(ev.clientX - lastTap.x, ev.clientY - lastTap.y) < TAP_PX) {
-      const [fx, fy] = at(ev.clientX, ev.clientY);
+        && Math.hypot(x - lastTap.x, y - lastTap.y) < TAP_PX) {
+      const [fx, fy] = at(x, y);
       set(zoomAt(state.get(), STEP, fx, fy, maxZoom()));
       lastTap = null;
     } else {
-      lastTap = { t, x: ev.clientX, y: ev.clientY };
+      lastTap = { t, x, y };
     }
   };
-  frame.addEventListener("pointerup", up);
-  frame.addEventListener("pointercancel", up);
+
+  // ---- mouse and pen: drag to pan once zoomed; a double click zooms in.
+  let drag: { id: number; x: number; y: number; moved: boolean } | null = null;
+  frame.addEventListener("pointerdown", (ev: PointerEvent) => {
+    if (ev.pointerType === "touch") return;          // touch is the touch handlers' (below)
+    drag = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, moved: false };
+    if (state.get().zoom > 1) frame.setPointerCapture(ev.pointerId);
+  });
+  frame.addEventListener("pointermove", (ev: PointerEvent) => {
+    if (drag === null || ev.pointerId !== drag.id) return;
+    const r = frame.getBoundingClientRect();
+    if (state.get().zoom > 1) {
+      set(panBy(state.get(), (ev.clientX - drag.x) / r.width, (ev.clientY - drag.y) / r.height,
+                maxZoom()));
+    }
+    if (Math.hypot(ev.clientX - drag.x, ev.clientY - drag.y) > DRAG_PX) drag.moved = true;
+    drag = { ...drag, x: ev.clientX, y: ev.clientY };
+  });
+  const release = (ev: PointerEvent): void => {
+    if (drag === null || ev.pointerId !== drag.id) return;
+    if (ev.type === "pointerup" && !drag.moved) tap(ev.timeStamp, ev.clientX, ev.clientY);
+    drag = null;
+  };
+  frame.addEventListener("pointerup", release);
+  frame.addEventListener("pointercancel", release);
+
+  // ---- touch, as on a map: one finger always scrolls the page (the frame's touch-action leaves
+  // it to the browser, and nothing here cancels it), two fingers pan and pinch. A one-finger drag
+  // on the image says so, briefly.
+  const notice = document.createElement("div");
+  notice.className = "sbu-peel__notice";
+  notice.textContent = "Use two fingers to move the image";
+  notice.setAttribute("aria-hidden", "true");
+  frame.append(notice);
+  let noticeTimer: number | null = null;
+  const showNotice = (): void => {
+    notice.dataset.shown = "yes";
+    if (noticeTimer !== null) clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => { notice.dataset.shown = "no"; },
+                             NOTICE_MS) as unknown as number;
+  };
+  let pair: [Point, Point] | null = null;
+  let one: { x: number; y: number; moved: boolean; noticed: boolean } | null = null;
+  const points = (list: TouchList): Point[] =>
+    Array.from({ length: list.length }, (_, i) => ({ x: list[i]!.clientX, y: list[i]!.clientY }));
+  frame.addEventListener("touchstart", (ev: TouchEvent) => {
+    const p = points(ev.touches);
+    pair = p.length === 2 ? [p[0]!, p[1]!] : null;
+    one = p.length === 1 ? { ...p[0]!, moved: false, noticed: false } : null;
+  });
+  frame.addEventListener("touchmove", (ev: TouchEvent) => {
+    const p = points(ev.touches);
+    if (p.length === 2 && pair !== null) {
+      // Two fingers are the image's: neither the page's scroll nor its zoom.
+      ev.preventDefault();
+      const r = frame.getBoundingClientRect();
+      set(twoFingers(state.get(), pair, [p[0]!, p[1]!], r, maxZoom()));
+      pair = [p[0]!, p[1]!];
+    } else if (p.length === 1 && one !== null) {
+      if (Math.hypot(p[0]!.x - one.x, p[0]!.y - one.y) > DRAG_PX) one.moved = true;
+      if (one.moved && !one.noticed) { one.noticed = true; showNotice(); }
+    }
+  }, { passive: false });
+  frame.addEventListener("touchend", (ev: TouchEvent) => {
+    if (one !== null && !one.moved && ev.touches.length === 0) {
+      const [c] = points(ev.changedTouches);
+      if (c !== undefined) tap(ev.timeStamp, c.x, c.y);
+    }
+    pair = null;
+    one = null;
+  });
 
   observeSize(frame, (size) => runOrReport(host, LABEL, () => {
     const first = width === 0;

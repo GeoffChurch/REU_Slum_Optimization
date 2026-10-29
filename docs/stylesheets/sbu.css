@@ -1283,10 +1283,10 @@ body,
 /* ---------------------------------------------------------------- the Demo's peel figure */
 
 /* The flagship run's depth figure in one zoomable frame (web/src/widgets/peel-zoom.ts): the
-   image fills the frame and is moved by one transform. On white, like every render on
-   this site. Unzoomed, the browser keeps one-finger swipes (it scrolls the page); the widget takes
-   them over only once zoomed in. No transition: a gesture follows the finger, and nothing animates
-   for a reader who asked for reduced motion. */
+   image fills the frame and is moved by one transform. On white, like every render on this site.
+   As on a map, one finger is always the browser's (it scrolls the page) and two are the
+   widget's: `pan-x pan-y` leaves the page's pinch-zoom to the widget too. No transition on the
+   image: a gesture follows the fingers. */
 .sbu-peel__frame {
   position: relative;
   overflow: hidden;
@@ -1300,6 +1300,35 @@ body,
 
 .sbu-peel__frame[data-zoomed="yes"] {
   cursor: grab;
+}
+
+/* "Use two fingers to move the image": shown over the frame on a one-finger drag, then faded --
+   at once, with no fade, for a reader who asked for reduced motion. */
+.sbu-peel__notice {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.55);
+  color: #ffffff;
+  font-size: var(--sbu-step-0);
+  font-weight: 700;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.sbu-peel__notice[data-shown="yes"] {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sbu-peel__notice {
+    transition: none;
+  }
 }
 
 .md-typeset .sbu-peel__frame img {
