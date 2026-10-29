@@ -66,6 +66,8 @@ from pyproj import Transformer  # noqa: E402
 from scipy.interpolate import griddata  # noqa: E402
 from scipy.ndimage import gaussian_filter  # noqa: E402
 
+from reblock import render as reblock_render  # noqa: E402  (the context layer, the depth figure)
+
 cp, rnd = nw.cp, render.rnd
 PLATES = HERE / "plates"                 # git-ignored: everything this script writes
 FRAMES = PLATES / "frames"               # full-size plates: FRAMES/<block>/<stem>_<frame>.webp
@@ -534,35 +536,104 @@ DEFAULT = 5              # the slider's opening position (D 0.05)
 
 # ------------------------------------------------------------------ plates
 
+class Context(NamedTuple):
+    """What surrounds a block in its plates, as the Explore page draws it (reblock.render's context
+    layer, region-grow's `hood`): the neighbouring blocks' outlines and their buildings as points,
+    in the block's own coordinates. From the screen's source (CONTEXT_SOURCE: the Cape Town
+    blocks parquet and its city-wide building points, both cached); no building tile is fetched
+    for a neighbour, and none is tessellated -- the points are what a neighbour's parcels would be
+    grown from, at a fraction of the drawing."""
+    outlines: Any            # GeoSeries of neighbouring blocks' polygons
+    points: Any              # GeoSeries of their buildings' points
+
+
+# The plates' frame grows by this share of the block's larger side on every side, the same for
+# every view: enough to show what surrounds a block that fills its own box (5810 nearly does).
+CONTEXT_MARGIN = 0.05
+
+
 class World(NamedTuple):
-    """What every plate of a block shares: the frame, the buildings, the block's edge and polygon,
-    the plain baseline's escape times and the escape-time scale."""
+    """What every plate of a block shares: the frame, its extent with the context margin (`lim`,
+    drawn at the baseline's pixels per metre: `nx` x `ny`), the buildings, the block's edge and
+    polygon, what surrounds it, the plain baseline's escape times and the escape-time scale."""
     fr: Any
+    lim: tuple[float, float, float, float]
+    nx: int
+    ny: int
     polys: np.ndarray
     centroids: np.ndarray
     edge: Any
     inside: Any
+    context: Context
     u_plain: np.ndarray
     scale: float             # the plain baseline's 99th percentile: 100% on the plate's scale
 
 
-def world(site: Site) -> World:
+def context_source() -> Any:
+    """The screen's source, which holds every Cape Town block and building point."""
+    from hydra import compose, initialize_config_dir  # noqa: PLC0415
+
+    from reblock.presets import load_stages  # noqa: PLC0415
+
+    with initialize_config_dir(version_base=None, config_dir=str(cp.ROOT / "conf")):
+        cfg = compose(config_name="compare_config",
+                      overrides=[f"+example={PEEL_EXAMPLE}", "data=capetown_full"])
+    return load_stages(cfg).source
+
+
+def context_of(src: Any, bid: str, boundary: Any,
+               lim: tuple[float, float, float, float]) -> Context:
+    """The blocks and building points around `bid` inside `lim` (its own coordinates). Those are
+    the source's UTM less the block's lower-left corner, which is checked: the block's extent there
+    must be its `boundary`'s here."""
+    blocks = src.block_geometries()
+    own = blocks.geometry[blocks.block_id == bid]
+    [poly] = list(own)
+    ox, oy, ex, ey = poly.bounds
+    bx0, by0, bx1, by1 = boundary.bounds
+    if max(abs(bx0), abs(by0), abs(ex - ox - bx1), abs(ey - oy - by1)) > 0.5:
+        raise SystemExit(f"{bid}: its baseline's frame is not its UTM less its corner")
+    x0, x1, y0, y1 = lim
+    box = (x0 + ox, y0 + oy, x1 + ox, y1 + oy)
+    near = blocks.cx[box[0]:box[2], box[1]:box[3]]
+    near = near[near.block_id != bid]
+    pts = src.building_geometries(box).geometry.centroid
+    pts = pts[~pts.within(poly)]
+    return Context(outlines=near.geometry.translate(-ox, -oy).reset_index(drop=True),
+                   points=pts.translate(-ox, -oy).reset_index(drop=True))
+
+
+def escape_scale(site: Site) -> float:
+    """The block's escape-time scale: its plain baseline's 99th-percentile home, 100% on every
+    plate."""
+    u = np.load(site.data / "baseline_times.npz")["u"]
+    return float(np.percentile(u[np.isfinite(u)], 99))
+
+
+def world(site: Site, src: Any) -> World:
     b = np.load(site.data / "baseline.npz", allow_pickle=True)          # our own file: WKB
     polys = shapely.from_wkb(b["polys"])
     [boundary] = shapely.from_wkb(b["boundary"])
     u = np.load(site.data / "baseline_times.npz")["u"]
     c = shapely.centroid(polys)
-    return World(fr=render.frame_from(b), polys=polys,
+    fr = render.frame_from(b)
+    x0, x1, y0, y1 = fr.lim
+    m = CONTEXT_MARGIN * max(x1 - x0, y1 - y0)
+    lim = (x0 - m, x1 + m, y0 - m, y1 + m)
+    ppm = fr.frame.nx / (x1 - x0)                         # the baseline's pixels per metre
+    return World(fr=fr, lim=lim, nx=round((lim[1] - lim[0]) * ppm),
+                 ny=round((lim[3] - lim[2]) * ppm), polys=polys,
                  centroids=np.column_stack([shapely.get_x(c), shapely.get_y(c)]),
-                 edge=render.edge(b), inside=boundary, u_plain=u,
-                 scale=float(np.percentile(u[np.isfinite(u)], 99)))
+                 edge=render.edge(b), inside=boundary,
+                 context=context_of(src, site.bid, boundary, lim), u_plain=u,
+                 scale=escape_scale(site))
 
 
 def field(w: World, u: np.ndarray, ok: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """The homes' escape times (`u` where `ok`) as a field on an ISO_GRID grid over the plate:
     linear between the centroids, smoothed by ISO_SMOOTH (normalized, so the block's edge does
     not pull it toward 0), nan outside the block."""
-    x0, x1, y0, y1 = w.fr.lim
+    x0, x1, y0, y1 = w.lim
     xs = np.arange(x0, x1, ISO_GRID)
     ys = np.arange(y0, y1, ISO_GRID)
     X, Y = np.meshgrid(xs, ys)
@@ -594,10 +665,12 @@ def homes_plate(w: World, u: np.ndarray, *, c: np.ndarray, corridor,  # type: ig
     the block's scale (nan: no home, outlined), the damage by `c` (the GHOST encoding above), the
     corridor in render.ROAD, and the isochrones every ISO_STEP of the scale, dark lines on a white
     halo."""
-    f = w.fr.frame
-    fig = plt.figure(figsize=(f.nx / 100, f.ny / 100), dpi=100)
+    fig = plt.figure(figsize=(w.nx / 100, w.ny / 100), dpi=100)
     ax = fig.add_axes((0, 0, 1, 1))
     norm = mcolors.Normalize(0.0, w.scale, clip=True)
+    # What surrounds the block, first and palest, as the Explore page draws it: never competing
+    # with the escape-time colours over it.
+    draw_context(ax, w.context, lw=CONTEXT_LW)
     gone = c >= 1.0
     partly = (c > 0.0) & ~gone
     has = np.isfinite(u) & ~gone
@@ -617,13 +690,31 @@ def homes_plate(w: World, u: np.ndarray, *, c: np.ndarray, corridor,  # type: ig
     cs = ax.contour(X, Y, Z, levels=levels, colors=rnd.STREET, linewidths=1.1)
     cs.set_path_effects([pe.Stroke(linewidth=2.8, foreground="white", alpha=0.85), pe.Normal()])
     render.draw_edge(ax, w.fr, w.edge)
-    ax.set_xlim(w.fr.lim[0], w.fr.lim[1])
-    ax.set_ylim(w.fr.lim[2], w.fr.lim[3])
+    ax.set_xlim(w.lim[0], w.lim[1])
+    ax.set_ylim(w.lim[2], w.lim[3])
     ax.set_axis_off()
     tmp = render.scratch(out)
     fig.savefig(tmp, dpi=100, facecolor="white")
     plt.close(fig)
     render.small(tmp, out)
+
+
+# px at the plate's 100 dpi: the context outlines' width, about region-grow's `hood_lw` on screen.
+CONTEXT_LW = 0.5
+# The neighbours' building discs' opacity: paler than reblock.render's 0.6, since a small block's
+# plate is drawn close enough for its neighbours' 2 m discs to read as large dots.
+CONTEXT_PT_ALPHA = 0.35
+
+
+def draw_context(ax: Any, ctx: Context, *, lw: float) -> None:
+    """The neighbours' outlines in reblock.render's context grey, and their buildings as its
+    pale discs (the geographic radius it gives them)."""
+    if len(ctx.outlines):
+        ctx.outlines.plot(ax=ax, facecolor="none", edgecolor=reblock_render._CONTEXT_OUTLINE,
+                          linewidth=lw)
+    if len(ctx.points):
+        ctx.points.buffer(reblock_render._POINT_RADIUS_M).plot(
+            ax=ax, color=reblock_render._CONTEXT_PT, alpha=CONTEXT_PT_ALPHA, linewidth=0)
 
 
 def plate_name(site: Site, f: str) -> Path:
@@ -658,16 +749,66 @@ def stored_plates(site: Site, w: World, key: str, run: str):  # type: ignore[no-
 def plates() -> None:
     """The page block's plain baseline and every frame of the method on it; the compared block's
     grids, both methods', all into FRAMES."""
+    src = context_source()
     site = Site.of(PAGE.bid)
     plate_name(site, "000").parent.mkdir(parents=True, exist_ok=True)
-    w = world(site)
+    w = world(site, src)
     homes_plate(w, w.u_plain, c=np.zeros(len(w.polys)), corridor=None,
                 out=plate_name(site, "000"))
     method_plates(site, w)
+    peel_plate(src, PAGE.bid, PEEL_PLATE)
     site = Site.of(COMPARED.bid)
-    w = world(site)
+    w = world(site, src)
     for g in (COMPARED.ours, COMPARED.earlier):
         g.plates(site, w)
+
+
+# The page block's peel figure: the screen's own tessellation and peel depths, drawn as
+# reblock.render draws them, with the context layer, square, at the zoom's resolution.
+PEEL_PLATE = PLATES / "peel.webp"
+
+
+def peel_plate(src: Any, bid: str, out: Path) -> None:
+    """The two-stage screen's measure of `bid` (its source's tessellation of the block, and the
+    k-complexity peel's depth per parcel: both the screen's own derivations, read from their
+    caches) as reblock.render.render_before draws it, square, with the block's surroundings inside
+    the frame (CONTEXT_MARGIN); its depth and parcel count beside it, for `site` to check against
+    the example's meta.json."""
+    from reblock.contracts import Proposal  # noqa: PLC0415
+    from reblock.eval.kcomplexity import KComplexityEval  # noqa: PLC0415
+
+    [block] = src.restricted([bid]).region().blocks
+    depth = KComplexityEval().score(block, Proposal(
+        block_id=block.block_id, crs=block.crs, roads=None, edges=None, proposal_id="no_roads",
+        method="no_roads", params={})).fields["access_before"]
+    x0, y0, x1, y1 = block.parcels.total_bounds
+    half = max(x1 - x0, y1 - y0) / 2 * (1 + 2 * CONTEXT_MARGIN)
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    frame = (cx - half, cy - half, cx + half, cy + half)
+    blocks = src.block_geometries(frame)
+    own = blocks[blocks.block_id == bid].geometry.iloc[0]
+    pts = src.building_geometries(frame)
+    pts = pts[~pts.geometry.centroid.within(own)]
+    fig = reblock_render.render_before(
+        block, depth, vmax=float(depth.max()), field="depth",
+        context_outlines=blocks[blocks.block_id != bid],
+        context_points=pts.set_geometry(pts.geometry.centroid), frame=frame)
+    tmp = out.with_suffix(".png")
+    reblock_render.save_render(fig, tmp)
+    plt.close(fig)
+    im = Image.open(tmp)
+    # On white, as the site shows every render, and square, as its zoom frame is.
+    flat = Image.new("RGB", im.size, "white")
+    flat.paste(im, mask=im.convert("RGBA").split()[3])
+    side = min(flat.size)
+    flat.crop((0, 0, side, side)).save(out, quality=PEEL_QUALITY, method=6)
+    out.with_suffix(".json").write_text(json.dumps(
+        {"block": bid, "deepest": int(depth.max()), "parcels": int(len(block.parcels)),
+         "px": side}) + "\n")
+    print(out, side, "px", f"{out.stat().st_size / 1e6:.1f} MB", flush=True)
+
+
+PEEL_QUALITY = 88            # lossy WebP's, for the peel: the parcels' grey lines stay crisp
 
 
 # ------------------------------------------------------------------ the screens
@@ -817,10 +958,14 @@ class DemoProxy:
 class DemoPeel:
     """The block under the two-stage depth_density screen: its score (`rings`, its peel depth --
     rings of parcels from the street to its deepest home -- times buildings per m²) and its rank
-    among the blocks that screen scores (DemoScreen.peel_keep_n, the proxy's top)."""
+    among the blocks that screen scores (DemoScreen.peel_keep_n, the proxy's top); and its
+    figure (`image`, beside demo.json: the screen's tessellation shaded by peel depth, with what
+    surrounds the block; `native_px` square), which the page's zoom frame caps its zoom by."""
     score: float
     rank: int
     rings: int
+    image: str
+    native_px: int
 
 
 @dataclass(frozen=True)
@@ -1199,6 +1344,18 @@ def proxy_of(sc: Screen, bid: str) -> DemoProxy:
                      informal=bool(b["informal"][i]))
 
 
+def peel_image(out: Path, rings: int, parcels: int) -> str:
+    """The peel figure (PEEL_PLATE, `plates`) into `out`, refused unless the depth and parcel
+    count it was drawn with are the screen's (`rings`, from its score) and the block's."""
+    info = json.loads(PEEL_PLATE.with_suffix(".json").read_text())
+    if (info["block"], info["deepest"], info["parcels"]) != (PAGE.bid, rings, parcels):
+        raise SystemExit(f"{PEEL_PLATE}: drawn for {info}, the page has {PAGE.bid} at {rings} "
+                         f"rings over {parcels} parcels -- re-run `plates`")
+    name = f"peel_{PAGE.bid}.webp"
+    shutil.copyfile(PEEL_PLATE, out / name)
+    return name
+
+
 def page_block(sc: Screen, pl: Peeled, out: Path, enc: DemoEncoding) -> DemoBlock:
     """Everything the page shows about PAGE; its build-out (one series, the method) into `out`."""
     site = Site.of(PAGE.bid)
@@ -1211,7 +1368,7 @@ def page_block(sc: Screen, pl: Peeled, out: Path, enc: DemoEncoding) -> DemoBloc
         raise AssertionError(f"{PAGE.bid}: depth_density {peel_score} over n/A is not a whole "
                              f"number of rings ({rings}); the bundle's n or A is not the screen's")
     buildout = write_buildout(out, DemoBuildOut(
-        block_id=PAGE.bid, escape_scale=round(world(site).scale, 1), budgets=PAGE_BUDGETS,
+        block_id=PAGE.bid, escape_scale=round(escape_scale(site), 1), budgets=PAGE_BUDGETS,
         default_step=DEFAULT,
         series=(method_series(site, PAGE_BUDGETS, f"Our method: {METHOD.name}", out),),
         plots=("displacement", "road"), encoding=enc))
@@ -1222,18 +1379,19 @@ def page_block(sc: Screen, pl: Peeled, out: Path, enc: DemoEncoding) -> DemoBloc
         proxy=proxy,
         peel=DemoPeel(score=float(peel_score),
                       rank=1 + sum(1 for v in pl.scores.values() if v > peel_score),
-                      rings=round(rings)),
+                      rings=round(rings), image=peel_image(out, round(rings), proxy.n),
+                      native_px=json.loads(PEEL_PLATE.with_suffix(".json").read_text())["px"]),
         fires=FIRES, buildout=buildout, topology=PAGE.topology.of(site, proxy.n))
 
 
-def grid_series(site: Site, w: World, g: Grid, budgets: tuple[float, ...], *, method: str,
+def grid_series(site: Site, scale: float, g: Grid, budgets: tuple[float, ...], *, method: str,
                 label: str, run: DemoRecorded | DemoTopologyMeasured, out: Path) -> DemoSeries:
     """The method's grid on the compared block at `budgets` (0 the plain baseline, then the
     table's grid, then any whole networks' displacements past it), its sheet into `out`."""
     t = g.table(site)
-    if abs(t["escape_scale"] - w.scale) > 1e-6 * w.scale:
+    if abs(t["escape_scale"] - scale) > 1e-6 * scale:
         raise SystemExit(f"{g.key}: its escape times are on scale {t['escape_scale']}, the "
-                         f"block's baseline {w.scale}")
+                         f"block's baseline {scale}")
     by_budget = {r["budget"]: r for r in t["rows"]}
     fs = ["000"] + [r["frame"] for r in t["rows"] if r["status"] == "frame"]
     if t["whole"]["frame"] not in fs:
@@ -1269,6 +1427,9 @@ def grid_series(site: Site, w: World, g: Grid, budgets: tuple[float, ...], *, me
                       run=run, cells=tuple(cells))
 
 
+# The face-off's opening budget (owner 2026-10-29): early on, where the two methods' first roads
+# differ most.
+COMPARE_OPENS = 0.06
 # px: a compared plate's width -- two sit side by side, each at most about half the page's
 COMPARE_WIDTH = 600
 
@@ -1276,27 +1437,24 @@ COMPARE_WIDTH = 600
 def comparison(sc: Screen, out: Path, enc: DemoEncoding) -> DemoComparison:
     """The methods compared on COMPARED under one slider, their sheets and the build-out file
     into `out`. The budgets are the grid's (both methods' tables share it), then topology's whole
-    network's displacement, where topology ends; the slider opens on the last budget both methods
-    meet."""
+    network's displacement, where topology ends; the slider opens on COMPARE_OPENS."""
     site = Site.of(COMPARED.bid)
-    w = world(site)
+    scale = escape_scale(site)
     proxy = proxy_of(sc, COMPARED.bid)
     whole = COMPARED.topology.of(site, proxy.n)
     ours_t, earlier_t = COMPARED.ours.table(site), COMPARED.earlier.table(site)
     if ours_t["grid"] != earlier_t["grid"]:
         raise SystemExit(f"{COMPARED.bid}: the two methods' grids differ")
     budgets = (0.0, *ours_t["grid"], earlier_t["whole"]["D"])
-    ours = grid_series(site, w, COMPARED.ours, budgets, method=METHOD.name,
+    ours = grid_series(site, scale, COMPARED.ours, budgets, method=METHOD.name,
                        label=f"Our method: {METHOD.name}",
                        run=DemoRecorded(kind="recorded", seconds=ours_t["whole"]["seconds"],
                                         machine=METHOD.runtime.machine), out=out)
-    earlier = grid_series(site, w, COMPARED.earlier, budgets, method="topology",
+    earlier = grid_series(site, scale, COMPARED.earlier, budgets, method="topology",
                           label="Earlier method: topology (our optimized port)", run=whole, out=out)
-    both = [k for k, (a, b) in enumerate(zip(ours.cells, earlier.cells, strict=True))
-            if isinstance(a, DemoMet) and isinstance(b, DemoMet) and k > 0]
     buildout = write_buildout(out, DemoBuildOut(
-        block_id=COMPARED.bid, escape_scale=round(w.scale, 1), budgets=budgets,
-        default_step=both[-1], series=(ours, earlier),
+        block_id=COMPARED.bid, escape_scale=round(scale, 1), budgets=budgets,
+        default_step=budgets.index(COMPARE_OPENS), series=(ours, earlier),
         # The face-off adds run time: how fast each method gets there is half the comparison.
         plots=("displacement", "road", "time"), encoding=enc))
     lat, lon = centroid_wgs84(COMPARED.bid)
@@ -1309,8 +1467,6 @@ def comparison(sc: Screen, out: Path, enc: DemoEncoding) -> DemoComparison:
 def site(root: Path) -> None:
     """The Demo page's bundle (SITE_DIR) and its declaration (SITE_DTS) into the main checkout
     `root`."""
-    from reblock import render as reblock_render  # noqa: PLC0415  (the depth figure's colouring)
-
     if not (root / "mkdocs.yml").is_file() or not (root / "web" / "src").is_dir():
         raise SystemExit(f"{root} is not a checkout of the site (no mkdocs.yml or web/src)")
     out = root / SITE_DIR
@@ -1325,6 +1481,15 @@ def site(root: Path) -> None:
         iso_step=ISO_STEP, road_width_m=road_simp.ROAD_W,
         gone_share=GONE_SHARE, ghost_fill=GHOST_FILL, ghost_edge=GHOST_EDGE,
         depth_ramp=tuple(mcolors.to_hex(depth(t)) for t in np.linspace(0, 1, 9)))
+    # The peel figure is drawn here, not taken from the depth_density example (whose render has no
+    # surroundings): it must show that example's numbers.
+    meta = json.loads((root / "examples" / "multiblock_depth_density" / "meta.json").read_text())
+    drawn = json.loads(PEEL_PLATE.with_suffix(".json").read_text())
+    if (drawn["deepest"], drawn["parcels"]) != (int(meta["deepest_depth"]),
+                                                int(meta["region_parcels"])):
+        raise SystemExit(f"{PEEL_PLATE}: {drawn['deepest']} rings over {drawn['parcels']} parcels, "
+                         f"the example's meta.json {meta['deepest_depth']} over "
+                         f"{meta['region_parcels']}")
     block, compared = page_block(sc, pl, out, enc), comparison(sc, out, enc)
     floor = sc.floor
     bundle = DemoBundle(
