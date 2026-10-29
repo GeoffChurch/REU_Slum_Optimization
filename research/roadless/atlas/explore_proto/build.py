@@ -257,10 +257,12 @@ class DemoTopologyExtrapolated:
 
 @dataclass(frozen=True)
 class DemoTopologyMeasured:
-    """The original topology algorithm run on the block itself, once, at `alpha`, on one thread
-    (atlas/topology_run.py): its wall time, where it ran in words, and the share of the homes'
-    floor area its network displaces (it builds until every parcel touches a road); beside it the
-    six-run fit's time at this block's size (`fit_central_s`, from `fit_runs` runs), which the
+    """Topology (our port) run on the block itself at `alpha`, on one thread, watched as it built
+    (atlas/topology_order.py): its wall time, where it ran in words, and the share of the homes'
+    floor area its network displaces (it builds until every parcel touches a road); where the
+    time went -- setup (`setup_s`), the first and second roads' landing times since the start,
+    how many roads came after them and the median time each took; and beside it the six-run
+    fit's time at this block's size (`fit_central_s`, from `fit_runs` runs), which the
     measurement checks as a further point."""
     kind: Literal["measured"]
     alpha: int
@@ -268,6 +270,11 @@ class DemoTopologyMeasured:
     seconds: float
     machine: str
     displacement: float
+    setup_s: float
+    first_road_s: float
+    second_road_s: float
+    n_rest: int
+    rest_median_s: float
     fit_central_s: float
     fit_runs: int
 
@@ -310,25 +317,37 @@ class Extrapolated:
 
 @dataclass(frozen=True)
 class Measured:
-    """atlas/topology_run.py's run on the block (Site.kept/topology.json, its roads scored there
-    too), set beside the fit through `runs` at the block's size; refuses a run whose building
-    count or alpha is not the page's, or whose roads were never scored."""
+    """The watched run on the block (atlas/topology_order.py: Site.kept/topology_built.json, and
+    its segments in build order, topology_built_roads.parquet), whose frames the comparison
+    shows, so its headline time and every frame's are one run's; set beside the fit through `runs`
+    at the block's size. Its network is the kept run's (atlas/topology_run.py, topology.json,
+    which scored it): a run that is not, or whose building count or alpha is not the page's, is
+    refused."""
     runs: tuple[Timed, ...]
     alpha: int
 
     def of(self, site: Site, n: int) -> DemoTopologyMeasured:
-        info = json.loads((site.kept / "topology.json").read_text())
-        if info["n_buildings"] != n or info["alpha"] != self.alpha:
-            raise SystemExit(f"{site.bid}: topology.json ran {info['n_buildings']} buildings at "
-                             f"alpha {info['alpha']}, the page {n} at {self.alpha}")
-        if "D" not in info:
-            raise SystemExit(f"{site.bid}: topology.json's roads are not scored (topology_run.py "
-                             f"score)")
+        kept = json.loads((site.kept / "topology.json").read_text())
+        run = json.loads((site.kept / "topology_built.json").read_text())
+        if not run["same_as_kept"]:
+            raise SystemExit(f"{site.bid}: topology_built.json's network is not the kept run's")
+        if kept["n_buildings"] != n or run["alpha"] != self.alpha:
+            raise SystemExit(f"{site.bid}: topology ran {kept['n_buildings']} buildings at alpha "
+                             f"{run['alpha']}, the page {n} at {self.alpha}")
+        # Each road's landing time since the start: its path's last segment's.
+        roads = pd.read_parquet(site.kept / "topology_built_roads.parquet", columns=["path", "t"])
+        land = roads.groupby("path")["t"].max().sort_index().to_numpy()
+        if len(land) != run["n_paths"] or abs(land[0] - run["first_road_s"]) > 1e-3:
+            raise SystemExit(f"{site.bid}: topology_built_roads.parquet disagrees with its record")
+        each = np.diff(land)
         # The CPU as our method's machine names it, so a reader sees the same chip both times.
-        cpu = str(info["cpu"]).replace("(R)", "")
+        cpu = str(run["cpu"]).replace("(R)", "")
         return DemoTopologyMeasured(
-            kind="measured", alpha=self.alpha, n_buildings=n, seconds=float(info["wall_s"]),
-            machine=f"one thread on a workstation CPU ({cpu})", displacement=float(info["D"]),
+            kind="measured", alpha=self.alpha, n_buildings=n, seconds=float(run["wall_s"]),
+            machine=f"one thread on a workstation CPU ({cpu})", displacement=float(kept["D"]),
+            setup_s=round(float(run["greedy_start_s"]), 1),
+            first_road_s=round(float(land[0]), 1), second_road_s=round(float(land[1]), 1),
+            n_rest=len(land) - 2, rest_median_s=round(float(np.median(each[1:])), 2),
             fit_central_s=extrapolated(self.runs, self.alpha, n).central_s,
             fit_runs=len(self.runs))
 
@@ -392,12 +411,11 @@ class Grid:
     committed per-budget table in the Site's kept files (`<key>_grid.json`: per budget a frame,
     a repeat of an earlier budget's, or stopped short of it; and the whole network), and the
     frames' corridors, damage and escape times in its networks (`<key>_grid.npz`,
-    `<key>_grid_times.npz`). `stem` names its plates; `order` says, in words, the order its
-    roads are cut in (OWN_ORDER, or the one the table was cut with); `stops_because` is what the
-    page says when the method has stopped below a budget."""
+    `<key>_grid_times.npz`), cut in the order the method built its roads, each frame with the
+    run's time to it. `stem` names its plates; `stops_because` is what the page says when the
+    method has stopped below a budget."""
     key: str
     stem: str
-    order: str
     stops_because: str
 
     def table(self, site: Site) -> dict[str, Any]:
@@ -434,17 +452,15 @@ PAGE = Block("ZAF.9.3.1_1_5810", "the Bloekombos and Wallacedene area of Kraaifo
 # The shipped screen's top block, and small enough (638 buildings) for topology to finish: 1.88 h
 # on one thread (atlas/topology_run.py, 2026-10-29). Philippi: OpenStreetMap's suburb at its
 # centre (Nominatim's reverse lookup, 2026-10-28); about 165 m across, so a closer zoom.
-# A method that builds one road at a time is cut in that order.
-OWN_ORDER = "the order it built its roads"
-# Each method cut into the shortest prefixes reaching every budget (atlas/buildout.py, 2026-10-29):
-# Our method in its own build order, topology -- which keeps none -- in common.canonical_order.
+# Each method cut into the shortest prefixes of its own build order reaching every budget
+# (atlas/buildout.py): topology's as a watched re-run built it (atlas/topology_order.py,
+# 2026-10-29; the same 546 segments as the kept run), which flatters it more at low budgets than
+# a standard drainage-first order did.
 COMPARED = Compared(
     "ZAF.9.3.1_1_41785", "Philippi", zoom=18, topology=MEASURED,
-    ours=Grid(f"{PATHS[:-len('.D0.15')]}.D0.91.v2", stem="loop", order=OWN_ORDER,
+    ours=Grid(f"{PATHS[:-len('.D0.15')]}.D0.91.v2", stem="loop",
               stops_because="no loop left to add"),
-    earlier=Grid("topology.a10.s0.w7.canonical", stem="topology",
-                 order=("a standard order, since it keeps none of its own: drainage first, "
-                        "then each road after the roads that join it to the street"),
+    earlier=Grid("topology.a10.s0.w7.built", stem="topology",
                  stops_because="its network is complete"))
 
 
@@ -778,13 +794,12 @@ class DemoPeel:
 class DemoStep:
     """A network the build-out shows: the share of the homes' floor area it displaces, its new
     road, its L_P (`permeability`), the conductance it adds (m² of open ground), the method's run
-    time to it (`seconds`; None where the method has no time to a stretch of its build order --
-    topology builds its whole network at once), and its frame's row in the series' sheet."""
+    time to it since the run began (`seconds`), and its frame's row in the series' sheet."""
     displacement: float
     road_km: float
     permeability: float
     conductance_m2: float
-    seconds: float | None
+    seconds: float
     row: int
 
 
@@ -828,12 +843,11 @@ class DemoSheet:
 
 @dataclass(frozen=True)
 class DemoSeries:
-    """One method on the build-out: its name, the label the page heads it with, the order its
-    roads are cut in for the budgets (`order`, in words), its plates, its whole run time
-    (recorded, or measured for topology), and what it shows at each of the build-out's budgets."""
+    """One method on the build-out: its name, the label the page heads it with, its plates, its
+    whole run time (recorded, or measured for topology), and what it shows at each of the
+    build-out's budgets, each cut in the order the method built its roads."""
     method: str
     label: str
-    order: str
     sheet: DemoSheet
     run: DemoRecorded | DemoTopologyMeasured
     cells: tuple[DemoMet | DemoShort, ...]
@@ -1128,8 +1142,8 @@ def method_series(site: Site, budgets: tuple[float, ...], label: str,
                   out: Path) -> DemoSeries:
     """The method on the block at `budgets`, its sheet into `out`."""
     cells, fs = cells_of(site, budgets)
-    whole = max(c.step.seconds for c in cells if c.step.seconds is not None)
-    return DemoSeries(method=METHOD.name, label=label, order=OWN_ORDER,
+    whole = max(c.step.seconds for c in cells)
+    return DemoSeries(method=METHOD.name, label=label,
                       sheet=sheet_of([plate_name(site, f) for f in fs],
                                      out / f"{METHOD.stem}_{site.bid}.webp", WIDTH),
                       run=DemoRecorded(kind="recorded", seconds=whole,
@@ -1195,7 +1209,7 @@ def grid_series(site: Site, w: World, g: Grid, budgets: tuple[float, ...], *, me
 
     def step(r: dict[str, Any]) -> DemoStep:
         return DemoStep(displacement=r["D"], road_km=r["km"], permeability=r["L_P"],
-                        conductance_m2=float(r["C"]), seconds=r["seconds"],
+                        conductance_m2=float(r["C"]), seconds=float(r["seconds"]),
                         row=fs.index(r["frame"]))
 
     whole = step(t["whole"])
@@ -1217,7 +1231,7 @@ def grid_series(site: Site, w: World, g: Grid, budgets: tuple[float, ...], *, me
                     cells.append(DemoShort(kind="short", step=whole, why=g.stops_because))
                 case other:
                     raise SystemExit(f"{g.key}: unknown status {other!r} at {b}")
-    return DemoSeries(method=method, label=label, order=g.order,
+    return DemoSeries(method=method, label=label,
                       sheet=sheet_of([g.plate(site, f) for f in fs],
                                      out / f"{g.stem}_{site.bid}.webp", COMPARE_WIDTH),
                       run=run, cells=tuple(cells))
