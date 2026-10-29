@@ -175,13 +175,13 @@ test("a stopped method shows its whole network and says why, short of the budget
   }
 });
 
-test("a series with no time to its steps says its time is the whole run's", async () => {
+test("each method's Built in is its run's time to the network shown", async () => {
   const { host } = await compared();
-  const i = COMPARED.series.findIndex((s) => s.cells.some((c) => c.step.seconds === null));
-  assert.ok(i >= 0, "topology's prefixes carry no seconds");
-  const k = COMPARED.series[i]!.cells.findIndex((c) => c.step.seconds === null);
+  const k = 3;
   step(host, k);
-  assert.equal(readouts(host)[i]![3], "whole run only");
+  COMPARED.series.forEach((s, i) => {
+    assert.equal(readouts(host)[i]![3], duration(s.cells[k]!.step.seconds), s.method);
+  });
 });
 
 test("a network shared by several budgets is one dot, and the note says whose it is",

@@ -292,8 +292,7 @@ function column(s: DemoSeries, src: string, metric: string, headed: boolean,
   const col = div("sbu-buildout__col");
   if (headed) {
     const how = s.run.kind === "recorded" ? "recorded" : "measured";
-    // The heading's time is the whole run's; a series with no time to its steps (topology,
-    // whose prefixes are not its own build order) says so in its readouts.
+    // The heading's time is the whole run's; each step's "Built in" is the same run's time to it.
     col.append(para("sbu-buildout__head", s.label),
                para("sbu-buildout__time", duration(s.run.seconds)),
                para("sbu-buildout__sub", `whole run, ${how}, ${s.run.machine}`));
@@ -465,9 +464,8 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
       dDisp!.textContent = pct(f.displacement, 1);
       dRoad!.textContent = km(f.road_km);
       dPerm!.textContent = pct(f.permeability, 1);
-      // A series with no time to its steps (topology: its prefixes are not its own build order)
-      // has only its whole run's, in its heading.
-      dTime!.textContent = f.seconds === null ? "whole run only" : duration(f.seconds);
+      // Since the run began, never an average: a run's early roads can take most of it.
+      dTime!.textContent = duration(f.seconds);
       c.note.textContent = cellNote(b.budgets, c.series, k);
     });
     // Each item's words held together (no-break spaces), so a narrow bar wraps between items

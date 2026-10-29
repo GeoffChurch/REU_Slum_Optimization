@@ -150,9 +150,14 @@
    "kind": "measured",
    "alpha": 10,
    "n_buildings": 638,
-   "seconds": 6762.479218959808,
+   "seconds": 6818.354460954666,
    "machine": "one thread on a workstation CPU (Intel Xeon w7-3455)",
    "displacement": 0.9066202515723024,
+   "setup_s": 3.4,
+   "first_road_s": 2534.9,
+   "second_road_s": 5674.2,
+   "n_rest": 285,
+   "rest_median_s": 0.63,
    "fit_central_s": 7553.2562910126035,
    "fit_runs": 6
   }

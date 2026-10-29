@@ -66,10 +66,12 @@ export interface DemoTopologyExtrapolated {
   small_exponent: number;
   top_exponent: number;
 }
-/** The original topology algorithm run on the block itself, once, at `alpha`, on one thread
- * (atlas/topology_run.py): its wall time, where it ran in words, and the share of the homes'
- * floor area its network displaces (it builds until every parcel touches a road); beside it the
- * six-run fit's time at this block's size (`fit_central_s`, from `fit_runs` runs), which the
+/** Topology (our port) run on the block itself at `alpha`, on one thread, watched as it built
+ * (atlas/topology_order.py): its wall time, where it ran in words, and the share of the homes'
+ * floor area its network displaces (it builds until every parcel touches a road); where the
+ * time went -- setup (`setup_s`), the first and second roads' landing times since the start,
+ * how many roads came after them and the median time each took; and beside it the six-run
+ * fit's time at this block's size (`fit_central_s`, from `fit_runs` runs), which the
  * measurement checks as a further point. */
 export interface DemoTopologyMeasured {
   kind: "measured";
@@ -78,6 +80,11 @@ export interface DemoTopologyMeasured {
   seconds: number;
   machine: string;
   displacement: number;
+  setup_s: number;
+  first_road_s: number;
+  second_road_s: number;
+  n_rest: number;
+  rest_median_s: number;
   fit_central_s: number;
   fit_runs: number;
 }
@@ -203,14 +210,13 @@ export interface DemoRecorded {
 }
 /** A network the build-out shows: the share of the homes' floor area it displaces, its new
  * road, its L_P (`permeability`), the conductance it adds (m² of open ground), the method's run
- * time to it (`seconds`; None where the method has no time to a stretch of its build order --
- * topology builds its whole network at once), and its frame's row in the series' sheet. */
+ * time to it since the run began (`seconds`), and its frame's row in the series' sheet. */
 export interface DemoStep {
   displacement: number;
   road_km: number;
   permeability: number;
   conductance_m2: number;
-  seconds: number | null;
+  seconds: number;
   row: number;
 }
 /** The budget met: the shortest stretch of the method's build order that displaces at least
@@ -226,13 +232,12 @@ export interface DemoShort {
   step: DemoStep;
   why: string;
 }
-/** One method on the build-out: its name, the label the page heads it with, the order its
- * roads are cut in for the budgets (`order`, in words), its plates, its whole run time
- * (recorded, or measured for topology), and what it shows at each of the build-out's budgets. */
+/** One method on the build-out: its name, the label the page heads it with, its plates, its
+ * whole run time (recorded, or measured for topology), and what it shows at each of the
+ * build-out's budgets, each cut in the order the method built its roads. */
 export interface DemoSeries {
   method: string;
   label: string;
-  order: string;
   sheet: DemoSheet;
   run: DemoRecorded | DemoTopologyMeasured;
   cells: (DemoMet | DemoShort)[];

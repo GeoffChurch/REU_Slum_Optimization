@@ -1271,7 +1271,8 @@ def test_the_comparison_leads_with_what_the_build_out_shows(demo_body: str) -> N
     assert f"topology needs {earlier['cells'][-1]['step']['displacement']:.0%}" in takeaway.group(1)
     short = next(c for c in ours["cells"] if c["kind"] == "short")
     assert f"stops at {short['step']['displacement']:.0%}, with {short['why']}" in section
-    assert ours["order"] in section and earlier["order"] in section
+    assert "each in the order it built its roads" in section
+    assert "whole run only" not in section and "drainage" not in section
 
 
 def test_the_screens_two_factors_are_the_blocks_and_multiply_to_its_score(demo_body: str) -> None:
@@ -1441,6 +1442,25 @@ def test_the_peel_caption_reads_in_either_layout(demo_body: str) -> None:
                         flags=re.S)
     assert caption is not None and "magnified" in caption.group(1)
     assert not re.search(r"(right|left|below|above)", caption.group(1)), caption.group(1)
+
+
+def test_the_measured_note_says_where_topologys_time_went(demo_body: str) -> None:
+    """Topology's "Built in" sits at its first road's time through the low budgets; the footnote
+    on its measured time says why, every number from the bundle's run record."""
+    import scripts.gen_site_pages as gsp
+
+    t = _demo_bundle()["comparison"]["topology"]
+    section = demo_body.split("## Our method and the earlier one")[1]
+    k = re.search(r'aria-label="How this was measured">(\d+)<', section)
+    assert k is not None
+    note = re.search(rf'id="topology-note-{k.group(1)}"><sup>\d+</sup> (.*?)</p>', section)
+    assert note is not None
+    for fact in (f"about {gsp._duration(t['fit_central_s'])}", f"{t['setup_s']:.1f} seconds",
+                 f"first lands at {gsp._duration(t['first_road_s'])}",
+                 f"({t['first_road_s'] / t['seconds']:.0%} of the run)",
+                 f"second at {gsp._duration(t['second_road_s'])}",
+                 f"other {t['n_rest']:,} take a median {t['rest_median_s']:.2f} seconds"):
+        assert fact in note.group(1), fact
 
 
 def test_an_unknown_topology_kind_refuses_to_build(monkeypatch: pytest.MonkeyPatch,

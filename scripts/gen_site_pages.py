@@ -1861,6 +1861,11 @@ class _TopologyTime(Protocol):
 class _Measured:
     seconds: float
     machine: str
+    setup_s: float
+    first_road_s: float
+    second_road_s: float
+    n_rest: int
+    rest_median_s: float
     fit_central_s: float
     fit_runs: int
     how: str = "How this was measured"   # a label, not a result: the class's own fact
@@ -1876,9 +1881,14 @@ class _Measured:
                               f"as long")
 
     def note(self) -> str:
+        # The run's own clock, so the page can say why "Built in" sits still for the first frames.
         return (f"Measured once on this block. The power law fitted to "
                 f"{_COUNT_WORDS[self.fit_runs].lower()} timed runs on other blocks predicted "
-                f"about {_duration(self.fit_central_s)}.")
+                f"about {_duration(self.fit_central_s)}. Nearly the whole run goes to finding its "
+                f"first two roads: after {self.setup_s:.1f} seconds of setup, the first lands at "
+                f"{_duration(self.first_road_s)} ({self.first_road_s / self.seconds:.0%} of the "
+                f"run) and the second at {_duration(self.second_road_s)}; the other "
+                f"{self.n_rest:,} take a median {self.rest_median_s:.2f} seconds each.")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1913,7 +1923,9 @@ def _topology_of(t: dict[str, Any]) -> _TopologyTime:
     default: a kind this generator does not know is a bundle it cannot state honestly."""
     match t["kind"]:
         case "measured":
-            return _Measured(seconds=t["seconds"], machine=t["machine"],
+            return _Measured(seconds=t["seconds"], machine=t["machine"], setup_s=t["setup_s"],
+                             first_road_s=t["first_road_s"], second_road_s=t["second_road_s"],
+                             n_rest=t["n_rest"], rest_median_s=t["rest_median_s"],
                              fit_central_s=t["fit_central_s"], fit_runs=t["fit_runs"])
         case "extrapolated":
             return _Extrapolated(t=t)
@@ -2067,9 +2079,8 @@ def _demo_compare() -> str:
         f"Topology, run as {port}, builds until every parcel touches a road, which here displaces "
         f"{e_whole['displacement']:.0%} of the floor area, in {timed(topology, t_head)}; "
         f"{name} stops at {o_whole['displacement']:.0%}, with {html.escape(why)}, in "
-        f"{_duration(ours['run']['seconds'])}. Below, both are cut at the same budgets: {name} in "
-        f"{html.escape(ours['order'])}; topology in {html.escape(earlier['order'])}, so only its "
-        f"whole run is timed.</p>\n")
+        f"{_duration(ours['run']['seconds'])}. Below, both are cut at the same budgets, each in "
+        f"the order it built its roads, with its run's time to each network.</p>\n")
     # The takeaway: the first of our networks to save as much as topology's whole one, if any.
     target = e_whole["permeability"]
     reach = next((x["step"] for x in ours["cells"] if x["step"]["permeability"] >= target), None)
