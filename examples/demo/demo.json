@@ -18,7 +18,9 @@
   "peel": {
    "score": 0.27533850017616884,
    "rank": 1,
-   "rings": 24
+   "rings": 24,
+   "image": "peel_ZAF.9.3.1_1_5810.webp",
+   "native_px": 3696
   },
   "fires": [
    {

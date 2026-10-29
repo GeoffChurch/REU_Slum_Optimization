@@ -1201,6 +1201,17 @@ body,
   min-width: 0;
 }
 
+/* Side by side, each plate at two-thirds of its column's width -- so two-thirds of the height it
+   would have, the aspect kept -- centred over its readouts (owner, 2026-10-29). Both plates share
+   one frame, so the two columns' readouts and plots still line up. Not on a phone: there each
+   column is already a third of the screen, and two-thirds of it is a 110 px plate. */
+@media screen and (min-width: 45em) {
+  .sbu-buildout--multi .sbu-buildout__plate {
+    width: 66.667%;
+    margin-inline: auto;
+  }
+}
+
 .md-typeset .sbu-buildout__head {
   margin: 0;
   font-size: var(--sbu-step--1);
@@ -1287,9 +1298,14 @@ body,
    As on a map, one finger is always the browser's (it scrolls the page) and two are the
    widget's: `pan-x pan-y` leaves the page's pinch-zoom to the widget too. No transition on the
    image: a gesture follows the fingers. */
+/* Two-thirds of the column's width, centred: two-thirds of the height a full-width square would
+   take (owner, 2026-10-29). The zoom cap is the image's native pixels over this width, so the
+   narrower frame zooms further. */
 .sbu-peel__frame {
   position: relative;
   overflow: hidden;
+  width: 66.667%;
+  margin-inline: auto;
   aspect-ratio: 1 / 1;
   background: #ffffff;
   border: 1px solid var(--sbu-rule-strong);

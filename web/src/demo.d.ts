@@ -15,11 +15,15 @@ export interface DemoProxy {
 }
 /** The block under the two-stage depth_density screen: its score (`rings`, its peel depth --
  * rings of parcels from the street to its deepest home -- times buildings per m²) and its rank
- * among the blocks that screen scores (DemoScreen.peel_keep_n, the proxy's top). */
+ * among the blocks that screen scores (DemoScreen.peel_keep_n, the proxy's top); and its
+ * figure (`image`, beside demo.json: the screen's tessellation shaded by peel depth, with what
+ * surrounds the block; `native_px` square), which the page's zoom frame caps its zoom by. */
 export interface DemoPeel {
   score: number;
   rank: number;
   rings: number;
+  image: string;
+  native_px: number;
 }
 /** One news report: its outlet, its date (ISO), its headline (None where the page cites
  * none) and its URL. */

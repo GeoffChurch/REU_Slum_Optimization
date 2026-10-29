@@ -1223,7 +1223,7 @@ def test_the_demo_rewrites_its_asset_urls_for_its_served_depth() -> None:
         assert f'data-bundle="../assets/demo/{name}"' in page, name
         sheet = _demo_buildout(name)["series"][0]["sheet"]["file"]
         assert f'src="../assets/demo/{sheet}"' in page, sheet
-    assert 'src="../assets/multiblock_depth_density/before_depth.png"' in page
+    assert f'src="../assets/demo/{bundle["block"]["peel"]["image"]}"' in page
     for attr in ("src", "href", "data-bundle", "data-bundle-capetown", "data-bundle-nairobi"):
         assert f'{attr}="assets/' not in page, attr
 
@@ -1335,7 +1335,8 @@ def test_the_peel_figure_reads_its_numbers_in_one_zoomable_frame(
     assert (f"rank {b['peel']['rank']:,} of the shipped screen's top {meta['flagged']:,}"
             in demo_body)
     assert f"Ring {meta['deepest_depth']:.0f}, the deepest" in demo_body
-    png = Image.open(ROOT / "examples" / "multiblock_depth_density" / "before_depth.png")
+    png = Image.open(ROOT / "examples" / "demo" / b["peel"]["image"])
+    assert png.width == png.height == b["peel"]["native_px"], "the zoom frame is square"
     figure = re.search(r'<figure class="sbu-peel"([^>]*)>(.*?)</figure>', demo_body, flags=re.S)
     assert figure is not None
     assert f'data-widget="peel-zoom" data-native-px="{png.width}"' in figure.group(1)
@@ -1346,9 +1347,62 @@ def test_the_peel_figure_reads_its_numbers_in_one_zoomable_frame(
     bundle = _demo_bundle()
     bundle["block"]["peel"]["rings"] += 1
     (tmp_path / "demo.json").write_text(json.dumps(bundle), encoding="utf-8")
+    image = bundle["block"]["peel"]["image"]
+    (tmp_path / image).write_bytes((ROOT / "examples" / "demo" / image).read_bytes())
     monkeypatch.setattr(gsp, "DEMO", tmp_path)
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
     with pytest.raises(SystemExit, match="disagrees"):
         gsp._demo_peel()
+
+
+# The context layer's colours (reblock.render's _CONTEXT_OUTLINE and _CONTEXT_PT, as the Explore
+# page draws neighbours): light, neutral greys. A pixel counts as context when it is one -- grey
+# (its channels within a few levels of each other), lighter than any line the block's own content
+# draws, and not white.
+def _context_share(im: Any) -> float:
+    """The share of `im`'s outer border strip (4% of its side: inside the 5% context margin, so
+    outside the block) that is context grey."""
+    rgb = im.convert("RGB")
+    w, h = rgb.size
+    k = max(2, round(0.04 * min(w, h)))
+    strips = [rgb.crop((0, 0, w, k)), rgb.crop((0, h - k, w, h)), rgb.crop((0, 0, k, h)),
+              rgb.crop((w - k, 0, w, h))]
+    import numpy as np
+
+    px = np.concatenate([np.asarray(strip, dtype=np.int16).reshape(-1, 3) for strip in strips])
+    lo, hi = px.min(axis=1), px.max(axis=1)
+    return float(((hi - lo <= 12) & (lo >= 150) & (lo <= 245)).mean())
+
+
+def _demo_views() -> list[tuple[str, Any]]:
+    """Every block-level view the Demo draws: each build-out sheet's first frame (the block with
+    no new road), cropped from its sprite sheet, and the peel figure."""
+    from PIL import Image
+
+    out: list[tuple[str, Any]] = []
+    d = _demo_bundle()
+    for key in ("block", "comparison"):
+        for s in _demo_buildout(d[key]["buildout"])["series"]:
+            sheet = s["sheet"]
+            im = Image.open(ROOT / "examples" / "demo" / sheet["file"])
+            out.append((sheet["file"], im.crop((0, 0, sheet["width"], sheet["frame_height"]))))
+    out.append((d["block"]["peel"]["image"],
+                Image.open(ROOT / "examples" / "demo" / d["block"]["peel"]["image"])))
+    return out
+
+
+def test_every_block_level_view_shows_what_surrounds_the_block() -> None:
+    """Owner, 2026-10-29: the four block-level views -- 5810's build-out, the two 41785 plates,
+    the peel figure -- show the neighbouring blocks and their buildings in the Explore page's
+    pale grey. Each view's border strip, outside the block, holds some of that grey; without the
+    layer it is white."""
+    views = _demo_views()
+    assert len(views) == 4
+    for name, im in views:
+        share = _context_share(im)
+        # 6.5-22% on the views drawn with it; at most 1.8% on the same views without it (main
+        # before 2026-10-29, where a block's own edge and isochrones reach the strip).
+        assert share > 0.04, f"{name}: {share:.2%} of its margin is context grey"
 
 
 def test_the_fires_are_listed_and_carry_nothing_a_map_could_draw(demo_body: str) -> None:
@@ -1397,6 +1451,24 @@ def test_the_demo_plots_displacement_and_road_and_the_faceoff_run_time(demo_body
             "page plots displacement and road length.") in demo_body
     widget = (ROOT / "web" / "src" / "widgets" / "build-out.ts").read_text(encoding="utf-8")
     assert "onductance" not in widget
+
+
+def test_the_comparison_links_its_block_on_google_maps(demo_body: str) -> None:
+    """Owner, 2026-10-29: the comparison's block gets the same "See it in Google Maps" link as the
+    page's own, from the bundle (its centroid, zoom 18, satellite)."""
+    c = _demo_bundle()["comparison"]
+    section = demo_body.split("## Our method and the earlier one")[1]
+    assert "basemap=satellite" in c["maps_url"] and "zoom=18" in c["maps_url"]
+    link = (f'<a href="{c["maps_url"].replace("&", "&amp;")}" target="_blank" rel="noopener">'
+            f"See it in Google Maps&nbsp;↗</a>")
+    assert link in section.split("</p>")[0], "no Maps link in the comparison's lead"
+
+
+def test_the_faceoff_opens_at_the_six_percent_budget() -> None:
+    """Owner, 2026-10-29: the face-off opens at 6% displaced (`?compare=6` on the grid's 0, 1%,
+    ...), set in the bundle, so the widget writes no key there and the fallback shows it too."""
+    bo = _demo_buildout(_demo_bundle()["comparison"]["buildout"])
+    assert bo["budgets"][bo["default_step"]] == 0.06 and bo["default_step"] == 6
 
 
 def test_the_runtime_table_times_every_method_on_both_blocks(demo_body: str) -> None:

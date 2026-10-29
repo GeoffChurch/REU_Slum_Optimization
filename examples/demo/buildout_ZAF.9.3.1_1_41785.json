@@ -35,7 +35,7 @@
   0.9,
   0.9066
  ],
- "default_step": 26,
+ "default_step": 6,
  "series": [
   {
    "method": "Shock Reblock",
@@ -43,7 +43,7 @@
    "sheet": {
     "file": "loop_ZAF.9.3.1_1_41785.webp",
     "width": 600,
-    "frame_height": 828,
+    "frame_height": 801,
     "frames": 15,
     "columns": 1
    },
@@ -386,7 +386,7 @@
    "sheet": {
     "file": "topology_ZAF.9.3.1_1_41785.webp",
     "width": 600,
-    "frame_height": 828,
+    "frame_height": 801,
     "frames": 32,
     "columns": 2
    },

@@ -126,10 +126,12 @@ interface PlotSpec {
 
 type PlotKind = DemoBuildOut["plots"][number];
 
-/** Run time's ticks: round human units, a decade or so apart. */
+/** Run time's ticks: round human units, a decade or so apart, and 2 h -- so an axis whose
+ * longest run is under two hours ends there, not at ten. The axis runs from the last tick at or
+ * below the shortest time to the first at or above the longest, so no series is clipped. */
 const TIME_TICKS: readonly (readonly [number, string])[] = [
-  [1, "1 s"], [10, "10 s"], [60, "1 min"], [600, "10 min"], [3600, "1 h"], [36000, "10 h"],
-  [86400, "1 day"], [864000, "10 days"],
+  [1, "1 s"], [10, "10 s"], [60, "1 min"], [600, "10 min"], [3600, "1 h"], [7200, "2 h"],
+  [36000, "10 h"], [86400, "1 day"], [864000, "10 days"],
 ];
 
 /** The x axis from 0 to a nice step past the largest x (`axisTo`). */

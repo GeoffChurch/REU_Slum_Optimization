@@ -1752,18 +1752,18 @@ def _demo_survey_note() -> str:
 def _demo_peel() -> str:
     """The slower screen's real measure on the block: the flagship run's depth figure (one Voronoi
     parcel per building, shaded by its ring counted in from the street) in one zoomable frame
-    (`web/src/widgets/peel-zoom.ts`) and a legend from ring one to the deepest. The depth and
-    the proxy's top are read off the run's meta.json, the rank off the bundle, and the two are
-    checked to agree.
+    (`web/src/widgets/peel-zoom.ts`) and a legend from ring one to the deepest. The figure is the
+    bundle's own (examples/demo/: the screen's tessellation and peel depths, drawn with the
+    blocks and buildings around the block); the depth and the proxy's top are read off the
+    depth_density run's meta.json, the rank off the bundle, and the two are checked to agree.
 
     The image is the widget's own and its no-JS fallback at once, marked skip-lightbox: a
     lightbox would fight the zoom gestures. Its native width caps the zoom (`data-native-px`)."""
     d = _demo()
     meta_path = MB / "meta.json"
-    png_path = MB / "before_depth.png"
     if d is None or not meta_path.exists():
         return ""
-    url = _copy_asset(png_path, "multiblock_depth_density")
+    url = _copy_asset(DEMO / d["block"]["peel"]["image"], "demo")
     if url is None:
         return ""
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -1782,7 +1782,7 @@ def _demo_peel() -> str:
         f"puts this block at rank {b['peel']['rank']:,} of the shipped screen's top {top:,}.")
     return (
         f'<figure class="sbu-peel" data-widget="peel-zoom" '
-        f'data-native-px="{_png_width(png_path)}">\n'
+        f'data-native-px="{b["peel"]["native_px"]}">\n'
         f'  <div class="sbu-peel__frame"><img class="skip-lightbox" src="{url}" alt="Block '
         f'{b["block_id"]}\'s Voronoi parcels shaded by depth from the street, deepest at the '
         f'core"></div>\n'
@@ -1791,14 +1791,6 @@ def _demo_peel() -> str:
         f"<span>Ring 1, on the street</span><span>Ring {rings}, the deepest</span></div>\n"
         f"  <figcaption>{caption}</figcaption>\n"
         f"</figure>")
-
-
-def _png_width(path: Path) -> int:
-    """A PNG's width in pixels, from its IHDR chunk (this generator is stdlib-only)."""
-    head = path.read_bytes()[:24]
-    if head[:8] != b"\x89PNG\r\n\x1a\n" or head[12:16] != b"IHDR":
-        raise SystemExit(f"{path} is not a PNG")
-    return int.from_bytes(head[16:20], "big")
 
 
 def _demo_fires() -> str:
@@ -2087,7 +2079,9 @@ def _demo_compare() -> str:
     o_whole, e_whole = whole(ours), whole(earlier)
     why = next(x["why"] for x in ours["cells"] if x["kind"] == "short")
     lead = (
-        f'<p>On block <code>{c["block_id"]}</code> in {html.escape(c["place"])}: {standing}, '
+        f'<p>On block <code>{c["block_id"]}</code> in {html.escape(c["place"])} '
+        f'(<a href="{html.escape(c["maps_url"])}" target="_blank" rel="noopener">See it in '
+        f"Google Maps&nbsp;↗</a>): {standing}, "
         f"and at {c['n_buildings']:,} buildings small enough for topology to run at all. "
         f"Topology, run as {marked(1, 'our optimized port')}, builds until every parcel touches "
         f"a road, which here displaces {e_whole['displacement']:.0%} of the floor area, in "

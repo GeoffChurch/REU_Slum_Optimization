@@ -152,9 +152,12 @@ test("two series: a headed plate each, both moved by the one slider", async () =
 test("the second build-out's slider owns its own URL key", async () => {
   const { host, loc } = await compared("?buildout=2&compare=4");
   assert.equal(slider(host).value, "4");
-  step(host, 6);
-  assert.ok(loc.search().includes("compare=6"), loc.search());
+  step(host, 7);
+  assert.ok(loc.search().includes("compare=7"), loc.search());
   assert.ok(loc.search().includes("buildout=2"), "the page block's key was touched");
+  // Back at the build-out's own opening budget the key goes, as every widget's default does.
+  step(host, COMPARED.default_step);
+  assert.ok(!loc.search().includes("compare="), loc.search());
 });
 
 test("a stopped method shows its whole network and says why, short of the budget", async () => {
@@ -268,6 +271,10 @@ test("the face-off plots run time on a log scale, two series, dots following the
   // Human units on the axis.
   const labels = time.findAll("text").map((t) => t.textContent);
   for (const want of ["1 min", "1 h"]) assert.ok(labels.includes(want), `${want} not in ${labels}`);
+  // The axis ends at the first round time at or past the longest run (topology's 1.89 h): 2 h.
+  const longest = Math.max(...COMPARED.series.flatMap((s) => s.cells.map((c) => c.step.seconds)));
+  assert.ok(longest < 7200 && longest > 3600, `the longest run is ${longest} s`);
+  assert.ok(labels.includes("2 h") && !labels.includes("10 h"), `${labels}`);
   // At a budget where both have a network, each dot sits on its series' point for that network,
   // and the axis is logarithmic: equal factors of time are equal distances.
   const k = 3;
