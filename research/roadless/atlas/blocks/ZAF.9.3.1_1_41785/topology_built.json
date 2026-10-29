@@ -1,0 +1,19 @@
+{
+ "block": "ZAF.9.3.1_1_41785",
+ "alpha": 10.0,
+ "seed": 0,
+ "road_width_m": 7.0,
+ "wall_s": 6818.354460954666,
+ "cpu_s": 6774.7551784219995,
+ "greedy_start_s": 3.352560520172119,
+ "first_road_s": 2534.853045940399,
+ "last_road_s": 6818.299759626389,
+ "n_roads": 546,
+ "n_paths": 287,
+ "n_logged": 547,
+ "peak_rss_gb": 0.694091796875,
+ "host": "rtx6000",
+ "cpu": "Intel(R) Xeon(R) w7-3455",
+ "same_as_kept": true,
+ "finished": "2026-10-29T09:58:11-0400"
+}

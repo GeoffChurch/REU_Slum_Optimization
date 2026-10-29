@@ -20,7 +20,8 @@ topology_built.json (the run's timing: wall, CPU, setup, peak memory, host).
 
     T=research/roadless/atlas/topology_order.py       # from the repo root, PYTHONPATH=.
     NUMBA_NUM_THREADS=1 uv run python $T run <block>
-    uv run python $T timing <block>                    # per segment, per path and per frame
+    uv run python $T timing <block>                    # per segment and per path
+    uv run python $T compare <block>                   # own order against canonical, per frame
 """
 from __future__ import annotations
 
@@ -187,11 +188,36 @@ def timing(site: Site) -> None:
         print(f"  paths' third {k + 1}: {summary(part)}")
 
 
+def compare(site: Site) -> None:
+    """Own build order against the lineup's canonical order on the budget grid (buildout.py's
+    tables, `topology built` and `topology`): L_P at each budget, and the own order's seconds
+    between frames."""
+    own = json.loads((site.kept / "topology.a10.s0.w7.built_grid.json").read_text())
+    can = json.loads((site.kept / "topology.a10.s0.w7.canonical_grid.json").read_text())
+    print(f"{'budget':>6} {'D own':>7} {'L_P own':>7} {'D can':>7} {'L_P can':>7} {'own-can':>8} "
+          f"{'s own':>7} {'ds':>7}")
+    last = 0.0
+    gaps = []
+    for a, c in zip(own["rows"], can["rows"], strict=True):
+        if a["status"] == "stopped" or c["status"] == "stopped":
+            print(f"{a['budget']:6.2f} {a['status']} / {c['status']}")
+            continue
+        ds = a["seconds"] - last
+        if a["status"] == "frame":
+            gaps.append(ds)
+            last = a["seconds"]
+        print(f"{a['budget']:6.2f} {a['D']:7.4f} {a['L_P']:7.3f} {c['D']:7.4f} {c['L_P']:7.3f} "
+              f"{a['L_P'] - c['L_P']:+8.3f} {a['seconds']:7.0f} {ds:7.0f}")
+    print(f"seconds between frames: {summary(np.asarray(gaps))}")
+
+
 if __name__ == "__main__":
     match sys.argv[1:]:
         case ["run", bid]:
             run(Site.of(bid))
         case ["timing", bid]:
             timing(Site.of(bid))
+        case ["compare", bid]:
+            compare(Site.of(bid))
         case _:
             raise SystemExit(__doc__)
