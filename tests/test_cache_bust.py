@@ -5,6 +5,7 @@ deploy's `mkdocs build --strict` and these test what they call."""
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 from pathlib import Path
 from types import ModuleType
@@ -102,3 +103,70 @@ def test_the_audit_passes_a_versioned_site_and_names_every_fault(tmp_path: Path)
         encoding="utf-8")
     assert any("demo/index.html: never loads js/widgets.js" in p
                for p in cb.audit(site, vers, BASE))
+
+
+def _data_site(tmp_path: Path) -> Path:
+    """A built site as the Demo's: a page whose build-out widget fetches a bundle, which names the
+    sprite sheet beside it, and a figure image with its lightbox link."""
+    site = tmp_path / "site"
+    (site / "assets" / "demo").mkdir(parents=True)
+    (site / "demo").mkdir()
+    (site / "assets" / "demo" / "sheet.webp").write_bytes(b"pixels")
+    (site / "assets" / "demo" / "plate.png").write_bytes(b"png")
+    (site / "assets" / "demo" / "buildout.json").write_text(
+        json.dumps({"series": [{"sheet": {"file": "sheet.webp"}, "label": "Our method"}]}),
+        encoding="utf-8")
+    (site / "assets" / "demo" / "index.json").write_text(
+        json.dumps({"buildout": "buildout.json", "note": "a sentence, not a file"}),
+        encoding="utf-8")
+    (site / "demo" / "index.html").write_text(
+        '<figure data-widget="build-out" data-bundle="../assets/demo/buildout.json">'
+        '<a class="glightbox" href="../assets/demo/plate.png"><img src="../assets/demo/plate.png">'
+        '</a></figure><svg><path d="M0 0h1v1h-1z"/></svg><a href="../">home</a>',
+        encoding="utf-8")
+    return site
+
+
+def test_every_fetched_asset_is_versioned_and_bundles_version_what_they_name(
+        tmp_path: Path) -> None:
+    site = _data_site(tmp_path)
+    cb.version_data(site, BASE)
+    demo = site / "assets" / "demo"
+    bundle = json.loads((demo / "buildout.json").read_text(encoding="utf-8"))
+    sheet = bundle["series"][0]["sheet"]["file"]
+    assert sheet == f"sheet.webp?v={cb._digest(demo / 'sheet.webp')}"
+    # A bundle named by another is versioned after its own rewrite: its final bytes.
+    index = json.loads((demo / "index.json").read_text(encoding="utf-8"))
+    assert index["buildout"] == f"buildout.json?v={cb._digest(demo / 'buildout.json')}"
+    assert index["note"] == "a sentence, not a file"
+    html = (site / "demo" / "index.html").read_text(encoding="utf-8")
+    assert f'data-bundle="../assets/demo/buildout.json?v={cb._digest(demo / "buildout.json")}"' \
+        in html
+    plate = cb._digest(demo / "plate.png")
+    assert f'href="../assets/demo/plate.png?v={plate}"' in html
+    assert f'src="../assets/demo/plate.png?v={plate}"' in html
+    assert 'href="../"' in html, "a link to a page is not an asset"
+    assert cb.audit_data(site, BASE) == []
+
+
+def test_the_audit_fails_an_unversioned_bundle_or_name(tmp_path: Path) -> None:
+    site = _data_site(tmp_path)
+    cb.version_data(site, BASE)
+    page = site / "demo" / "index.html"
+    # A deliberately unversioned bundle: the page's fetch as it was before 2026-10-29.
+    html = page.read_text(encoding="utf-8")
+    page.write_text(re.sub(r"buildout\.json\?v=[0-9a-f]+", "buildout.json", html),
+                    encoding="utf-8")
+    problems = cb.audit_data(site, BASE)
+    assert problems and "data-bundle=../assets/demo/buildout.json is not versioned" in problems[0]
+    # A sheet the bundle names plainly, and a reference through an attribute the rewrite does not
+    # know, fail too.
+    cb.version_data(site, BASE)
+    demo = site / "assets" / "demo"
+    (demo / "buildout.json").write_text(
+        json.dumps({"series": [{"sheet": {"file": "sheet.webp"}}]}), encoding="utf-8")
+    page.write_text(page.read_text(encoding="utf-8")
+                    + '<div data-poster="../assets/demo/plate.png"></div>', encoding="utf-8")
+    problems = cb.audit_data(site, BASE)
+    assert any("buildout.json: sheet.webp is not versioned" in p for p in problems)
+    assert any("data-poster=../assets/demo/plate.png" in p for p in problems)
