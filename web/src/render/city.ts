@@ -1,30 +1,37 @@
-/** The ScreenMap canvas: 16,451 Cape Town blocks (3,500 Nairobi), a pale base layer painted once
- * onto an offscreen canvas and blitted back every frame, with the selected prefix OUTLINED on top
- * of it -- never filled over it.
+/** The ScreenMap canvas: 16,451 Cape Town blocks (3,500 Nairobi), a base layer painted once onto
+ * an offscreen canvas and blitted back every frame, with the selected prefix FILLED red on top.
  *
- * **Why the selected prefix is a stroke, not a fill.** An opaque `selected_color` fill over the
- * base layer erases whatever `paintBase` painted underneath, including `e.informal_color`. That
- * is not merely a colour swap: `gen_screen_map.py`'s `_render_screen_map` draws Cape Town's real
- * informal blocks filled gold (zorder 2) and the current selection OUTLINED red on top of that
- * (zorder 3, `facecolor="none"`), so a hit reads as "gold with a red ring", a false positive as
- * "red ring, no gold", and a miss as "gold, no ring" -- the legend `_render_screen_map`'s own
- * docstring states. A fill collapses the first two into indistinguishable solid red, silently
- * turning "gold" from "ground truth" into "what the screen missed", which shrinks toward zero as
- * the reader lowers the floor -- the opposite of what the widget is showing. Stroking at
- * `e.block_lw * 2` (matching the PNG's own selected linewidth) restores the legend exactly, at
- * the same O(k) cost a fill would have been.
+ * **The encoding: three fills.** Each block is red if the current floor selects it, whatever the
+ * City's survey says; gold if it is not selected but the survey marks it informal; grey otherwise
+ * (owner, 2026-10-29; `gen_screen_map.py`'s `_render_screen_map` draws the static figure the same
+ * way). The base layer carries the last two -- every block in its unselected colour -- and each
+ * frame fills the selected prefix in `e.selected_color` over it. Hiding the gold under a selected
+ * block is the encoding, not a loss: the map answers "what does the screen pick", and gold is
+ * what it leaves.
  *
- * **Why a real blit, not a "paint minus undo" delta.** An earlier version of this module painted
- * the base layer once onto the VISIBLE canvas and, on every later frame, tried to restore just the
- * previously-selected blocks by re-filling them in `base_color` before filling the new prefix in
- * `selected_color`. That does not work at Cape Town's own geometry: the median block is ~0.6 CSS
- * px² at a 700 px canvas (measured against the committed bundle), which is entirely antialiased
- * edge coverage -- there is no interior pixel a re-fill can cleanly overwrite. Source-over
- * compositing `selected_color` onto a partially-covered pixel and then `base_color` back over it
- * does not restore the original colour; repeated select/deselect cycles converge toward a
- * permanent pink residue (a coverage-α pixel converges to (1−α)/(2−α) of the way to
- * `selected_color`, never back to 0). A `drawImage` pixel COPY has no such residue: every frame
- * starts from the offscreen canvas's own untouched pixels, unconditionally.
+ * **Why the selected fill is edged at twice the base outline's width.** Most of Cape Town's
+ * blocks are smaller than a pixel (the median is ~0.6 CSS px² at a 700 px canvas, measured against
+ * the committed bundle), so a block is nothing but antialiased edge: its colour reaches the screen
+ * as partial coverage, composited over what is already there. Red painted over the block's own
+ * base-layer gold at the SAME coverage would leave part of the gold in every such pixel, and a
+ * selected informal block would come out orange beside a selected plain one's red -- the survey
+ * leaking back into a colour that is meant to ignore it. Edging the red at `e.block_lw * 2`, twice
+ * the base outline, covers the block's whole base-layer footprint with room to spare, so its
+ * pixels read red (`web/test/city-raster.test.ts` rasterizes a tenth-of-a-pixel informal block at
+ * a desktop's DPR and checks; at `e.block_lw` it comes out nearer the gold). The PNG's selected
+ * linewidth is the same.
+ *
+ * **Why every frame starts from a blit, so a floor drag leaves no residue.** Painting the base
+ * layer once onto the VISIBLE canvas and, on each later frame, restoring the previously selected
+ * blocks by re-filling them in their base colour does not work at this geometry: a sub-pixel block
+ * has no interior pixel a re-fill can cleanly overwrite, and source-over compositing red onto a
+ * partially covered pixel and then the base colour back over it does not restore the original --
+ * repeated select/deselect cycles converge toward a permanent pink residue (a coverage-α pixel
+ * converges to (1−α)/(2−α) of the way to `selected_color`, never back to 0). A filled selection
+ * would make that worse, not better. So each frame clears the visible canvas and copies the
+ * offscreen base layer back whole (`drawImage`, a pixel COPY of untouched pixels), then fills the
+ * current prefix: what a frame shows depends only on its own floor, never on the frames before it
+ * (`city-raster.test.ts` drags the floor down and back and compares every pixel).
  *
  * **Why the offscreen canvas is a plain, uninserted `<canvas>`, not `OffscreenCanvas`.** Both give
  * the same 2D context and `drawImage` accepts either; a second `<canvas>` element needs no new
@@ -35,9 +42,11 @@
  * free. At city scale it is not: `paintBase` below is the ONE O(n_blocks) pass this module ever
  * makes for a given (bundle, view) pair, run once into the offscreen canvas. Every later frame --
  * a floor drag, a metric switch -- goes through `paintFrame` alone: one `clearRect`, one
- * `drawImage` (the whole base layer, correctly restored, in one call), and O(k) strokes for the
+ * `drawImage` (the whole base layer, correctly restored, in one call), and O(k) fills for the
  * current selected prefix -- never another O(n_blocks) pass. That is what keeps a floor-slider
- * drag cheap at 1,655 selected blocks rather than 16,451; `web/test/screen-map-boot.test.ts`'s
+ * drag cheap at 1,655 selected blocks rather than 16,451 (a full repaint of every block in its
+ * final colour measured ~70 ms a frame on a desktop and ~290 ms at a phone's 4x CPU slowdown,
+ * 2026-10-29; batched into one path per colour, slower still); `web/test/screen-map-boot.test.ts`'s
  * base-layer test makes the claim checkable by following a frame's own `drawImage` call to the
  * offscreen canvas it names and counting what THAT canvas's own log holds. */
 import type { CityBundle, CityEncoding } from "../screen_map.js";
@@ -87,8 +96,7 @@ function tracePath(ctx: CanvasRenderingContext2D, rings: ScreenRings): void {
 
 /** One beginPath()/fill() PER block, matching `region.ts`'s own reasoning: a test that counts
  * layer membership by counting `fill()` calls in a given colour needs one call per block, not one
- * batched path across many. Used only for the offscreen base layer now -- the selected prefix is
- * `strokeBlock`, below. */
+ * batched path across many. */
 function fillBlock(ctx: CanvasRenderingContext2D, rings: ScreenRings, style: string): void {
   ctx.fillStyle = style;
   tracePath(ctx, rings);
@@ -118,11 +126,11 @@ export interface CityLayer {
            size: { width: number; height: number }): void;
   /** Every frame: clear `ctx`, blit the offscreen base layer onto it (a single `drawImage`, in
    * device-pixel space so a DPR-scaled backing store is copied 1:1 rather than re-scaled), then
-   * OUTLINE `order[0..k)` in `e.selected_color` at `e.block_lw * 2` directly on `ctx`, in the
-   * CSS-pixel space every other draw call in this codebase uses -- never filled, so whatever
-   * `paintBase` painted underneath (in particular `e.informal_color`) stays visible through the
-   * ring. Finally, where the bundle carries one, `bundle.follow` gets a `FOLLOW_RADIUS_PX` ring in
-   * `e.follow_color`, drawn last so it sits over those outlines rather than under them. That draw
+   * FILL `order[0..k)` in `e.selected_color`, edged in it at `e.block_lw * 2`, directly on `ctx`,
+   * in the CSS-pixel space every other draw call in this codebase uses -- over whatever
+   * `paintBase` painted there, gold included (this module's docstring). Finally, where the
+   * bundle carries one, `bundle.follow` gets a `FOLLOW_RADIUS_PX` ring in `e.follow_color`, drawn
+   * last so it sits over those fills rather than under them. That draw
    * order is one of the two reasons it belongs on THIS layer; the other is that `paintBase` is the
    * strictly per-block pass, one fill and one outline for each of `bundle.rings` and nothing else.
    * Survival is NOT among the reasons: the base layer is blitted back whole on every frame, so a
@@ -177,14 +185,15 @@ export function createLayer(): CityLayer {
       // of `dpr`, blitting only the top-left 1/dpr² of the base layer at the wrong scale.
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(base, 0, 0);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // back to CSS-pixel space for the stroke below
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // back to CSS-pixel space for the fills below
       const screen = screenRingsOf(bundle, view);
       for (let i = 0; i < k; i++) {
-        strokeBlock(ctx, screen[order[i]!]!, e.selected_color, e.block_lw * 2);
+        const rings = screen[order[i]!]!;
+        fillBlock(ctx, rings, e.selected_color);
+        strokeBlock(ctx, rings, e.selected_color, e.block_lw * 2);
       }
-      // Drawn last, so wherever it meets a selected block's outline it sits over that outline
-      // rather than under it -- which is the first of the two reasons it is on the FRAME and not
-      // the base layer. The second: `paintBase` is the strictly per-block pass, and a marker
+      // Drawn last, so wherever it meets a selected block it sits over it rather than under it --
+      // which is the first of the two reasons it is on the FRAME and not the base layer. The second: `paintBase` is the strictly per-block pass, and a marker
       // belonging to no block has no place in a loop whose stroke count is exactly `n_blocks`
       // (`screen-map-boot.test.ts`'s base-layer test counts it). Note which reason is NOT in that
       // list: a ring painted into the base layer would still be VISIBLE after a floor change,

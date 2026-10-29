@@ -193,7 +193,14 @@ class Encoding:
     beside it drawing from two separately-typed numbers is how a JS-on/JS-off divergence like D2's
     `street_lw` mismatch happens).
 
-    `base_color`/`block_lw` reuse `_CONTEXT_OUTLINE`/`_PARCEL_LW`, the same pale thin wireframe role
+    Three fills, one per block (owner, 2026-10-29): `selected_color` where the floor selects the
+    block, whatever the survey says; `informal_color` where it does not but the City's survey marks
+    the block informal; `base_color` otherwise. Each block is edged in its own fill colour, at
+    `block_lw`, or at twice that when selected -- the wider red edge covers a sub-pixel block's
+    whole base footprint on the widget's canvas, where red is painted over the unselected colour
+    (web/src/render/city.ts), and the figure uses the same width so the two read alike.
+
+    `base_color`/`block_lw` reuse `_CONTEXT_OUTLINE`/`_PARCEL_LW`, the same pale thin role
     RegionGrow's `hood_color`/`hood_lw` draws every unselected unit with. `selected_color` reuses
     `_DISPLACED_PT`, the same emphasis red RegionGrow's `region_color` draws a chosen region with --
     here, the floor's own selection. `informal_color` has no `render.py` analogue (no other bundle
@@ -371,22 +378,23 @@ def build_bundle(city: str, epsg: int, blocks: gpd.GeoDataFrame, simplified: lis
 
 def _render_screen_map(gdf: gpd.GeoDataFrame, selected_ids: set[str], informal_ids: set[str],
                        follow_xy: tuple[float, float]) -> Figure:
-    """The fallback figure: Cape Town at the shipped `depth_density_proxy` floor. Every block's
-    thin wireframe in `base_color`, the City's own ground truth filled in `informal_color`, and the
-    floor's own selection outlined in `selected_color` on top -- so a gold fill with a red outline
-    reads as a hit, a bare red outline reads as a false positive, and a gold fill with no outline
-    reads as a miss.
+    """The fallback figure: Cape Town at the shipped `depth_density_proxy` floor, every block filled
+    once in its own colour (`Encoding`): red where the floor selects it, gold where it does not and
+    the City's survey marks it informal, grey otherwise -- so red is what the screen picks and gold
+    is the informal settlement it leaves. Each block is drawn exactly once, so no colour sits under
+    another.
 
     `follow_xy` is the followed block's point in `gdf`'s own CRS -- `gdf.plot` draws in world
     coordinates, so this is NOT the bundle's origin-relative pair."""
     fig, ax = plt.subplots(figsize=(10, 10))
-    gdf.plot(ax=ax, facecolor="none", edgecolor=ENCODING.base_color, linewidth=ENCODING.block_lw,
-             zorder=1)
-    informal = cast(gpd.GeoDataFrame, gdf[gdf["block_id"].isin(informal_ids)])
-    informal.plot(ax=ax, facecolor=ENCODING.informal_color, edgecolor="none", zorder=2)
-    selected = cast(gpd.GeoDataFrame, gdf[gdf["block_id"].isin(selected_ids)])
-    selected.plot(ax=ax, facecolor="none", edgecolor=ENCODING.selected_color,
-                 linewidth=ENCODING.block_lw * 2, zorder=3)
+    is_selected = gdf["block_id"].isin(selected_ids)
+    is_informal = gdf["block_id"].isin(informal_ids)
+    for mask, color, lw in ((~is_selected & ~is_informal, ENCODING.base_color, ENCODING.block_lw),
+                            (~is_selected & is_informal, ENCODING.informal_color,
+                             ENCODING.block_lw),
+                            (is_selected, ENCODING.selected_color, ENCODING.block_lw * 2)):
+        cast(gpd.GeoDataFrame, gdf[mask]).plot(ax=ax, facecolor=color, edgecolor=color,
+                                               linewidth=lw, zorder=1)
     # The follow marker. Colour from `ENCODING`, which is also what `encoding` carries into both
     # bundles, and centred on the same block the bundle's `follow` names -- one constant and one
     # block feeding this fallback and the widget, so a JS-off or print reader sees the block the
@@ -508,8 +516,9 @@ matches the City of Cape Town's own informal-structure survey
 ({n_informal:,} of {ct['n_blocks']:,} blocks are really informal by that survey,
 via `reblock.data.informal`).
 
-![Cape Town at the shipped depth_density_proxy floor: gold = real informal settlement, red outline \
-= selected, blue ring = the block the rest of the site follows](screen_map.png)
+![Cape Town at the shipped depth_density_proxy floor: red = selected by the screen, gold = \
+informal by the City's survey and not selected, grey = neither; blue ring = the block the rest of \
+the site follows](screen_map.png)
 
 The blue ring marks `{ct_follow['block_id']}` (index {ct_follow['index']:,} of the columns below)
 -- the single block every later stage of the site is about: perm-graph, displacement-field and
