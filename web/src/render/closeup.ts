@@ -14,7 +14,7 @@
  * A few hundred blocks at most fall in the window, so this redraws everything on every frame --
  * `region.ts`'s reasoning at its 213 blocks, not `city.ts`'s offscreen blit at 16,000.
  */
-import type { CityBundle } from "../screen_map.js";
+import type { CityBundle, CityFollow } from "../screen_map.js";
 import { sizeCanvas } from "./canvas.js";
 import { fitBbox, toScreen, type Bbox, type View } from "../view/transform.js";
 
@@ -79,10 +79,10 @@ export interface Closeup {
   readonly canvas: HTMLCanvasElement;
   /** The canvas's measured CSS size; call from its own ResizeObserver. Repaints the last frame. */
   resize(size: { width: number; height: number }): void;
-  /** Draw `bundle`'s followed block's window with `order[0..k)` selected. A bundle with no
-   * `follow` (Nairobi) has nothing to frame, so the canvas is HIDDEN rather than left showing the
+  /** Draw `follow`'s window in `bundle` with `order[0..k)` selected. No `follow` (Nairobi, which
+   * carries none) has nothing to frame, so the canvas is HIDDEN rather than left showing the
    * previous city's block. Before the first `resize` nothing is drawn; `resize` draws it. */
-  paint(bundle: CityBundle, order: Int32Array, k: number): void;
+  paint(bundle: CityBundle, follow: CityFollow | undefined, order: Int32Array, k: number): void;
 }
 
 export function createCloseup(padM: number): Closeup {
@@ -91,22 +91,22 @@ export function createCloseup(padM: number): Closeup {
   canvas.style.aspectRatio = "1 / 1";
   const ctx = canvas.getContext("2d")!;
   let size: { width: number; height: number } | null = null;
-  let last: { bundle: CityBundle; order: Int32Array; k: number } | null = null;
+  let last: { bundle: CityBundle; follow: CityFollow | undefined; order: Int32Array;
+              k: number } | null = null;
   // The window and the blocks in it, per bundle (a city switch is a different bundle object).
-  let framed: { bundle: CityBundle; box: Bbox; near: number[] } | null = null;
+  let framed: { bundle: CityBundle; index: number; box: Bbox; near: number[] } | null = null;
 
   const draw = (): void => {
     if (size === null || last === null) return;
-    const { bundle, order, k } = last;
-    const follow = bundle.follow;
+    const { bundle, follow, order, k } = last;
     if (follow === undefined) {
       canvas.style.display = "none";
       return;
     }
     canvas.style.display = "";
-    if (framed === null || framed.bundle !== bundle) {
+    if (framed === null || framed.bundle !== bundle || framed.index !== follow.index) {
       const box = closeupBox(bundle, follow.index, padM);
-      framed = { bundle, box, near: blocksIn(bundle, box) };
+      framed = { bundle, index: follow.index, box, near: blocksIn(bundle, box) };
     }
     const e = bundle.encoding;
     const view = fitBbox(framed.box, size.width, size.height, 0);
@@ -143,8 +143,8 @@ export function createCloseup(padM: number): Closeup {
       size = measured;
       draw();
     },
-    paint(bundle, order, k) {
-      last = { bundle, order, k };
+    paint(bundle, follow, order, k) {
+      last = { bundle, follow, order, k };
       draw();
     },
   };

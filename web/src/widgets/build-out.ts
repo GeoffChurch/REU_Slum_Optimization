@@ -1,6 +1,6 @@
 // Type-only: erased at compile time, so this module has NO runtime import of mount.js (the cycle
 // mount.ts's registration comment describes). This file must never import `register`.
-import type { DemoBundle, DemoEncoding, DemoFrame } from "../demo.js";
+import type { DemoBlock, DemoBundle, DemoEncoding, DemoFrame } from "../demo.js";
 import type { Widget } from "../mount.js";
 import type { StateFactory, StateSource } from "../state.js";
 import { intParam, type UrlCodec } from "../url/param.js";
@@ -8,6 +8,7 @@ import { requireAttr } from "../dom/attrs.js";
 import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
 import { observeSize } from "../dom/resize.js";
+import { DEMO_BLOCK, type Channel } from "../page/channel.js";
 import { createSvg, drawAxes, drawCursor, drawMarkers, drawPolyline,
          type Cursor } from "../render/svg.js";
 import { niceTicks } from "../view/ticks.js";
@@ -93,21 +94,45 @@ function plotView(width: number, height: number, xTop: number, yTop: number): Vi
 }
 
 /** The bundle crosses a network boundary, and its declaration (demo.d.ts) cannot promise what
- * the sprite sheets hold: every frame's row must be one of the sheets' rows, and the frame the
- * slider opens on must exist. Checked once, here, so nothing below indexes past either. */
-function checkBundle(b: DemoBundle): void {
-  const frames = b.method.frames;
-  if (frames.length === 0) throw new Error(`${LABEL}: the bundle carries no frames`);
-  for (const f of frames) {
-    if (!(Number.isInteger(f.row) && f.row >= 0 && f.row < b.sheets.rows)) {
-      throw new Error(`${LABEL}: a frame's sprite row ${f.row} is outside the sheets' `
-        + `${b.sheets.rows} rows`);
+ * the sprite sheets hold: every block's frames must be as many as the slider's positions (one
+ * slider serves every block, so a budget means the same on each), every frame's row one of its
+ * sheet's rows, and the opening position one of them. Checked once, here, so nothing below
+ * indexes past any of them. */
+function checkBundle(b: DemoBundle): number {
+  const first = b.blocks[0];
+  if (first === undefined) throw new Error(`${LABEL}: the bundle carries no blocks`);
+  const n = first.frames.length;
+  for (const blk of b.blocks) {
+    if (blk.frames.length !== n || n === 0) {
+      throw new Error(`${LABEL}: block ${blk.block_id} has ${blk.frames.length} frames, `
+        + `the slider ${n}`);
     }
+    blk.frames.forEach((f, k) => {
+      if (!(Number.isInteger(f.row) && f.row >= 0 && f.row < blk.sheet.rows)) {
+        throw new Error(`${LABEL}: block ${blk.block_id}'s sprite row ${f.row} is outside its `
+          + `sheet's ${blk.sheet.rows} rows`);
+      }
+      if (f.budget !== first.frames[k]!.budget) {
+        throw new Error(`${LABEL}: block ${blk.block_id}'s slider position ${k} is a different `
+          + "budget from the first block's");
+      }
+    });
   }
   const d = b.method.default_frame;
-  if (!(Number.isInteger(d) && d >= 0 && d < frames.length)) {
-    throw new Error(`${LABEL}: default_frame ${d} is not one of the ${frames.length} frames`);
+  if (!(Number.isInteger(d) && d >= 0 && d < n)) {
+    throw new Error(`${LABEL}: default_frame ${d} is not one of the ${n} frames`);
   }
+  return n;
+}
+
+/** The budget at which the frame at slider position `k` first appears: a run whose step
+ * overshoots several budgets builds one network for all of them (41785's ears are dear, so its
+ * fifteen budgets land on three networks), and the readout says so rather than implying a new
+ * network at every step. `null` where position `k` is the network's first. */
+export function sameAsBudget(frames: readonly DemoFrame[], k: number): number | null {
+  const row = frames[k]!.row;
+  const first = frames.findIndex((f) => f.row === row);
+  return first < k ? frames[first]!.budget : null;
 }
 
 /** The sheets sit beside the bundle (gen_site_pages.py copies all four into one directory), so
@@ -116,16 +141,21 @@ function besideBundle(src: string, name: string): string {
   return src.slice(0, src.lastIndexOf("/") + 1) + name;
 }
 
-export const buildOut: Widget<BuildOutState> = (host, makeState) => {
-  const src = requireAttr(host.dataset.bundle, "data-bundle", LABEL);
-  void fetch(src)
-    .then((r) => {
-      if (!r.ok) throw new Error(`fetch ${src} failed: ${r.status} ${r.statusText}`);
-      return r.json() as Promise<DemoBundle>;
-    })
-    .then((b) => boot(host, makeState, b, src))
-    .catch((err: unknown) => showWidgetError(host, LABEL, err));
-};
+/** The widget, following the block on `channel` (DEMO_BLOCK on the page; its own in tests). */
+export function buildOutOn(channel: Channel<string>): Widget<BuildOutState> {
+  return (host, makeState) => {
+    const src = requireAttr(host.dataset.bundle, "data-bundle", LABEL);
+    void fetch(src)
+      .then((r) => {
+        if (!r.ok) throw new Error(`fetch ${src} failed: ${r.status} ${r.statusText}`);
+        return r.json() as Promise<DemoBundle>;
+      })
+      .then((b) => boot(host, makeState, b, src, channel))
+      .catch((err: unknown) => showWidgetError(host, LABEL, err));
+  };
+}
+
+export const buildOut: Widget<BuildOutState> = buildOutOn(DEMO_BLOCK);
 
 function div(cls: string): HTMLDivElement {
   const el = document.createElement("div");
@@ -192,12 +222,20 @@ function edgeKey(e: DemoEncoding): HTMLDivElement {
 }
 
 function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: DemoBundle,
-              src: string): void {
-  checkBundle(b);
+              src: string, channel: Channel<string>): void {
+  const positions = checkBundle(b);
   const metric = requireAttr(host.dataset.metricLabel, "data-metric-label", LABEL);
   const PLOTS = plotsFor(metric);
-  const frames = b.method.frames;
-  const last = frames.length - 1;
+  const last = positions - 1;
+  /** The block on show: the channel's, or the bundle's first on a page with no switch. A block
+   * the bundle does not carry is an error in the page, so it throws rather than picking one. */
+  const blockOf = (id: string | null): DemoBlock => {
+    if (id === null) return b.blocks[0]!;
+    const blk = b.blocks.find((x) => x.block_id === id);
+    if (blk === undefined) throw new Error(`${LABEL}: the page's block ${id} is not in the bundle`);
+    return blk;
+  };
+  let blk = blockOf(channel.get());
   const state: StateSource<BuildOutState> = makeState({
     budget: b.method.default_frame,
   });
@@ -232,11 +270,9 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
   const stage = div("sbu-buildout__stage");
   const left = div("sbu-buildout__left");
   const plate = div("sbu-buildout__plate");
-  plate.style.aspectRatio = `${b.sheets.width} / ${b.sheets.frame_height}`;
   const img = document.createElement("img");
   img.alt = "";
   plate.append(img);
-  img.setAttribute("src", besideBundle(src, b.sheets.sheet));
 
   const read = document.createElement("dl");
   read.className = "sbu-buildout__read";
@@ -251,7 +287,11 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
     read.append(item);
     return dd;
   });
-  left.append(plate, read, legend(b.encoding), edgeKey(b.encoding));
+  // Said when this budget's network is an earlier budget's: announced with the readouts.
+  const same = document.createElement("p");
+  same.className = "sbu-buildout__same";
+  same.setAttribute("aria-live", "polite");
+  left.append(plate, read, same, legend(b.encoding), edgeKey(b.encoding));
 
   // ---- the plots: permeability against each cost, the method's whole curve and this frame's dot
   const plots = div("sbu-buildout__plots");
@@ -272,18 +312,23 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
   wrap.append(bar, stage);
   if (caption) host.insertBefore(wrap, caption); else host.append(wrap);
 
-  const yAxis = axisTo(Math.max(...frames.map((f) => f.permeability)), 3);
   let cursors: Cursor[] = [];
   let svgs: SVGSVGElement[] = [];
 
-  /** Every chart, laid out afresh for `width`: axes, the curve and its points, and a cursor. */
+  /** The block's own plate and every chart, laid out afresh for `width`: axes on the block's own
+   * ranges, the curve through its distinct networks (a dot for each, not one per budget), and a
+   * cursor. */
   const layout = (width: number): void => {
+    plate.style.aspectRatio = `${blk.sheet.width} / ${blk.sheet.frame_height}`;
+    img.setAttribute("src", besideBundle(src, blk.sheet.file));
     for (const s of svgs) s.remove();
     const height = plotHeight(width);
+    const distinct = blk.frames.filter((f, k) => sameAsBudget(blk.frames, k) === null);
+    const yAxis = axisTo(Math.max(...distinct.map((f) => f.permeability)), 3);
     svgs = [];
     cursors = plotParts.map(({ spec, chart }) => {
-      const xs = frames.map(spec.x);
-      const ys = frames.map((f) => f.permeability);
+      const xs = distinct.map(spec.x);
+      const ys = distinct.map((f) => f.permeability);
       const xAxis = axisTo(Math.max(...xs), 4);
       const view = plotView(width, height, xAxis.top, yAxis.top);
       const svg = createSvg(chart, width, height);
@@ -305,19 +350,23 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
 
   const render = (): void => {
     const s = state.get();
-    const f = frames[s.budget]!;
+    const f = blk.frames[s.budget]!;
     slider.value = String(s.budget);
     out.textContent = pct(f.budget, 0);
     slider.setAttribute("aria-valuetext", `${pct(f.budget, 0)} budget, `
       + `${pct(f.displacement, 1)} displaced, ${metric} ${pct(f.permeability, 1)}`);
-    img.style.transform = `translateY(${(-100 * f.row) / b.sheets.rows}%)`;
-    img.alt = `Block ${b.block_id}, each home's escape time with isochrones, `
+    img.style.transform = `translateY(${(-100 * f.row) / blk.sheet.rows}%)`;
+    img.alt = `Block ${blk.block_id}, each home's escape time with isochrones, `
       + (s.budget === 0 ? "before any new road." : `at ${pct(f.displacement, 1)} displaced.`);
     const [dDisp, dRoad, dPerm, dTime] = readouts;
     dDisp!.textContent = pct(f.displacement, 1);
     dRoad!.textContent = km(f.road_km);
     dPerm!.textContent = pct(f.permeability, 1);
     dTime!.textContent = duration(f.seconds);
+    const was = sameAsBudget(blk.frames, s.budget);
+    same.textContent = was === null ? ""
+      : `The same network as at the ${pct(was, 0)} budget: its roads already displace `
+        + `${pct(f.displacement, 1)}, past this budget too.`;
     // Each item's words held together (no-break spaces), so a narrow bar wraps between items
     // rather than leaving "km" alone on a line.
     const keep = (t: string): string => t.replaceAll(" ", "\u00a0");
@@ -339,6 +388,12 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
     drawnWidth = width;
     if (first) {
       state.subscribe(render);
+      // A new block: its own plate and plot ranges, at the same slider position.
+      channel.subscribe((id) => runOrReport(host, LABEL, () => {
+        blk = blockOf(id);
+        layout(drawnWidth);
+        render();
+      }));
       removeFallbackImage(host);
     }
   }));

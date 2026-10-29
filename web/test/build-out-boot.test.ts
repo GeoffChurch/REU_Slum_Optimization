@@ -1,13 +1,16 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import type { DemoBundle } from "../src/demo.js";
+import type { DemoBlock, DemoBundle } from "../src/demo.js";
+import { createChannel, type Channel } from "../src/page/channel.js";
 import type { StateSource } from "../src/state.js";
 import { urlStore } from "../src/url/store.js";
 import {
   fakeLocation, FakeElement, fireResize, installStubs, mountPoint, writeNow,
 } from "./harness.js";
-import { BUILD_OUT_URL, buildOut, type BuildOutState } from "../src/widgets/build-out.js";
+import {
+  BUILD_OUT_URL, buildOutOn, sameAsBudget, type BuildOutState,
+} from "../src/widgets/build-out.js";
 
 installStubs();
 // The widget draws its plots through render/svg.ts, which creates elements by namespace; the
@@ -21,6 +24,7 @@ const SRC = "../assets/demo/demo.json";
 /** The page's name for L_P, handed over as `data-metric-label`; deliberately not the real one, so
  * a label the widget spelled itself would show up as a mismatch. */
 const METRIC = "ease of access";
+const [FIRST, SECOND] = committed.blocks as [DemoBlock, DemoBlock];
 
 let served: DemoBundle = committed;
 (globalThis as Record<string, unknown>).fetch = (): Promise<unknown> => Promise.resolve({
@@ -28,11 +32,13 @@ let served: DemoBundle = committed;
   json: (): Promise<unknown> => Promise.resolve(served),
 });
 
-/** Mounts over the PRODUCTION url store (a fake location), waits out the fetch chain, then plays
- * the first resize -- screen-map-boot.test.ts's `mount`, for this widget. */
-async function mount(search = "", bundle: DemoBundle = committed):
+/** Mounts over the PRODUCTION url store (a fake location) and its own page channel, waits out the
+ * fetch chain, then plays the first resize -- screen-map-boot.test.ts's `mount`, for this
+ * widget. */
+async function mount(search = "", bundle: DemoBundle = committed,
+                     channel: Channel<string> = createChannel<string>()):
     Promise<{ host: FakeElement; store: StateSource<BuildOutState> | null;
-              loc: ReturnType<typeof fakeLocation> }> {
+              loc: ReturnType<typeof fakeLocation>; channel: Channel<string> }> {
   served = bundle;
   const host = mountPoint();
   host.dataset.bundle = SRC;
@@ -40,13 +46,13 @@ async function mount(search = "", bundle: DemoBundle = committed):
   const loc = fakeLocation(search);
   const slot = urlStore(loc, writeNow).reserve();
   let store: StateSource<BuildOutState> | null = null;
-  buildOut(host as never, (initial) => {
+  buildOutOn(channel)(host as never, (initial) => {
     store = slot.bind(BUILD_OUT_URL, initial);
     return store;
   });
   await new Promise((resolve) => setTimeout(resolve, 0));
   if (store !== null) fireResize(600, 400);
-  return { host, store, loc };
+  return { host, store, loc, channel };
 }
 
 const plate = (host: FakeElement): FakeElement => {
@@ -62,14 +68,16 @@ const slider = (host: FakeElement): FakeElement => {
 const readouts = (host: FakeElement): string[] => host.findAll("dd").map((d) => d.textContent);
 const circles = (svg: FakeElement, cls: string): FakeElement[] =>
   svg.findAll("circle").filter((c) => c.getAttribute("class") === cls);
+const shift = (blk: DemoBlock, k: number): string =>
+  `translateY(${(-100 * blk.frames[k]!.row) / blk.sheet.rows}%)`;
 
-test("it boots on the bundle's default frame and removes the fallback", async () => {
+test("it boots on the first block's default frame and removes the fallback", async () => {
   const { host } = await mount();
   const d = committed.method.default_frame;
-  const f = committed.method.frames[d]!;
+  const f = FIRST.frames[d]!;
   assert.equal(host.findAll("img").length, 1, "the fallback image is still there");
-  assert.equal(plate(host).getAttribute("src"), `../assets/demo/${committed.sheets.sheet}`);
-  assert.equal(plate(host).style.transform, `translateY(${(-100 * f.row) / committed.sheets.rows}%)`);
+  assert.equal(plate(host).getAttribute("src"), `../assets/demo/${FIRST.sheet.file}`);
+  assert.equal(plate(host).style.transform, shift(FIRST, d));
   assert.equal(slider(host).value, String(d));
   assert.deepEqual(readouts(host).slice(0, 3), [
     `${(f.displacement * 100).toFixed(1)}%`, `${f.road_km.toFixed(1)} km`,
@@ -79,22 +87,53 @@ test("it boots on the bundle's default frame and removes the fallback", async ()
 
 test("a slider step moves the plate, the readouts and every plot's dot to that frame", async () => {
   const { host } = await mount();
-  const k = committed.method.frames.length - 1;
-  const f = committed.method.frames[k]!;
+  const k = FIRST.frames.length - 1;
+  const f = FIRST.frames[k]!;
   slider(host).value = String(k);
   slider(host).dispatch("input");
-  assert.equal(plate(host).style.transform, `translateY(${(-100 * f.row) / committed.sheets.rows}%)`);
+  assert.equal(plate(host).style.transform, shift(FIRST, k));
   assert.equal(readouts(host)[2], `${(f.permeability * 100).toFixed(1)}%`);
   const svgs = host.findAll("svg");
   assert.equal(svgs.length, 3, "three plots");
   for (const svg of svgs) {
-    // The curve's k-th marker is frame k's point; the dot must sit exactly on it.
+    // Each frame of the first block is its own network, so its k-th marker is frame k's point.
     const marker = circles(svg, "sbu-curve")[k]!;
     const [dot] = circles(svg, "sbu-cursor");
     assert.ok(dot !== undefined, "no cursor dot");
     assert.equal(dot.getAttribute("cx"), marker.getAttribute("cx"));
     assert.equal(dot.getAttribute("cy"), marker.getAttribute("cy"));
   }
+});
+
+test("the page's block switch moves it to that block's sheet, at the same slider position",
+     async () => {
+  const { host, channel } = await mount("?budget=7");
+  channel.set(SECOND.block_id);
+  assert.equal(plate(host).getAttribute("src"), `../assets/demo/${SECOND.sheet.file}`);
+  assert.equal(plate(host).style.transform, shift(SECOND, 7));
+  assert.equal(slider(host).value, "7");
+  assert.equal(readouts(host)[0], `${(SECOND.frames[7]!.displacement * 100).toFixed(1)}%`);
+});
+
+test("a network shared by several budgets is one dot, and the readout says whose it is",
+     async () => {
+  const distinct = new Set(SECOND.frames.map((f) => f.row)).size;
+  assert.ok(distinct < SECOND.frames.length, "no shared networks; this test would check nothing");
+  const channel = createChannel<string>();
+  channel.set(SECOND.block_id);
+  const { host } = await mount("", committed, channel);
+  for (const svg of host.findAll("svg")) {
+    assert.equal(circles(svg, "sbu-curve").length, distinct, "one dot per network, not per budget");
+  }
+  // A position sharing an earlier one's network, then one that does not.
+  const k = SECOND.frames.findIndex((_, i) => sameAsBudget(SECOND.frames, i) !== null);
+  slider(host).value = String(k);
+  slider(host).dispatch("input");
+  const was = sameAsBudget(SECOND.frames, k)!;
+  assert.match(host.text(), new RegExp(`same network as at the ${Math.round(was * 100)}% budget`));
+  slider(host).value = "0";
+  slider(host).dispatch("input");
+  assert.doesNotMatch(host.text(), /same network/);
 });
 
 test("the metric is named as the page names it, never by the widget itself", async () => {
@@ -106,18 +145,25 @@ test("the metric is named as the page names it, never by the widget itself", asy
 });
 
 test("a URL budget past the last frame is pinned to it and written back", async () => {
-  const last = committed.method.frames.length - 1;
+  const last = FIRST.frames.length - 1;
   const { host, loc } = await mount("?budget=999");
   assert.equal(slider(host).value, String(last));
   assert.ok(loc.search().includes(`budget=${last}`), loc.search());
 });
 
-test("a frame whose sprite row is not in the sheets fails into the caption", async () => {
+test("a frame whose sprite row is not in its sheet fails into the caption", async () => {
   const bad = structuredClone(committed);
-  bad.method.frames[1]!.row = bad.sheets.rows;
+  bad.blocks[1]!.frames[1]!.row = bad.blocks[1]!.sheet.rows;
   const { host } = await mount("", bad);
   const caption = host.find("figcaption");
   assert.ok(caption !== null);
   assert.match(caption.textContent, /could not load interactively.*sprite row/);
   assert.equal(host.findAll("img").length, 1, "the fallback must stay when boot failed");
+});
+
+test("blocks whose sliders differ in length are refused", async () => {
+  const bad = structuredClone(committed);
+  bad.blocks[1]!.frames.pop();
+  const { host } = await mount("", bad);
+  assert.match(host.find("figcaption")!.textContent, /frames, the slider/);
 });

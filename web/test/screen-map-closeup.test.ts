@@ -9,7 +9,8 @@ import {
   Call, fireAnimationFrame, FakeElement, FakeResizeObserver, fireResize, installStubs, lastFrame,
   mountPoint,
 } from "./harness.js";
-import { screenMap } from "../src/widgets/screen-map.js";
+import { createChannel, type Channel } from "../src/page/channel.js";
+import { followOfBlock, screenMapOn } from "../src/widgets/screen-map.js";
 
 installStubs();
 
@@ -29,13 +30,15 @@ const PAD = 450;
 /** The Demo page's mount: ScreenMap with `data-closeup-pad-m` (or `pad`, when given as a string
  * to test the attribute's own validation). Both canvases get a size: the close-up's observer is
  * registered first, so `fireResize` (the most recent observer) is still the city map's. */
-async function mount(pad: string | null = String(PAD)): Promise<FakeElement> {
+async function mount(pad: string | null = String(PAD), channel: Channel<string> | null = null):
+    Promise<FakeElement> {
   const host = mountPoint();
   host.dataset.bundleCapetown = "capetown.json";
   host.dataset.bundleNairobi = "nairobi.json";
   if (pad !== null) host.dataset.closeupPadM = pad;
+  if (channel !== null) host.dataset.followBlock = "";
   const before = FakeResizeObserver.live.length;
-  screenMap(host as never, localState);
+  screenMapOn(channel ?? createChannel<string>())(host as never, localState);
   await new Promise((resolve) => setTimeout(resolve, 0));
   const mine = FakeResizeObserver.live.slice(before);
   if (mine.length === 2) mine[0]!.fire(300, 300);
@@ -107,3 +110,40 @@ test("a close-up margin that is not a positive number fails into the caption", a
   const host = await mount("wide");
   assert.match(host.find("figcaption")!.textContent, /data-closeup-pad-m must be a positive/);
 });
+
+/** A block of Cape Town's other than the bundle's own followed one, for the page-follow tests. */
+const OTHER = "ZAF.9.3.1_1_41785";
+
+test("with data-follow-block, the ring and close-up follow the page's block, and back", async () => {
+  const channel = createChannel<string>();
+  channel.set(OTHER);
+  const host = await mount(String(PAD), channel);
+  const [, close] = canvases(host);
+  const follow = followOfBlock(ct, OTHER)!;
+  assert.ok(follow.index !== ct.follow!.index, "the test needs a block other than the bundle's");
+  const near = blocksIn(ct, closeupBox(ct, follow.index, PAD));
+  assert.equal(lastFrame(close!).filter((c) => c.op === "fill").length, near.length);
+  assert.match(host.text(), new RegExp(`Block ${OTHER} is ringed .* this page is showing`));
+  channel.set(ct.follow!.block_id);
+  fireAnimationFrame();
+  const back = blocksIn(ct, closeupBox(ct, ct.follow!.index, PAD));
+  assert.equal(lastFrame(close!).filter((c) => c.op === "fill").length, back.length);
+});
+
+test("without data-follow-block the map keeps its bundle's block whatever the page says",
+     async () => {
+  const channel = createChannel<string>();
+  channel.set(OTHER);
+  const host = mountPointWithout(channel);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  fireResize(500, 500);
+  assert.match(host.text(), new RegExp(`Block ${ct.follow!.block_id} is ringed`));
+});
+
+function mountPointWithout(channel: Channel<string>): FakeElement {
+  const host = mountPoint();
+  host.dataset.bundleCapetown = "capetown.json";
+  host.dataset.bundleNairobi = "nairobi.json";
+  screenMapOn(channel)(host as never, localState);
+  return host;
+}

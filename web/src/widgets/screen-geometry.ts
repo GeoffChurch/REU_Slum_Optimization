@@ -1,6 +1,6 @@
 // Type-only: erased at compile time, so this module has NO runtime import of mount.js (the cycle
 // mount.ts's registration comment describes). This file must never import `register`.
-import type { DemoBundle, DemoScreenBlock } from "../demo.js";
+import type { DemoBlock, DemoBundle } from "../demo.js";
 import type { Widget } from "../mount.js";
 import type { StateFactory, StateSource } from "../state.js";
 import { enumParam, nullableNumberParam, type UrlCodec } from "../url/param.js";
@@ -8,6 +8,7 @@ import { requireAttr } from "../dom/attrs.js";
 import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
 import { observeSize } from "../dom/resize.js";
+import { DEMO_BLOCK, type Channel } from "../page/channel.js";
 import { sizeCanvas } from "../render/canvas.js";
 import { fitBbox, toScreen, type Bbox, type View } from "../view/transform.js";
 
@@ -26,13 +27,12 @@ import { fitBbox, toScreen, type Bbox, type View } from "../view/transform.js";
  * The drawing: the outline, ticked every s along its street, so the slots can be counted; a row
  * of parcels of side s along its longest straight edge, to scale, and the same stretch magnified
  * in an inset. The picker swaps the outline for a disk, a square or a strip of the same area and
- * buildings -- shape enters the score only through P -- or the block for the city's median one;
- * the slider changes the buildings, and with them s, the slot count and the crowding.
+ * buildings -- shape enters the score only through P; the slider changes the buildings, and with
+ * them s, the slot count and the crowding. The block is the page's (DEMO_BLOCK, the block
+ * switch's), so this diagram shows whichever block the rest of the page does.
  */
 const LABEL = "ScreenGeometry";
 
-export const GEO_BLOCKS = ["followed", "typical"] as const;
-export type GeoBlock = (typeof GEO_BLOCKS)[number];
 /** The block's own outline, or a reference shape of its area. */
 export const OUTLINES = ["own", "disk", "square", "strip"] as const;
 export type Outline = (typeof OUTLINES)[number];
@@ -40,15 +40,14 @@ export type Outline = (typeof OUTLINES)[number];
 export const STRIP_ELONGATION = 16;
 
 /** `homes` is `null` for "the block's own", screen-map.ts's `floor: null` reasoning: a switch of
- * block lands on that block's own count rather than carrying the last block's. */
+ * block lands on that block's own count rather than carrying the last block's. The block itself
+ * is not here: it is the page's (DEMO_BLOCK). */
 export interface GeometryState {
-  block: GeoBlock;
   outline: Outline;
   homes: number | null;
 }
 
 export const SCREEN_GEOMETRY_URL: UrlCodec<GeometryState> = {
-  block: enumParam("geo", GEO_BLOCKS),
   outline: enumParam("outline", OUTLINES),
   homes: nullableNumberParam("homes", 6),
 };
@@ -74,10 +73,10 @@ export function factors(area: number, perimeter: number, n: number): Factors {
 
 /** The street length of `outline` at the block's area: the block's own (as measured,
  * unsimplified) for "own", the reference shapes' exactly. */
-export function perimeterOf(outline: Outline, blk: DemoScreenBlock): number {
-  const a = blk.area_m2;
+export function perimeterOf(outline: Outline, blk: DemoBlock): number {
+  const a = blk.proxy.area_m2;
   switch (outline) {
-    case "own": return blk.perimeter_m;
+    case "own": return blk.proxy.perimeter_m;
     case "disk": return 2 * Math.sqrt(Math.PI * a);
     case "square": return 4 * Math.sqrt(a);
     case "strip": {
@@ -113,11 +112,11 @@ function bbox(rings: Ring[]): Bbox {
 /** The outline drawn: the block's own rings, or a reference shape of its area centred on its
  * bbox's centre (the disk as a 96-gon, which only the drawing uses: its perimeter is
  * `perimeterOf`'s exact one). */
-export function ringsOf(outline: Outline, blk: DemoScreenBlock): Ring[] {
-  const own = blk.rings.map((r) => r.map(([x, y]) => [x, y] as [number, number]));
+export function ringsOf(outline: Outline, blk: DemoBlock): Ring[] {
+  const own = blk.proxy.rings.map((r) => r.map(([x, y]) => [x, y] as [number, number]));
   if (outline === "own") return own;
   const b = bbox(own);
-  const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2, a = blk.area_m2;
+  const cx = (b.minX + b.maxX) / 2, cy = (b.minY + b.maxY) / 2, a = blk.proxy.area_m2;
   const rect = (w: number, h: number): Ring => [
     [cx - w / 2, cy - h / 2], [cx + w / 2, cy - h / 2], [cx + w / 2, cy + h / 2],
     [cx - w / 2, cy + h / 2]];
@@ -212,16 +211,21 @@ function outlineLabel(o: Outline): string {
   }
 }
 
-export const screenGeometry: Widget<GeometryState> = (host, makeState) => {
-  const src = requireAttr(host.dataset.bundle, "data-bundle", LABEL);
-  void fetch(src)
-    .then((r) => {
-      if (!r.ok) throw new Error(`fetch ${src} failed: ${r.status} ${r.statusText}`);
-      return r.json() as Promise<DemoBundle>;
-    })
-    .then((b) => boot(host, makeState, b))
-    .catch((err: unknown) => showWidgetError(host, LABEL, err));
-};
+/** The widget, following the block on `channel` (DEMO_BLOCK on the page; its own in tests). */
+export function screenGeometryOn(channel: Channel<string>): Widget<GeometryState> {
+  return (host, makeState) => {
+    const src = requireAttr(host.dataset.bundle, "data-bundle", LABEL);
+    void fetch(src)
+      .then((r) => {
+        if (!r.ok) throw new Error(`fetch ${src} failed: ${r.status} ${r.statusText}`);
+        return r.json() as Promise<DemoBundle>;
+      })
+      .then((b) => boot(host, makeState, b, channel))
+      .catch((err: unknown) => showWidgetError(host, LABEL, err));
+  };
+}
+
+export const screenGeometry: Widget<GeometryState> = screenGeometryOn(DEMO_BLOCK);
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K,
                                                    cls: string): HTMLElementTagNameMap[K] {
@@ -237,34 +241,28 @@ function group(label: string): HTMLDivElement {
   return g;
 }
 
-function boot(host: HTMLElement, makeState: StateFactory<GeometryState>, b: DemoBundle): void {
-  const blocks: Record<GeoBlock, DemoScreenBlock> = {
-    followed: b.screen.followed, typical: b.screen.typical,
-  };
-  for (const g of GEO_BLOCKS) {
-    const ring = blocks[g].rings[0];
+function boot(host: HTMLElement, makeState: StateFactory<GeometryState>, b: DemoBundle,
+              channel: Channel<string>): void {
+  for (const blk of b.blocks) {
+    const ring = blk.proxy.rings[0];
     if (ring === undefined || ring.length < 3) {
-      throw new Error(`${LABEL}: block ${blocks[g].block_id} has no outline`);
+      throw new Error(`${LABEL}: block ${blk.block_id} has no outline`);
     }
   }
+  /** The page's block (channel), or the bundle's first on a page with no switch. */
+  const blockOf = (id: string | null): DemoBlock => {
+    const blk = id === null ? b.blocks[0] : b.blocks.find((x) => x.block_id === id);
+    if (blk === undefined) throw new Error(`${LABEL}: the page's block ${id} is not in the bundle`);
+    return blk;
+  };
+  let blk = blockOf(channel.get());
   const floor = b.screen.floor;
   const street = b.encoding.street;
-  const state: StateSource<GeometryState> = makeState({
-    block: "followed", outline: "own", homes: null,
-  });
+  const state: StateSource<GeometryState> = makeState({ outline: "own", homes: null });
 
   const caption = host.querySelector("figcaption");
   const wrap = el("div", "sbu-geometry");
 
-  const blockPick = group("Block");
-  const blockButtons = GEO_BLOCKS.map((g) => {
-    const btn = el("button", "");
-    btn.type = "button";
-    btn.textContent = g === "followed" ? `Block ${blocks.followed.block_id}` : "A typical block";
-    btn.addEventListener("click", () => state.set({ block: g, homes: null }));
-    blockPick.append(btn);
-    return [g, btn] as const;
-  });
   const outlinePick = group("Outline");
   const outlineButtons = OUTLINES.map((o) => {
     const btn = el("button", "");
@@ -283,12 +281,12 @@ function boot(host: HTMLElement, makeState: StateFactory<GeometryState>, b: Demo
   const homesOut = el("output", "");
   homesLabel.append("Buildings ", homesIn, homesOut);
   homesIn.addEventListener("input", () => {
-    const own = blocks[state.get().block].n;
+    const own = blk.proxy.n;
     state.set({ homes: Math.round(fromStep(Number(homesIn.value), own / BUILDINGS_SPAN,
                                               own * BUILDINGS_SPAN)) });
   });
   const controls = el("div", "sbu-geometry__controls");
-  controls.append(blockPick, outlinePick, homesLabel);
+  controls.append(outlinePick, homesLabel);
 
   const plate = el("div", "sbu-geometry__plate");
   const cv = el("canvas", "");
@@ -424,12 +422,11 @@ function boot(host: HTMLElement, makeState: StateFactory<GeometryState>, b: Demo
 
   const render = (): void => {
     const s = state.get();
-    const blk = blocks[s.block];
-    const n = s.homes ?? blk.n;
-    const f = factors(blk.area_m2, perimeterOf(s.outline, blk), n);
-    homesIn.value = String(toStep(n, blk.n / BUILDINGS_SPAN, blk.n * BUILDINGS_SPAN));
+    const own = blk.proxy;
+    const n = s.homes ?? own.n;
+    const f = factors(own.area_m2, perimeterOf(s.outline, blk), n);
+    homesIn.value = String(toStep(n, own.n / BUILDINGS_SPAN, own.n * BUILDINGS_SPAN));
     homesOut.textContent = n.toLocaleString("en-US");
-    for (const [g, btn] of blockButtons) btn.setAttribute("aria-pressed", String(g === s.block));
     for (const [o, btn] of outlineButtons) {
       btn.setAttribute("aria-pressed", String(o === s.outline));
     }
@@ -457,6 +454,12 @@ function boot(host: HTMLElement, makeState: StateFactory<GeometryState>, b: Demo
     if (first) {
       first = false;
       state.subscribe(render);
+      // A new block: its own outline and buildings, so a buildings count set on the last block
+      // (which `render` would read) is dropped; a state change re-renders.
+      channel.subscribe((id) => runOrReport(host, LABEL, () => {
+        blk = blockOf(id);
+        if (state.get().homes === null) render(); else state.set({ homes: null });
+      }));
       removeFallbackImage(host);
     }
   }));

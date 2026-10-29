@@ -40,7 +40,7 @@
  * drag cheap at 1,655 selected blocks rather than 16,451; `web/test/screen-map-boot.test.ts`'s
  * base-layer test makes the claim checkable by following a frame's own `drawImage` call to the
  * offscreen canvas it names and counting what THAT canvas's own log holds. */
-import type { CityBundle, CityEncoding } from "../screen_map.js";
+import type { CityBundle, CityEncoding, CityFollow } from "../screen_map.js";
 import { sizeCanvas } from "./canvas.js";
 import { toScreen, type View } from "../view/transform.js";
 
@@ -128,7 +128,8 @@ export interface CityLayer {
    * Survival is NOT among the reasons: the base layer is blitted back whole on every frame, so a
    * ring painted into it would still reach the screen after a floor change (verified). */
   paintFrame(ctx: CanvasRenderingContext2D, bundle: CityBundle, view: View, e: CityEncoding,
-            order: Int32Array, k: number, size: { width: number; height: number }): void;
+            order: Int32Array, k: number, size: { width: number; height: number },
+            follow: CityFollow | undefined): void;
 }
 
 /** Builds one OFFSCREEN `<canvas>` (never inserted into the document -- a pure pixel buffer) and
@@ -168,7 +169,7 @@ export function createLayer(): CityLayer {
         strokeBlock(baseCtx, rings, style, e.block_lw);
       }
     },
-    paintFrame(ctx, bundle, view, e, order, k, size) {
+    paintFrame(ctx, bundle, view, e, order, k, size, follow) {
       ctx.clearRect(0, 0, size.width, size.height);
       // The blit happens in DEVICE-PIXEL space: `base` and `ctx`'s own canvas were sized to the
       // same backing-store dimensions (this module's own `dpr`, above), so copying them 1:1 needs
@@ -193,7 +194,6 @@ export function createLayer(): CityLayer {
       //
       // `follow` is absent for Nairobi (screen_map.d.ts), so this branch is a real optional, not a
       // guard: a bundle that carries no followed block draws no ring.
-      const follow = bundle.follow;
       if (follow !== undefined) {
         const [fx, fy] = toScreen(view, follow.x, follow.y);
         ctx.beginPath();

@@ -1,21 +1,23 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import type { DemoBundle } from "../src/demo.js";
+import type { DemoBlock, DemoBundle } from "../src/demo.js";
+import { createChannel, type Channel } from "../src/page/channel.js";
 import type { StateSource } from "../src/state.js";
 import { urlStore } from "../src/url/store.js";
 import {
   fakeLocation, FakeElement, fireResize, installStubs, lastFrame, mountPoint, writeNow,
 } from "./harness.js";
 import {
-  factors, longestEdge, OUTLINES, perimeterOf, ringsOf, SCREEN_GEOMETRY_URL, screenGeometry,
+  factors, longestEdge, OUTLINES, perimeterOf, ringsOf, SCREEN_GEOMETRY_URL, screenGeometryOn,
   slotTicks, type GeometryState,
 } from "../src/widgets/screen-geometry.js";
 
 installStubs();
 
 const bundle = JSON.parse(readFileSync("../examples/demo/demo.json", "utf8")) as DemoBundle;
-const own = bundle.screen.followed;
+const [FIRST, SECOND] = bundle.blocks as [DemoBlock, DemoBlock];
+const own = FIRST.proxy;
 (globalThis as Record<string, unknown>).fetch = (): Promise<unknown> => Promise.resolve({
   ok: true, status: 200, statusText: "OK",
   json: (): Promise<unknown> => Promise.resolve(bundle),
@@ -27,13 +29,13 @@ const screen = (n: number, area: number, perimeter: number): number =>
   (Math.sqrt(n * area) / perimeter) * (n / area);
 const close = (a: number, b: number, rel: number): boolean => Math.abs(a - b) <= rel * Math.abs(b);
 
-async function mount(search = ""): Promise<{ host: FakeElement;
-                                            store: StateSource<GeometryState> }> {
+async function mount(search = "", channel: Channel<string> = createChannel<string>()):
+    Promise<{ host: FakeElement; store: StateSource<GeometryState> }> {
   const host = mountPoint();
   host.dataset.bundle = "../assets/demo/demo.json";
   const slot = urlStore(fakeLocation(search), writeNow).reserve();
   let store: StateSource<GeometryState> | null = null;
-  screenGeometry(host as never, (initial) => {
+  screenGeometryOn(channel)(host as never, (initial) => {
     store = slot.bind(SCREEN_GEOMETRY_URL, initial);
     return store;
   });
@@ -51,7 +53,7 @@ const button = (host: FakeElement, text: string): FakeElement => {
 };
 
 test("the depth factor is the homes behind each frontage slot, for any shape", () => {
-  for (const blk of [bundle.screen.followed, bundle.screen.typical]) {
+  for (const blk of bundle.blocks.map((b) => b.proxy)) {
     const f = factors(blk.area_m2, blk.perimeter_m, blk.n);
     assert.ok(close(f.slots, blk.perimeter_m / Math.sqrt(blk.area_m2 / blk.n), 1e-12));
     assert.ok(close(f.perSlot, Math.sqrt(blk.n * blk.area_m2) / blk.perimeter_m, 1e-12));
@@ -63,7 +65,7 @@ test("the depth factor is the homes behind each frontage slot, for any shape", (
 
 test("at one area and one count, shape enters only through the street: the strip scores least",
      () => {
-  const scores = OUTLINES.map((o) => factors(own.area_m2, perimeterOf(o, own), own.n));
+  const scores = OUTLINES.map((o) => factors(own.area_m2, perimeterOf(o, FIRST), own.n));
   for (const f of scores) assert.equal(f.side, scores[0]!.side, "s must not depend on shape");
   const [ownF, disk, square, strip] = scores;
   assert.ok(disk!.score > square!.score && square!.score > strip!.score);
@@ -73,7 +75,7 @@ test("at one area and one count, shape enters only through the street: the strip
 
 test("the ticks along the outline number the frontage slots of the drawn street", () => {
   for (const o of OUTLINES) {
-    const rings = ringsOf(o, own);
+    const rings = ringsOf(o, FIRST);
     const side = Math.sqrt(own.area_m2 / own.n);
     const drawn = rings.reduce((s, r) => s + r.reduce((t, p, i) => {
       const q = r[(i + 1) % r.length]!;
@@ -130,24 +132,33 @@ test("a reference shape keeps the area and the buildings and changes only the st
   const { host, store } = await mount();
   button(host, "Strip").dispatch("click");
   assert.equal(store.get().outline, "strip");
-  const f = factors(own.area_m2, perimeterOf("strip", own), own.n);
+  const f = factors(own.area_m2, perimeterOf("strip", FIRST), own.n);
   assert.equal(readouts(host)[1], Number(f.slots.toPrecision(3)).toLocaleString("en-US"));
   assert.equal(readouts(host)[0], `${Number(f.side.toPrecision(2))} m`);
 });
 
-test("switching block drops the last block's buildings", async () => {
-  const { host, store } = await mount("?homes=50&outline=disk");
-  button(host, "A typical block").dispatch("click");
-  assert.deepEqual(store.get(), { block: "typical", outline: "disk", homes: null });
-  const t = bundle.screen.typical;
-  const f = factors(t.area_m2, perimeterOf("disk", t), t.n);
+test("the page's block switch drops the last block's buildings and keeps the outline",
+     async () => {
+  const channel = createChannel<string>();
+  const { host, store } = await mount("?homes=50&outline=disk", channel);
+  channel.set(SECOND.block_id);
+  assert.deepEqual(store.get(), { outline: "disk", homes: null });
+  const f = factors(SECOND.proxy.area_m2, perimeterOf("disk", SECOND), SECOND.proxy.n);
   assert.ok(readouts(host)[4]!.startsWith(f.score.toPrecision(3)), readouts(host)[4]);
+  assert.ok(host.text().includes(`block ${SECOND.block_id}'s area`), host.text());
+});
+
+test("it opens on the page's block when the switch has already chosen one", async () => {
+  const channel = createChannel<string>();
+  channel.set(SECOND.block_id);
+  const { host } = await mount("", channel);
+  assert.ok(readouts(host)[4]!.startsWith(SECOND.proxy.score.toPrecision(3)), readouts(host)[4]);
 });
 
 test("the row of parcels stays on its edge, even on a disk's short edges", async () => {
   for (const outline of ["disk", "own"] as const) {
     const { host } = await mount(`?outline=${outline}`);
-    const rings = ringsOf(outline, own);
+    const rings = ringsOf(outline, FIRST);
     const side = Math.sqrt(own.area_m2 / own.n);
     const e = longestEdge(rings, side);
     // The parcels are the only translucent-red fills (the inset's frames are strokes alone).

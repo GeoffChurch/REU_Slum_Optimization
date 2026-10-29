@@ -214,6 +214,16 @@ export class FakeElement {
   setPointerCapture(): void {}
   releasePointerCapture(): void {}
   querySelector(selector: string): FakeElement | null { return this.find(selector); }
+  /** `tag[data-name]` or `[data-name]` only: the selectors the Demo's block switch uses. Anything
+   * else throws, so a widget reaching for a selector this fake does not know fails loudly. */
+  querySelectorAll(selector: string): FakeElement[] {
+    const m = /^([a-z]*)\[data-([a-z-]+)\]$/.exec(selector);
+    if (m === null) throw new Error(`FakeElement.querySelectorAll: unsupported "${selector}"`);
+    const tag = m[1]!.toUpperCase();
+    const key = m[2]!.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+    return this.descendants().filter((c) => (tag === "" || c.tagName === tag) && key in c.dataset);
+  }
+  hidden = false;
   descendants(): FakeElement[] { return this.children.flatMap((c) => [c, ...c.descendants()]); }
   find(tagName: string): FakeElement | null {
     return this.descendants().find((c) => c.tagName === tagName.toUpperCase()) ?? null;
