@@ -1282,32 +1282,36 @@ body,
 
 /* ---------------------------------------------------------------- the Demo's peel figure */
 
-/* The flagship run's depth figure whole, and its deep core magnified beside it: the same image,
-   the detail a CSS crop (gen_site_pages.py's PEEL_DETAIL), with the cropped window marked on the
-   whole. Both on white, like every render on this site. */
-.sbu-peel__views {
-  display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  gap: 1rem;
-  align-items: start;
-}
-
-@media screen and (max-width: 44.9375em) {
-  .sbu-peel__views {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.sbu-peel__whole,
-.sbu-peel__detail {
+/* The flagship run's depth figure in one zoomable frame (web/src/widgets/peel-zoom.ts): the
+   image fills the frame and is moved by one transform; the deep core's outline is placed in frame
+   coordinates by the widget, so its line stays thin at any zoom. On white, like every render on
+   this site. Unzoomed, the browser keeps one-finger swipes (it scrolls the page); the widget takes
+   them over only once zoomed in. No transition: a gesture follows the finger, and nothing animates
+   for a reader who asked for reduced motion. */
+.sbu-peel__frame {
   position: relative;
-  min-width: 0;
+  overflow: hidden;
+  aspect-ratio: 1 / 1;
+  background: #ffffff;
+  border: 1px solid var(--sbu-rule-strong);
+  border-radius: 3px;
+  touch-action: pan-x pan-y;
+  cursor: zoom-in;
 }
 
-.md-typeset .sbu-peel__whole img {
+.sbu-peel__frame[data-zoomed="yes"] {
+  cursor: grab;
+}
+
+.md-typeset .sbu-peel__frame img {
   display: block;
   width: 100%;
+  max-width: none;
+  height: auto;
   margin: 0;
+  transform-origin: 0 0;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .sbu-peel__mark {
@@ -1317,21 +1321,45 @@ body,
   pointer-events: none;
 }
 
-.sbu-peel__detail {
-  aspect-ratio: 1 / 1;
-  overflow: hidden;
-  background: #ffffff;
-  border: 1px solid var(--sbu-rule-strong);
-  border-radius: 3px;
+/* On the white plate, the outline is the plate's ink in both schemes. */
+[data-md-color-scheme="slate"] .sbu-peel__mark {
+  border-color: #111111;
 }
 
-.md-typeset .sbu-peel__detail img {
-  position: absolute;
-  max-width: none;
-  height: auto;
-  margin: 0;
-  border: 0;
-  border-radius: 0;
+.sbu-peel__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.5rem;
+  margin: 0 0 0.5rem;
+}
+
+.sbu-peel__btn {
+  min-width: 2.2rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--sbu-rule-strong);
+  border-radius: 3px;
+  background: var(--md-default-bg-color);
+  color: var(--sbu-ink);
+  font: inherit;
+  font-size: var(--sbu-step--1);
+  cursor: pointer;
+}
+
+.sbu-peel__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.sbu-peel__btn:focus-visible {
+  outline: 3px solid var(--sbu-red-ink);
+  outline-offset: 2px;
+}
+
+.md-typeset .sbu-peel__hint {
+  margin: 0 0 0 0.4rem;
+  font-size: var(--sbu-step--1);
+  color: var(--sbu-ink-muted);
 }
 
 .sbu-peel__legend {

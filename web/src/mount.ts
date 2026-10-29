@@ -177,6 +177,8 @@ register("build-out", buildOut, BUILD_OUT_URL);
 // The same widget under a second name, so a page carrying two build-outs (the Demo's block, and
 // the methods compared on another) gives each slider its own URL key: one codec per name.
 register("build-out-compare", buildOut, BUILD_OUT_COMPARE_URL);
+import { peelZoom, PEEL_URL } from "./widgets/peel-zoom.js";
+register("peel-zoom", peelZoom, PEEL_URL);
 
 // DOMContentLoaded fires once per full page load. That is sufficient only because this project's
 // mkdocs.yml does not enable Material's navigation.instant feature (confirmed absent as of this

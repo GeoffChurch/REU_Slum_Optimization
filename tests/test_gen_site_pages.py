@@ -1200,7 +1200,7 @@ def test_the_demo_mounts_the_sites_screen_map_untouched_and_the_build_out(demo_b
     import scripts.gen_site_pages as gsp
 
     assert re.findall(r'data-widget="([a-z-]+)"', demo_body) == [
-        "screen-map", "build-out", "build-out-compare"]
+        "screen-map", "peel-zoom", "build-out", "build-out-compare"]
     assert gsp._screen_map_figure() in demo_body
     for page in ("explore", "screening", "demo"):
         body = render_page(page)
@@ -1316,13 +1316,13 @@ def test_the_demo_figures_refuse_a_bundle_that_disagrees_with_the_map(
             gsp._demo_screen_facts()
 
 
-def test_the_peel_figure_reads_its_numbers_and_crops_the_deep_core(
+def test_the_peel_figure_reads_its_numbers_and_outlines_the_deep_core(
         demo_body: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The slower screen's figure: the flagship run's depth render, its numbers (the deepest ring
-    and the proxy's top) read off that run's meta.json and checked against the bundle, the rank
-    off the bundle; and its magnified detail, a CSS crop at PEEL_DETAIL, still centred on the
-    render's deepest colour -- a re-render that moved the core would otherwise crop pale
-    parcels silently."""
+    """The slower screen's figure: the flagship run's depth render in one zoomable frame, its
+    numbers (the deepest ring and the proxy's top) read off that run's meta.json and checked
+    against the bundle, the rank off the bundle; the outline at PEEL_CORE still on the render's
+    deepest colour -- a re-render that moved the core would otherwise outline pale parcels
+    silently; and the frame handed the image's native width, which caps the zoom."""
     import json
 
     from PIL import Image
@@ -1336,13 +1336,20 @@ def test_the_peel_figure_reads_its_numbers_and_crops_the_deep_core(
             in demo_body)
     assert f"Ring {meta['deepest_depth']:.0f}, the deepest" in demo_body
     png = Image.open(ROOT / "examples" / "multiblock_depth_density" / "before_depth.png")
-    cx, cy = gsp.PEEL_DETAIL
-    half = png.width / gsp.PEEL_ZOOM / 4            # the middle half of the magnified window
+    figure = re.search(r'<figure class="sbu-peel"([^>]*)>(.*?)</figure>', demo_body, flags=re.S)
+    assert figure is not None
+    assert f'data-widget="peel-zoom" data-native-px="{png.width}"' in figure.group(1)
+    assert figure.group(2).count("<img") == 1, "one frame, not a whole view and a crop"
+    assert 'class="skip-lightbox"' in figure.group(2), "a lightbox would fight the gestures"
+    cx, cy, side = gsp.PEEL_CORE
+    assert (f'data-mark="{cx - side / 2:.4f},{cy - side / 2:.4f},{side:.4f},{side:.4f}"'
+            in figure.group(1))
+    half = png.width * side / 4                      # the middle half of the outlined square
     window = png.convert("RGB").crop((round(cx * png.width - half), round(cy * png.height - half),
                                       round(cx * png.width + half), round(cy * png.height + half)))
     pixels: list[tuple[int, int, int]] = list(window.getdata())
     deep = sum(1 for r, g, _ in pixels if r > 150 and g < 90) / len(pixels)
-    assert deep > 0.3, f"the crop's middle is {deep:.0%} deep-red parcels, not the core"
+    assert deep > 0.3, f"the outline's middle is {deep:.0%} deep-red parcels, not the core"
     bundle = _demo_bundle()
     bundle["block"]["peel"]["rings"] += 1
     (tmp_path / "demo.json").write_text(json.dumps(bundle), encoding="utf-8")
