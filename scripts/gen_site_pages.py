@@ -1864,6 +1864,11 @@ class _TopologyTime(Protocol):
         """The footnote's sentence or two: how the time was had."""
         ...
 
+    def original(self) -> str:
+        """The original implementation's time on the block, as the runtime table states it: this
+        time scaled by the port-speed fit at the block's size (`original_factor`)."""
+        ...
+
 
 @dataclass(frozen=True, kw_only=True)
 class _Measured:
@@ -1876,6 +1881,7 @@ class _Measured:
     rest_median_s: float
     fit_central_s: float
     fit_runs: int
+    original_factor: float
     how: str = "How this was measured"   # a label, not a result: the class's own fact
 
     def figure(self, ours_s: float) -> tuple[str, str]:
@@ -1893,35 +1899,46 @@ class _Measured:
                 f"run) and the second at {_duration(self.second_road_s)}; the other "
                 f"{self.n_rest:,} take a median {self.rest_median_s:.2f} seconds each.")
 
+    def original(self) -> str:
+        return f"about {_duration(self.seconds * self.original_factor)}"
+
 
 @dataclass(frozen=True, kw_only=True)
 class _Extrapolated:
     t: dict[str, Any]
+    block_id: str
     how: str = "How this was estimated"   # a label, not a result: the class's own fact
 
     def _range(self) -> tuple[float, float]:
         a, b = self.t["by_small_s"], self.t["by_top_s"]
         return min(a, b), max(a, b)
 
-    def figure(self, ours_s: float) -> tuple[str, str]:
-        lo, hi = self._range()
+    @staticmethod
+    def _head(lo: float, hi: float) -> str:
+        """A range as the page leads with it (owner, 2026-10-28: "months to centuries"): in one
+        unit a span of numbers, across units a span of units."""
         (vlo, ulo), (vhi, uhi) = _span(lo), _span(hi)
-        # The range leads (owner, 2026-10-28: "months to centuries"); in one unit it is a span of
-        # numbers, across units a span of units.
-        head = (f"{vlo:.1f} to {vhi:.1f} {uhi}" if ulo == uhi
-                else f"{ulo.capitalize()} to {uhi}")
-        return head, "estimated: never run on a block this size"
+        return f"{vlo:.1f} to {vhi:.1f} {uhi}" if ulo == uhi else f"{ulo.capitalize()} to {uhi}"
+
+    def figure(self, ours_s: float) -> tuple[str, str]:
+        return self._head(*self._range()), "estimated: never run on a block this size"
+
+    def original(self) -> str:
+        f = self.t["original_factor"]
+        lo, hi = self._range()
+        return self._head(lo * f, hi * f)
 
     def note(self) -> str:
         lo, hi = self._range()
         t = self.t
-        return (f"Estimated. A power law fitted to {_COUNT_WORDS[len(t['runs'])].lower()} timed "
-                f"runs on smaller blocks gives about {_duration(t['central_s'])} at this block's "
-                f"{t['n_buildings']:,} buildings; anchored on the largest run instead, "
-                f"{_duration(lo)} to {_duration(hi)}.")
+        # The block named: this note sits in a footnote shared with another block's times.
+        return (f"On block <code>{_short(self.block_id)}</code>, never run, a power law fitted to "
+                f"{_COUNT_WORDS[len(t['runs'])].lower()} timed runs on smaller blocks gives about "
+                f"{_duration(t['central_s'])} at its {t['n_buildings']:,} buildings; anchored on "
+                f"the largest run instead, {_duration(lo)} to {_duration(hi)}.")
 
 
-def _topology_of(t: dict[str, Any]) -> _TopologyTime:
+def _topology_of(t: dict[str, Any], block_id: str) -> _TopologyTime:
     """The bundle's tagged `topology` as a _TopologyTime: the one place its `kind` is read. No
     default: a kind this generator does not know is a bundle it cannot state honestly."""
     match t["kind"]:
@@ -1929,42 +1946,36 @@ def _topology_of(t: dict[str, Any]) -> _TopologyTime:
             return _Measured(seconds=t["seconds"], machine=t["machine"], setup_s=t["setup_s"],
                              first_road_s=t["first_road_s"], second_road_s=t["second_road_s"],
                              n_rest=t["n_rest"], rest_median_s=t["rest_median_s"],
-                             fit_central_s=t["fit_central_s"], fit_runs=t["fit_runs"])
+                             fit_central_s=t["fit_central_s"], fit_runs=t["fit_runs"],
+                             original_factor=t["original_factor"])
         case "extrapolated":
-            return _Extrapolated(t=t)
+            return _Extrapolated(t=t, block_id=block_id)
         case other:
             raise SystemExit(f"examples/demo/demo.json: unknown topology kind {other!r}")
 
 
 # Topology's name wherever its time appears: the times are our optimized port's, not the original's
-# (`_port_note`); the comparison's build-out heads its column the same way, from the bundle.
+# (`_estimates_note`); the comparison's build-out heads its column the same way, from the bundle.
 TOPOLOGY_LABEL = "topology (our optimized port)"
 
 
-def _port_note(p: dict[str, Any]) -> str:
-    """The footnote on whose topology the times are: our port's, and how much longer the original
-    took on the blocks both were timed on (examples/demo/demo.json `topology_port`)."""
-    same = "the same networks" if p["same_networks"] else "networks that differ"
+def _estimates_note(p: dict[str, Any], page: _TopologyTime, factors: str) -> str:
+    """The one footnote on how the runtime table's estimates were made: whose topology the
+    measured times are (our port's), how the page block's port time was extrapolated (`page`'s
+    note), and how the original's times follow from the port's by the port-speed fit
+    (examples/demo/demo.json `topology_port`; `factors`, the fit at each block's size)."""
     def count(n: int) -> str:
         return _COUNT_WORDS.get(n, str(n)).lower()
 
-    return (f"Topology's times here are our optimized port's (commit <code>{p['port']}</code>), "
-            f"not the original's. On {count(p['n_blocks'])} blocks of {p['n_min']} to {p['n_max']} "
-            f"buildings the original (commit <code>{p['original']}</code>) took "
-            f"{p['speedup_min']:.1f} to {p['speedup_max']:.1f} times as long, about "
-            f"{p['speedup_median']:.0f}× at the median, building {same}; "
-            f"{count(p['n_failed'])} more blocks failed in both versions and are left out. The "
-            f"gap seems to grow with block size, roughly as "
-            f"n<sup>{p['exponent']:.2f}</sup>, so on blocks this size the original would likely "
-            f"be slower still.")
-
-
-def _compare_col(head: str, time: str, sub: str) -> str:
-    """One method's column: its plain heading, its run time large, and the line saying how."""
-    return (f'  <div class="sbu-compare__col">\n'
-            f'    <p class="sbu-compare__head">{head}</p>\n'
-            f'    <p class="sbu-compare__time">{time}</p>\n'
-            f'    <p class="sbu-compare__sub">{sub}</p>\n  </div>\n')
+    same = "the same networks" if p["same_networks"] else "networks that differ"
+    return (f"Topology's times are our optimized port's (commit <code>{p['port']}</code>) "
+            f"unless marked original. {page.note()} The original implementation (commit "
+            f"<code>{p['original']}</code>), timed against the port on {count(p['n_blocks'])} "
+            f"blocks of {p['n_min']} to {p['n_max']} buildings, took {p['speedup_min']:.1f} to "
+            f"{p['speedup_max']:.1f} times as long, building {same} "
+            f"({count(p['n_failed'])} more blocks failed in both). The gap grows with block size, "
+            f"roughly as n<sup>{p['exponent']:.2f}</sup>; that fit, carried to each block's size "
+            f"({factors}), gives the original's times.")
 
 
 def _buildout(name: str) -> dict[str, Any]:
@@ -2031,9 +2042,9 @@ def _demo_build_out() -> str:
         f"new road ({bo['escape_scale']:,.0f} model units): {_plate_key(e)} "
         f"{DEMO_METRIC.capitalize()} is the share of the homes' total escape time the roads "
         f"remove, 1 − P(roads) / P(no roads): what the rest of this site calls "
-        '<a href="../methodology/permeability/">permeability</a>. Conductance added is how much '
-        f"easier the roads make the ground to cross, in m² of open ground; a road conducts "
-        f"{e['road_conductance']:.0f} times what open ground does.")
+        '<a href="../methodology/permeability/">permeability</a>. The conductance the roads add '
+        "gives a natural single number for a budget, but the page plots displacement and "
+        "road length.")
     opening = bo["budgets"][bo["default_step"]]
     return _build_out_figure(
         b["buildout"], "build-out",
@@ -2043,10 +2054,11 @@ def _demo_build_out() -> str:
 
 def _demo_compare() -> str:
     """Our method and the earlier one (owner, 2026-10-29): on the comparison block, where topology
-    has run, both methods under one budget slider (`_build_out_figure`, two series), headed by
-    what each does there and when one saves as much escape time as the other's whole network;
-    then the page's own block, where topology's time can only be estimated. Each big time is
-    labelled with its method; footnotes say how topology's were had (`_TopologyTime`)."""
+    has run, what each method does there; a runtime table, both blocks by topology's original,
+    our port of it, and our method (`_runtime_table`); then both methods under one budget slider
+    (`_build_out_figure`, two series), headed by when one saves as much escape time as the
+    other's whole network. Footnotes say how topology's times were had (`_TopologyTime`): one for
+    every estimate, one for the measurement."""
     d = _demo()
     if d is None:
         return ""
@@ -2054,15 +2066,20 @@ def _demo_compare() -> str:
     name = html.escape(m["name"])
     bo = _buildout(c["buildout"])
     ours, earlier = bo["series"]
-    notes: list[str] = []
+    [page_ours] = _buildout(b["buildout"])["series"]
+    topology = _topology_of(c["topology"], c["block_id"])
+    page_topology = _topology_of(b["topology"], b["block_id"])
+    factors = (f"{c['topology']['original_factor']:.1f}× at {c['n_buildings']:,} buildings, "
+               f"{b['topology']['original_factor']:.1f}× at {b['n_buildings']:,}")
+    # Two footnotes, each with a fixed number: every estimate links the first, the measurement
+    # the second -- one explanation however many cells it covers.
+    notes = (("How these were estimated",
+              _estimates_note(d["topology_port"], page_topology, factors)),
+             (topology.how, topology.note()))
 
-    def marked(how: str, note: str, value: str) -> str:
-        notes.append(note)
-        k = len(notes)
-        return f'{value}<sup><a href="#topology-note-{k}" aria-label="{how}">{k}</a></sup>'
-
-    def timed(topology: _TopologyTime, value: str) -> str:
-        return marked(topology.how, topology.note(), value)
+    def marked(k: int, value: str) -> str:
+        return (f'{value}<sup><a href="#topology-note-{k}" aria-label="{notes[k - 1][0]}">{k}</a>'
+                f"</sup>")
 
     def whole(s: dict[str, Any]) -> dict[str, Any]:
         """The series' whole network: its last budget's step."""
@@ -2071,19 +2088,46 @@ def _demo_compare() -> str:
 
     standing = ("the shipped screen's top block" if c["proxy_rank"] == 1
                 else f"rank {c['proxy_rank']:,} under the shipped screen")
-    topology = _topology_of(c["topology"])
     t_head, _ = topology.figure(ours["run"]["seconds"])
     o_whole, e_whole = whole(ours), whole(earlier)
-    port = marked("Which topology this is", _port_note(d["topology_port"]), "our optimized port")
     why = next(x["why"] for x in ours["cells"] if x["kind"] == "short")
     lead = (
         f'<p>On block <code>{c["block_id"]}</code> in {html.escape(c["place"])}: {standing}, '
         f"and at {c['n_buildings']:,} buildings small enough for topology to run at all. "
-        f"Topology, run as {port}, builds until every parcel touches a road, which here displaces "
-        f"{e_whole['displacement']:.0%} of the floor area, in {timed(topology, t_head)}; "
-        f"{name} stops at {o_whole['displacement']:.0%}, with {html.escape(why)}, in "
-        f"{_duration(ours['run']['seconds'])}. Below, both are cut at the same budgets, each in "
-        f"the order it built its roads, with its run's time to each network.</p>\n")
+        f"Topology, run as {marked(1, 'our optimized port')}, builds until every parcel touches "
+        f"a road, which here displaces {e_whole['displacement']:.0%} of the floor area, in "
+        f"{marked(2, t_head)}; {name} stops at {o_whole['displacement']:.0%}, with "
+        f"{html.escape(why)}, in {_duration(ours['run']['seconds'])}. Below, both are cut at the "
+        f"same budgets, each in the order it built its roads, with its run's time to each "
+        f"network.</p>\n")
+
+    def cell(time: str, how: str, fastest: bool = False) -> str:
+        cls = ' class="sbu-runtimes__fastest"' if fastest else ""
+        return f"<td{cls}><strong>{time}</strong><span>{how}</span></td>"
+
+    def row(blk: dict[str, Any], original: str, port: str, ours_cell: str) -> str:
+        return (f"<tr><th scope=\"row\"><code>{_short(blk['block_id'])}</code>"
+                f"<span>{blk['n_buildings']:,} buildings</span></th>"
+                f"{original}{port}{ours_cell}</tr>")
+
+    p_head, _ = page_topology.figure(page_ours["run"]["seconds"])
+    table = (
+        '<table class="sbu-runtimes">\n'
+        "<caption>Run times on each block: our method is the fastest on both, in green and "
+        "marked.</caption>\n"
+        '<thead><tr><th scope="col">Block</th><th scope="col">Topology, original '
+        'implementation</th><th scope="col">Topology, our optimized port</th>'
+        f'<th scope="col">{name}</th></tr></thead>\n<tbody>\n'
+        + row(c, cell(topology.original(), marked(1, "expected")),
+              cell(t_head, marked(2, "measured")),
+              cell(_duration(ours["run"]["seconds"]), "measured, whole run · fastest", True))
+        + "\n"
+        + row(b, cell(page_topology.original(), marked(1, "estimated")),
+              cell(p_head, marked(1, "estimated")),
+              cell(_duration(page_ours["run"]["seconds"]),
+                   f"measured, to a {_buildout(b['buildout'])['budgets'][-1]:.0%} budget · fastest",
+                   True))
+        + "\n</tbody>\n</table>\n")
     # The takeaway: the first of our networks to save as much as topology's whole one, if any.
     target = e_whole["permeability"]
     reach = next((x["step"] for x in ours["cells"] if x["step"]["permeability"] >= target), None)
@@ -2096,28 +2140,16 @@ def _demo_compare() -> str:
     caption = (
         f"Drag the budget: both plates and the dots on every plot follow. Each home coloured by "
         f"its escape time on this block's scale ({bo['escape_scale']:,.0f} model units at the "
-        f"99th-percentile home with no new road): {_plate_key(e)}")
+        f"99th-percentile home with no new road): {_plate_key(e)} Run time is each method's "
+        f"since its start, on a log scale.")
     figure = _build_out_figure(
         c["buildout"], "build-out-compare",
         f"Block {c['block_id']}'s homes coloured by escape time, with the roads {name} builds to "
         f"a {bo['budgets'][bo['default_step']]:.0%} displacement budget", caption)
-    first = f'{lead}<p class="sbu-compare__takeaway">{takeaway}</p>\n{figure}'
-    page_topology = _topology_of(b["topology"])
-    page_bo = _buildout(b["buildout"])
-    [page_ours] = page_bo["series"]
-    p_head, p_sub = page_topology.figure(page_ours["run"]["seconds"])
-    second = (
-        f'<p class="sbu-compare__block">On block <code>{b["block_id"]}</code>, this page\'s '
-        f"block:</p>\n"
-        f'<div class="sbu-compare">\n'
-        + _compare_col(f"Our method: {name}", _duration(page_ours["run"]["seconds"]),
-                       f"to a {page_bo['budgets'][-1]:.0%} budget, recorded, "
-                       f"{html.escape(page_ours['run']['machine'])}")
-        + _compare_col(f"Earlier method: {TOPOLOGY_LABEL}", timed(page_topology, p_head), p_sub)
-        + "</div>")
     foot = "\n".join(f'<p class="sbu-footnote" id="topology-note-{k}"><sup>{k}</sup> {n}</p>'
-                     for k, n in enumerate(notes, start=1))
-    return f"{first}\n{second}\n{foot}"
+                     for k, (_, n) in enumerate(notes, start=1))
+    return (f'{lead}{table}<p class="sbu-compare__takeaway">{takeaway}</p>\n{figure}\n'
+            f"{foot}")
 
 
 # Marker name -> producer. A partial's <!-- NAME --> holes are filled from here; tests assert this

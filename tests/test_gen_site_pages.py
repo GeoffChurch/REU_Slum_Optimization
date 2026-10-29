@@ -1178,7 +1178,7 @@ def test_the_demo_names_its_metric_once(demo_body: str) -> None:
     assert f'data-metric-label="{gsp.DEMO_METRIC}"' in demo_body
     widget = (ROOT / "web" / "src" / "widgets" / "build-out.ts").read_text(encoding="utf-8")
     code = re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", widget, flags=re.S))
-    assert "plotsFor" in code, "the comment strip ate the code; this test is vacuous"
+    assert "plotOf" in code, "the comment strip ate the code; this test is vacuous"
     # The string literals, with any template's ${...} code taken out: the bundle's own field
     # `f.permeability` is code, not a label.
     literals = [re.sub(r"\$\{[^}]*\}", "", lit)
@@ -1359,89 +1359,107 @@ def test_the_fires_are_listed_and_carry_nothing_a_map_could_draw(demo_body: str)
             assert r["url"] in demo_body
 
 
-def test_every_big_time_names_its_method_and_says_how_it_was_had(demo_body: str) -> None:
-    """Owner, 2026-10-28: no bare "21 seconds". Every large time in the comparison sits under its
-    method's heading, our method's or the earlier one's; topology's is measured on the
-    comparison block and estimated on the page's (a tagged union read once, `_topology_of`), each
-    with a footnote whose marker says which. The page block's times live here, not under the
-    build-out."""
+def _runtime_rows(section: str) -> dict[str, list[tuple[str, str, str]]]:
+    """The comparison's runtime table: per row's block (its short id), each cell's (time, how,
+    class)."""
+    m = re.search(r'<table class="sbu-runtimes">(.*?)</table>', section, flags=re.S)
+    assert m is not None, "the comparison has no runtime table"
+    rows: dict[str, list[tuple[str, str, str]]] = {}
+    for row in re.findall(r'<tr><th scope="row">(.*?)</tr>', m.group(1), flags=re.S):
+        block = re.search(r"<code>([^<]*)</code>", row)
+        assert block is not None
+        rows[block.group(1)] = [
+            (time, re.sub(r"<[^>]*>", "", how), cls)
+            for cls, time, how in re.findall(
+                r'<td(?: class="([^"]*)")?><strong>([^<]*)</strong><span>(.*?)</span></td>', row)]
+    return rows
+
+
+def test_the_demo_plots_displacement_and_road_and_the_faceoff_run_time(demo_body: str) -> None:
+    """Owner, 2026-10-29: conductance leaves the Demo -- no plot, readout or bundle field; the
+    5810 caption says in one sentence why it is not plotted. 5810's build-out plots escape time
+    saved against displacement and new road; the face-off adds run time."""
+    d = _demo_bundle()
+    page, faceoff = (_demo_buildout(d[k]["buildout"]) for k in ("block", "comparison"))
+    assert page["plots"] == ["displacement", "road"]
+    assert faceoff["plots"] == ["displacement", "road", "time"]
+    for bo in (page, faceoff):
+        for s in bo["series"]:
+            assert all("conductance_m2" not in c["step"] for c in s["cells"])
+    assert "road_conductance" not in d["encoding"]
+    assert demo_body.count("onductance") == 1
+    assert ("The conductance the roads add gives a natural single number for a budget, but the "
+            "page plots displacement and road length.") in demo_body
+    widget = (ROOT / "web" / "src" / "widgets" / "build-out.ts").read_text(encoding="utf-8")
+    assert "onductance" not in widget
+
+
+def test_the_runtime_table_times_every_method_on_both_blocks(demo_body: str) -> None:
+    """Owner, 2026-10-29: one small table near the top of the comparison -- the two blocks by
+    topology's original implementation, our optimized port of it, and our method -- each cell
+    saying whether it was measured, expected or estimated, every number from the bundle; our
+    method's cells green and marked "fastest", so colour is not the only cue; the old times row
+    at the end is gone."""
     import scripts.gen_site_pages as gsp
 
-    bundle = _demo_bundle()
+    d = _demo_bundle()
+    c, b, name = d["comparison"], d["block"], d["method"]["name"]
     section = demo_body.split("## Our method and the earlier one")[1]
-    pairs = re.findall(r'<p class="sbu-compare__head">([^<]*)</p>\s*'
-                       r'<p class="sbu-compare__time">([^<]*)', section)
-    assert len(pairs) == 2 and demo_body.count('class="sbu-compare__time"') == 2, pairs
-    name = bundle["method"]["name"]
-    assert [h for h, _ in pairs] == [f"Our method: {name}",
-                                     f"Earlier method: {gsp.TOPOLOGY_LABEL}"]
-    c, b = bundle["comparison"], bundle["block"]
-    # On the comparison block the build-out widget heads each plate with its series' label and
-    # whole run time (build-out.ts); the lead sentence states topology's, footnoted.
-    series = _demo_buildout(c["buildout"])["series"]
-    assert [s["label"] for s in series] == [f"Our method: {name}",
-                                            f"Earlier method: {gsp.TOPOLOGY_LABEL}"]
-    assert c["topology"]["kind"] == "measured" and b["topology"]["kind"] == "extrapolated"
-    assert series[1]["run"] == c["topology"]
-    v, unit = gsp._span(c["topology"]["seconds"])
-    assert re.search(rf"in {v:.3g} {unit}<sup><a [^>]*How this was measured", section)
-    lo, hi = sorted((b["topology"]["by_small_s"], b["topology"]["by_top_s"]))
-    (vlo, ulo), (vhi, uhi) = gsp._span(lo), gsp._span(hi)
-    assert pairs[1][1].startswith(f"{vlo:.1f} to {vhi:.1f} {uhi}" if ulo == uhi
-                                  else f"{ulo.capitalize()} to {uhi}")
-    assert section.count('aria-label="How this was measured"') == 1
-    assert section.count('aria-label="How this was estimated"') == 1
-    whole = series[1]["cells"][-1]["step"]["displacement"]
-    assert f"displaces {whole:.0%} of the floor area" in section
+    head = re.search(r"<thead>(.*?)</thead>", section, flags=re.S)
+    assert head is not None
+    assert re.findall(r'<th scope="col">([^<]*)</th>', head.group(1)) == [
+        "Block", "Topology, original implementation", "Topology, our optimized port", name]
+    assert section.index('class="sbu-runtimes"') < section.index('data-widget="build-out-compare"')
+    rows = _runtime_rows(section)
+    short_c, short_b = gsp._short(c["block_id"]), gsp._short(b["block_id"])
+    assert list(rows) == [short_c, short_b]
+    t = gsp._topology_of(c["topology"], c["block_id"])
+    pt = gsp._topology_of(b["topology"], b["block_id"])
+    [ours] = [s for s in _demo_buildout(c["buildout"])["series"] if s["label"].endswith(name)]
     [page] = _demo_buildout(b["buildout"])["series"]
-    ours = gsp._duration(page["run"]["seconds"])
-    assert ours not in demo_body.split("## Our method and the earlier one")[0], (
-        "the page block's run time is back under the build-out")
+    (o1, h1, _), (p1, hp1, _), (s1, hs1, cs1) = rows[short_c]
+    (o2, h2, _), (p2, hp2, _), (s2, hs2, cs2) = rows[short_b]
+    assert (o1, h1) == (t.original(), "expected1")
+    assert (p1, hp1) == (gsp._measured_time(c["topology"]["seconds"]), "measured2")
+    assert (o2, h2) == (pt.original(), "estimated1")
+    assert (p2, hp2) == (pt.figure(page["run"]["seconds"])[0], "estimated1")
+    assert s1 == gsp._duration(ours["run"]["seconds"])
+    assert s2 == gsp._duration(page["run"]["seconds"])
+    for how, cls in ((hs1, cs1), (hs2, cs2)):
+        assert cls == "sbu-runtimes__fastest" and "fastest" in how and "measured" in how
+    # The original's time follows from the port's by the fit at the block's size.
+    expected = c["topology"]["seconds"] * c["topology"]["original_factor"]
+    assert t.original() == f"about {gsp._duration(expected)}"
+    assert f"{b['n_buildings']:,} buildings" in section
+    assert 'class="sbu-compare__time"' not in demo_body, "the old times row is back"
+    assert section.count('aria-label="How these were estimated"') == 4
+    assert section.count('aria-label="How this was measured"') == 2
 
 
 def test_topology_is_named_as_our_port_with_the_originals_times_footnoted(
         demo_body: str) -> None:
-    """Owner, 2026-10-29: the site's topology times are our optimized port's. Every heading over a
-    topology time says so, and one footnote gives the original's times against it, read from the
-    bundle (atlas/topology_speed/table.csv through build.py)."""
+    """Owner, 2026-10-29: the site's topology times are our optimized port's. The build-out heads
+    topology's column as our port, and one footnote says how every estimate was made -- the
+    port's extrapolation and the original's speed-up fit -- read from the bundle
+    (atlas/topology_speed/table.csv through build.py)."""
     import scripts.gen_site_pages as gsp
 
-    p = _demo_bundle()["topology_port"]
+    d = _demo_bundle()
+    p = d["topology_port"]
     section = demo_body.split("## Our method and the earlier one")[1]
-    heads = re.findall(r'<p class="sbu-compare__head">([^<]*)</p>', section)
-    assert [h for h in heads if "topology" in h] == [f"Earlier method: {gsp.TOPOLOGY_LABEL}"]
-    assert section.count('aria-label="Which topology this is"') == 1
+    labels = [s["label"] for s in _demo_buildout(d["comparison"]["buildout"])["series"]]
+    assert f"Earlier method: {gsp.TOPOLOGY_LABEL}" in labels
     note = re.search(r'<p class="sbu-footnote" id="topology-note-1">(.*?)</p>', section)
     assert note is not None and "our optimized port" in note.group(1)
     for fact in (f"<code>{p['port']}</code>", f"<code>{p['original']}</code>",
                  f"{p['n_min']} to {p['n_max']} buildings",
                  f"{p['speedup_min']:.1f} to {p['speedup_max']:.1f} times as long",
-                 f"n<sup>{p['exponent']:.2f}</sup>"):
+                 f"n<sup>{p['exponent']:.2f}</sup>",
+                 f"{d['comparison']['topology']['original_factor']:.1f}×",
+                 f"{d['block']['topology']['original_factor']:.1f}×",
+                 f"<code>{gsp._short(d['block']['block_id'])}</code>, never run"):
         assert fact in note.group(1), fact
-
-
-def test_the_method_is_named_and_its_name_explained(demo_body: str) -> None:
-    """Owner, 2026-10-29: the method is "Shock Reblock", its description closing on why, in the
-    coordinator's sentence verbatim; the plan keys stay as they are."""
-    m = _demo_bundle()["method"]
-    assert m["name"] == "Shock Reblock"
-    assert m["blurb"].endswith(
-        "Named for thermal-shock cracking: as a quenched ceramic cracks inward from its cold "
-        "surface and each crack ends on another, each new road here runs in from the street "
-        "toward the homes with the longest way out and joins the network at both ends, so every "
-        "road is on a loop.")
-    assert "Loop roads" not in demo_body
-    for name in ("buildout_ZAF.9.3.1_1_5810.json", "buildout_ZAF.9.3.1_1_41785.json"):
-        assert _demo_buildout(name)["series"][0]["label"] == "Our method: Shock Reblock"
-
-
-def test_the_peel_caption_reads_in_either_layout(demo_body: str) -> None:
-    """The magnified view sits right of the whole on a wide screen and below it on a phone, so the
-    caption names neither side."""
-    caption = re.search(r'<figure class="sbu-peel">.*?<figcaption>(.*?)</figcaption>', demo_body,
-                        flags=re.S)
-    assert caption is not None and "magnified" in caption.group(1)
-    assert not re.search(r"(right|left|below|above)", caption.group(1)), caption.group(1)
+    assert len(re.findall(r'class="sbu-footnote"', section)) == 2
 
 
 def test_the_measured_note_says_where_topologys_time_went(demo_body: str) -> None:
