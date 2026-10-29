@@ -3,8 +3,9 @@ import { showWidgetError } from "./dom/error.js";
 import type { StateFactory } from "./state.js";
 import type { UrlCodec } from "./url/param.js";
 import {
-  browserLocation, debounce, systemTimers, urlStore, type UrlStore,
+  browserLocation, debounce, notifying, systemTimers, urlStore, type UrlStore,
 } from "./url/store.js";
+import { createQr, type Qr } from "./qr/qr.js";
 
 export type Widget<T> = (host: HTMLElement, makeState: StateFactory<T>) => void;
 
@@ -47,11 +48,25 @@ export function register<T>(name: string, w: Widget<T>, codec: UrlCodec<T>): voi
  * who stops and copies the address bar gets the view they are looking at. */
 export const URL_DEBOUNCE_MS = 300;
 
-function defaultStore(): UrlStore {
-  return urlStore(browserLocation(), debounce(URL_DEBOUNCE_MS, systemTimers));
+/** The page's store over the browser's address, telling `after` of every write it makes. */
+function defaultStore(after: () => void): UrlStore {
+  return urlStore(notifying(browserLocation(), after), debounce(URL_DEBOUNCE_MS, systemTimers));
 }
 
-export function mountAll(root: ParentNode = document, store: UrlStore = defaultStore()): void {
+/** The page's QR code (qr/qr.ts), moved from overrides/main.html's slot to the bottom of the
+ * navigation sidebar and drawn; null on a page with no slot (the 404 page, which has no canonical
+ * URL to send a phone to). */
+function pageQr(doc: Document): Qr | null {
+  const slot = doc.querySelector<HTMLElement>("[data-sbu-qr]");
+  if (slot === null) return null;
+  const sidebar = doc.querySelector(".md-sidebar--primary .md-sidebar__scrollwrap");
+  if (sidebar === null) throw new Error("QR code: the page has no navigation sidebar to sit in");
+  sidebar.append(slot);
+  return createQr(slot, { canonical: slot.dataset.sbuQr!, search: () => location.search,
+                          hash: () => location.hash });
+}
+
+export function mountAll(root: ParentNode, store: UrlStore): void {
   // Which widget on THIS page claimed which query key. Two mount points sharing a key would
   // cross-talk silently through one set of values -- including two mount points of the SAME
   // widget, which is why the check is per mount point rather than per registration.
@@ -168,5 +183,9 @@ register("build-out-compare", buildOut, BUILD_OUT_COMPARE_URL);
 // writing): with that feature on, page navigations swap content via fetch + DOM replacement
 // without a reload, so this listener would fire on the first page and never again. If
 // navigation.instant is ever turned on, replace this with Material's `document$` subscription
-// (which fires on every instant navigation) so mountAll() keeps running on every page.
-document.addEventListener("DOMContentLoaded", () => mountAll());
+// (which fires on every instant navigation) so mountAll() keeps running on every page. The
+// QR code is drawn first, so the store's first write already has it to tell.
+document.addEventListener("DOMContentLoaded", () => {
+  const qr = pageQr(document);
+  mountAll(document, defaultStore(qr === null ? () => {} : qr.update));
+});

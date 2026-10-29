@@ -1,0 +1,14 @@
+{#-
+  The page's QR code (web/src/qr/qr.ts): a slot after the two sidebars carrying the page's
+  canonical URL, which widgets.js moves into the bottom of the primary (navigation) sidebar and
+  fills. The canonical URL is site_url plus this page's path, so a scan opens the live site even
+  from a local or claude.ai preview. No slot where a page has no canonical URL (the 404 page,
+  which is not a place to send a phone). hooks/qr_slot.py checks every built page has one.
+-#}
+{% extends "base.html" %}
+{% block site_nav %}
+  {{ super() }}
+  {% if page and page.canonical_url %}
+    <div class="sbu-qr" data-sbu-qr="{{ page.canonical_url }}" hidden></div>
+  {% endif %}
+{% endblock %}

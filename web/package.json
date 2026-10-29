@@ -11,7 +11,11 @@
     "@types/emscripten": "1.41.5",
     "@types/node": "22.20.1",
     "esbuild": "0.28.2",
+    "jsqr": "1.4.0",
     "pyodide": "0.29.2",
     "typescript": "5.9.3"
+  },
+  "dependencies": {
+    "qrcode-generator": "2.0.4"
   }
 }

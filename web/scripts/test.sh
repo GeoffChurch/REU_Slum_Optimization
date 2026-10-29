@@ -111,6 +111,10 @@ make -C .. wheel || exit 1
 
 OUTDIR=$(mktemp -d)
 tsc -p tsconfig.test.json --outDir "$OUTDIR" --noEmit false
+# The compiled modules import npm packages by bare name (qr/qr.ts's `qrcode-generator`, and the
+# tests' `jsqr`); Node resolves those by walking up from the importing file, and nothing above a
+# temporary directory holds them -- so this one is linked in.
+ln -s "$PWD/node_modules" "$OUTDIR/node_modules"
 mapfile -d '' -t files < <(find "$OUTDIR/test" -name '*.test.js' -print0)
 if (( ${#files[@]} == 0 )); then
   echo "no compiled test files found under $OUTDIR/test -- a broken tsconfig.test.json," \
