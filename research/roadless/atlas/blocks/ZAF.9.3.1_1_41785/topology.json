@@ -1,0 +1,22 @@
+{
+ "block": "ZAF.9.3.1_1_41785",
+ "n_buildings": 638,
+ "alpha": 10.0,
+ "seed": 0,
+ "road_width_m": 7.0,
+ "wall_s": 6762.479218959808,
+ "cpu_s": 6734.77579317,
+ "peak_rss_gb": 0.6868362426757812,
+ "host": "rtx6000",
+ "cpu": "Intel(R) Xeon(R) w7-3455",
+ "n_roads": 546,
+ "road_m": 1917.5753452101724,
+ "finished": "2026-10-29T01:15:01-0400",
+ "D": 0.9066202515723024,
+ "L_P": 0.9347676761286854,
+ "L_J2": 0.9404855424822465,
+ "C": 119243.3802742434,
+ "scored_key": "topology.a10.s0.w7",
+ "scored_run": "at907",
+ "metric": "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75"
+}

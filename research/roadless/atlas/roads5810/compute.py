@@ -247,11 +247,26 @@ def opened(carved: NDArray[np.int64], parent: NDArray[np.int64],
     return out
 
 
-def frames_of(name: str, run: str, b, net: Network, t0: float, *,  # type: ignore[no-untyped-def]
-              frames: Pass, data: Path, meshes: Path) -> None:
-    """`network`'s frames of the Network `net` at `frames`' targets: per stop its rasters, lenses,
-    escape times and sheet (module docstring)."""
-    metric = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())
+class Carved(NamedTuple):
+    """A network's frames' model (`carved`): the stops' corridors carved into one fixed mesh."""
+    m: gcl.Model
+    want: list[tuple[float | None, int]]    # (target, stop): None the whole network
+    stops: list[int]
+    D_full: float
+    nt: int
+    atoms: int
+    t_cut: float
+    t_mesh: float
+    t_model: float
+
+
+def carved(b, net: Network, *, frames: Pass, metric: gcl.ComplexMetric,  # type: ignore[no-untyped-def]
+           meshes: Path) -> Carved:
+    """The frames of Network `net` at `frames`' targets (the shortest prefix reaching each, and
+    the whole network if `full`), their corridors carved into one fixed mesh (cached in `meshes`
+    by the carving's identity: a second call with the same network meets the first's mesh) and
+    its model; stop k of the carving is the k-th of `stops`."""
+    t0 = time.time()
     W = common.POPULATIONS["area"].weights(np.asarray(b.buildings.outlines))
     D_full = float((net.c(net.size) * W).sum() / W.sum())
     want = [(t, net.prefix_len(t)) for t in frames.targets if D_full >= t]
@@ -259,8 +274,6 @@ def frames_of(name: str, run: str, b, net: Network, t0: float, *,  # type: ignor
         want.append((None, net.size))
     stops = sorted({mm for _t, mm in want})
     t_cut = time.time() - t0
-    print(f"{name}: D_full {D_full:.4f}, stops {stops} ({t_cut:.0f}s)", flush=True)
-
     geo = gc.geometry(b)
     carving = gcl.Carving.of(geo, [[geo.local(net.corridor(mm)) for mm in stops]])
     meshes.mkdir(exist_ok=True)
@@ -270,8 +283,21 @@ def frames_of(name: str, run: str, b, net: Network, t0: float, *,  # type: ignor
     t_model = time.time() - t0 - t_cut - t_mesh
     if len(m.geo.polys) != len(b.buildings.outlines):
         raise AssertionError("the model's buildings are not the block's")
-    print(f"{name}: mesh {fx.fm.nt} triangles, {carving.n} atoms, mesh {t_mesh:.0f}s, "
-          f"model {t_model:.0f}s, P0 {m.base.P:.6e}", flush=True)
+    return Carved(m=m, want=want, stops=stops, D_full=D_full, nt=int(fx.fm.nt),
+                  atoms=int(carving.n), t_cut=t_cut, t_mesh=t_mesh, t_model=t_model)
+
+
+def frames_of(name: str, run: str, b, net: Network, t0: float, *,  # type: ignore[no-untyped-def]
+              frames: Pass, data: Path, meshes: Path) -> None:
+    """`network`'s frames of the Network `net` at `frames`' targets: per stop its rasters, lenses,
+    escape times and sheet (module docstring)."""
+    metric = gcl.complex_of(metrics.RUNTIME, factorization=gap_factor.SuperLU())
+    W = common.POPULATIONS["area"].weights(np.asarray(b.buildings.outlines))
+    cv = carved(b, net, frames=frames, metric=metric, meshes=meshes)
+    m, want, stops, D_full = cv.m, cv.want, cv.stops, cv.D_full
+    t_cut, t_mesh, t_model = cv.t_cut, cv.t_mesh, cv.t_model
+    print(f"{name}: D_full {D_full:.4f}, stops {stops}; mesh {cv.nt} triangles, {cv.atoms} atoms, "
+          f"mesh {t_mesh:.0f}s, model {t_model:.0f}s, P0 {m.base.P:.6e}", flush=True)
     fr = frame_of(m)
     cleared = [net.cleared(mm) for mm in stops]
     out: dict[str, np.ndarray] = dict(
@@ -322,8 +348,8 @@ def frames_of(name: str, run: str, b, net: Network, t0: float, *,  # type: ignor
     info = dict(method=name, metric=metric.name, block=b.block_id, D_full=D_full,
                 rule="the shortest prefix whose D_area reaches the target (Network.prefix_len: "
                      "the lineup's road_rescore.prefix_len for roads)",
-                want=[dict(target=t, m=mm) for t, mm in want], nt=int(fx.fm.nt),
-                atoms=int(carving.n), base=base, frames=rows, t_cut=t_cut, t_mesh=t_mesh,
+                want=[dict(target=t, m=mm) for t, mm in want], nt=cv.nt,
+                atoms=cv.atoms, base=base, frames=rows, t_cut=t_cut, t_mesh=t_mesh,
                 t_model=t_model, t_total=time.time() - t0,
                 peak_rss_gb=rr._status_gb("VmHWM"))
     (data / f"{name}_{run}.json").write_text(json.dumps(info, indent=1))
