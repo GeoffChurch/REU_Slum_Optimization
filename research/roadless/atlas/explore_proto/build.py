@@ -187,9 +187,9 @@ EARS_PATHS = Shown(
     # The owner's name for it (2026-10-29), and the coordinator's sentence for why, verbatim.
     name="Shock Reblock",
     blurb=("Each new road runs from the street, or a road already built, across the block and "
-           "back to a street or road, so every road is on a loop and none is a dead end. At each "
-           "step the method tries the cheapest routes through the gaps between buildings and "
-           "builds the one that saves the most escape time for the homes it displaces. "
+           "back to a street or road. At each step the method tries the cheapest routes through "
+           "the gaps between buildings and builds the one that saves the most escape time for the "
+           "homes it displaces. "
            "Named for thermal-shock cracking: as a quenched ceramic cracks inward from its cold "
            "surface and each crack ends on another, each new road here runs in from the street "
            "toward the homes with the longest way out and joins the network at both ends, so "
