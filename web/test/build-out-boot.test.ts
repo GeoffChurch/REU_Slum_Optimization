@@ -18,6 +18,9 @@ installStubs();
 const committed = JSON.parse(
   readFileSync("../examples/demo/demo.json", "utf8")) as DemoBundle;
 const SRC = "../assets/demo/demo.json";
+/** The page's name for L_P, handed over as `data-metric-label`; deliberately not the real one, so
+ * a label the widget spelled itself would show up as a mismatch. */
+const METRIC = "ease of access";
 
 let served: DemoBundle = committed;
 (globalThis as Record<string, unknown>).fetch = (): Promise<unknown> => Promise.resolve({
@@ -33,6 +36,7 @@ async function mount(search = "", bundle: DemoBundle = committed):
   served = bundle;
   const host = mountPoint();
   host.dataset.bundle = SRC;
+  host.dataset.metricLabel = METRIC;
   const loc = fakeLocation(search);
   const slot = urlStore(loc, writeNow).reserve();
   let store: StateSource<BuildOutState> | null = null;
@@ -59,12 +63,12 @@ const readouts = (host: FakeElement): string[] => host.findAll("dd").map((d) => 
 const circles = (svg: FakeElement, cls: string): FakeElement[] =>
   svg.findAll("circle").filter((c) => c.getAttribute("class") === cls);
 
-test("it boots on the bundle's default frame, network view, and removes the fallback", async () => {
+test("it boots on the bundle's default frame and removes the fallback", async () => {
   const { host } = await mount();
   const d = committed.method.default_frame;
   const f = committed.method.frames[d]!;
   assert.equal(host.findAll("img").length, 1, "the fallback image is still there");
-  assert.equal(plate(host).getAttribute("src"), `../assets/demo/${committed.sheets.network}`);
+  assert.equal(plate(host).getAttribute("src"), `../assets/demo/${committed.sheets.sheet}`);
   assert.equal(plate(host).style.transform, `translateY(${(-100 * f.row) / committed.sheets.rows}%)`);
   assert.equal(slider(host).value, String(d));
   assert.deepEqual(readouts(host).slice(0, 3), [
@@ -93,26 +97,18 @@ test("a slider step moves the plate, the readouts and every plot's dot to that f
   }
 });
 
-test("the view switch swaps the sheet and the legend, and the URL says so", async () => {
-  const { host, loc } = await mount();
-  // `className` is set by the widget; the harness's element does not declare it.
-  const legends = host.descendants().filter(
-    (e) => (e as unknown as { className?: string }).className === "sbu-buildout__legend");
-  assert.equal(legends.length, 3, "one legend per view");
-  const button = host.findAll("button").find((b) => b.textContent === "Escape time");
-  assert.ok(button !== undefined);
-  button.dispatch("click");
-  assert.equal(plate(host).getAttribute("src"), `../assets/demo/${committed.sheets.time}`);
-  assert.deepEqual(legends.map((l) => (l as unknown as { hidden: boolean }).hidden),
-                   [true, false, true]);
-  assert.equal(loc.written.at(-1), "view=time");
+test("the metric is named as the page names it, never by the widget itself", async () => {
+  const { host } = await mount();
+  const text = host.text();
+  assert.ok(text.includes("Ease of access against displacement"), text);
+  assert.ok(!/[Pp]ermeability/.test(text), "the widget spelled the metric's name itself");
+  assert.equal(host.findAll("button").length, 0, "there is one view; nothing to switch");
 });
 
 test("a URL budget past the last frame is pinned to it and written back", async () => {
   const last = committed.method.frames.length - 1;
-  const { host, loc } = await mount("?budget=999&view=saved");
+  const { host, loc } = await mount("?budget=999");
   assert.equal(slider(host).value, String(last));
-  assert.equal(plate(host).getAttribute("src"), `../assets/demo/${committed.sheets.saved}`);
   assert.ok(loc.search().includes(`budget=${last}`), loc.search());
 });
 

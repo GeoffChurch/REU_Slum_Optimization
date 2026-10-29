@@ -102,6 +102,10 @@ export class RecordingContext {
     this.path.push({ op: "arc", args: [x, y, r, a0, a1] });
   }
   clearRect(): void { this.record("clearRect"); }
+  /** Text is not recorded: no test reads a canvas label's position, only that drawing it does not
+   * throw. */
+  font = "";
+  fillText(): void {}
   stroke(): void { this.record("stroke"); }
   /** No `Path2D` overload: nothing in this project ever passes one (checked -- `region.ts`,
    * `city.ts` and `canvas.ts` all call `fill()` bare or `fill("evenodd")`, always against the

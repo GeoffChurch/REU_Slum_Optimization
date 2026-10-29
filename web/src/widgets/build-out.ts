@@ -3,7 +3,7 @@
 import type { DemoBundle, DemoEncoding, DemoFrame } from "../demo.js";
 import type { Widget } from "../mount.js";
 import type { StateFactory, StateSource } from "../state.js";
-import { enumParam, intParam, type UrlCodec } from "../url/param.js";
+import { intParam, type UrlCodec } from "../url/param.js";
 import { requireAttr } from "../dom/attrs.js";
 import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
@@ -16,47 +16,25 @@ import type { View } from "../view/transform.js";
 /** The name every failure of this widget is reported under (region-grow.ts's `LABEL`). */
 const LABEL = "BuildOut";
 
-/** The three pictures of one frame, in the order the switch shows them. A closed set spelled out,
- * with `as const satisfies` for screen-map.ts's `METRIC_NAMES` reason: the literal members survive
- * for the URL grammar and the exhaustive switches below. */
-export const VIEWS = ["network", "time", "saved"] as const satisfies readonly (keyof SheetNames)[];
-export type PlateView = (typeof VIEWS)[number];
-type SheetNames = Pick<DemoBundle["sheets"], "network" | "time" | "saved">;
-
 /** `budget` is the slider's POSITION -- an index into the bundle's `method.frames`, the block with
  * no new road at 0 -- not a share: the frames' budgets are whatever the producer baked, and an
- * index cannot name a budget the bundle has no frame for. `view` is which picture of it. */
+ * index cannot name a budget the bundle has no frame for.
+ *
+ * One picture per frame, each home's escape time with its isochrones: the owner kept that view
+ * alone (2026-10-28), so there is no `view` to carry. */
 export interface BuildOutState {
   budget: number;
-  view: PlateView;
 }
 
 export const BUILD_OUT_URL: UrlCodec<BuildOutState> = {
   budget: intParam("budget"),
-  view: enumParam("view", VIEWS),
 };
-
-function viewLabel(v: PlateView): string {
-  switch (v) {
-    case "network": return "Roads";
-    case "time": return "Escape time";
-    case "saved": return "Time saved";
-  }
-}
-
-/** The picture's alt text, the part that names the view. */
-function viewAlt(v: PlateView): string {
-  switch (v) {
-    case "network": return "the roads and the buildings they destroy";
-    case "time": return "each home's escape time, with isochrones";
-    case "saved": return "the share of each home's escape time the roads save";
-  }
-}
 
 const pct = (v: number, digits: number): string => `${(v * 100).toFixed(digits)}%`;
 const km = (v: number): string => `${v.toFixed(1)} km`;
 const m2 = (v: number): string =>
   (v >= 1000 ? `${Math.round(v / 1000)}k m²` : `${Math.round(v)} m²`);
+const capital = (w: string): string => w.charAt(0).toUpperCase() + w.slice(1);
 const duration = (s: number): string =>
   (s < 60 ? `${Math.round(s)} s` : `${Math.round(s / 60)} min`);
 
@@ -70,8 +48,10 @@ interface PlotSpec {
   readonly at: (f: DemoFrame) => string;
 }
 
-const PLOTS: readonly PlotSpec[] = [
-  { title: "Permeability against displacement", xLabel: "displaced, share of floor area",
+/** `metric` is the page's name for L_P (`data-metric-label`, lower case), so a rename is one
+ * change in the generator rather than a hunt through this file's strings. */
+const plotsFor = (metric: string): readonly PlotSpec[] => [
+  { title: `${capital(metric)} against displacement`, xLabel: "displaced, share of floor area",
     x: (f) => f.displacement, formatX: (t) => pct(t, 0),
     at: (f) => `${pct(f.displacement, 1)} displaced` },
   { title: "… against new road", xLabel: "new road, km",
@@ -179,27 +159,18 @@ function swatch(text: string, paint: (sw: HTMLElement) => void): HTMLSpanElement
   return item;
 }
 
-/** Each view's legend, built once and shown or hidden with the view. The numbers on the two ramps
- * are the bundle's: escape time runs to 100% of its scale (and past it, hence the "+"), time
- * saved to `saved_max`. */
-function legends(e: DemoEncoding): Record<PlateView, HTMLDivElement> {
-  const network = div("sbu-buildout__legend");
-  network.append(
-    swatch("Building", (sw) => { sw.style.background = e.building; }),
-    swatch("Partly to wholly destroyed", (sw) => {
-      sw.style.background = `linear-gradient(90deg, ${e.building}, ${e.destroyed})`;
-    }),
-    swatch("New road", (sw) => { sw.style.background = e.road; }));
-  const time = div("sbu-buildout__legend");
-  time.append(ramp(e.escape_ramp,
-                   [0, 0.25, 0.5, 0.75, 1].map((t) => (t === 1 ? `${pct(t, 0)}+` : pct(t, 0)))));
-  const saved = div("sbu-buildout__legend");
-  saved.append(ramp(e.saved_ramp, [0, 1, 2, 3].map((k) =>
-    (k === 0 ? "none" : k === 3 ? `${pct(e.saved_max, 0)}+` : pct((e.saved_max * k) / 3, 0)))));
-  return { network, time, saved };
+/** The plate's legend: escape time's ramp, to 100% of its scale and past it (hence the "+"), and
+ * the grey that is a new road's corridor or a wholly destroyed building. */
+function legend(e: DemoEncoding): HTMLDivElement {
+  const box = div("sbu-buildout__legend");
+  box.append(
+    ramp(e.escape_ramp,
+         [0, 0.25, 0.5, 0.75, 1].map((t) => (t === 1 ? `${pct(t, 0)}+` : pct(t, 0)))),
+    swatch("New road, or a destroyed building", (sw) => { sw.style.background = e.road; }));
+  return box;
 }
 
-/** The block's edge, the same in every view: where people walk out, and the two kinds of edge
+/** The block's edge: where people walk out, and the two kinds of edge
  * they cannot cross on foot except at its ends or not at all. */
 function edgeKey(e: DemoEncoding): HTMLDivElement {
   const key = div("sbu-buildout__legend sbu-buildout__edge");
@@ -223,10 +194,12 @@ function edgeKey(e: DemoEncoding): HTMLDivElement {
 function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: DemoBundle,
               src: string): void {
   checkBundle(b);
+  const metric = requireAttr(host.dataset.metricLabel, "data-metric-label", LABEL);
+  const PLOTS = plotsFor(metric);
   const frames = b.method.frames;
   const last = frames.length - 1;
   const state: StateSource<BuildOutState> = makeState({
-    budget: b.method.default_frame, view: "network",
+    budget: b.method.default_frame,
   });
   // `?budget=` decodes any non-negative integer; how many frames there are is the bundle's to
   // say, so a position past the last is pinned to it here and written back, which rewrites the
@@ -236,19 +209,8 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
   const caption = host.querySelector("figcaption");
   const wrap = div("sbu-buildout");
 
-  // ---- the bar: view switch, budget slider, and (on a phone, by CSS) a compact readout
+  // ---- the bar: the budget slider, and (on a phone, by CSS) a compact readout
   const bar = div("sbu-buildout__bar");
-  const switcher = div("sbu-buildout__views");
-  switcher.setAttribute("role", "group");
-  switcher.setAttribute("aria-label", "Picture");
-  const buttons = VIEWS.map((v) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = viewLabel(v);
-    btn.addEventListener("click", () => state.set({ view: v }));
-    switcher.append(btn);
-    return [v, btn] as const;
-  });
   const sliderLabel = document.createElement("label");
   sliderLabel.className = "sbu-buildout__budget";
   const slider = document.createElement("input");
@@ -264,9 +226,9 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
   const mini = document.createElement("p");
   mini.className = "sbu-buildout__mini";
   mini.setAttribute("aria-hidden", "true");
-  bar.append(switcher, sliderLabel, mini);
+  bar.append(sliderLabel, mini);
 
-  // ---- the plate: one sprite sheet per view, the frame chosen by translating it
+  // ---- the plate: the sprite sheet, the frame chosen by translating it
   const stage = div("sbu-buildout__stage");
   const left = div("sbu-buildout__left");
   const plate = div("sbu-buildout__plate");
@@ -274,13 +236,13 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
   const img = document.createElement("img");
   img.alt = "";
   plate.append(img);
-  const sheetOf = (v: PlateView): string => besideBundle(src, b.sheets[v]);
+  img.setAttribute("src", besideBundle(src, b.sheets.sheet));
 
   const read = document.createElement("dl");
   read.className = "sbu-buildout__read";
   // Announced: the one place a screen-reader user hears what a slider step built.
   read.setAttribute("aria-live", "polite");
-  const readouts = (["Displaced", "New road", "Permeability", "Built in"] as const).map((term) => {
+  const readouts = ["Displaced", "New road", capital(metric), "Built in"].map((term) => {
     const item = div("");
     const dt = document.createElement("dt");
     dt.textContent = term;
@@ -289,8 +251,7 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
     read.append(item);
     return dd;
   });
-  const legendOf = legends(b.encoding);
-  left.append(plate, read, ...VIEWS.map((v) => legendOf[v]), edgeKey(b.encoding));
+  left.append(plate, read, legend(b.encoding), edgeKey(b.encoding));
 
   // ---- the plots: permeability against each cost, the method's whole curve and this frame's dot
   const plots = div("sbu-buildout__plots");
@@ -327,9 +288,9 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
       const view = plotView(width, height, xAxis.top, yAxis.top);
       const svg = createSvg(chart, width, height);
       svg.setAttribute("role", "img");
-      svg.setAttribute("aria-label", `${spec.title.replace("…", "Permeability")}, every frame`);
+      svg.setAttribute("aria-label", `${spec.title.replace("…", capital(metric))}, every frame`);
       // The y axis's 0 goes unlabelled: the x axis's 0 sits under it at the same corner.
-      drawAxes(svg, view, xAxis.ticks, yAxis.ticks, spec.xLabel, "permeability", spec.formatX,
+      drawAxes(svg, view, xAxis.ticks, yAxis.ticks, spec.xLabel, metric, spec.formatX,
                (t) => (t === 0 ? "" : pct(t, 0)), 0.15);
       drawPolyline(svg, view, xs, ys, "currentColor", 1.5).setAttribute("class", "sbu-curve");
       for (const m of drawMarkers(svg, view, xs, ys, "currentColor", 2)) {
@@ -348,21 +309,17 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
     slider.value = String(s.budget);
     out.textContent = pct(f.budget, 0);
     slider.setAttribute("aria-valuetext", `${pct(f.budget, 0)} budget, `
-      + `${pct(f.displacement, 1)} displaced, permeability ${pct(f.permeability, 1)}`);
-    const sheet = sheetOf(s.view);
-    if (img.getAttribute("src") !== sheet) img.setAttribute("src", sheet);
+      + `${pct(f.displacement, 1)} displaced, ${metric} ${pct(f.permeability, 1)}`);
     img.style.transform = `translateY(${(-100 * f.row) / b.sheets.rows}%)`;
-    img.alt = `Block ${b.block_id}, ${viewAlt(s.view)}, `
+    img.alt = `Block ${b.block_id}, each home's escape time with isochrones, `
       + (s.budget === 0 ? "before any new road." : `at ${pct(f.displacement, 1)} displaced.`);
     const [dDisp, dRoad, dPerm, dTime] = readouts;
     dDisp!.textContent = pct(f.displacement, 1);
     dRoad!.textContent = km(f.road_km);
     dPerm!.textContent = pct(f.permeability, 1);
     dTime!.textContent = duration(f.seconds);
-    mini.textContent = `Permeability ${pct(f.permeability, 1)} · Displaced `
+    mini.textContent = `${capital(metric)} ${pct(f.permeability, 1)} · Displaced `
       + `${pct(f.displacement, 1)} · Road ${km(f.road_km)}`;
-    for (const [v, btn] of buttons) btn.setAttribute("aria-pressed", String(v === s.view));
-    for (const v of VIEWS) legendOf[v].hidden = v !== s.view;
     plotParts.forEach(({ spec, now }, i) => {
       now.textContent = `${pct(f.permeability, 1)} at ${spec.at(f)}`;
       cursors[i]?.move(spec.x(f), f.permeability);
@@ -379,10 +336,6 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
     if (first) {
       state.subscribe(render);
       removeFallbackImage(host);
-      // The other two views' sheets, fetched once the first frame is up, so a switch is instant.
-      for (const v of VIEWS) {
-        if (v !== state.get().view) document.createElement("img").src = sheetOf(v);
-      }
     }
   }));
 }
