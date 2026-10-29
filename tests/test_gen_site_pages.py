@@ -1184,6 +1184,21 @@ def test_the_demo_hides_its_table_of_contents(tmp_path: Path,
     assert out.read_text(encoding="utf-8").startswith('---\ntitle: "Demo"\nhide:\n  - toc\n---\n')
 
 
+def test_the_demo_calls_the_metric_escape_time_saved_and_names_permeability_once(
+        demo_body: str) -> None:
+    """Owner, 2026-10-28: on the Demo page the metric is "escape time saved". "Permeability", the
+    rest of the site's term, appears once -- in the build-out caption's definition, as a link to
+    the Permeability page -- and nowhere else on the page, the bundle's method blurb included."""
+    import scripts.gen_site_pages as gsp
+
+    assert gsp.DEMO_METRIC == "escape time saved"
+    assert "the roads remove, 1 − P(roads) / P(no roads)" in demo_body
+    text = re.sub(r'href="[^"]*"', "", demo_body)
+    mentions = re.findall(r".{40}[Pp]ermeability.{10}", text)
+    assert len(mentions) == 1, mentions
+    assert '<a href="../methodology/permeability/">permeability</a>' in demo_body
+
+
 def test_the_demo_names_its_metric_once(demo_body: str) -> None:
     """The metric's name may change (the owner is weighing "ease of access"), so the Demo page
     spells it in one place, DEMO_METRIC, and hands it to the build-out widget, which spells none of

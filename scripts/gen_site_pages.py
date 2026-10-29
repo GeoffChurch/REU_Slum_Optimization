@@ -1638,10 +1638,10 @@ def _method_count() -> str:
 
 # ------------------------------------------------------------------------- the Demo page
 
-# The Demo page's one name for L_P: the caption above the build-out uses it, and the widget is
-# handed it (`data-metric-label`) rather than spelling its own, so renaming the metric on this page
-# is this line.
-DEMO_METRIC = "permeability"
+# The Demo page's one name for L_P (owner, 2026-10-28): the build-out's caption defines it, naming
+# "permeability" once there as the site's term, and the widget is handed it (`data-metric-label`)
+# rather than spelling its own. The Methodology pages keep "permeability".
+DEMO_METRIC = "escape time saved"
 
 
 def _demo() -> dict[str, Any] | None:
@@ -1986,8 +1986,10 @@ def _demo_build_out() -> str:
         f"homes inside a ring take longer than homes outside it, and the rings shrink as roads go "
         f"in. Grey is a new road, drawn at its {e['road_width_m']:.0f} m width, or a destroyed "
         f"building: one {e['gone_share']:.0%} or more of which the roads take, or that a road "
-        f"cuts in two. In the plots, {DEMO_METRIC} is 1 − P(roads) / P(no roads), where P is the "
-        f"effort every home's walk out spends, so 0 is no change; conductance added is how much "
+        f"cuts in two. In the plots, {DEMO_METRIC} is the share of the homes' total escape time "
+        f"the roads remove, 1 − P(roads) / P(no roads), where P is that total, the effort every "
+        f"home's walk out spends; 0 is no change. It is what the rest of this site calls "
+        '<a href="../methodology/permeability/">permeability</a>. Conductance added is how much '
         f"easier the roads make the ground to cross, in m² of open ground, a road conducting "
         f"{e['road_conductance']:.0f} times what open ground does. <em>Built in</em> is the "
         f"method's own recorded run time to that frame.")

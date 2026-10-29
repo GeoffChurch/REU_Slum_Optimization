@@ -318,8 +318,12 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
     dRoad!.textContent = km(f.road_km);
     dPerm!.textContent = pct(f.permeability, 1);
     dTime!.textContent = duration(f.seconds);
-    mini.textContent = `${capital(metric)} ${pct(f.permeability, 1)} · Displaced `
-      + `${pct(f.displacement, 1)} · Road ${km(f.road_km)}`;
+    // Each item's words held together (no-break spaces), so a narrow bar wraps between items
+    // rather than leaving "km" alone on a line.
+    const keep = (t: string): string => t.replaceAll(" ", "\u00a0");
+    mini.textContent = [`${capital(metric)} ${pct(f.permeability, 1)}`,
+                        `Displaced ${pct(f.displacement, 1)}`, `Road ${km(f.road_km)}`]
+      .map(keep).join(" · ");
     plotParts.forEach(({ spec, now }, i) => {
       now.textContent = `${pct(f.permeability, 1)} at ${spec.at(f)}`;
       cursors[i]?.move(spec.x(f), f.permeability);
