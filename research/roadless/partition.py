@@ -57,16 +57,16 @@ true D), and gone at the last stage; the rows' D and every answer's score use th
 The start is a Strategy (Start, the plan's last token): `vor<n>s<seed>`, the Voronoi cells of n
 seeds placed by k-means on the homes' centroids; `spec<n>s<seed>`, the shelved spectral normalized
 cut (memory "Voronoi-adjacency partition method": a gap-aware affinity exp(-gap^2 / 2 sigma^2)
-between each building and its KNN nearest, sigma the median gap, the n smallest eigenvectors of
-the normalized Laplacian row-normalized and k-means'd; each pixel takes its nearest building's
-cluster); `nodal<n>s<seed>`, a Dirichlet spectral partition aiming at the spectral minimal
-partition (Helffer, Hoffmann-Ostenhof, Terracini: the pieces' smallest first eigenvalue the
-largest, a piece's P at most its demand over its lambda_1; Nodal); `div<n>p<tau>`, the flow's own
-divides: the persistence-simplified Morse-Smale cuts of u (the ears arm's generator, imported:
-ears.divides) until about n pieces (Divides); `ears`, the ears' `paths` answer at the plan's
-budget, its faces the cells (Ears: EARS_RUN's frame there, as the 5810 page reads it). Each cell
-then coloured into the K labels (DSatur on the cells' adjacency: K labels make any number of
-sub-blocks, four colouring every planar partition, DSatur not always finding it). Each start is
+between each building and its KNN nearest, sigma the median gap, the n smallest eigenvectors of the
+normalized Laplacian row-normalized and k-means'd; each pixel takes its nearest building's cluster);
+`nodal<n>s<seed>`, a Dirichlet spectral partition aiming at the spectral minimal partition (Helffer,
+Hoffmann-Ostenhof, Terracini: the pieces' smallest first eigenvalue the largest, a piece's P at most
+its demand over its lambda_1; Nodal); `div<n>p<tau>e<ear_m>`, the flow's own divides: the
+persistence-simplified Morse-Smale cuts of u, their ends at least ear_m apart (the ears arm's
+generator, imported: ears.divides) until about n pieces (Divides); `ears`, the ears' `paths` answer
+at the plan's budget, its faces the cells (Ears: EARS_RUN's frame there, as the 5810 page reads it).
+Each cell then coloured into the K labels (DSatur on the cells' adjacency: K labels make any number
+of sub-blocks, four colouring every planar partition, DSatur not always finding it). Each start is
 scored as its own cut answer before the update moves it (`start_*` in the row).
 
 Answers, each scored as a road network (road_simp.scored: its own carved mesh, RUNTIME), with the
@@ -300,14 +300,17 @@ class Divides:
     (ears.EarWorld's PIX raster, pixel graph and sinks, the street's faces, from a growth.Growth
     of the block), u the eps world's baseline potential under the population's demand (its
     set_u), at persistence threshold `tau`;
-    its cuts added most persistent first until the block falls into at least n regions; each
-    pixel of this raster its nearest coarse pixel's region (a cut pixel its nearest region's)."""
+    its cuts (their ends at least `ear_m` apart) added most persistent first until the block
+    falls into at least n regions; each pixel of this raster its nearest coarse pixel's region (a
+    cut pixel its nearest region's). The rev 2 div runs (`div<n>p<tau>`, before ears rev 3 made
+    the floor a parameter) had ear_m 30."""
     n: int
     tau: float
+    ear_m: float
 
     @property
     def name(self) -> str:
-        return f"div{self.n}p{self.tau:g}"
+        return f"div{self.n}p{self.tau:g}e{self.ear_m:g}"
 
     def cells(self, b: Any, ra: rs.Raster, m: gcl.Model) -> I64:
         g = gr.Growth(m, contrast=gr.Road(kappa=gr.ROAD_KAPPA))
@@ -316,7 +319,7 @@ class Divides:
         e.set_u(g.solve(g.state(np.zeros(g.nt, dtype=bool)))[0])
         face = np.where(er.tri >= 0, 0, -1)
         cuts = ears.divides(e.u_pix, face, e.sinks(), er.ea, er.eb, er.xy, er.bld, face=0,
-                            tau=self.tau, stretch_m=ears.STRETCH_M)
+                            tau=self.tau, stretch_m=ears.STRETCH_M, ear_m=self.ear_m)
         inside = (face == 0).reshape(er.shape)
         cut = np.zeros(er.shape, dtype=bool)
         reg = np.zeros(er.shape, dtype=np.int64)
@@ -362,14 +365,14 @@ class Ears:
 
 def start_of(token: str, *, budget: float) -> Start:
     m = re.fullmatch(r"(vor|spec|nodal)([0-9]+)s([0-9]+)", token)
-    d = re.fullmatch(r"div([0-9]+)p([0-9.]+)", token)
+    d = re.fullmatch(r"div([0-9]+)p([0-9.]+)e([0-9.]+)", token)
     if token == "ears":
         return Ears(budget=budget)
     if d is not None:
-        return Divides(n=int(d[1]), tau=float(d[2]))
+        return Divides(n=int(d[1]), tau=float(d[2]), ear_m=float(d[3]))
     if m is None:
         raise SystemExit(f"{token}: a start is vor<n>s<seed>, spec<n>s<seed>, nodal<n>s<seed>, "
-                         "div<n>p<tau> or ears")
+                         "div<n>p<tau>e<ear_m> or ears")
     n, seed = int(m[2]), int(m[3])
     kinds: dict[str, type[Voronoi] | type[Spectral] | type[Nodal]] = {
         "vor": Voronoi, "spec": Spectral, "nodal": Nodal}

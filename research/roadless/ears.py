@@ -21,7 +21,7 @@ Candidate ears are a Strategy (Candidates): `paths` (Paths), cheapest paths on a
 the faces (a metre on open ground costs 1, through a building 1 + `bld`; grown ground closed)
 from the faces' sinks (EarWorld.sinks: pixels on the street or a grounded road, not a block edge
 with no exit nor a paved way inside the block, where an ear would dead-end), sampled every SRC_M
-m, to any other sink pixel of the same face at least MIN_EAR_M away in a straight line: per
+m, to any other sink pixel of the same face at least `ear_m` away in a straight line: per
 source the target with the most first-order gain along the path per path cost (the gains summed
 down the shortest-path tree), the best `pairs` sources' ears built as ROAD_W corridors
 (EarWorld.corridor) and costed exactly (dD, dC); and `divides` (Divides,
@@ -42,9 +42,9 @@ the state's row.
     uv run python $E run <block> <plan>
     uv run python $E check decouple|first|ends|offer <block> [fault]
 
-plan: ears.<paths.b<bld>|divides.p<tau>>.gl<h>Croad.n<nu>s<price>.M<pairs>.K<exact>.D<D>, its
-name adding the
-code's revision (.v<REV>); rows in growth_rows/<block>/<name>/ in growth.py's layout
+plan: ears.<paths.b<bld>|divides.p<tau>>.f<face_m2>.e<ear_m>.gl<h>Croad.n<nu>s<price>.M<pairs>
+.K<exact>.D<D> (a face under face_m2 not split, an ear's ends at least ear_m apart), its name
+adding the code's revision (.v<REV>); rows in growth_rows/<block>/<name>/ in growth.py's layout
 (steps.parquet, picks.parquet one row per ear, bridges.parquet empty, tri_step.parquet), so the
 growth runs' frames and plates read them.
 
@@ -97,8 +97,6 @@ B: TypeAlias = NDArray[np.bool_]
 
 PIX = 2.0              # m: the paths' raster
 SRC_M = 20.0           # m: ear sources along each face's boundary, one per square this wide
-MIN_EAR_M = 30.0       # m: an ear's ends at least this far apart in a straight line
-MIN_FACE_M2 = 2000.0   # m^2: a face this small is not split further
 STRETCH_M = 40.0       # m: divides' harmonic split: the face's boundary in stretches this wide
 DUP_M = 2 * PIX        # m: Divides: a divide's pixel this near a kept divide's is shared
 DUP_SHARE = 0.5        # Divides: a divide sharing this much of its pixels with a kept one dropped
@@ -106,8 +104,10 @@ BLD_G = 0.01           # divides' harmonic split: a pixel edge's conductance thr
 STEP_M = 0.25          # m: an ear's centreline sampled this finely (EarWorld.corridor)
 LOCATE_K = 12          # EarWorld.locate: candidate triangles per point
 CHUNK = 32             # sources per Dijkstra call (its distance and predecessor rows held)
-REV = 2                # 2: Divides offers by first-order gain per metre, near-duplicates dropped
-                       # (rev 1: the most persistent across faces)
+REV = 3                # 2: Divides offers by first-order gain per metre, near-duplicates dropped
+                       # (rev 1: the most persistent across faces); 3: the two floors are the
+                       # plan's (`.f<face_m2>.e<ear_m>`, required); every rev 1 and 2 run had
+                       # f2000 e30, the constants they replace
 TOL_DEC = 1e-2         # decouple: relative (19570, 3 ears at h 0.25: 2.4e-3; at h 25, 0.24)
 DEC_EVERY = 10         # build: the decoupling gap measured every this many ears
 TOL_FIRST = 2e-3       # first: relative (19570: 3.3e-4 at FIRST_H; 3.3e-2 at h 250, the drop
@@ -209,18 +209,21 @@ class Candidates(Protocol):
 @dataclass(frozen=True, kw_only=True)
 class Paths:
     """Cheapest paths on the raster (module docstring); `bld` the extra cost of a metre through a
-    building, `pairs` the sources whose best ears are built and costed."""
+    building, `pairs` the sources whose best ears are built and costed; a face under `face_m2` is
+    not split, an ear's ends at least `ear_m` apart in a straight line."""
     bld: float
     pairs: int
+    face_m2: float
+    ear_m: float
 
     @property
     def name(self) -> str:
-        return f"paths.b{self.bld:g}"
+        return f"paths.b{self.bld:g}.f{self.face_m2:g}.e{self.ear_m:g}"
 
     def ears(self, e: EarWorld, faces: Face, gain: F64, *, cost: gr.Cost) -> list[Ear]:
         g, ra = e.g, e.ra
         pf = np.where(ra.tri >= 0, faces.lab[np.maximum(ra.tri, 0)], -1)    # pixel's face
-        big = faces.area >= MIN_FACE_M2
+        big = faces.area >= self.face_m2
         live = (pf >= 0) & big[np.maximum(pf, 0)]
         # the ends: sink pixels of the face (a road or the street, not a wall)
         same = pf[ra.ea] == pf[ra.eb]
@@ -244,7 +247,7 @@ class Paths:
                 fin = np.isfinite(d)
                 order = np.flatnonzero(fin)[np.argsort(d[fin])]
                 acc = _tree_sum(pred[k], order, gp)
-                far = np.hypot(*(ra.xy - ra.xy[a]).T) >= MIN_EAR_M
+                far = np.hypot(*(ra.xy - ra.xy[a]).T) >= self.ear_m
                 tg = np.flatnonzero(bnd & fin & far & (pf == pf[a]))
                 if not len(tg):
                     continue
@@ -379,7 +382,7 @@ def _harmonic_cut(xy: F64, bld: F64, on: B, edge: B, a: I64, b: I64, *,
 
 
 def divides(u: F64, lab: I64, sink: B, ea: I64, eb: I64, xy: F64, bld: F64, *, face: int,
-            tau: float, stretch_m: float) -> list[Divide]:
+            tau: float, stretch_m: float, ear_m: float) -> list[Divide]:
     """Candidate cuts of one face of a pixel graph from its potential, most persistent first
     (brief, `divides`); pure in its inputs, so other optimizers can seed from it.
 
@@ -396,7 +399,7 @@ def divides(u: F64, lab: I64, sink: B, ea: I64, eb: I64, xy: F64, bld: F64, *, f
     into one; then the harmonic-measure split (`_harmonic_cut`, stretches stretch_m wide) gives
     the divides. Either way the divide pixels form a network; its ends are the divide pixels
     beside a sink, and each end's cut is the path through the network to another end at
-    least MIN_EAR_M away that keeps highest in u (the network's edges weighted by length over
+    least ear_m away that keeps highest in u (the network's edges weighted by length over
     u, a shortest path), so every cut runs sink to sink (no dead end)."""
     on = lab == face
     if not on.any():
@@ -405,16 +408,17 @@ def divides(u: F64, lab: I64, sink: B, ea: I64, eb: I64, xy: F64, bld: F64, *, f
     a, b = ea[both], eb[both]
     edge = on & sink
     umax = float(u[on].max())
-    out = _cuts(u, xy, _ms_cut(u, on, edge, a, b, tau=tau), edge, a, b, umax=umax, kind="ms")
+    out = _cuts(u, xy, _ms_cut(u, on, edge, a, b, tau=tau), edge, a, b, umax=umax, kind="ms",
+                ear_m=ear_m)
     if not out:
         out = _cuts(u, xy, _harmonic_cut(xy, bld, on, edge, a, b, stretch_m=stretch_m), edge,
-                    a, b, umax=umax, kind="harmonic")
+                    a, b, umax=umax, kind="harmonic", ear_m=ear_m)
     out.sort(key=lambda d: -d.persistence)
     return out
 
 
 def _cuts(u: F64, xy: F64, cut: B, edge: B, a: I64, b: I64, *, umax: float,
-          kind: str) -> list[Divide]:
+          kind: str, ear_m: float) -> list[Divide]:
     """The boundary-to-boundary paths through a divide network (`divides`), one per end, each
     path once."""
     if not cut.any():
@@ -439,7 +443,7 @@ def _cuts(u: F64, xy: F64, cut: B, edge: B, a: I64, b: I64, *, umax: float,
         src = ends[c0:c0 + CHUNK]
         dist, pred = dijkstra(G, directed=False, indices=src, return_predecessors=True)
         for r, s0 in enumerate(src):
-            far = np.hypot(*(xy[ends] - xy[s0]).T) >= MIN_EAR_M
+            far = np.hypot(*(xy[ends] - xy[s0]).T) >= ear_m
             tg = ends[far & np.isfinite(dist[r, ends])]
             if not len(tg):
                 continue
@@ -482,7 +486,8 @@ def _distinct(ds: list[Divide], xy: F64) -> list[Divide]:
 
 @dataclass(frozen=True, kw_only=True)
 class Divides:
-    """The divides of u (`divides`), per face of at least MIN_FACE_M2 on its own u (the state's,
+    """The divides of u (`divides`, ends at least `ear_m` apart), per face of at least `face_m2`
+    on its own u (the state's,
     the roads grounded), at persistence threshold `tau`, the harmonic-measure split where the
     strict basins degenerate, near-duplicates dropped (`_distinct`); across faces the `pairs`
     with the most first-order gain per metre costed (`offers`). Rev 1 took the `pairs` most
@@ -491,10 +496,12 @@ class Divides:
     times the costed ones' first-order gain per cost) were never costed."""
     tau: float
     pairs: int
+    face_m2: float
+    ear_m: float
 
     @property
     def name(self) -> str:
-        return f"divides.p{self.tau:g}"
+        return f"divides.p{self.tau:g}.f{self.face_m2:g}.e{self.ear_m:g}"
 
     def offers(self, e: EarWorld, faces: Face, gain: F64) -> list[Offer]:
         """Every face's distinct divides, the most first-order gain per metre first."""
@@ -503,9 +510,9 @@ class Divides:
         gp = np.bincount(_pix_of(ra, g.cen), weights=gain, minlength=len(pf))
         sink = e.sinks()
         out: list[Offer] = []
-        for f in np.flatnonzero(faces.area >= MIN_FACE_M2):
+        for f in np.flatnonzero(faces.area >= self.face_m2):
             ds = divides(e.u_pix, pf, sink, ra.ea, ra.eb, ra.xy, ra.bld, face=int(f),
-                         tau=self.tau, stretch_m=STRETCH_M)
+                         tau=self.tau, stretch_m=STRETCH_M, ear_m=self.ear_m)
             for d in _distinct(ds, ra.xy):
                 L = float(np.hypot(*np.diff(ra.xy[d.pixels], axis=0).T).sum())
                 out.append(Offer(face=int(f), divide=d,
@@ -559,16 +566,19 @@ class Plan:
 
     @staticmethod
     def of(spec: str) -> Plan:
-        m = re.fullmatch(r"ears\.(paths\.b|divides\.p)([0-9.]+)\.gl([0-9.]+)Croad"
-                         r"\.n([0-9.e-]+)s([0-9.e-]+)\.M([0-9]+)\.K([0-9]+)\.D([0-9.]+)", spec)
+        m = re.fullmatch(r"ears\.(paths\.b|divides\.p)([0-9.]+)\.f([0-9.]+)\.e([0-9.]+)"
+                         r"\.gl([0-9.]+)Croad\.n([0-9.e-]+)s([0-9.e-]+)\.M([0-9]+)\.K([0-9]+)"
+                         r"\.D([0-9.]+)", spec)
         if m is None:
-            raise SystemExit(f"{spec}: a plan is ears.<paths.b<bld>|divides.p<tau>>.gl<h>Croad"
-                             ".n<nu>s<price>.M<pairs>.K<exact>.D<D>")
-        cands: Candidates = (Paths(bld=float(m[2]), pairs=int(m[6])) if m[1] == "paths.b"
-                             else Divides(tau=float(m[2]), pairs=int(m[6])))
-        return Plan(candidates=cands, contrast=gr.GroundedLeak(h=float(m[3])),
-                    cost=gr.Cost(nu=float(m[4]), price=float(m[5])), exact=int(m[7]),
-                    D=float(m[8]))
+            raise SystemExit(f"{spec}: a plan is ears.<paths.b<bld>|divides.p<tau>>.f<face_m2>"
+                             ".e<ear_m>.gl<h>Croad.n<nu>s<price>.M<pairs>.K<exact>.D<D>")
+        floors = dict(face_m2=float(m[3]), ear_m=float(m[4]))
+        cands: Candidates = (Paths(bld=float(m[2]), pairs=int(m[8]), **floors)
+                             if m[1] == "paths.b" else
+                             Divides(tau=float(m[2]), pairs=int(m[8]), **floors))
+        return Plan(candidates=cands, contrast=gr.GroundedLeak(h=float(m[5])),
+                    cost=gr.Cost(nu=float(m[6]), price=float(m[7])), exact=int(m[9]),
+                    D=float(m[10]))
 
 
 class EarWorld:
@@ -774,8 +784,8 @@ def run(bid: str, plan: Plan) -> None:
 
 # ---------------------------------------------------------------- the checks
 
-CHECK_PLAN = "ears.paths.b20.gl0.25Croad.n2s0.1.M8.K2.D1"
-CHECK_DIVIDES = "ears.divides.p0.1.gl0.25Croad.n2s0.1.M16.K4.D1"
+CHECK_PLAN = "ears.paths.b20.f2000.e30.gl0.25Croad.n2s0.1.M8.K2.D1"
+CHECK_DIVIDES = "ears.divides.p0.1.f2000.e30.gl0.25Croad.n2s0.1.M16.K4.D1"
 
 
 def _short(bid: str, h: float, n: int, *, spec: str) -> EarWorld:
@@ -818,7 +828,8 @@ def check(verb: str, bid: str, fault: str | None) -> None:
             gk, _ = g.grad(st, u)
             gain = -gk * (1.0 - g.kt0) + np.abs(u[g.m.c.cell]) * g.contrast.leak_t(g)
         fc = e.faces()
-        cands = Paths(bld=20.0, pairs=6).ears(e, fc, gain, cost=gr.Cost(nu=2.0, price=0.1))
+        cands = Paths(bld=20.0, pairs=6, face_m2=2000.0, ear_m=30.0).ears(
+            e, fc, gain, cost=gr.Cost(nu=2.0, price=0.1))
         worst = 0.0
         for q in cands[:4]:
             tris = q.tris[g.kt0[q.tris] >= OPEN_KT]
@@ -841,7 +852,8 @@ def check(verb: str, bid: str, fault: str | None) -> None:
         st = g.state(g.step >= 0)
         u, _ = g.solve(st)
         fc = e.faces()
-        cands = Paths(bld=20.0, pairs=4).ears(e, fc, g.contrast.gains(g, st, u),
+        cands = Paths(bld=20.0, pairs=4, face_m2=2000.0, ear_m=30.0).ears(
+            e, fc, g.contrast.gains(g, st, u),
                                               cost=gr.Cost(nu=2.0, price=0.1))
         ok = bool(cands)
         for q in cands[:4]:
