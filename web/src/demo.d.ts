@@ -2,36 +2,28 @@
 // research/roadless) -- do not edit. Regenerate there: build.py site <this checkout>
 // This file is what makes a renamed Python field a TypeScript error instead of a
 // blank panel.
-/** One block's inputs to the screen -- its buildings `n`, area and perimeter, the three
- * numbers the score is made of -- with its score, its rank (1 the highest) in the city, and its
- * outline as the screen bundle draws it (`rings`: exterior first, then any interiors, in the
- * bundle's local metres, simplified as the bundle simplifies them -- so their drawn length runs
- * a little under `perimeter_m`, the unsimplified block's). */
-export interface DemoScreenBlock {
-  block_id: string;
+/** The block under the shipped screen: its buildings `n`, area and perimeter (the three numbers
+ * the score is made of), its score, its rank (1 the highest) among all `n_blocks` of the city,
+ * whether the City's informal-settlement survey flags it, and its outline as the screen bundle
+ * draws it (`rings`: exterior first, then any interiors, in the bundle's local metres,
+ * simplified as the bundle simplifies them, so their drawn length runs a little under
+ * `perimeter_m`, the unsimplified block's). */
+export interface DemoProxy {
   n: number;
   area_m2: number;
   perimeter_m: number;
   score: number;
   rank: number;
+  informal: boolean;
   rings: [number, number][][];
 }
-/** The block under the shipped screen (ScreenFacts), and the close-up's margin around it (m):
- * the site's screen map frames its close-up of the block the way the prototype's does. The
- * page's diagram of the score's geometry opens on `followed` (the block) and offers `typical`,
- * the city's median block by score, beside it. */
-export interface DemoScreen {
-  metric: string;
+/** The block under the two-stage depth_density screen: its score (`rings`, its peel depth --
+ * rings of parcels from the street to its deepest home -- times buildings per m²) and its rank
+ * among the blocks that screen scores (DemoScreen.peel_keep_n, the proxy's top). */
+export interface DemoPeel {
   score: number;
   rank: number;
-  n_blocks: number;
-  floor: number;
-  pool: number;
-  precision: number;
-  recall: number;
-  closeup_pad_m: number;
-  followed: DemoScreenBlock;
-  typical: DemoScreenBlock;
+  rings: number;
 }
 /** One news report: its outlet, its date (ISO), its headline (None where the page cites
  * none) and its URL. */
@@ -41,12 +33,13 @@ export interface Report {
   title: string | null;
   url: string;
 }
-/** One fire reported near the block: its month (ISO, YYYY-MM), where the reports place it
- * (with OpenStreetMap's distance to the block where the street can be found), what they say
- * happened, and the reports. Each was checked against its article (2026-10-28); none is placed
- * inside the block, and the page draws none of them on a map (owner 2026-10-28: some reports'
- * streets cannot be placed). */
+/** One fire reported near a block (`near`, its id): its month (ISO, YYYY-MM), where the
+ * reports place it (with OpenStreetMap's distance to the block where the street can be found),
+ * what they say happened, and the reports. Each was checked against its article (2026-10-28);
+ * none is placed inside the block, and the page draws none of them on a map (owner 2026-10-28:
+ * some reports' streets cannot be placed). */
 export interface Fire {
+  near: string;
   month: string;
   where: string;
   what: string;
@@ -54,9 +47,10 @@ export interface Fire {
 }
 /** One slider position: the network the method has built by the displacement budget `budget`
  * (a share of the homes' floor area; 0 the block with no new road). `displacement` is the share
- * it reaches (at least `budget`), `road_km` its new road, `permeability` its L_P,
+ * it reaches (at least `budget`; a run's ears can overshoot several budgets at once, so several
+ * positions can share one network), `road_km` its new road, `permeability` its L_P,
  * `conductance_m2` the conductance it adds (m² of open ground), `seconds` the method's run time
- * to it, `row` its frame's row in each sprite sheet. */
+ * to it, `row` its frame's row in the block's sprite sheet. */
 export interface DemoFrame {
   budget: number;
   displacement: number;
@@ -66,43 +60,13 @@ export interface DemoFrame {
   seconds: number;
   row: number;
 }
-/** The method the page builds out: its reader-facing name, how it works, where its run time
- * was recorded, the slider's frames (`default_frame` the one the page opens on). */
-export interface DemoMethod {
-  name: string;
-  blurb: string;
-  machine: string;
-  default_frame: number;
-  frames: DemoFrame[];
-}
-/** The escape-time plates as one sprite sheet beside demo.json (`sheet`): `rows` frames of
- * `width` x `frame_height` px stacked top to bottom. The site shows this view alone (owner
- * 2026-10-28: "just keep the escape time view with the nice topographical overlay"); the roads
- * are on it too, in `DemoEncoding.road`. */
-export interface DemoSheets {
+/** The block's escape-time plates as one sprite sheet beside demo.json (`file`): `rows` frames
+ * of `width` x `frame_height` px stacked top to bottom. */
+export interface DemoSheet {
+  file: string;
   width: number;
   frame_height: number;
   rows: number;
-  sheet: string;
-}
-/** The plate's colours and the quantities its legend states. `escape_ramp` maps escape time
- * from 0 to 100% of `escape_scale` (the model's units: the 99th-percentile home with no new
- * road), short blue to long red, with an isochrone every `iso_step` of it. `road` is the grey
- * of a new road's corridor and of a wholly destroyed building, which a building is once
- * `gone_share` of it is gone; roads are `road_width_m` wide and conduct `road_conductance` times
- * what open ground does. The block's edge: `street` (where people walk out), `edge` (a
- * railway's or a ditch's line), `water` (a ditch). */
-export interface DemoEncoding {
-  road: string;
-  street: string;
-  edge: string;
-  water: string;
-  escape_ramp: string[];
-  escape_scale: number;
-  iso_step: number;
-  road_width_m: number;
-  road_conductance: number;
-  gone_share: number;
 }
 /** One recorded topology run: its block, building count and seconds. */
 export interface Timed {
@@ -110,37 +74,103 @@ export interface Timed {
   n: number;
   seconds: number;
 }
-/** The original topology algorithm's run time on this block, extrapolated from `runs` (each
- * once, at `alpha`, on one thread) to `n_buildings`: a least-squares power law through all of
- * them (seconds ~ n^`exponent`, standard error `se`) gives `central_s`; anchored on the largest
- * run, the smaller runs' exponent (`small_exponent`) gives `low_s` and the two largest runs'
- * slope (`top_exponent`) `high_s`. */
-export interface DemoTopology {
+/** The original topology algorithm's run time on the block, extrapolated from `runs` (each
+ * once, at `alpha`, on one thread) to its `n_buildings`: a least-squares power law through all
+ * of them (seconds ~ n^`exponent`, standard error `se`) gives `central_s`; anchored on the
+ * largest run, the smaller runs' exponent (`small_exponent`) gives `by_small_s` and the two
+ * largest runs' slope (`top_exponent`) `by_top_s`. Which of the two is the lower depends on
+ * which side of the largest run the block falls: above it the steeper slope gives more time,
+ * below it less. */
+export interface DemoTopologyExtrapolated {
+  kind: "extrapolated";
   alpha: number;
   runs: Timed[];
   n_buildings: number;
   exponent: number;
   se: number;
   central_s: number;
-  low_s: number;
-  high_s: number;
+  by_small_s: number;
+  by_top_s: number;
   small_exponent: number;
   top_exponent: number;
 }
-/** The Demo page's numbers: the block (its id, buildings, place in words, centroid and a Google
- * Maps link), the screen's verdict on it, the fires reported near it, the method built out on it
- * and its plates, and the topology algorithm's extrapolated run time on it. */
-export interface DemoBundle {
+/** The original topology algorithm run on the block itself, once, at `alpha`, on one thread
+ * (atlas/topology_run.py): its wall time and where it ran, in words. */
+export interface DemoTopologyMeasured {
+  kind: "measured";
+  alpha: number;
+  n_buildings: number;
+  seconds: number;
+  machine: string;
+}
+/** One block the page shows: its id, buildings, place in words, centroid and a Google Maps
+ * link; whether it is plainly an informal settlement on the ground (Block's), whatever the
+ * survey (`proxy.informal`) says; the screens' verdicts on it; the fires reported near it; the
+ * method's build-out on it (its frames, its plates, the escape-time scale -- the model's units
+ * at the block's plain baseline's 99th-percentile home, 100% on its plates -- and where it
+ * ran); and the original topology algorithm's run time on it, measured or extrapolated
+ * (`kind`). */
+export interface DemoBlock {
   block_id: string;
   n_buildings: number;
   place: string;
   lat: number;
   lon: number;
   maps_url: string;
-  screen: DemoScreen;
+  plainly_informal: boolean;
+  proxy: DemoProxy;
+  peel: DemoPeel;
   fires: Fire[];
+  frames: DemoFrame[];
+  sheet: DemoSheet;
+  escape_scale: number;
+  machine: string;
+  topology: DemoTopologyExtrapolated | DemoTopologyMeasured;
+}
+/** The screens, city-wide: the shipped proxy (`metric`) at its `floor`, its `pool`, and that
+ * pool's precision and recall against the City's survey, over `n_blocks`; the screen map's
+ * close-up margin around a block (m); and the two-stage screen (`peel_metric`), which peels
+ * the proxy's top `peel_keep_n`. */
+export interface DemoScreen {
+  metric: string;
+  floor: number;
+  pool: number;
+  precision: number;
+  recall: number;
+  n_blocks: number;
+  closeup_pad_m: number;
+  peel_metric: string;
+  peel_keep_n: number;
+}
+/** The method the page builds out: its reader-facing name, how it works, and the slider
+ * position the page opens on. */
+export interface DemoMethod {
+  name: string;
+  blurb: string;
+  default_frame: number;
+}
+/** The plates' colours and the quantities their legend states. `escape_ramp` maps escape time
+ * from 0 to 100% of a block's `escape_scale`, short blue to long red, with an isochrone every
+ * `iso_step` of it. `road` is the grey of a new road's corridor and of a wholly destroyed
+ * building, which a building is once `gone_share` of it is gone; roads are `road_width_m` wide
+ * and conduct `road_conductance` times what open ground does. The block's edge: `street`
+ * (where people walk out), `edge` (a railway's or a ditch's line), `water` (a ditch). */
+export interface DemoEncoding {
+  road: string;
+  street: string;
+  edge: string;
+  water: string;
+  escape_ramp: string[];
+  iso_step: number;
+  road_width_m: number;
+  road_conductance: number;
+  gone_share: number;
+}
+/** The Demo page's numbers: its blocks (the first the page's default), the screens, the
+ * method, and the plates' encoding. */
+export interface DemoBundle {
+  blocks: DemoBlock[];
+  screen: DemoScreen;
   method: DemoMethod;
-  sheets: DemoSheets;
   encoding: DemoEncoding;
-  topology: DemoTopology;
 }

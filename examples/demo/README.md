@@ -3,23 +3,22 @@
 
 # The Demo page's bundle
 
-What the site's Demo page reads: one Cape Town block, `ZAF.9.3.1_1_5810`, followed from the city-wide screen
-to the roads one method builds through it.
+What the site's Demo page reads: 2 Cape Town blocks (`ZAF.9.3.1_1_5810`, `ZAF.9.3.1_1_41785`), each followed from the
+city-wide screens to the roads one method builds through it.
 
-- `demo.json`: every number the page shows. The block and its place, the shipped screen's verdict
-  on it (checked against `../screen-map/capetown.json`), the fires reported near it (each quoted
-  from its report and checked against the article; none is placed inside the block, and the page
-  draws none of them on a map), the method's frames under a displacement budget with its recorded
-  run time, the plates' colours, and the original topology algorithm's run time on this block,
-  extrapolated from 6 recorded runs on smaller blocks.
-- `loop_time.webp`: the method's escape-time plates as one sprite sheet (16 frames, the block with
-  no new road first). The prototype's other two views (the roads alone, the time saved) are not
-  shipped: the site shows this one (owner 2026-10-28).
+- `demo.json`: every number the page shows. Per block: its place, the shipped screen's verdict
+  on it (checked against `../screen-map/capetown.json`) and the two-stage depth_density screen's,
+  the fires reported near it (each quoted from its report and checked against the article; none
+  is placed inside a block, and the page draws none of them on a map), the method's frames under
+  a displacement budget with its recorded run time, and the original topology algorithm's run
+  time on it, measured or extrapolated from 6 recorded runs on smaller blocks.
+- `loop_ZAF.9.3.1_1_5810.webp`, `loop_ZAF.9.3.1_1_41785.webp`: each block's escape-time plates as one sprite sheet (the block with no new road
+  first).
 
 `web/src/demo.d.ts` is generated beside it from the same dataclasses, so a renamed field is a
 TypeScript error.
 
 The producer is `research/roadless/atlas/explore_proto/build.py` on the `research/roadless`
 branch, which cannot merge into `main` (it carries a private submit group and a large GPU group):
-the frames are the 5810 build-out pilot's stored ones (`ears.paths.b20.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1`), so this directory is how they
-reach the public site.
+the frames are the build-out pipeline's stored ones, so this directory is how they reach the
+public site.
