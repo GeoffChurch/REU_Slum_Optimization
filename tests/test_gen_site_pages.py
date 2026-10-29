@@ -1152,7 +1152,7 @@ def test_the_demo_shows_the_screen_formula_with_both_factors_braced() -> None:
     page = render_page("demo")
     depth = r"\underbrace{\frac{\sqrt{nA}}{P}}"
     density = r"\underbrace{\frac{n}{A}}"
-    for variant, labels in (("wide", ("depth: homes per stretch of street",
+    for variant, labels in (("wide", ("depth: about how many homes deep, from the street",
                                       "density: homes per area")),
                             ("narrow", ("depth", "density"))):
         block = re.search(rf'<div class="sbu-formula sbu-formula--{variant}" markdown>(.*?)</div>',
@@ -1163,6 +1163,10 @@ def test_the_demo_shows_the_screen_formula_with_both_factors_braced() -> None:
         assert all(rf"\text{{{label}}}" in tex for label in labels), tex
     why = page.split("## Why this block")[1].split("<!-- SCREENMAP")[0]
     assert "buildings $n$, its area $A$ and its perimeter $P$" in why
+    # What the depth is in rings, under the formula: about half of them in a compact block.
+    note = page.split('<div class="sbu-formula sbu-formula--narrow"')[1].split("</div>")[1]
+    note = note.split('<div class="sbu-demo-screenmap"')[0]
+    assert "about half the rings of parcels" in note and "long strip" in note, note
 
 
 def test_the_demo_shows_the_screen_map_at_half_size_and_only_the_demo() -> None:

@@ -44,7 +44,7 @@ blocks both deep and crowded score high:
 
 <div class="sbu-formula sbu-formula--wide" markdown>
 
-$$\text{score} \;=\; \underbrace{\frac{\sqrt{nA}}{P}}_{\text{depth: homes per stretch of street}}
+$$\text{score} \;=\; \underbrace{\frac{\sqrt{nA}}{P}}_{\text{depth: about how many homes deep, from the street}}
 \;\cdot\; \underbrace{\frac{n}{A}}_{\text{density: homes per area}}$$
 
 </div>
@@ -55,6 +55,10 @@ $$\text{score} \;=\; \underbrace{\frac{\sqrt{nA}}{P}}_{\text{depth}}
 \;\cdot\; \underbrace{\frac{n}{A}}_{\text{density}}$$
 
 </div>
+
+In a compact block that depth comes to about half the rings of parcels between the street and the
+deepest home, because the parcels' columns narrow toward the block's middle; in a long strip, whose
+columns keep their width, it is all of them.
 
 <div class="sbu-demo-screenmap" markdown>
 

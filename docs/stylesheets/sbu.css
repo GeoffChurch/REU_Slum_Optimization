@@ -1574,7 +1574,9 @@ body,
   }
 }
 
-@media screen and (max-width: 44.9375em) {
+/* The full labels need about 760 px at the formula's size; below a 56em column they would touch
+   its edge, so the one-word ones take over there. */
+@media screen and (max-width: 55.9375em) {
   .sbu-formula--wide {
     display: none;
   }
