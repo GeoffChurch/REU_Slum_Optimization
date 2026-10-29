@@ -38,9 +38,23 @@ and that method set beside the earlier one. Every control writes to the address 
 
 ## Why this block {#screening}
 
-The shipped screen scores every block in the city from three numbers it gets for free: building
-count, area and perimeter. It multiplies how many homes stand behind each parcel-wide stretch of
-street by how many homes there are per hectare, so only blocks both deep and crowded score high.
+The shipped screen scores every block in the city from three numbers it gets for free: its
+buildings $n$, its area $A$ and its perimeter $P$. It multiplies a depth by a density, so only
+blocks both deep and crowded score high:
+
+<div class="sbu-formula sbu-formula--wide" markdown>
+
+$$\text{score} \;=\; \underbrace{\frac{\sqrt{nA}}{P}}_{\text{depth: homes per stretch of street}}
+\;\cdot\; \underbrace{\frac{n}{A}}_{\text{density: homes per area}}$$
+
+</div>
+
+<div class="sbu-formula sbu-formula--narrow" markdown>
+
+$$\text{score} \;=\; \underbrace{\frac{\sqrt{nA}}{P}}_{\text{depth}}
+\;\cdot\; \underbrace{\frac{n}{A}}_{\text{density}}$$
+
+</div>
 
 <!-- SCREENMAP -->
 

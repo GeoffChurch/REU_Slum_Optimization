@@ -1145,6 +1145,26 @@ def test_the_demo_partial_types_no_numerals() -> None:
     assert not digits, f"digits typed into the Demo partial's prose: {digits}"
 
 
+def test_the_demo_shows_the_screen_formula_with_both_factors_braced() -> None:
+    """Owner, 2026-10-29: "Why this block" shows the shipped screen's formula in display math,
+    its two factors under braces, in the built page -- in full on a wide column and with one-word
+    labels on a phone -- and names n, A and P once."""
+    page = render_page("demo")
+    depth = r"\underbrace{\frac{\sqrt{nA}}{P}}"
+    density = r"\underbrace{\frac{n}{A}}"
+    for variant, labels in (("wide", ("depth: homes per stretch of street",
+                                      "density: homes per area")),
+                            ("narrow", ("depth", "density"))):
+        block = re.search(rf'<div class="sbu-formula sbu-formula--{variant}" markdown>(.*?)</div>',
+                          page, flags=re.S)
+        assert block is not None, variant
+        tex = block.group(1)
+        assert tex.strip().startswith("$$") and depth in tex and density in tex, tex
+        assert all(rf"\text{{{label}}}" in tex for label in labels), tex
+    why = page.split("## Why this block")[1].split("<!-- SCREENMAP")[0]
+    assert "buildings $n$, its area $A$ and its perimeter $P$" in why
+
+
 def test_the_demo_hides_its_table_of_contents(tmp_path: Path,
                                               monkeypatch: pytest.MonkeyPatch) -> None:
     """Owner, 2026-10-28: the Demo page drops its table of contents for the width the build-out

@@ -1582,3 +1582,32 @@ body,
   font: inherit;
   cursor: pointer;
 }
+
+/* The Demo's screen formula, in display math (docs/_partials/demo.md): its under-brace labels in
+   full where the column holds them, one word each on a phone, so the page never scrolls sideways.
+   One of the two is in the page at a time; the other is display:none, so it is neither drawn nor
+   read aloud. */
+.sbu-formula--narrow {
+  display: none;
+}
+
+/* Large: the formula is the section's point, not a footnote to it. */
+.sbu-formula {
+  font-size: 140%;
+}
+
+@media screen and (max-width: 44.9375em) {
+  .sbu-formula {
+    font-size: 125%;
+  }
+}
+
+@media screen and (max-width: 44.9375em) {
+  .sbu-formula--wide {
+    display: none;
+  }
+
+  .sbu-formula--narrow {
+    display: block;
+  }
+}
