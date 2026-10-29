@@ -353,10 +353,12 @@ class Grid:
     committed per-budget table in the Site's kept files (`<key>_grid.json`: per budget a frame,
     a repeat of an earlier budget's, or stopped short of it; and the whole network), and the
     frames' corridors, damage and escape times in its networks (`<key>_grid.npz`,
-    `<key>_grid_times.npz`). `stem` names its plates; `stops_because` is what the page says when
-    the method has stopped below a budget."""
+    `<key>_grid_times.npz`). `stem` names its plates; `order` says, in words, the order its
+    roads are cut in (OWN_ORDER, or the one the table was cut with); `stops_because` is what the
+    page says when the method has stopped below a budget."""
     key: str
     stem: str
+    order: str
     stops_because: str
 
     def table(self, site: Site) -> dict[str, Any]:
@@ -393,13 +395,17 @@ PAGE = Block("ZAF.9.3.1_1_5810", "the Bloekombos and Wallacedene area of Kraaifo
 # The shipped screen's top block, and small enough (638 buildings) for topology to finish: 1.88 h
 # on one thread (atlas/topology_run.py, 2026-10-29). Philippi: OpenStreetMap's suburb at its
 # centre (Nominatim's reverse lookup, 2026-10-28); about 165 m across, so a closer zoom.
+# A method that builds one road at a time is cut in that order.
+OWN_ORDER = "the order it built them in"
 # Each method cut into the shortest prefixes reaching every budget (atlas/buildout.py, 2026-10-29):
 # Loop roads in its own build order, topology -- which keeps none -- in common.canonical_order.
 COMPARED = Compared(
     "ZAF.9.3.1_1_41785", "Philippi", zoom=18, topology=MEASURED,
-    ours=Grid(f"{PATHS[:-len('.D0.15')]}.D0.91.v2", stem="loop",
+    ours=Grid(f"{PATHS[:-len('.D0.15')]}.D0.91.v2", stem="loop", order=OWN_ORDER,
               stops_because="no loop left to add"),
     earlier=Grid("topology.a10.s0.w7.canonical", stem="topology",
+                 order=("drainage first, then each road after the roads that join it to the "
+                        "street (topology keeps no build order of its own)"),
                  stops_because="its network is complete"))
 
 
@@ -761,12 +767,6 @@ class DemoShort:
 
 
 @dataclass(frozen=True)
-class DemoNone:
-    """No network of the method's for this budget."""
-    kind: Literal["none"]
-
-
-@dataclass(frozen=True)
 class DemoRecorded:
     """A method's whole run time, recorded by its own run, and where it ran in words."""
     kind: Literal["recorded"]
@@ -789,14 +789,15 @@ class DemoSheet:
 
 @dataclass(frozen=True)
 class DemoSeries:
-    """One method on the build-out: its name, the label the page heads it with, its plates, its
-    whole run time (recorded, or measured for topology), and what it shows at each of the
-    build-out's budgets."""
+    """One method on the build-out: its name, the label the page heads it with, the order its
+    roads are cut in for the budgets (`order`, in words), its plates, its whole run time
+    (recorded, or measured for topology), and what it shows at each of the build-out's budgets."""
     method: str
     label: str
+    order: str
     sheet: DemoSheet
     run: DemoRecorded | DemoTopologyMeasured
-    cells: tuple[DemoMet | DemoShort | DemoNone, ...]
+    cells: tuple[DemoMet | DemoShort, ...]
 
 
 @dataclass(frozen=True)
@@ -867,11 +868,9 @@ class DemoScreen:
 
 @dataclass(frozen=True)
 class DemoMethod:
-    """The method the page builds out: its reader-facing name, how it works, and the slider
-    position the page opens on."""
+    """The method the page builds out: its reader-facing name and how it works."""
     name: str
     blurb: str
-    default_frame: int
 
 
 @dataclass(frozen=True)
@@ -1028,7 +1027,7 @@ def centroid_wgs84(bid: str) -> tuple[float, float]:
 
 
 def cells_of(site: Site, budgets: tuple[float, ...]
-             ) -> tuple[list[DemoMet | DemoShort | DemoNone], list[str]]:
+             ) -> tuple[list[DemoMet | DemoShort], list[str]]:
     """The method's cells on the block at `budgets` (0 the plain baseline, then the slider's: the
     stored run's rows, render.SLIDER's), and its sheet's frame names in row order. Budgets the
     stored run has no row for are refused: the page states what the method did, never pads it."""
@@ -1038,7 +1037,7 @@ def cells_of(site: Site, budgets: tuple[float, ...]
     secs = METHOD.runtime.seconds(key, src, rows, site)
     by_budget = dict(zip(nw.SLIDER, zip(rows, secs, strict=True), strict=True))
     fs = ["000"] + list(dict.fromkeys(r["f"] for r in rows if r is not None))
-    cells: list[DemoMet | DemoShort | DemoNone] = []
+    cells: list[DemoMet | DemoShort] = []
     for t in budgets:
         if t == 0.0:
             cells.append(DemoMet(kind="met", step=BASELINE_STEP))
@@ -1047,8 +1046,7 @@ def cells_of(site: Site, budgets: tuple[float, ...]
             raise SystemExit(f"{site.bid}: the stored run has no row at the {t:g} budget")
         r, sec = by_budget[t]
         if r is None:
-            cells.append(DemoNone(kind="none"))
-            continue
+            raise SystemExit(f"{site.bid}: the stored run has no network at the {t:g} budget")
         if r.get("full", False):
             raise SystemExit(f"{site.bid}: the stored run stopped below the {t:g} budget, which "
                              f"the page's slider offers")
@@ -1068,9 +1066,8 @@ def method_series(site: Site, budgets: tuple[float, ...], label: str,
                   out: Path) -> DemoSeries:
     """The method on the block at `budgets`, its sheet into `out`."""
     cells, fs = cells_of(site, budgets)
-    whole = max(c.step.seconds for c in cells if not isinstance(c, DemoNone)
-                and c.step.seconds is not None)
-    return DemoSeries(method=METHOD.name, label=label,
+    whole = max(c.step.seconds for c in cells if c.step.seconds is not None)
+    return DemoSeries(method=METHOD.name, label=label, order=OWN_ORDER,
                       sheet=sheet_of([plate_name(site, f) for f in fs],
                                      out / f"{METHOD.stem}_{site.bid}.webp", WIDTH),
                       run=DemoRecorded(kind="recorded", seconds=whole,
@@ -1140,7 +1137,7 @@ def grid_series(site: Site, w: World, g: Grid, budgets: tuple[float, ...], *, me
                         row=fs.index(r["frame"]))
 
     whole = step(t["whole"])
-    cells: list[DemoMet | DemoShort | DemoNone] = []
+    cells: list[DemoMet | DemoShort] = []
     for b in budgets:
         if b == 0.0:
             cells.append(DemoMet(kind="met", step=BASELINE_STEP))
@@ -1158,7 +1155,7 @@ def grid_series(site: Site, w: World, g: Grid, budgets: tuple[float, ...], *, me
                     cells.append(DemoShort(kind="short", step=whole, why=g.stops_because))
                 case other:
                     raise SystemExit(f"{g.key}: unknown status {other!r} at {b}")
-    return DemoSeries(method=method, label=label,
+    return DemoSeries(method=method, label=label, order=g.order,
                       sheet=sheet_of([g.plate(site, f) for f in fs],
                                      out / f"{g.stem}_{site.bid}.webp", COMPARE_WIDTH),
                       run=run, cells=tuple(cells))
@@ -1226,7 +1223,7 @@ def site(root: Path) -> None:
                           precision=float(floor["precision"]), recall=float(floor["recall"]),
                           n_blocks=len(sc.score), peel_metric=PEEL_EXAMPLE,
                           peel_keep_n=pl.keep_n),
-        method=DemoMethod(name=METHOD.name, blurb=METHOD.blurb, default_frame=DEFAULT),
+        method=DemoMethod(name=METHOD.name, blurb=METHOD.blurb),
         encoding=enc)
     (out / "demo.json").write_text(json.dumps(dataclasses.asdict(bundle), indent=1,
                                               ensure_ascii=False) + "\n")
