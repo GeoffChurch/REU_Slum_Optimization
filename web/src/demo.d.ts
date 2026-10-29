@@ -95,13 +95,19 @@ export interface DemoTopologyExtrapolated {
   top_exponent: number;
 }
 /** The original topology algorithm run on the block itself, once, at `alpha`, on one thread
- * (atlas/topology_run.py): its wall time and where it ran, in words. */
+ * (atlas/topology_run.py): its wall time, where it ran in words, and the share of the homes'
+ * floor area its network displaces (it builds until every parcel touches a road); beside it the
+ * six-run fit's time at this block's size (`fit_central_s`, from `fit_runs` runs), which the
+ * measurement checks as a further point. */
 export interface DemoTopologyMeasured {
   kind: "measured";
   alpha: number;
   n_buildings: number;
   seconds: number;
   machine: string;
+  displacement: number;
+  fit_central_s: number;
+  fit_runs: number;
 }
 /** One block the page shows: its id, buildings, place in words, centroid and a Google Maps
  * link; whether it is plainly an informal settlement on the ground (Block's), whatever the

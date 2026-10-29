@@ -1637,6 +1637,8 @@ def _key_figures() -> str:
 
 _COUNT_WORDS = {1: "One", 2: "Two", 3: "Three", 4: "Four", 5: "Five", 6: "Six",
                 7: "Seven", 8: "Eight", 9: "Nine", 10: "Ten", 11: "Eleven", 12: "Twelve"}
+_ORDINALS = {1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth", 6: "sixth",
+             7: "seventh", 8: "eighth", 9: "ninth", 10: "tenth", 11: "eleventh", 12: "twelfth"}
 
 
 def _method_count() -> str:
@@ -1877,12 +1879,17 @@ class _TopologyTime(Protocol):
     it. Resolved once from the bundle's tagged `topology` (`_topology_of`); the times row and the
     footnote never ask which they have."""
 
+    @property
+    def how(self) -> str:
+        """The footnote marker's accessible name: what the footnote explains."""
+        ...
+
     def figure(self, ours_s: float) -> tuple[str, str]:
         """The times row's (value, words), against our method's own run time `ours_s`."""
         ...
 
     def note(self, method: str, anchor: str) -> str:
-        """The footnote (`id=anchor`) saying how the time was had."""
+        """The footnote (`id=anchor`) saying how the time was measured or estimated."""
         ...
 
 
@@ -1892,23 +1899,41 @@ class _Measured:
     machine: str
     alpha: int
     n: int
+    displacement: float
+    fit_central_s: float
+    fit_runs: int
+    how: str = "How this was measured"   # a label, not a result: the class's own fact
+
+    def _time(self) -> str:
+        """A measurement to three figures (1.88 hours), where an estimate gets two."""
+        v, unit = _span(self.seconds)
+        return f"{v:.3g} {unit}"
 
     def figure(self, ours_s: float) -> tuple[str, str]:
-        return (_duration(self.seconds),
-                f"the original topology algorithm on this block, measured: one run, "
-                f"{html.escape(self.machine)}, {self.seconds / ours_s:,.0f} times longer")
+        ratio = float(f"{self.seconds / ours_s:.2g}")       # two figures, as the estimates'
+        return (self._time(),
+                f"the original topology algorithm on this block: one run, recorded, "
+                f"{html.escape(self.machine)}, about {ratio:,.0f} times longer. It builds until "
+                f"every parcel touches a road, which here displaces "
+                f"{self.displacement:.0%} of the homes' floor area")
 
     def note(self, method: str, anchor: str) -> str:
-        return (f'<p class="sbu-footnote" id="{anchor}">Measured: topology ran once on this '
-                f"block's {self.n:,} buildings, at α&nbsp;=&nbsp;{self.alpha}, "
-                f"{html.escape(self.machine)}, as the timed runs behind the extrapolation on the "
-                f"other blocks did. Topology's goal also differs: it builds until every parcel "
-                f"touches a road, where {method} stops at a displacement budget.</p>")
+        return (f'<p class="sbu-footnote" id="{anchor}">Measured, not extrapolated: topology ran '
+                f"once on this block's {self.n:,} buildings, at α&nbsp;=&nbsp;{self.alpha}, "
+                f"{html.escape(self.machine)}, in {self._time()}. The power law fitted to the "
+                f"{_COUNT_WORDS[self.fit_runs].lower()} timed runs on other blocks, which "
+                f"extrapolates topology's time where it has not been run, puts a block this size "
+                f"at about {_duration(self.fit_central_s)}; this run is a "
+                f"{_ORDINALS[self.fit_runs + 1]} point, close to that fit. "
+                f"Topology's goal also differs: it builds until every parcel touches a road, which "
+                f"on this block displaces {self.displacement:.0%} of the homes' floor area, where "
+                f"{method} stops at a displacement budget.</p>")
 
 
 @dataclass(frozen=True, kw_only=True)
 class _Extrapolated:
     t: dict[str, Any]
+    how: str = "How this was estimated"   # a label, not a result: the class's own fact
 
     def _range(self) -> tuple[float, float]:
         a, b = self.t["by_small_s"], self.t["by_top_s"]
@@ -1955,7 +1980,8 @@ def _topology_of(t: dict[str, Any]) -> _TopologyTime:
     match t["kind"]:
         case "measured":
             return _Measured(seconds=t["seconds"], machine=t["machine"], alpha=t["alpha"],
-                             n=t["n_buildings"])
+                             n=t["n_buildings"], displacement=t["displacement"],
+                             fit_central_s=t["fit_central_s"], fit_runs=t["fit_runs"])
         case "extrapolated":
             return _Extrapolated(t=t)
         case other:
@@ -1973,13 +1999,14 @@ def _demo_times() -> str:
     def times(b: dict[str, Any]) -> str:
         frames = b["frames"]
         ours = max(f["seconds"] for f in frames)
-        head, words = _topology_of(b["topology"]).figure(ours)
+        topology = _topology_of(b["topology"])
+        head, words = topology.figure(ours)
         anchor = f"topology-time-{_short(b['block_id'])}"
         items = [
             (_duration(ours),
              f"{name} on this block, to a {frames[-1]['budget']:.0%} budget: recorded, "
              f"{html.escape(b['machine'])}"),
-            (f'{head}<sup><a href="#{anchor}" aria-label="How this was had">1</a></sup>', words),
+            (f'{head}<sup><a href="#{anchor}" aria-label="{topology.how}">1</a></sup>', words),
         ]
         cells = "\n".join(f"  <div><dd>{v}</dd><dt>{t}</dt></div>" for v, t in items)
         return f'<dl class="sbu-keyfigures sbu-demo-times">\n{cells}\n</dl>'
@@ -1987,7 +2014,7 @@ def _demo_times() -> str:
 
 
 def _demo_topology_note() -> str:
-    """Each block's footnote under its topology time: how it was had."""
+    """Each block's footnote under its topology time: how it was measured or estimated."""
     d = _demo()
     if d is None:
         return ""

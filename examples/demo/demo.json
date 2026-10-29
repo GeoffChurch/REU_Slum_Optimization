@@ -733,48 +733,14 @@
    "escape_scale": 566.7,
    "machine": "one process on a workstation CPU (Intel Xeon w7-3455)",
    "topology": {
-    "kind": "extrapolated",
+    "kind": "measured",
     "alpha": 10,
-    "runs": [
-     {
-      "block": "ZAF.9.3.1_1_38136",
-      "n": 51,
-      "seconds": 1.5
-     },
-     {
-      "block": "ZAF.9.3.1_1_21016",
-      "n": 93,
-      "seconds": 4.2
-     },
-     {
-      "block": "ZAF.9.3.1_1_20254",
-      "n": 122,
-      "seconds": 14.4
-     },
-     {
-      "block": "ZAF.9.3.1_1_45919",
-      "n": 159,
-      "seconds": 14.5
-     },
-     {
-      "block": "ZAF.9.3.1_1_44918",
-      "n": 257,
-      "seconds": 82.6
-     },
-     {
-      "block": "ZAF.9.3.1_1_5618",
-      "n": 759,
-      "seconds": 42477.5
-     }
-    ],
     "n_buildings": 638,
-    "exponent": 3.805546033418746,
-    "se": 0.5047696161970066,
-    "central_s": 7553.2562910126035,
-    "by_small_s": 27769.012600588372,
-    "by_top_s": 15609.193170047578,
-    "small_exponent": 2.4475712754078724,
-    "top_exponent": 5.764680038220273
+    "seconds": 6762.479218959808,
+    "machine": "one thread on a workstation CPU (Intel Xeon w7-3455)",
+    "displacement": 0.9066202515723024,
+    "fit_central_s": 7553.2562910126035,
+    "fit_runs": 6
    }
   }
  ],

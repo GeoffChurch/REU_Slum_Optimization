@@ -1293,34 +1293,48 @@ def test_the_demo_screen_facts_refuse_a_bundle_that_disagrees_with_the_map(
 
 def test_each_blocks_topology_time_is_measured_or_extrapolated_never_both(
         demo_body: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Topology's time on a block is a tagged union in the bundle, read once (`_topology_of`): an
+    """Topology's time on a block is a tagged union in the bundle, read once (`_topology_of`). An
     extrapolation leads with its range (owner, 2026-10-28) -- the two anchored estimates in
-    order, whichever is the lower -- and a measurement replaces it whole, with no range and a
-    footnote saying it was measured. An unknown kind refuses to build."""
+    order, whichever is the lower -- and its footnote marker says it was estimated. A measurement
+    (41785's, 2026-10-29) replaces it whole: its own time to three figures, the ratio to the
+    method's, the share its network displaces (the bundle's, from topology.json), a footnote
+    setting it beside the fit, and a marker saying it was measured. An unknown kind refuses to
+    build."""
     import json
 
     import scripts.gen_site_pages as gsp
 
+    kinds = set()
     for b in _demo_bundle()["blocks"]:
         t = b["topology"]
-        assert t["kind"] == "extrapolated", "a block now has a measured time; update this test"
-        lo, hi = sorted((t["by_small_s"], t["by_top_s"]))
-        (vlo, ulo), (vhi, uhi) = gsp._span(lo), gsp._span(hi)
-        head = f"{vlo:.1f} to {vhi:.1f} {uhi}" if ulo == uhi else f"{ulo.capitalize()} to {uhi}"
-        assert f"<dd>{head}<sup>" in demo_body, b["block_id"]
+        kinds.add(t["kind"])
+        short = b["block_id"].rsplit("_", 1)[1]
+        passages = re.findall(rf'<div class="sbu-demo-block" data-demo-block="{short}"[^>]*>\n'
+                              rf"(.*?)\n</div>", demo_body, flags=re.S)
+        [times] = [x for x in passages if "sbu-demo-times" in x]
+        if t["kind"] == "extrapolated":
+            lo, hi = sorted((t["by_small_s"], t["by_top_s"]))
+            (vlo, ulo), (vhi, uhi) = gsp._span(lo), gsp._span(hi)
+            head = (f"{vlo:.1f} to {vhi:.1f} {uhi}" if ulo == uhi
+                    else f"{ulo.capitalize()} to {uhi}")
+            assert f'<dd>{head}<sup><a href="#topology-time-' in times, b["block_id"]
+            assert 'aria-label="How this was estimated"' in times
+        else:
+            v, unit = gsp._span(t["seconds"])
+            assert f"<dd>{v:.3g} {unit}<sup>" in times, b["block_id"]
+            assert 'aria-label="How this was measured"' in times
+            assert f"displaces {t['displacement']:.0%} of the homes' floor area" in times
+            ours = max(f["seconds"] for f in b["frames"])
+            ratio = float(f"{t['seconds'] / ours:.2g}")
+            assert f"about {ratio:,.0f} times longer" in times
+            assert (f"puts a block this size at about {gsp._duration(t['fit_central_s'])}"
+                    in demo_body)
+    assert kinds == {"extrapolated", "measured"}, f"the committed bundle's kinds are {kinds}"
+    assert "How this was had" not in demo_body
     bundle = _demo_bundle()
-    second = bundle["blocks"][1]
-    second["topology"] = {"kind": "measured", "alpha": 10, "n_buildings": second["n_buildings"],
-                          "seconds": 12345.0, "machine": "one thread on a test CPU"}
+    bundle["blocks"][0]["topology"]["kind"] = "guessed"
     (tmp_path / "demo.json").write_text(json.dumps(bundle), encoding="utf-8")
     monkeypatch.setattr(gsp, "DEMO", tmp_path)
-    times, note = gsp._demo_times(), gsp._demo_topology_note()
-    passage = times.split(f'data-demo-block="{second["block_id"].rsplit("_", 1)[1]}"')[1]
-    assert f"<dd>{gsp._duration(12345.0)}<sup>" in passage and "measured: one run" in passage
-    assert "Measured: topology ran once" in note and note.count("An extrapolation") == len(
-        bundle["blocks"]) - 1
-    second["topology"]["kind"] = "guessed"
-    (tmp_path / "demo.json").write_text(json.dumps(bundle), encoding="utf-8")
     with pytest.raises(SystemExit, match="unknown topology kind"):
         gsp._demo_times()
 
