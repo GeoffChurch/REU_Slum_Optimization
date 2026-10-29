@@ -184,11 +184,16 @@ class Shown:
 PATHS = "ears.paths.b20.gl0.25Croad.n2s0.1.M8.K4.D0.15"
 EARS_PATHS = Shown(
     runs=(OnBlock("ZAF.9.3.1_1_5810", GrownRun(f"{PATHS}.v1", budget=0.15)),),
-    name="Loop roads",
+    # The owner's name for it (2026-10-29), and the coordinator's sentence for why, verbatim.
+    name="Shock Reblock",
     blurb=("Each new road runs from the street, or a road already built, across the block and "
            "back to a street or road, so every road is on a loop and none is a dead end. At each "
            "step the method tries the cheapest routes through the gaps between buildings and "
-           "builds the one that saves the most escape time for the homes it displaces."),
+           "builds the one that saves the most escape time for the homes it displaces. "
+           "Named for thermal-shock cracking: as a quenched ceramic cracks inward from its cold "
+           "surface and each crack ends on another, each new road here runs in from the street "
+           "toward the homes with the longest way out and joins the network at both ends, so "
+           "every road is on a loop."),
     stem="loop",
     runtime=GrownSteps(machine="one process on a workstation CPU (Intel Xeon w7-3455)"))
 
@@ -319,7 +324,7 @@ class Measured:
         if "D" not in info:
             raise SystemExit(f"{site.bid}: topology.json's roads are not scored (topology_run.py "
                              f"score)")
-        # The CPU as Loop roads' machine names it, so a reader sees the same chip both times.
+        # The CPU as our method's machine names it, so a reader sees the same chip both times.
         cpu = str(info["cpu"]).replace("(R)", "")
         return DemoTopologyMeasured(
             kind="measured", alpha=self.alpha, n_buildings=n, seconds=float(info["wall_s"]),
@@ -327,6 +332,40 @@ class Measured:
             fit_central_s=extrapolated(self.runs, self.alpha, n).central_s,
             fit_runs=len(self.runs))
 
+
+@dataclass(frozen=True)
+class PortSpeed:
+    """atlas/topology_speed: topology's original (`original`) and our port (`port`) run on the
+    same blocks, a JSON record per block and version beside the table (`dir`/table.csv)."""
+    dir: Path
+    original: str
+    port: str
+
+    def of(self) -> DemoPortSpeed:
+        rows = list(pd.read_csv(self.dir / "table.csv", dtype={"failed": str}).itertuples())
+        failed = [r for r in rows if isinstance(r.failed, str)]
+        ok = [r for r in rows if not isinstance(r.failed, str)]
+        if any(bool(r.censored) for r in ok):
+            raise SystemExit(f"{self.dir}: a censored run; the table's speed-ups are not times")
+        for r in ok:                         # the table's columns are the versions named here
+            for v, col in ((self.original, r.original_s), (self.port, r.fork_s)):
+                rec = json.loads((self.dir / f"{r.block}_{v}.json").read_text())
+                if abs(rec["wall_s"] - col) > 1e-9:
+                    raise SystemExit(f"{self.dir}: {r.block}'s {v} record disagrees with the table")
+        n = np.array([r.n for r in ok], dtype=float)
+        sp = np.array([r.speedup for r in ok], dtype=float)
+        return DemoPortSpeed(
+            port=self.port, original=self.original, n_blocks=len(ok), n_min=int(n.min()),
+            n_max=int(n.max()), speedup_min=round(float(sp.min()), 2),
+            speedup_median=round(float(np.median(sp)), 2), speedup_max=round(float(sp.max()), 2),
+            same_networks=all(bool(r.same) for r in ok),
+            exponent=round(float(np.polyfit(np.log(n), np.log(sp), 1)[0]), 2),
+            n_failed=len(failed))
+
+
+# The original's last commit before the performance changes, and the port's (2026-10-29).
+PORT_SPEED = PortSpeed(HERE.parent / "topology_speed",
+                       original="5972772", port="ff74af2")
 
 EXTRAPOLATED = Extrapolated(TOPOLOGY_RUNS, TOPOLOGY_ALPHA)
 MEASURED = Measured(TOPOLOGY_RUNS, TOPOLOGY_ALPHA)
@@ -398,7 +437,7 @@ PAGE = Block("ZAF.9.3.1_1_5810", "the Bloekombos and Wallacedene area of Kraaifo
 # A method that builds one road at a time is cut in that order.
 OWN_ORDER = "the order it built its roads"
 # Each method cut into the shortest prefixes reaching every budget (atlas/buildout.py, 2026-10-29):
-# Loop roads in its own build order, topology -- which keeps none -- in common.canonical_order.
+# Our method in its own build order, topology -- which keeps none -- in common.canonical_order.
 COMPARED = Compared(
     "ZAF.9.3.1_1_41785", "Philippi", zoom=18, topology=MEASURED,
     ours=Grid(f"{PATHS[:-len('.D0.15')]}.D0.91.v2", stem="loop", order=OWN_ORDER,
@@ -900,14 +939,37 @@ class DemoEncoding:
 
 
 @dataclass(frozen=True)
+class DemoPortSpeed:
+    """Topology's run times on the page are our optimized port's (`port`, a commit of
+    GeoffChurch's topology fork); the original (`original`, the last commit before the
+    performance changes) timed against it on `n_blocks` blocks of `n_min` to `n_max` buildings:
+    how many times as long the original took (least, median, most), whether every network was
+    the same, the slope of log speed-up on log n (`exponent`), and how many blocks failed in both
+    and are left out (atlas/topology_speed/table.csv)."""
+    port: str
+    original: str
+    n_blocks: int
+    n_min: int
+    n_max: int
+    speedup_min: float
+    speedup_median: float
+    speedup_max: float
+    same_networks: bool
+    exponent: float
+    n_failed: int
+
+
+@dataclass(frozen=True)
 class DemoBundle:
     """The Demo page's numbers: the block it follows, the methods compared on another, the
-    screens, the method, and the plates' encoding."""
+    screens, the method, the plates' encoding, and how topology's times relate to the original
+    algorithm's (`topology_port`)."""
     block: DemoBlock
     comparison: DemoComparison
     screen: DemoScreen
     method: DemoMethod
     encoding: DemoEncoding
+    topology_port: DemoPortSpeed
 
 
 def ts_type(t: Any) -> str:
@@ -1183,7 +1245,7 @@ def comparison(sc: Screen, out: Path, enc: DemoEncoding) -> DemoComparison:
                        run=DemoRecorded(kind="recorded", seconds=ours_t["whole"]["seconds"],
                                         machine=METHOD.runtime.machine), out=out)
     earlier = grid_series(site, w, COMPARED.earlier, budgets, method="topology",
-                          label="Earlier method: topology", run=whole, out=out)
+                          label="Earlier method: topology (our optimized port)", run=whole, out=out)
     both = [k for k, (a, b) in enumerate(zip(ours.cells, earlier.cells, strict=True))
             if isinstance(a, DemoMet) and isinstance(b, DemoMet) and k > 0]
     buildout = write_buildout(out, DemoBuildOut(
@@ -1224,6 +1286,7 @@ def site(root: Path) -> None:
                           n_blocks=len(sc.score), peel_metric=PEEL_EXAMPLE,
                           peel_keep_n=pl.keep_n),
         method=DemoMethod(name=METHOD.name, blurb=METHOD.blurb),
+        topology_port=PORT_SPEED.of(),
         encoding=enc)
     (out / "demo.json").write_text(json.dumps(dataclasses.asdict(bundle), indent=1,
                                               ensure_ascii=False) + "\n")
