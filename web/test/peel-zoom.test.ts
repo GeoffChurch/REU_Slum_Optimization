@@ -60,13 +60,12 @@ test("the URL round-trips the view", () => {
   assert.equal(loc.search(), "");
 });
 
-/** The figure the page's generator writes: a frame holding the image and the core's outline. */
+/** The figure the page's generator writes: a frame holding the image. */
 function mount(): { frame: FakeElement; state: () => StateSource<PeelView> } {
   const figure = new FakeElement("figure");
   figure.dataset.nativePx = String(NATIVE);
-  figure.dataset.mark = "0.28,0.46,0.2,0.2";
   const frame = new FakeElement("div");
-  frame.append(new FakeElement("img"), new FakeElement("span"));
+  frame.append(new FakeElement("img"));
   figure.append(frame);
   (frame as unknown as { getBoundingClientRect: () => DOMRect }).getBoundingClientRect = () =>
     ({ left: 0, top: 0, width: WIDTH, height: WIDTH }) as DOMRect;

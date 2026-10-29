@@ -1283,8 +1283,7 @@ body,
 /* ---------------------------------------------------------------- the Demo's peel figure */
 
 /* The flagship run's depth figure in one zoomable frame (web/src/widgets/peel-zoom.ts): the
-   image fills the frame and is moved by one transform; the deep core's outline is placed in frame
-   coordinates by the widget, so its line stays thin at any zoom. On white, like every render on
+   image fills the frame and is moved by one transform. On white, like every render on
    this site. Unzoomed, the browser keeps one-finger swipes (it scrolls the page); the widget takes
    them over only once zoomed in. No transition: a gesture follows the finger, and nothing animates
    for a reader who asked for reduced motion. */
@@ -1312,18 +1311,6 @@ body,
   transform-origin: 0 0;
   user-select: none;
   -webkit-user-drag: none;
-}
-
-.sbu-peel__mark {
-  position: absolute;
-  border: 2px solid var(--sbu-ink);
-  box-shadow: 0 0 0 1px #ffffff;
-  pointer-events: none;
-}
-
-/* On the white plate, the outline is the plate's ink in both schemes. */
-[data-md-color-scheme="slate"] .sbu-peel__mark {
-  border-color: #111111;
 }
 
 .sbu-peel__controls {

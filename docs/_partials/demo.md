@@ -8,7 +8,7 @@
        city bundle the map draws from.
      * DEMOSURVEYNOTE -- one sentence on what the survey's gold does and does not say here.
      * DEMOPEEL -- the slower screen's measure: the flagship run's depth figure in one zoomable
-       frame (the peel-zoom widget), its core outlined, a legend; its numbers from that run's
+       frame (the peel-zoom widget), a legend; its numbers from that run's
        meta.json and the bundle.
      * DEMOFIRES -- the fires reported near the block, as a list. NO map draws them: some reports'
        streets cannot be placed (owner, 2026-10-28). Keep it that way.

@@ -1316,13 +1316,12 @@ def test_the_demo_figures_refuse_a_bundle_that_disagrees_with_the_map(
             gsp._demo_screen_facts()
 
 
-def test_the_peel_figure_reads_its_numbers_and_outlines_the_deep_core(
+def test_the_peel_figure_reads_its_numbers_in_one_zoomable_frame(
         demo_body: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The slower screen's figure: the flagship run's depth render in one zoomable frame, its
-    numbers (the deepest ring and the proxy's top) read off that run's meta.json and checked
-    against the bundle, the rank off the bundle; the outline at PEEL_CORE still on the render's
-    deepest colour -- a re-render that moved the core would otherwise outline pale parcels
-    silently; and the frame handed the image's native width, which caps the zoom."""
+    """The slower screen's figure: the flagship run's depth render in one zoomable frame, with no
+    outline on it (owner, 2026-10-29); its numbers (the deepest ring and the proxy's top) read off
+    that run's meta.json and checked against the bundle, the rank off the bundle; and the frame
+    handed the image's native width, which caps the zoom."""
     import json
 
     from PIL import Image
@@ -1331,7 +1330,8 @@ def test_the_peel_figure_reads_its_numbers_and_outlines_the_deep_core(
 
     meta = json.loads((ROOT / "examples" / "multiblock_depth_density" / "meta.json").read_text())
     b = _demo_bundle()["block"]
-    assert f"The deepest home is {meta['deepest_depth']:.0f} rings in" in demo_body
+    assert (f"The deepest home is {meta['deepest_depth']:.0f} rings in; zoom in to see its "
+            f"parcels") in demo_body
     assert (f"rank {b['peel']['rank']:,} of the shipped screen's top {meta['flagged']:,}"
             in demo_body)
     assert f"Ring {meta['deepest_depth']:.0f}, the deepest" in demo_body
@@ -1341,15 +1341,8 @@ def test_the_peel_figure_reads_its_numbers_and_outlines_the_deep_core(
     assert f'data-widget="peel-zoom" data-native-px="{png.width}"' in figure.group(1)
     assert figure.group(2).count("<img") == 1, "one frame, not a whole view and a crop"
     assert 'class="skip-lightbox"' in figure.group(2), "a lightbox would fight the gestures"
-    cx, cy, side = gsp.PEEL_CORE
-    assert (f'data-mark="{cx - side / 2:.4f},{cy - side / 2:.4f},{side:.4f},{side:.4f}"'
-            in figure.group(1))
-    half = png.width * side / 4                      # the middle half of the outlined square
-    window = png.convert("RGB").crop((round(cx * png.width - half), round(cy * png.height - half),
-                                      round(cx * png.width + half), round(cy * png.height + half)))
-    pixels: list[tuple[int, int, int]] = list(window.getdata())
-    deep = sum(1 for r, g, _ in pixels if r > 150 and g < 90) / len(pixels)
-    assert deep > 0.3, f"the outline's middle is {deep:.0%} deep-red parcels, not the core"
+    assert "data-mark" not in figure.group(1) and "sbu-peel__mark" not in figure.group(2)
+    assert "outlined" not in figure.group(2)
     bundle = _demo_bundle()
     bundle["block"]["peel"]["rings"] += 1
     (tmp_path / "demo.json").write_text(json.dumps(bundle), encoding="utf-8")

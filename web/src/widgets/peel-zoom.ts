@@ -8,9 +8,8 @@ import { runOrReport } from "../dom/error.js";
 import { observeSize } from "../dom/resize.js";
 
 /** The Demo's peel figure as one zoomable frame (owner, 2026-10-29): the flagship run's depth
- * render, whole at first with the deep core outlined as a suggestion of where to look; pinch,
- * Ctrl/⌘-wheel, the +/− buttons or a double tap/click zoom in, a drag pans once zoomed, and a
- * button resets. The view is URL state, so a link -- or the page's QR code -- carries a zoomed
+ * render, whole at first; pinch, Ctrl/⌘-wheel, the +/− buttons or a double tap/click zoom in, a
+ * drag pans once zoomed, and a button resets. The view is URL state, so a link -- or the page's QR code -- carries a zoomed
  * view.
  *
  * Nothing hijacks the page's scroll: a plain wheel and a one-finger swipe on an unzoomed frame
@@ -18,8 +17,8 @@ import { observeSize } from "../dom/resize.js";
  * deliberate gesture -- a modified wheel, two fingers, a drag on a zoomed image -- moves the view.
  *
  * No library: pointer events and one CSS transform on the image. The page's generator writes the
- * frame, the image (marked skip-lightbox: a lightbox would fight the gestures), the outline and
- * the image's native width (`data-native-px`), which caps the zoom: past it there is no detail
+ * frame, the image (marked skip-lightbox: a lightbox would fight the gestures) and the image's
+ * native width (`data-native-px`), which caps the zoom: past it there is no detail
  * left to show. */
 const LABEL = "PeelZoom";
 
@@ -94,9 +93,6 @@ export const peelZoom: Widget<PeelView> = (host, makeState) => {
   const img = host.querySelector("img");
   if (img === null) throw new Error(`${LABEL}: no image`);
   const frame = img.parentElement!;
-  const mark = frame.querySelector("span");
-  const [mx, my, mw, mh] = requireAttr(host.dataset.mark, "data-mark", LABEL).split(",")
-    .map(Number) as [number, number, number, number];
 
   let width = 0;
   // The cap: the image's native pixels across the frame's CSS width. Unknown until laid out, so
@@ -123,13 +119,6 @@ export const peelZoom: Widget<PeelView> = (host, makeState) => {
   const render = (): void => {
     const v = state.get();
     img.style.transform = transformOf(v);
-    // The outline in frame coordinates, not scaled with the image, so its line stays thin.
-    if (mark !== null) {
-      mark.style.left = `${(mx - (v.cx - 0.5 / v.zoom)) * v.zoom * 100}%`;
-      mark.style.top = `${(my - (v.cy - 0.5 / v.zoom)) * v.zoom * 100}%`;
-      mark.style.width = `${mw * v.zoom * 100}%`;
-      mark.style.height = `${mh * v.zoom * 100}%`;
-    }
     // Unzoomed, a one-finger swipe is the page's to scroll; zoomed, a drag pans the image.
     frame.style.touchAction = v.zoom > 1 ? "none" : "pan-x pan-y";
     frame.dataset.zoomed = v.zoom > 1 ? "yes" : "no";

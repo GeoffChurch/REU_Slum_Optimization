@@ -1749,19 +1749,12 @@ def _demo_survey_note() -> str:
             '<a href="../results/bakeoff/#caveats">bake-off\'s caveats</a>).</p>')
 
 
-# The deep core of the block in examples/multiblock_depth_density/before_depth.png -- its centre
-# and side as fractions of the image's width and height -- which the peel figure outlines as a
-# suggestion of where to zoom. tests/test_gen_site_pages.py checks it still lands on the figure's
-# deepest colour, so a re-render that moved the core cannot leave the outline on pale parcels.
-PEEL_CORE = (0.38, 0.56, 0.2)
-
-
 def _demo_peel() -> str:
     """The slower screen's real measure on the block: the flagship run's depth figure (one Voronoi
     parcel per building, shaded by its ring counted in from the street) in one zoomable frame
-    (`web/src/widgets/peel-zoom.ts`), the deep core outlined, and a legend from ring one to the
-    deepest. The depth and the proxy's top are read off the run's meta.json, the rank off the
-    bundle, and the two are checked to agree.
+    (`web/src/widgets/peel-zoom.ts`) and a legend from ring one to the deepest. The depth and
+    the proxy's top are read off the run's meta.json, the rank off the bundle, and the two are
+    checked to agree.
 
     The image is the widget's own and its no-JS fallback at once, marked skip-lightbox: a
     lightbox would fight the zoom gestures. Its native width caps the zoom (`data-native-px`)."""
@@ -1781,24 +1774,18 @@ def _demo_peel() -> str:
         raise SystemExit(
             f"examples/multiblock_depth_density/meta.json ({meta['deepest_block']}, {rings} "
             f"rings, top {top}) disagrees with examples/demo/demo.json")
-    cx, cy, side = PEEL_CORE
-    x0, y0 = cx - side / 2, cy - side / 2
-    mark = (f"left:{100 * x0:.2f}%;top:{100 * y0:.2f}%;width:{100 * side:.2f}%;"
-            f"height:{100 * side:.2f}%")
     stops = ", ".join(d["encoding"]["depth_ramp"])
     caption = (
         f"The slower screen's measure of the same block: one Voronoi parcel per building, shaded "
         f"by how many rings of parcels lie between it and the street. The deepest home is {rings} "
-        f"rings in, inside the outlined square; zoom in to see its parcels. Depth times density "
+        f"rings in; zoom in to see its parcels. Depth times density "
         f"puts this block at rank {b['peel']['rank']:,} of the shipped screen's top {top:,}.")
     return (
         f'<figure class="sbu-peel" data-widget="peel-zoom" '
-        f'data-native-px="{_png_width(png_path)}" '
-        f'data-mark="{x0:.4f},{y0:.4f},{side:.4f},{side:.4f}">\n'
+        f'data-native-px="{_png_width(png_path)}">\n'
         f'  <div class="sbu-peel__frame"><img class="skip-lightbox" src="{url}" alt="Block '
         f'{b["block_id"]}\'s Voronoi parcels shaded by depth from the street, deepest at the '
-        f'outlined core"><span class="sbu-peel__mark" style="{mark}" aria-hidden="true">'
-        f"</span></div>\n"
+        f'core"></div>\n'
         f'  <div class="sbu-peel__legend"><span class="sbu-peel__ramp" '
         f'style="background:linear-gradient(90deg, {stops})"></span>'
         f"<span>Ring 1, on the street</span><span>Ring {rings}, the deepest</span></div>\n"
