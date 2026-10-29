@@ -159,14 +159,6 @@ register("draw-road", drawRoad, DRAW_ROAD_URL);
 // inside the widget module (see the paragraph above).
 import { buildOut, BUILD_OUT_URL } from "./widgets/build-out.js";
 register("build-out", buildOut, BUILD_OUT_URL);
-// Eighth widget, same shape, same reason -- registered HERE, after REGISTRY exists, never from
-// inside the widget module (see the paragraph above).
-import { screenGeometry, SCREEN_GEOMETRY_URL } from "./widgets/screen-geometry.js";
-register("screen-geometry", screenGeometry, SCREEN_GEOMETRY_URL);
-// Ninth, same shape, same reason. The Demo page's block switch: it owns the `block` URL key and
-// publishes the block on page/channel.ts's DEMO_BLOCK, which the page's other widgets follow.
-import { blockSwitch, BLOCK_SWITCH_URL } from "./widgets/block-switch.js";
-register("block-switch", blockSwitch, BLOCK_SWITCH_URL);
 
 // DOMContentLoaded fires once per full page load. That is sufficient only because this project's
 // mkdocs.yml does not enable Material's navigation.instant feature (confirmed absent as of this
