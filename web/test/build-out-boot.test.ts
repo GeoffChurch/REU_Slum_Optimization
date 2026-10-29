@@ -9,7 +9,8 @@ import {
   fakeLocation, FakeElement, fireResize, installStubs, mountPoint, writeNow,
 } from "./harness.js";
 import {
-  BUILD_OUT_COMPARE_URL, BUILD_OUT_URL, buildOut, duration, sameAsBudget, sheetOffset,
+  BUILD_OUT_COMPARE_URL, BUILD_OUT_URL, buildOut, duration, measuredTime, sameAsBudget,
+  sheetOffset,
   type BuildOutState,
 } from "../src/widgets/build-out.js";
 
@@ -128,8 +129,9 @@ test("a slider step moves the plate, the readouts and every plot's dot to that b
 test("two series: a headed plate each, both moved by the one slider", async () => {
   const { host } = await compared();
   assert.deepEqual(byClass(host, "sbu-buildout__head"), COMPARED.series.map((s) => s.label));
-  assert.deepEqual(byClass(host, "sbu-buildout__time"),
-                   COMPARED.series.map((s) => duration(s.run.seconds)));
+  assert.deepEqual(byClass(host, "sbu-buildout__time"), COMPARED.series.map((s) => (
+    s.run.kind === "measured" ? measuredTime(s.run.seconds) : duration(s.run.seconds))));
+  assert.ok(COMPARED.series.some((s) => s.run.kind === "measured"), "no measured run to check");
   assert.deepEqual(plates(host).map((i) => i.getAttribute("src")),
                    COMPARED.series.map((s) => `${DIR}${s.sheet.file}`));
   const k = 3;
@@ -241,4 +243,12 @@ test("run times read as the page's generator writes them", () => {
   assert.equal(duration(56), "56 seconds");
   assert.equal(duration(6762.5), "1.9 hours");
   assert.equal(duration(7.44), "7.4 seconds");
+});
+
+test("a measured time reads as the page's generator states it", () => {
+  // The cases the generator's `_measured_time` is tested against too (tests/test_gen_site_pages.py).
+  const fixture = JSON.parse(readFileSync("test/fixtures/measured-times.json", "utf8")) as
+    { cases: [number, string][] };
+  assert.ok(fixture.cases.length > 0);
+  for (const [s, want] of fixture.cases) assert.equal(measuredTime(s), want, String(s));
 });

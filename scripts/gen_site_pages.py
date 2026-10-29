@@ -1655,6 +1655,14 @@ def _duration(seconds: float) -> str:
     return f"{v:.0f} {unit}" if v >= 10 else f"{v:.1f} {unit}"
 
 
+def _measured_time(seconds: float) -> str:
+    """A measured run time to three figures (1.88 hours), where an estimate gets two. The
+    build-out widget states the same times (build-out.ts `measuredTime`);
+    web/test/fixtures/measured-times.json holds the cases both are tested against."""
+    v, unit = _span(seconds)
+    return f"{v:.3g} {unit}"
+
+
 def _short(block_id: str) -> str:
     """A block's short id, as the page names it in prose (`5810`)."""
     return block_id.rsplit("_", 1)[1]
@@ -1870,15 +1878,10 @@ class _Measured:
     fit_runs: int
     how: str = "How this was measured"   # a label, not a result: the class's own fact
 
-    def _time(self) -> str:
-        """A measurement to three figures (1.88 hours), where an estimate gets two."""
-        v, unit = _span(self.seconds)
-        return f"{v:.3g} {unit}"
-
     def figure(self, ours_s: float) -> tuple[str, str]:
         ratio = float(f"{self.seconds / ours_s:.2g}")       # two figures, as the estimates'
-        return (self._time(), f"measured, {html.escape(self.machine)}: about {ratio:,.0f} times "
-                              f"as long")
+        return (_measured_time(self.seconds),
+                f"measured, {html.escape(self.machine)}: about {ratio:,.0f} times as long")
 
     def note(self) -> str:
         # The run's own clock, so the page can say why "Built in" sits still for the first frames.

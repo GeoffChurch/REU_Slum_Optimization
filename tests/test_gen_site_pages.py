@@ -1463,6 +1463,22 @@ def test_the_measured_note_says_where_topologys_time_went(demo_body: str) -> Non
         assert fact in note.group(1), fact
 
 
+def test_a_measured_time_reads_as_the_build_out_widget_states_it() -> None:
+    """The generator and the build-out widget state a measured run alike (owner, 2026-10-29: the
+    column read "1.9 hours" over prose saying "1.88 hours"): both are tested against one set of
+    cases, web/test/fixtures/measured-times.json, which web/test/build-out-boot.test.ts reads
+    too."""
+    import json
+
+    import scripts.gen_site_pages as gsp
+
+    cases = json.loads((ROOT / "web" / "test" / "fixtures" / "measured-times.json")
+                       .read_text(encoding="utf-8"))["cases"]
+    assert cases
+    for seconds, want in cases:
+        assert gsp._measured_time(seconds) == want, seconds
+
+
 def test_an_unknown_topology_kind_refuses_to_build(monkeypatch: pytest.MonkeyPatch,
                                                    tmp_path: Path) -> None:
     import json
