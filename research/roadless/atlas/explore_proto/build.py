@@ -253,12 +253,18 @@ class DemoTopologyExtrapolated:
 @dataclass(frozen=True)
 class DemoTopologyMeasured:
     """The original topology algorithm run on the block itself, once, at `alpha`, on one thread
-    (atlas/topology_run.py): its wall time and where it ran, in words."""
+    (atlas/topology_run.py): its wall time, where it ran in words, and the share of the homes'
+    floor area its network displaces (it builds until every parcel touches a road); beside it the
+    six-run fit's time at this block's size (`fit_central_s`, from `fit_runs` runs), which the
+    measurement checks as a further point."""
     kind: Literal["measured"]
     alpha: int
     n_buildings: int
     seconds: float
     machine: str
+    displacement: float
+    fit_central_s: float
+    fit_runs: int
 
 
 def extrapolated(runs: tuple[Timed, ...], alpha: int, n: int) -> DemoTopologyExtrapolated:
@@ -299,20 +305,31 @@ class Extrapolated:
 
 @dataclass(frozen=True)
 class Measured:
-    """atlas/topology_run.py's run on the block (Site.kept/topology.json); refuses one whose
-    building count or alpha is not the page's."""
+    """atlas/topology_run.py's run on the block (Site.kept/topology.json, its roads scored there
+    too), set beside the fit through `runs` at the block's size; refuses a run whose building
+    count or alpha is not the page's, or whose roads were never scored."""
+    runs: tuple[Timed, ...]
+    alpha: int
 
     def of(self, site: Site, n: int) -> DemoTopologyMeasured:
         info = json.loads((site.kept / "topology.json").read_text())
-        if info["n_buildings"] != n or info["alpha"] != TOPOLOGY_ALPHA:
+        if info["n_buildings"] != n or info["alpha"] != self.alpha:
             raise SystemExit(f"{site.bid}: topology.json ran {info['n_buildings']} buildings at "
-                             f"alpha {info['alpha']}, the page {n} at {TOPOLOGY_ALPHA}")
-        return DemoTopologyMeasured(kind="measured", alpha=TOPOLOGY_ALPHA, n_buildings=n,
-                                    seconds=float(info["wall_s"]),
-                                    machine=f"one thread on a workstation CPU ({info['cpu']})")
+                             f"alpha {info['alpha']}, the page {n} at {self.alpha}")
+        if "D" not in info:
+            raise SystemExit(f"{site.bid}: topology.json's roads are not scored (topology_run.py "
+                             f"score)")
+        # The CPU as Loop roads' machine names it, so a reader sees the same chip both times.
+        cpu = str(info["cpu"]).replace("(R)", "")
+        return DemoTopologyMeasured(
+            kind="measured", alpha=self.alpha, n_buildings=n, seconds=float(info["wall_s"]),
+            machine=f"one thread on a workstation CPU ({cpu})", displacement=float(info["D"]),
+            fit_central_s=extrapolated(self.runs, self.alpha, n).central_s,
+            fit_runs=len(self.runs))
 
 
 EXTRAPOLATED = Extrapolated(TOPOLOGY_RUNS, TOPOLOGY_ALPHA)
+MEASURED = Measured(TOPOLOGY_RUNS, TOPOLOGY_ALPHA)
 
 
 # ------------------------------------------------------------------ the blocks the page shows
@@ -335,8 +352,8 @@ BLOCKS = (
           plainly_informal=True, topology=EXTRAPOLATED),
     # Philippi: OpenStreetMap's suburb at its centre (Nominatim's reverse lookup, 2026-10-28).
     # About 165 m across, so a closer zoom than 5810's.
-    Block("ZAF.9.3.1_1_41785", "Philippi", zoom=18, plainly_informal=False,
-          topology=EXTRAPOLATED),
+    # Topology measured here (atlas/topology_run.py, 2026-10-29): 1.88 h on one thread.
+    Block("ZAF.9.3.1_1_41785", "Philippi", zoom=18, plainly_informal=False, topology=MEASURED),
 )
 
 
