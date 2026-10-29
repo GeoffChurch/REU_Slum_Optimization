@@ -1,0 +1,11 @@
+{
+ "block": "ZAF.9.3.1_1_13805",
+ "version": "5972772",
+ "n_buildings": 150,
+ "wall_s": 23.356972455978394,
+ "cpu_s": 23.354910476,
+ "n_roads": 82,
+ "road_m": 710.8161036521145,
+ "module": "/tmp/claude-1641171234/-home-gchurchill-src-reblock/febe79f0-57af-4cfc-a689-40c1b02b438b/scratchpad/topology_5972772/topology/__init__.py",
+ "host": "rtx6000"
+}

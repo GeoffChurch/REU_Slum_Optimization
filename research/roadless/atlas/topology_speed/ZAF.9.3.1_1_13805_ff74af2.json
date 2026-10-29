@@ -1,0 +1,11 @@
+{
+ "block": "ZAF.9.3.1_1_13805",
+ "version": "ff74af2",
+ "n_buildings": 150,
+ "wall_s": 11.104823112487793,
+ "cpu_s": 11.103578921,
+ "n_roads": 82,
+ "road_m": 710.8161036521145,
+ "module": "/home/gchurchill/src/reblock/ext/topology/topology/__init__.py",
+ "host": "rtx6000"
+}
