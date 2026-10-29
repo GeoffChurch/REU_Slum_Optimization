@@ -15,6 +15,7 @@ import re
 import tempfile
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -1093,3 +1094,206 @@ def test_the_headline_compares_only_what_lens_a_actually_matched(
     figures = gsp._key_figures()
     assert "70.0%" in figures and "95.0%" not in figures
     assert "single-block benchmark region" in figures and "1-block" not in figures
+
+
+# ------------------------------------------------------------------------------- the Demo page
+
+@pytest.fixture
+def demo_body(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
+    """The rendered Demo partial, markers filled -- `explore_body`'s fixture, for docs/demo.md."""
+    import scripts.gen_site_pages as gsp
+
+    monkeypatch.setattr(gsp, "DOCS", tmp_path)
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
+    return gsp._render_partial("demo")
+
+
+def _demo_bundle() -> dict[str, Any]:
+    import json
+    path = ROOT / "examples" / "demo" / "demo.json"
+    assert path.is_file(), f"{path} is missing; the Demo tests would check nothing"
+    out: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return out
+
+
+def test_the_demo_partial_types_no_numerals() -> None:
+    """The partial's header states the rule: every number on the page, the fires' quoted ones
+    included, comes from examples/demo/demo.json through a marker. A digit typed into the prose is
+    a second copy no re-bake moves. Markers are capitals only, so they cannot hide a digit."""
+    text = (ROOT / "docs" / "_partials" / "demo.md").read_text(encoding="utf-8")
+    body = re.sub(r"\A\s*<!--.*?-->", "", text, count=1, flags=re.S)
+    assert "<!-- DEMOFIRES -->" in body, "the comment strip ate the body; this test is vacuous"
+    digits = re.findall(r".{0,30}\d.{0,30}", body)
+    assert not digits, f"digits typed into the Demo partial's prose: {digits}"
+
+
+def test_the_demo_mounts_the_sites_screen_map_with_a_close_up_and_the_build_out(
+        demo_body: str) -> None:
+    """One screen widget on the site, not two: the Demo page's city map is ScreenMap, asking for a
+    close-up; then the build-out. And ONLY the Demo page asks for the close-up -- Screening and
+    Explore keep the markup they had."""
+    assert re.findall(r'data-widget="([a-z-]+)"', demo_body) == [
+        "screen-geometry", "screen-map", "build-out"]
+    pad = _demo_bundle()["screen"]["closeup_pad_m"]
+    assert f'data-closeup-pad-m="{pad:g}"' in demo_body
+    for page in ("explore", "screening"):
+        assert "data-closeup-pad-m" not in render_page(page), page
+
+
+def test_the_demo_rewrites_its_bundle_urls_for_its_served_depth() -> None:
+    """docs/demo.md serves at <base>/demo/, url_depth 1: every asset it points at needs one `../`,
+    the build-out's bundle and its fallback sheet included."""
+    page = render_page("demo")
+    assert 'data-bundle="../assets/demo/demo.json"' in page
+    assert 'src="../assets/demo/loop_time.webp"' in page
+    assert 'src="../assets/demo/geometry.svg"' in page
+    for attr in ("src", "href", "data-bundle", "data-bundle-capetown", "data-bundle-nairobi"):
+        assert f'{attr}="assets/' not in page, attr
+
+
+def test_the_demo_ships_the_one_sheet_the_build_out_shows(monkeypatch: pytest.MonkeyPatch,
+                                                         tmp_path: Path) -> None:
+    """The owner kept the escape-time view alone (2026-10-28): the bundle names one sheet, the
+    generator ships it beside the bundle (where build-out.ts's `besideBundle` looks), and nothing
+    on the page offers a view switch or a `view` URL key any more."""
+    import scripts.gen_site_pages as gsp
+
+    monkeypatch.setattr(gsp, "DOCS", tmp_path)
+    monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
+    figure = gsp._demo_build_out()
+    sheets = _demo_bundle()["sheets"]
+    assert set(sheets) == {"width", "frame_height", "rows", "sheet"}
+    assert (tmp_path / "assets" / "demo" / sheets["sheet"]).is_file()
+    widget = (ROOT / "web" / "src" / "widgets" / "build-out.ts").read_text(encoding="utf-8")
+    assert '"view"' not in widget, "the build-out widget still carries a view URL key"
+    assert "Grey is a new road" in figure and "destroyed" in figure, (
+        "the caption must say what grey is on the escape-time plate")
+
+
+def test_the_demo_hides_its_table_of_contents(tmp_path: Path,
+                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    """Owner, 2026-10-28: the Demo page drops its table of contents for the width the build-out
+    needs. Checked on the written page, front matter and all, as `main()` writes it."""
+    import scripts.gen_site_pages as gsp
+
+    src = (ROOT / "scripts" / "gen_site_pages.py").read_text(encoding="utf-8")
+    call = re.search(r'_write_page\(DOCS / "demo\.md",[^\n]*\n[^\n]*', src)
+    assert call is not None and 'hide=("toc",)' in call.group(0)
+    out = tmp_path / "demo.md"
+    gsp._write_page(out, "body", depth=0, url_depth=1, title="Demo", hide=("toc",))
+    assert out.read_text(encoding="utf-8").startswith('---\ntitle: "Demo"\nhide:\n  - toc\n---\n')
+
+
+def test_the_demo_calls_the_metric_escape_time_saved_and_names_permeability_once(
+        demo_body: str) -> None:
+    """Owner, 2026-10-28: on the Demo page the metric is "escape time saved". "Permeability", the
+    rest of the site's term, appears once -- in the build-out caption's definition, as a link to
+    the Permeability page -- and nowhere else on the page, the bundle's method blurb included."""
+    import scripts.gen_site_pages as gsp
+
+    assert gsp.DEMO_METRIC == "escape time saved"
+    assert "the roads remove, 1 − P(roads) / P(no roads)" in demo_body
+    text = re.sub(r'href="[^"]*"', "", demo_body)
+    mentions = re.findall(r".{40}[Pp]ermeability.{10}", text)
+    assert len(mentions) == 1, mentions
+    assert '<a href="../methodology/permeability/">permeability</a>' in demo_body
+
+
+def test_the_demo_names_its_metric_once(demo_body: str) -> None:
+    """The metric's name may change (the owner is weighing "ease of access"), so the Demo page
+    spells it in one place, DEMO_METRIC, and hands it to the build-out widget, which spells none of
+    its own."""
+    import scripts.gen_site_pages as gsp
+
+    assert f'data-metric-label="{gsp.DEMO_METRIC}"' in demo_body
+    widget = (ROOT / "web" / "src" / "widgets" / "build-out.ts").read_text(encoding="utf-8")
+    code = re.sub(r"//[^\n]*", "", re.sub(r"/\*.*?\*/", "", widget, flags=re.S))
+    assert "plotsFor" in code, "the comment strip ate the code; this test is vacuous"
+    # The string literals, with any template's ${...} code taken out: the bundle's own field
+    # `f.permeability` is code, not a label.
+    literals = [re.sub(r"\$\{[^}]*\}", "", lit)
+                for lit in re.findall(r'"[^"\n]*"|`[^`]*`', code)]
+    spelled = [lit for lit in literals if re.search(r"[Pp]ermeability", lit)]
+    assert not spelled, (
+        f"build-out.ts spells the metric's name in {spelled}; take it from data-metric-label")
+
+
+def test_the_depth_factor_is_homes_per_frontage_slot(demo_body: str) -> None:
+    """The diagram's reading, which presumes no shape: with s = √(A/n), the block's street holds
+    P/s parcels (frontage slots), and the screen's depth factor √(nA)/P is n ÷ (P/s) exactly, the
+    homes behind each slot. Checked on both blocks the bundle carries, against the bundle's own
+    score, and as the factors table prints it."""
+    for blk in (_demo_bundle()["screen"]["followed"], _demo_bundle()["screen"]["typical"]):
+        n, area, perimeter = blk["n"], blk["area_m2"], blk["perimeter_m"]
+        side = (area / n) ** 0.5
+        per_slot = n / (perimeter / side)
+        assert per_slot == pytest.approx((n * area) ** 0.5 / perimeter, rel=1e-12)
+        assert per_slot * n / area == pytest.approx(blk["score"], rel=1e-9)
+        assert per_slot / side ** 2 == pytest.approx(n / (perimeter * side), rel=1e-12)
+        assert f"<td>{per_slot:.1f}</td>" in demo_body or f"| {per_slot:.1f} |" in demo_body
+
+
+def test_the_factors_table_sets_the_proxy_against_the_peel(demo_body: str) -> None:
+    """Both blocks' factors are tabulated, and where the flagship run peeled this very block, its
+    true depth is quoted beside the proxy's -- from that run's meta.json, never typed."""
+    import json
+
+    sc = _demo_bundle()["screen"]
+    assert sc["followed"]["block_id"] in demo_body and sc["typical"]["block_id"] in demo_body
+    meta = json.loads((ROOT / "examples" / "multiblock_depth_density" / "meta.json").read_text())
+    assert meta["deepest_block"] == sc["followed"]["block_id"], "the peel sentence would be absent"
+    assert f"deepest home {meta['deepest_depth']:.0f} rings in" in demo_body
+
+
+def test_the_fires_are_listed_and_carry_nothing_a_map_could_draw(demo_body: str) -> None:
+    """Owner, 2026-10-28: the fires go on no map, since some reports' streets cannot be placed.
+    The list shows every fire the bundle has; and the bundle gives a fire no coordinates at all,
+    so no widget could draw one without the producer changing first."""
+    fires = _demo_bundle()["fires"]
+    assert isinstance(fires, list) and fires
+    assert demo_body.count('<p class="sbu-fires__when">') == len(fires)
+    for f in fires:
+        assert set(f) == {"month", "where", "what", "reports"}, f
+        for r in f["reports"]:
+            assert r["url"] in demo_body
+
+
+def test_the_demo_screen_facts_refuse_a_bundle_that_disagrees_with_the_map(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The figure row is baked on research/roadless, the map's bundle on main; a re-bake of one
+    alone must fail the build, not publish a pool the map beside it contradicts."""
+    import json
+
+    import scripts.gen_site_pages as gsp
+
+    bundle = _demo_bundle()
+    assert gsp._demo_screen_facts(), "the committed bundles disagree already"
+    bundle["screen"]["pool"] += 1
+    (tmp_path / "demo.json").write_text(json.dumps(bundle), encoding="utf-8")
+    monkeypatch.setattr(gsp, "DEMO", tmp_path)
+    with pytest.raises(SystemExit, match="disagrees"):
+        gsp._demo_screen_facts()
+
+
+def test_the_topology_headline_leads_with_the_range(demo_body: str) -> None:
+    """Owner, 2026-10-28: the topology time is headed by its range (months to centuries), the
+    middle estimate after it -- read off the bundle's low and high, not typed."""
+    import scripts.gen_site_pages as gsp
+
+    t = _demo_bundle()["topology"]
+    (_, low), (_, high) = gsp._span(t["low_s"]), gsp._span(t["high_s"])
+    assert f"<dd>{low.capitalize()} to {high}<sup>" in demo_body
+
+
+def test_demo_is_generated_gitignored_in_the_nav_and_seen_by_the_widget_guard() -> None:
+    """explore.md's three guards, for demo.md: committed, it drifts; outside nav, it is an orphan
+    `mkdocs build --strict` does not fail on; outside `generated_pages`, a missing widgets.js
+    leaves its two widgets dead behind their fallbacks."""
+    ignored = [line.strip()
+               for line in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()]
+    assert "docs/demo.md" in ignored
+    assert re.search(r"^\s+- Demo: demo\.md$",
+                     (ROOT / "mkdocs.yml").read_text(encoding="utf-8"), flags=re.M)
+    src = (ROOT / "scripts" / "gen_site_pages.py").read_text(encoding="utf-8")
+    block = re.search(r"generated_pages = \(([^)]*)\)", src, flags=re.S)
+    assert block is not None and '"demo.md"' in block.group(1)

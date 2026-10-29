@@ -133,7 +133,8 @@ function draw(pad: number, formatTick: (t: number) => string = String,
   // written against, and the containment/gutter guards (one of them a Critical from the previous
   // task) are unchanged rather than re-tuned. PERCENT_TICK below covers the units the Frontier
   // widget actually passes, whose labels are up to four characters instead of one.
-  drawAxes(svg, v, X_TICKS, Y_TICKS, "Displacement", "Permeability", formatTick, GRID_OPACITY);
+  drawAxes(svg, v, X_TICKS, Y_TICKS, "Displacement", "Permeability", formatTick, formatTick,
+           GRID_OPACITY);
   const fake = svg as unknown as FakeElement;
   return { svg: fake, rect: plotRectAttrs(fake) };
 }
@@ -414,10 +415,21 @@ test("gridlines are drawn at the caller's opacity, not at full body ink", () => 
     const host = new FakeElement("div");
     const s2 = createSvg(host as unknown as HTMLElement, WIDTH, HEIGHT);
     drawAxes(s2, fitAxes([0, 0.4], [0, 1], WIDTH, HEIGHT, GENEROUS_PAD), X_TICKS, Y_TICKS,
-             "Displacement", "Permeability", PERCENT_TICK, 0);
+             "Displacement", "Permeability", PERCENT_TICK, PERCENT_TICK, 0);
     return { svg: s2 as unknown as FakeElement };
   })();
   for (const line of none.children.filter((c) => c.tagName === "line")) {
     assert.equal(Number(line.getAttribute("stroke-opacity")), 0);
   }
+});
+
+test("drawAxes labels each axis with its own formatter", () => {
+  const host = new FakeElement("div");
+  const svg = createSvg(host as unknown as HTMLElement, WIDTH, HEIGHT);
+  drawAxes(svg, fitAxes([0, 0.4], [0, 1], WIDTH, HEIGHT, 0.15), X_TICKS, Y_TICKS,
+           "Displacement", "Permeability", (t) => `x${t}`, (t) => `y${t}`, GRID_OPACITY);
+  const labels = (svg as unknown as FakeElement).children
+    .filter((c) => c.tagName === "text").map((c) => c.textContent);
+  for (const t of X_TICKS) assert.ok(labels.includes(`x${t}`), `x tick ${t} missing: ${labels}`);
+  for (const t of Y_TICKS) assert.ok(labels.includes(`y${t}`), `y tick ${t} missing: ${labels}`);
 });

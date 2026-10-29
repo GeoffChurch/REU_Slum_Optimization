@@ -7,7 +7,8 @@ never-stale) site. Prose is the only handwritten content: the per-method blurbs 
 docs/_partials/intro.md partial that opens the page.
 
 The site is multi-page. This script writes only the GENERATED (gitignored) pages: docs/index.md
-(Home -- docs/_partials/intro.md folded in, plus a hero figure), docs/methodology/index.md,
+(Home -- docs/_partials/intro.md folded in, plus a hero figure), docs/explore.md and docs/demo.md
+(each from its own partial), docs/methodology/index.md,
 docs/methodology/screening.md, docs/methodology/permeability.md, and
 docs/methodology/displacement.md (each from its own docs/_partials/*.md partial),
 docs/methodology/methods/index.md (methods overview) and docs/methodology/methods/<slug>.md (one
@@ -18,16 +19,19 @@ committed and this script never creates, reads, or overwrites them; docs/_partia
 committed partials it reads (excluded from the built site) and folds into the generated pages.
 
 Usage:  python3 scripts/gen_site_pages.py
-Emits:  docs/index.md, docs/methodology/*.md, docs/methodology/methods/*.md, docs/results/*.md,
-        docs/reproduce.md, and copies referenced images into docs/assets/ (MkDocs can only serve
-        files under docs/).
+Emits:  docs/index.md, docs/explore.md, docs/demo.md, docs/methodology/*.md,
+        docs/methodology/methods/*.md, docs/results/*.md, docs/reproduce.md, and copies
+        referenced images into docs/assets/ (MkDocs can only serve files under docs/).
 """
 from __future__ import annotations
 
 import ast
 import csv
+import datetime
+import html
 import importlib.util
 import json
+import math
 import re
 import shutil
 import struct
@@ -64,6 +68,10 @@ NAIROBI = ROOT / "examples" / "nairobi"
 PERMGRAPH = ROOT / "examples" / "perm-graph"
 REGIONGROW = ROOT / "examples" / "region-grow"
 SCREENMAP = ROOT / "examples" / "screen-map"
+# The Demo page's bundle: one method built out on the followed block, the screen's verdict on it,
+# the fires reported near it and the topology algorithm's extrapolated run time -- baked on the
+# research/roadless branch (its README names the producer), since that branch cannot merge here.
+DEMO = ROOT / "examples" / "demo"
 
 
 def _load_friendly_method_name() -> Callable[[str], str]:
@@ -144,7 +152,7 @@ def _img_row(items: list[tuple[str, str]]) -> str:
 
 
 def _figure(url: str, alt: str, caption: str, *, fig_class: str = "",
-            skip_lightbox: bool = False, attrs: str = "") -> str:
+            skip_lightbox: bool = False, attrs: str = "", img_style: str = "") -> str:
     """One captioned figure, emitted as a raw HTML block (no `markdown` attribute) so
     python-markdown passes it through untouched -- <figcaption> has no Markdown spelling, and
     mixing md_in_html parsing modes inside a <figure> is fragile. Any links in `caption` must
@@ -153,16 +161,20 @@ def _figure(url: str, alt: str, caption: str, *, fig_class: str = "",
     `skip_lightbox` marks an image as decoration rather than data; glightbox is configured with
     skip_classes: [skip-lightbox] so those images are not zoom targets.
 
+    `img_style` is an inline style for the <img> -- the Demo page's fallback crops one frame out
+    of a sprite sheet with it.
+
     `attrs` is raw HTML attributes appended to the <figure> tag itself -- e.g. a widget's
     `data-widget`/`data-bundle`/... mount-point attributes (fix wave, I4). Those MUST
     land on the figure element and not on a wrapping <div>: `.sbu-figure-grid > figure` in
     docs/stylesheets/sbu.css resets `margin` and the mandatory `min-width: 0` on DIRECT children
     only, and a wrapping div would put the figure one level too deep to be reset."""
     img_cls = ' class="skip-lightbox"' if skip_lightbox else ""
+    img_css = f' style="{img_style}"' if img_style else ""
     fig_attr = f' class="{fig_class}"' if fig_class else ""
     extra_attr = f" {attrs}" if attrs else ""
     return (f"<figure{fig_attr}{extra_attr}>\n"
-            f'  <img src="{url}" alt="{alt}"{img_cls}>\n'
+            f'  <img src="{url}" alt="{alt}"{img_cls}{img_css}>\n'
             f"  <figcaption>{caption}</figcaption>\n"
             f"</figure>\n")
 
@@ -728,6 +740,11 @@ def _region_grow_figure() -> str:
 
 
 def _screen_map_figure() -> str:
+    """The Screening and Explore pages' city-scale screen: `_screen_map` with no close-up."""
+    return _screen_map(closeup_pad_m=None)
+
+
+def _screen_map(*, closeup_pad_m: float | None) -> str:
     """The Screening page's figure after *The shipped screen*'s table: which blocks the chosen
     metric selects, city-wide, redrawn live as the floor slider moves or the metric changes -- the
     same arithmetic `reblock.metric` computes, replayed client-side on the raw per-block quantities
@@ -766,6 +783,12 @@ def _screen_map_figure() -> str:
     No `data-aspect`: this widget's canvas is square by construction (`screen-map.ts` sets
     `aspectRatio: 1 / 1`), exactly `_displacement_field_figure`'s reasoning for omitting it there.
 
+    **The close-up.** `closeup_pad_m` adds `data-closeup-pad-m`, which has the widget draw a second
+    canvas framed on the followed block, that many metres around it, in the city map's own
+    encoding (`render/closeup.ts`), and one more caption sentence saying so. The Demo page asks for
+    it, with the margin its bundle carries (`_demo_screen_map`); Screening and Explore do not, and
+    their markup is what it was.
+
     Emits nothing when the artifacts are absent, like every other figure on this site.
     """
     capetown_path = SCREENMAP / "capetown.json"
@@ -787,6 +810,12 @@ def _screen_map_figure() -> str:
 
     attrs = (f'data-widget="screen-map" data-bundle-capetown="{capetown_url}" '
              f'data-bundle-nairobi="{nairobi_url}"')
+    closeup = ""
+    if closeup_pad_m is not None:
+        attrs += f' data-closeup-pad-m="{closeup_pad_m:g}"'
+        closeup = (f" Beside the map, a close-up frames <code>{follow['block_id']}</code> and its "
+                   f"neighbours, {closeup_pad_m:,.0f} m around it, in the same colours, with the "
+                   f"block itself outlined in blue.")
     caption = (
         f"Cape Town at the shipped <code>depth_density_proxy</code> floor: gold marks real "
         f"informal settlements from the City of Cape Town's own survey, the red outline the "
@@ -798,7 +827,7 @@ def _screen_map_figure() -> str:
         f"far too small for its own boundary to be a shape anyone could pick out. Switch metric, "
         f"drag the floor, or toggle to Nairobi — {nai_floor['n']:,} of {nairobi['n_blocks']:,} "
         f"blocks at the same absolute floor, with no equivalent informal-structure survey to "
-        f"check them against, so no precision or recall is shown for that city."
+        f"check them against, so no precision or recall is shown for that city.{closeup}"
     )
     return _figure(img_url,
                    "Cape Town screened at the shipped depth_density_proxy floor: gold marks real "
@@ -1607,6 +1636,371 @@ def _method_count() -> str:
     return _COUNT_WORDS.get(n, str(n))
 
 
+# ------------------------------------------------------------------------- the Demo page
+
+# The Demo page's one name for L_P (owner, 2026-10-28): the build-out's caption defines it, naming
+# "permeability" once there as the site's term, and the widget is handed it (`data-metric-label`)
+# rather than spelling its own. The Methodology pages keep "permeability".
+DEMO_METRIC = "escape time saved"
+
+
+def _demo() -> dict[str, Any] | None:
+    """examples/demo/demo.json, or None where the checkout has no bundle (a partial site, like
+    every other artifact's absence)."""
+    path = DEMO / "demo.json"
+    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+
+
+# The units a duration is stated in, largest first, each with its length in seconds.
+_SPANS = (("centuries", 100 * 3.156e7), ("years", 3.156e7), ("months", 2.63e6),
+          ("days", 86400.0), ("hours", 3600.0), ("minutes", 60.0))
+
+
+def _span(seconds: float) -> tuple[float, str]:
+    """A duration in the largest unit it is at least one and a half of: (value, unit). The
+    prototype's own rule (research/roadless's explore_proto/build.py `span`), so the page reads
+    the extrapolation as the owner approved it."""
+    for unit, length in _SPANS:
+        if seconds >= 1.5 * length:
+            return seconds / length, unit
+    return seconds, "seconds"
+
+
+def _duration(seconds: float) -> str:
+    v, unit = _span(seconds)
+    return f"{v:.0f} {unit}" if v >= 10 else f"{v:.1f} {unit}"
+
+
+def _demo_place() -> str:
+    """The Demo page's opening line: which block, how many buildings, where, and a link to see it
+    from above. Every fact is the bundle's."""
+    d = _demo()
+    if d is None:
+        return ""
+    lat, lon = d["lat"], d["lon"]
+    where = (f"{abs(lat):.4f}° {'S' if lat < 0 else 'N'}, "
+             f"{abs(lon):.4f}° {'E' if lon >= 0 else 'W'}")
+    return (f'<p class="sbu-demo-place">Block <code>{d["block_id"]}</code>: '
+            f'{d["n_buildings"]:,} buildings in {html.escape(d["place"])}, at {where}. '
+            f'<a href="{html.escape(d["maps_url"])}" target="_blank" rel="noopener">'
+            f"See it in Google Maps&nbsp;↗</a></p>")
+
+
+def _demo_screen_map() -> str:
+    """The Demo page's screen: the site's own ScreenMap widget, with a close-up of the block at the
+    margin the bundle carries (the prototype's framing)."""
+    d = _demo()
+    if d is None:
+        return ""
+    return _screen_map(closeup_pad_m=float(d["screen"]["closeup_pad_m"]))
+
+
+def _demo_screen_facts() -> str:
+    """The screen's verdict on the block, as a key-figures row: its score against the floor, its
+    rank, and the pool it falls in. Read from the Demo bundle, and checked against the city bundle
+    the widget above draws from -- the two are baked on different branches, and a figure row that
+    disagreed with the map beside it would be the drift class this site's captions exist to
+    close."""
+    d = _demo()
+    if d is None:
+        return ""
+    sc = d["screen"]
+    city = json.loads((SCREENMAP / "capetown.json").read_text(encoding="utf-8"))
+    floor = next(f for f in city["floors"] if f["metric"] == sc["metric"])
+    theirs = (city["follow"]["block_id"], city["n_blocks"], floor["value"], floor["n"],
+              floor["precision"], floor["recall"])
+    ours = (d["block_id"], sc["n_blocks"], sc["floor"], sc["pool"], sc["precision"], sc["recall"])
+    if theirs != ours:
+        raise SystemExit(
+            f"examples/demo/demo.json's screen {ours} disagrees with "
+            f"examples/screen-map/capetown.json's {theirs} -- re-bake the Demo bundle "
+            f"(research/roadless's explore_proto/build.py site)")
+    rank, n = sc["rank"], sc["n_blocks"]
+    items = [
+        (f"{sc['score']:.4f}",
+         f"block {d['block_id']}'s score, {sc['score'] / sc['floor']:.1f} times the shipped floor "
+         f"of {sc['floor']:g}"),
+        (f"{rank:,} of {n:,}", f"its rank among Cape Town's blocks: the top {100 * rank / n:.2g}%"),
+        (f"{sc['pool']:,}",
+         f"blocks clear the floor, this one among them; {_pct(sc['precision'])} of them are "
+         f"informal settlements by the City's survey, and they hold {_pct(sc['recall'])} of its "
+         f"settlement blocks"),
+    ]
+    cells = "\n".join(f"  <div><dd>{value}</dd><dt>{label}</dt></div>" for value, label in items)
+    return f'<dl class="sbu-keyfigures">\n{cells}\n</dl>'
+
+
+def _demo_fires() -> str:
+    """The fires reported near the block, as the bundle quotes them: when, where the reports put
+    it, what they say happened, and the reports themselves, linked. A list and nothing else -- the
+    page draws none of them on a map, because some reports' streets cannot be placed (owner,
+    2026-10-28), and a marker for some would read as the ones that matter."""
+    d = _demo()
+    if d is None:
+        return ""
+
+    def report(r: dict[str, Any]) -> str:
+        day = datetime.date.fromisoformat(r["date"])
+        title = "" if r["title"] is None else f": “{html.escape(r['title'], quote=False)}”"
+        return (f'<a href="{html.escape(r["url"])}" target="_blank" rel="noopener">'
+                f"{html.escape(r['outlet'], quote=False)}, {day.day} {day:%B %Y}{title}"
+                f"&nbsp;↗</a>")
+
+    items = "".join(
+        f"  <li>\n"
+        f'    <p class="sbu-fires__when">'
+        f"{datetime.date.fromisoformat(f['month'] + '-01'):%B %Y}</p>\n"
+        f'    <div class="sbu-fires__what">\n'
+        f'      <p class="sbu-fires__where">{html.escape(f["where"], quote=False)}</p>\n'
+        f"      <p>{html.escape(f['what'], quote=False)}</p>\n"
+        f'      <p class="sbu-fires__src">{" · ".join(report(r) for r in f["reports"])}</p>\n'
+        f"    </div>\n"
+        f"  </li>\n" for f in d["fires"])
+    return f'<ol class="sbu-fires">\n{items}</ol>'
+
+
+def _demo_method() -> str:
+    """The method the Demo page builds out, named and explained in the bundle's own words -- the
+    method is one setting of its producer, so its name is never typed here."""
+    d = _demo()
+    if d is None:
+        return ""
+    m = d["method"]
+    return (f"<p><strong>{html.escape(m['name'])}.</strong> "
+            f"{html.escape(m['blurb'], quote=False)}</p>")
+
+
+def _demo_times() -> str:
+    """The method's recorded run time on the block beside the original topology algorithm's,
+    extrapolated -- the second led by its RANGE (owner, 2026-10-28: "months to centuries", the
+    middle estimate after it), since the range is what the extrapolation can honestly claim."""
+    d = _demo()
+    if d is None:
+        return ""
+    m, t = d["method"], d["topology"]
+    frames = m["frames"]
+    ours = max(f["seconds"] for f in frames)
+    (_, low_unit), (_, high_unit) = _span(t["low_s"]), _span(t["high_s"])
+    ratio = float(f"{t['central_s'] / ours:.2g}")
+    items = [
+        (_duration(ours),
+         f"{html.escape(m['name'])} on this block, to a {frames[-1]['budget']:.0%} budget: "
+         f"recorded, {html.escape(m['machine'])}"),
+        (f'{low_unit.capitalize()} to {high_unit}<sup><a href="#topology-estimate" '
+         f'aria-label="How this was estimated">1</a></sup>',
+         f"the original topology algorithm on this block, extrapolated for one run: "
+         f"{_duration(t['low_s'])} to {_duration(t['high_s'])}, about "
+         f"{_duration(t['central_s'])} in the middle, some {ratio:,.0f} times longer"),
+    ]
+    cells = "\n".join(f"  <div><dd>{value}</dd><dt>{label}</dt></div>" for value, label in items)
+    return f'<dl class="sbu-keyfigures sbu-demo-times">\n{cells}\n</dl>'
+
+
+def _demo_topology_note() -> str:
+    """The footnote under the topology extrapolation: how it was made, from what, and why it is a
+    range. Every number is the bundle's."""
+    d = _demo()
+    if d is None:
+        return ""
+    t, name = d["topology"], html.escape(d["method"]["name"])
+    runs = t["runs"]
+    timed = "; ".join(f"{r['n']:,} buildings {r['seconds']:,.1f} s" for r in runs)
+    largest = runs[-1]
+    return (
+        f'<p class="sbu-footnote" id="topology-estimate"><sup>1</sup> An extrapolation, not a '
+        f"measurement. Topology was timed once on each of {_COUNT_WORDS[len(runs)].lower()} "
+        f"smaller Cape Town blocks, at α&nbsp;=&nbsp;{t['alpha']} on one thread ({timed}). A "
+        f"least-squares power law through all of them gives time ∝ "
+        f"buildings<sup>{t['exponent']:.1f} ± {t['se']:.1f}</sup>, which reaches about "
+        f"{_duration(t['central_s'])} at this block's {t['n_buildings']:,} buildings. The runs "
+        f"steepen with size, so the fit under-predicts the largest of them "
+        f"({largest['n']:,} buildings, {largest['seconds'] / 3600:.1f} hours). Anchored on that "
+        f"run, the smaller blocks' exponent ({t['small_exponent']:.1f}) gives "
+        f"{_duration(t['low_s'])} and the slope between the two largest "
+        f"({t['top_exponent']:.1f}) gives {_duration(t['high_s'])}. The paper's own procedure "
+        f"keeps the best of many runs, which multiplies the time again. Topology's goal also "
+        f"differs: it builds until every parcel touches a road, where {name} stops at a "
+        f"displacement budget.</p>")
+
+
+def _slot_ticks(rings: list[list[list[float]]], step: float) -> list[tuple[float, float]]:
+    """A point every `step` metres along every ring: screen-geometry.ts's `slotTicks`, without
+    the normals, for the no-JS picture."""
+    out = []
+    for ring in rings:
+        offset = 0.0
+        for (x0, y0), (x1, y1) in zip(ring, ring[1:] + ring[:1], strict=True):
+            length = math.hypot(x1 - x0, y1 - y0)
+            if length == 0:
+                continue
+            d = offset
+            while d < length:
+                out.append((x0 + (x1 - x0) * d / length, y0 + (y1 - y0) * d / length))
+                d += step
+            offset = d - length
+    return out
+
+
+def _geometry_svg(blk: dict[str, Any], street: str) -> str:
+    """The diagram's opening picture without JavaScript: the block's own outline, with a dot every
+    parcel side along its street -- one per frontage slot -- as screen-geometry.ts draws it,
+    without the inset or the row of parcels."""
+    rings = blk["rings"]
+    xs = [x for r in rings for x, _ in r]
+    ys = [y for r in rings for _, y in r]
+    width, pad = 1000.0, 20.0
+    scale = (width - 2 * pad) / (max(xs) - min(xs))
+    height = (max(ys) - min(ys)) * scale + 2 * pad
+
+    def pt(x: float, y: float) -> tuple[float, float]:
+        return pad + (x - min(xs)) * scale, height - pad - (y - min(ys)) * scale
+
+    path = " ".join("M" + " L".join("{:.1f},{:.1f}".format(*pt(x, y)) for x, y in r) + " Z"
+                    for r in rings)
+    side = math.sqrt(blk["area_m2"] / blk["n"])
+    dots = "".join('<circle cx="{:.1f}" cy="{:.1f}" r="1.6"/>'.format(*pt(x, y))
+                   for x, y in _slot_ticks(rings, side))
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:.0f} {height:.0f}">'
+            f'<rect width="100%" height="100%" fill="#ffffff"/>'
+            f'<path d="{path}" fill="#ebe6de" fill-rule="evenodd" stroke="{street}" '
+            f'stroke-width="2"/><g fill="{street}">{dots}</g></svg>\n')
+
+
+def _demo_geometry() -> str:
+    """The Demo page's diagram of why the screen's formula finds deep, crowded blocks
+    (`web/src/widgets/screen-geometry.ts`), on the block's real outline: no shape is presumed.
+    s = √(A/n) is a parcel's side, P/s the parcels that fit along the street (frontage slots), and
+    √(nA)/P = n ÷ (P/s) exactly -- the homes behind each slot -- so the score is homes per slot
+    over s², homes per m² of the one-parcel band along the street. The reader swaps the outline
+    for a disk, square or strip of the same area (shape enters only through P), switches to the
+    city's median block, or changes the buildings.
+
+    The no-JS picture is the block's outline dotted every s along its street, an SVG this function
+    draws from the bundle's rings; the widget removes it once it has drawn. The caption is
+    block-neutral, since the reader can switch block; the widget's own note names the block on
+    show and its numbers."""
+    d = _demo()
+    if d is None:
+        return ""
+    blk = d["screen"]["followed"]
+    bundle_url = _copy_asset(DEMO / "demo.json", "demo")
+    if bundle_url is None:
+        return ""
+    svg = ASSETS / "demo" / "geometry.svg"
+    svg.write_text(_geometry_svg(blk, d["encoding"]["street"]), encoding="utf-8")
+    caption = (
+        "The screen sees three numbers per block: its buildings <em>n</em>, its area <em>A</em> "
+        "and its perimeter <em>P</em>. Give each building an equal share of the ground, a square "
+        "parcel of side <em>s</em> = √(<em>A</em>/<em>n</em>); then <em>P</em>/<em>s</em> parcels "
+        "fit along the street, and each tick on the outline marks one of these frontage slots. "
+        "The depth factor √(<em>nA</em>)/<em>P</em> is exactly <em>n</em> ÷ (<em>P</em>/"
+        "<em>s</em>): how many homes stand behind each slot, whatever the block's shape. The red "
+        "squares are parcels to scale along the longest straight stretch of street, magnified in "
+        "the inset. The score, homes per slot times <em>n</em>/<em>A</em>, is how crowded the "
+        "one-parcel band along the street would be if every home had to fit there. Swap the "
+        "outline for a disk, a square or a strip of the same area: only <em>P</em> changes, and "
+        "the strip, with the most street, puts the fewest homes behind each slot.")
+    attrs = f'data-widget="screen-geometry" data-bundle="{bundle_url}"'
+    return _figure("assets/demo/geometry.svg",
+                   f"Block {blk['block_id']}'s outline with a dot every parcel side along its "
+                   f"street, one per frontage slot", caption, attrs=attrs)
+
+
+def _demo_screen_factors() -> str:
+    """The score's factors for the block and for the city's median block, side by side, read from
+    the bundle and worked out here -- the arithmetic the diagram above does live: parcel side s,
+    frontage slots P/s, homes per slot n ÷ (P/s), homes per hectare, and their product. Where the
+    flagship region's own peel measured this block's true depth (examples/multiblock_depth_
+    density's meta.json names its deepest block and how many rings in its deepest home sits), a
+    paragraph sets homes per slot against it."""
+    d = _demo()
+    if d is None:
+        return ""
+    sc = d["screen"]
+    rows = []
+    for label, blk in (("This block", sc["followed"]), ("A typical block", sc["typical"])):
+        a, n, per = blk["area_m2"], blk["n"], blk["perimeter_m"]
+        side = math.sqrt(a / n)
+        slots = per / side
+        rows.append([f"{label}, <code>{blk['block_id']}</code>", f"{n:,}", f"{a / 10_000:,.1f}",
+                     f"{side:.1f}", f"{slots:,.0f}", f"{n / slots:.1f}",
+                     f"{n / a * 10_000:,.0f}", f"{blk['score']:.4f}",
+                     f"{blk['rank']:,} of {sc['n_blocks']:,}"])
+    table = _table(["", "buildings n", "area A, ha", "parcel side s, m", "frontage slots P/s",
+                    "homes per slot", "homes per ha", "score", "rank"], rows)
+    meta_path = MB / "meta.json"
+    peel = ""
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        if meta["deepest_block"] == d["block_id"]:
+            f = sc["followed"]
+            per_slot = f["n"] / (f["perimeter_m"] / math.sqrt(f["area_m2"] / f["n"]))
+            peel = (f"\n\nHomes per slot is not rows deep, except in a strip. In a strip each "
+                    f"slot's column of parcels runs straight in to the middle, so the homes behind "
+                    f"a slot are the rows to the middle. In a square or a disk the columns narrow "
+                    f"into wedges as they reach in, and the homes behind a slot come to about half "
+                    f"the deepest home's rows. So the full peel, which tessellates this block and "
+                    f"counts rings of parcels in from the street, puts its deepest home "
+                    f"{meta['deepest_depth']:.0f} rings in, against {per_slot:.0f} homes per slot. "
+                    f"The screen uses homes per slot to rank blocks, not to measure them.")
+    return table + peel
+
+
+def _demo_build_out() -> str:
+    """The Demo page's build-out: the bundle's method on the block under a budget slider, each
+    frame's escape-time plate and three plots whose dots follow it
+    (`web/src/widgets/build-out.ts`). One view: the owner kept the escape-time plate with its
+    isochrones and dropped the roads-only and time-saved views (2026-10-28) -- the roads are on
+    this plate too, in the grey the caption names.
+
+    The fallback is the sprite sheet itself, cropped to the frame the widget opens on by
+    `object-fit`/`object-position` -- no second image to bake or let drift. Marked skip-lightbox:
+    zoomed, it would show the whole sheet, every frame stacked. The widget removes it once it has
+    drawn, like every mount point's fallback on this site.
+
+    The caption carries what the plate and the plots mean, every number read from the bundle; the
+    widget writes only labels and the frame's own readouts. `data-metric-label` hands it
+    DEMO_METRIC, so the page names L_P in one place."""
+    d = _demo()
+    if d is None:
+        return ""
+    sheets = d["sheets"]
+    bundle_url = _copy_asset(DEMO / "demo.json", "demo")
+    img_url = _copy_asset(DEMO / sheets["sheet"], "demo")
+    if bundle_url is None or img_url is None:
+        return ""
+    m, e = d["method"], d["encoding"]
+    frames = m["frames"]
+    first = frames[m["default_frame"]]
+    crop = 100 * first["row"] / (sheets["rows"] - 1)
+    style = (f"width:100%;aspect-ratio:{sheets['width']}/{sheets['frame_height']};"
+             f"object-fit:cover;object-position:50% {crop:.4g}%")
+    name = html.escape(m["name"])
+    caption = (
+        f"Block <code>{d['block_id']}</code> as {name} builds it out, from no new road to a "
+        f"{frames[-1]['budget']:.0%} displacement budget, one frame per point of budget. Each "
+        f"home is coloured by its escape time: how hard it is for its people to walk out to the "
+        f"street, as a share of the 99th-percentile home's with no new road "
+        f"({e['escape_scale']:,.0f} in the model's own units). Blue is a short way out and red a "
+        f"long one, and each dark line is an isochrone, every {e['iso_step']:.0%} of that scale: "
+        f"homes inside a ring take longer than homes outside it, and the rings shrink as roads go "
+        f"in. Grey is a new road, drawn at its {e['road_width_m']:.0f} m width, or a destroyed "
+        f"building: one {e['gone_share']:.0%} or more of which the roads take, or that a road "
+        f"cuts in two. In the plots, {DEMO_METRIC} is the share of the homes' total escape time "
+        f"the roads remove, 1 − P(roads) / P(no roads), where P is that total, the effort every "
+        f"home's walk out spends; 0 is no change. It is what the rest of this site calls "
+        '<a href="../methodology/permeability/">permeability</a>. Conductance added is how much '
+        f"easier the roads make the ground to cross, in m² of open ground, a road conducting "
+        f"{e['road_conductance']:.0f} times what open ground does. <em>Built in</em> is the "
+        f"method's own recorded run time to that frame.")
+    attrs = (f'data-widget="build-out" data-bundle="{bundle_url}" '
+             f'data-metric-label="{DEMO_METRIC}"')
+    return _figure(img_url,
+                   f"Block {d['block_id']}'s homes coloured by escape time, with the roads "
+                   f"{name} builds to a {first['budget']:.0%} displacement budget",
+                   caption, attrs=attrs, skip_lightbox=True, img_style=style)
+
+
 # Marker name -> producer. A partial's <!-- NAME --> holes are filled from here; tests assert this
 # mapping and the markers actually used in docs/_partials/ are the same set, in both directions.
 MARKERS: dict[str, Callable[[], str]] = {
@@ -1632,6 +2026,18 @@ MARKERS: dict[str, Callable[[], str]] = {
     # there and makes the same figure available to a partial (Explore's Methods stage).
     "FRONTIER": _frontier_figure,
     "NAIROBITABLE": _nairobi_table,
+    # The Demo page's: one block, screened, its fires, and one method built out on it, all read
+    # from examples/demo/demo.json (see that directory's README for its producer).
+    "DEMOPLACE": _demo_place,
+    "DEMOGEOMETRY": _demo_geometry,
+    "DEMOSCREENFACTORS": _demo_screen_factors,
+    "DEMOSCREENMAP": _demo_screen_map,
+    "DEMOSCREENFACTS": _demo_screen_facts,
+    "DEMOFIRES": _demo_fires,
+    "DEMOMETHOD": _demo_method,
+    "DEMOTIMES": _demo_times,
+    "DEMOBUILDOUT": _demo_build_out,
+    "DEMOTOPOLOGYNOTE": _demo_topology_note,
     "REPROCOMMANDS": _repro_commands,
 }
 
@@ -1657,7 +2063,7 @@ def _render_partial(name: str) -> str:
 
 
 def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
-                title: str | None = None) -> None:
+                title: str | None = None, hide: tuple[str, ...] = ()) -> None:
     """Write one generated page, fixing asset paths for BOTH link forms, which MkDocs treats
     differently:
 
@@ -1685,7 +2091,12 @@ def _write_page(path: Path, body: str, *, depth: int, url_depth: int,
     # "Looped Tree" -- because it does not read the H1 for nav purposes. Emitting the title here
     # keeps method_labels.py the single source of the display name for the heading AND the nav,
     # instead of a hand-written copy in mkdocs.yml that silently goes stale.
-    front = f'---\ntitle: "{title}"\n---\n' if title else ""
+    #
+    # `hide` lists Material's page-level `hide:` keys ("toc", "navigation"): the Demo page drops its
+    # table of contents for the width its build-out needs.
+    hidden = "hide:\n" + "".join(f"  - {h}\n" for h in hide) if hide else ""
+    meta = (f'title: "{title}"\n' if title else "") + hidden
+    front = f"---\n{meta}---\n" if meta else ""
     text = front + GENERATED_NOTE + body.rstrip() + "\n"
     if depth:
         text = text.replace("](assets/", "](" + "../" * depth + "assets/")
@@ -1730,6 +2141,11 @@ def main() -> None:
     # name separately.
     _write_page(DOCS / "explore.md", _render_partial("explore"), depth=0, url_depth=1,
                 title="Explore")
+    # docs/demo.md serves at <base>/demo/ -- explore.md's depths, for explore.md's reasons.
+    # No table of contents: the page has three sections, and the build-out's plate and plots
+    # need the column it would take to sit side by side (owner, 2026-10-28).
+    _write_page(DOCS / "demo.md", _render_partial("demo"), depth=0, url_depth=1, title="Demo",
+                hide=("toc",))
 
     results_dir = DOCS / "results"
     if results_dir.exists():
@@ -1781,14 +2197,16 @@ def main() -> None:
     # file's own design spec does, as an example snippet) without a single generated page
     # actually carrying a mount point; scanning them would make the guard fire on a site that
     # built perfectly fine.
-    generated_pages = ([DOCS / "index.md", DOCS / "reproduce.md", DOCS / "explore.md"]
+    generated_pages = ([DOCS / "index.md", DOCS / "reproduce.md", DOCS / "explore.md",
+                        DOCS / "demo.md"]
                        + sorted(methodology_dir.rglob("*.md"))
                        + sorted(results_dir.rglob("*.md")))
     pages_with_widgets = any('data-widget="' in p.read_text(encoding="utf-8")
                              for p in generated_pages if p.exists())
     _assert_widget_bundle_present(pages_with_widgets)
 
-    print("wrote docs/index.md, docs/reproduce.md, docs/explore.md, docs/results/*.md, "
+    print("wrote docs/index.md, docs/reproduce.md, docs/explore.md, docs/demo.md, "
+          "docs/results/*.md, "
           "docs/methodology/*.md, docs/methodology/methods/*.md")
 
 

@@ -466,7 +466,7 @@ function boot(host: HTMLElement, makeState: StateFactory<FrontierState>, b: Fron
     // the aria-live summary, the per-method verdicts and both guide labels below carry every number
     // as announced prose, and the figure keeps its own <figcaption>.
     drawAxes(svg, view, xTicks, yTicks, chart.x_label, chart.y_label, formatTarget,
-             chart.grid_opacity);
+             formatTarget, chart.grid_opacity);
 
     drawnScreen = [];
     for (const key of keys) {

@@ -1,0 +1,579 @@
+{
+ "block_id": "ZAF.9.3.1_1_5810",
+ "n_buildings": 6619,
+ "place": "the Bloekombos and Wallacedene area of Kraaifontein",
+ "lat": -33.84214962452025,
+ "lon": 18.74128464339774,
+ "maps_url": "https://www.google.com/maps/@?api=1&map_action=map&center=-33.84215%2C18.74128&zoom=17&basemap=satellite",
+ "screen": {
+  "metric": "depth_density_proxy",
+  "score": 0.12645662242251568,
+  "rank": 2,
+  "n_blocks": 18309,
+  "floor": 0.0128,
+  "pool": 3169,
+  "precision": 0.200379,
+  "recall": 0.819355,
+  "closeup_pad_m": 450.0,
+  "followed": {
+   "block_id": "ZAF.9.3.1_1_5810",
+   "n": 6619,
+   "area_m2": 576948.0,
+   "perimeter_m": 5606.33,
+   "score": 0.12645662242251568,
+   "rank": 2,
+   "rings": [
+    [
+     [
+      40773.59,
+      60788.46
+     ],
+     [
+      40907.69,
+      60845.15
+     ],
+     [
+      41541.18,
+      61040.59
+     ],
+     [
+      41637.94,
+      61078.62
+     ],
+     [
+      41779.06,
+      61163.05
+     ],
+     [
+      42148.36,
+      61438.58
+     ],
+     [
+      42320.83,
+      61529.48
+     ],
+     [
+      42328.81,
+      61234.32
+     ],
+     [
+      42294.2,
+      61232.27
+     ],
+     [
+      42258.51,
+      61328.96
+     ],
+     [
+      42298.47,
+      61349.85
+     ],
+     [
+      42264.41,
+      61445.64
+     ],
+     [
+      42144.49,
+      61371.89
+     ],
+     [
+      41995.82,
+      61261.35
+     ],
+     [
+      41999.33,
+      61233.01
+     ],
+     [
+      41914.9,
+      61199.51
+     ],
+     [
+      41947.08,
+      61102.41
+     ],
+     [
+      41902.55,
+      61085.58
+     ],
+     [
+      41885.7,
+      61130.13
+     ],
+     [
+      41759.78,
+      61071.49
+     ],
+     [
+      41776.43,
+      61027.77
+     ],
+     [
+      41734.15,
+      61007.82
+     ],
+     [
+      41715.69,
+      61043.37
+     ],
+     [
+      41704.29,
+      61044.82
+     ],
+     [
+      41573.5,
+      60979.11
+     ],
+     [
+      41574.78,
+      60792.13
+     ],
+     [
+      41554.3,
+      60789.96
+     ],
+     [
+      41553.93,
+      60755.53
+     ],
+     [
+      41558.78,
+      60746.98
+     ],
+     [
+      41576.81,
+      60746.91
+     ],
+     [
+      41582.0,
+      60647.68
+     ],
+     [
+      41591.58,
+      60644.18
+     ],
+     [
+      41647.27,
+      60664.19
+     ],
+     [
+      41649.48,
+      60605.41
+     ],
+     [
+      41538.48,
+      60562.68
+     ],
+     [
+      41513.33,
+      60486.49
+     ],
+     [
+      41525.1,
+      60411.37
+     ],
+     [
+      41302.04,
+      60331.94
+     ],
+     [
+      41262.99,
+      60329.93
+     ],
+     [
+      41212.4,
+      60286.33
+     ],
+     [
+      41140.5,
+      60252.25
+     ],
+     [
+      40967.77,
+      60139.93
+     ],
+     [
+      40925.05,
+      60123.57
+     ],
+     [
+      40907.53,
+      60125.88
+     ],
+     [
+      40859.43,
+      60164.41
+     ],
+     [
+      40822.09,
+      60230.12
+     ],
+     [
+      40809.05,
+      60275.23
+     ],
+     [
+      40789.66,
+      60643.15
+     ],
+     [
+      40773.59,
+      60788.46
+     ]
+    ],
+    [
+     [
+      41363.39,
+      60385.06
+     ],
+     [
+      41372.15,
+      60381.92
+     ],
+     [
+      41375.31,
+      60390.64
+     ],
+     [
+      41366.55,
+      60393.79
+     ],
+     [
+      41363.39,
+      60385.06
+     ]
+    ]
+   ]
+  },
+  "typical": {
+   "block_id": "ZAF.9.3.1_1_8426",
+   "n": 94,
+   "area_m2": 33091.4,
+   "perimeter_m": 848.629,
+   "score": 0.005903592074458694,
+   "rank": 9155,
+   "rings": [
+    [
+     [
+      37992.01,
+      60284.38
+     ],
+     [
+      38278.71,
+      60138.4
+     ],
+     [
+      38231.42,
+      60047.2
+     ],
+     [
+      37945.2,
+      60192.37
+     ],
+     [
+      37992.01,
+      60284.38
+     ]
+    ]
+   ]
+  }
+ },
+ "fires": [
+  {
+   "month": "2016-05",
+   "where": "Japhta and Dlayedwa streets, Bloekombos, Kraaifontein. OpenStreetMap puts Dlayedwa Street about 80 m outside the block.",
+   "what": "Two shacks were set alight, allegedly with a petrol bomb, and four members of one family died: a woman and three children aged 8 to 13. Neighbours tried to fight it with water and could not.",
+   "reports": [
+    {
+     "outlet": "Cape Times",
+     "date": "2016-05-23",
+     "title": "Four die in suspected arson attack",
+     "url": "https://iol.co.za/capetimes/news/2016-05-23-four-die-in-suspected-arson-attack/"
+    }
+   ]
+  },
+  {
+   "month": "2020-02",
+   "where": "Wallacedene, Kraaifontein, beside the block.",
+   "what": "A fire at about 2am burned 28 shacks, displaced 83 people and killed two. Fire engines could not drive in: a community leader said “we have no roads and the shacks are closely clustered”, so crews parked on Mfeketo Street and walked to the fire. The taps gave no water, and residents pulled down shacks to stop it spreading.",
+   "reports": [
+    {
+     "outlet": "GroundUp",
+     "date": "2020-02-25",
+     "title": "Couple dies in shack fire in Kraaifontein",
+     "url": "https://groundup.news/article/couple-dies-shack-fire-kraaifontein/"
+    }
+   ]
+  },
+  {
+   "month": "2022-06",
+   "where": "Pietersen Road, Wallacedene. OpenStreetMap puts Pietersen Road about 1.2 km south of the block.",
+   "what": "Three shacks burned, 11 people were displaced and three siblings died.",
+   "reports": [
+    {
+     "outlet": "News24",
+     "date": "2022-06-17",
+     "title": "Three siblings die in Cape Town fire that displaced 11 people",
+     "url": "https://www.news24.com/southafrica/news/three-siblings-die-in-cape-town-fire-that-displaced-11-people-20220617"
+    }
+   ]
+  },
+  {
+   "month": "2024-10",
+   "where": "Manuel Street, Wallacedene.",
+   "what": "Four people died, three of them children, in one of 48 shack fires across Cape Town that weekend. JP Smith, the City's mayoral committee member for safety and security, said its crews arrive quickly but are “hampered by other factors such as access”; he spoke of the weekend's fires as a whole.",
+   "reports": [
+    {
+     "outlet": "TimesLIVE",
+     "date": "2024-10-28",
+     "title": "Nine people perish in weekend informal settlement fires in Cape Town",
+     "url": "https://www.timeslive.co.za/news/south-africa/2024-10-28-nine-people-perish-in-weekend-informal-settlement-fires-in-cape-town/"
+    }
+   ]
+  },
+  {
+   "month": "2025-07",
+   "where": "Maroela Road, Wallacedene. OpenStreetMap puts the Wallacedene stretch of Maroela Road about 630 m south of the block; the road also passes within about 16 m of the block's south edge.",
+   "what": "About 20 shacks burned and 60 to 80 people were displaced. A 6-year-old girl died.",
+   "reports": [
+    {
+     "outlet": "EWN",
+     "date": "2025-07-15",
+     "title": null,
+     "url": "https://www.ewn.co.za/2025/07/15/kraaifontein-police-monitoring-wallacedene-after-shack-fire-claims-life-of-girl"
+    },
+    {
+     "outlet": "Cape Argus",
+     "date": "2025-07-17",
+     "title": null,
+     "url": "https://capeargus.co.za/news/2025-07-17-tragic-shack-fire-claims-life-of-6-year-old-girl-in-wallacedene/"
+    }
+   ]
+  }
+ ],
+ "method": {
+  "name": "Loop roads",
+  "blurb": "Each new road runs from the street, or a road already built, across the block and back to a street or road, so every road is on a loop and none is a dead end. At each step the method tries the cheapest routes through the gaps between buildings and builds the one that saves the most escape time for the homes it displaces.",
+  "machine": "one process on a workstation CPU (Intel Xeon w7-3455)",
+  "default_frame": 5,
+  "frames": [
+   {
+    "budget": 0.0,
+    "displacement": 0.0,
+    "road_km": 0.0,
+    "permeability": 0.0,
+    "conductance_m2": 0.0,
+    "seconds": 0.0,
+    "row": 0
+   },
+   {
+    "budget": 0.01,
+    "displacement": 0.0122,
+    "road_km": 0.87,
+    "permeability": 0.204,
+    "conductance_m2": 49856.0,
+    "seconds": 196.72972893714905,
+    "row": 1
+   },
+   {
+    "budget": 0.02,
+    "displacement": 0.0227,
+    "road_km": 1.78,
+    "permeability": 0.308,
+    "conductance_m2": 97623.0,
+    "seconds": 322.67055010795593,
+    "row": 2
+   },
+   {
+    "budget": 0.03,
+    "displacement": 0.0321,
+    "road_km": 2.2,
+    "permeability": 0.364,
+    "conductance_m2": 122398.0,
+    "seconds": 398.06657433509827,
+    "row": 3
+   },
+   {
+    "budget": 0.04,
+    "displacement": 0.0454,
+    "road_km": 2.91,
+    "permeability": 0.403,
+    "conductance_m2": 164324.0,
+    "seconds": 550.5276434421539,
+    "row": 4
+   },
+   {
+    "budget": 0.05,
+    "displacement": 0.0556,
+    "road_km": 3.11,
+    "permeability": 0.431,
+    "conductance_m2": 175755.0,
+    "seconds": 598.9586958885193,
+    "row": 5
+   },
+   {
+    "budget": 0.06,
+    "displacement": 0.0624,
+    "road_km": 3.66,
+    "permeability": 0.439,
+    "conductance_m2": 208082.0,
+    "seconds": 727.0155868530273,
+    "row": 6
+   },
+   {
+    "budget": 0.07,
+    "displacement": 0.0733,
+    "road_km": 4.15,
+    "permeability": 0.464,
+    "conductance_m2": 237024.0,
+    "seconds": 847.4073979854584,
+    "row": 7
+   },
+   {
+    "budget": 0.08,
+    "displacement": 0.083,
+    "road_km": 4.56,
+    "permeability": 0.469,
+    "conductance_m2": 260651.0,
+    "seconds": 970.4124236106873,
+    "row": 8
+   },
+   {
+    "budget": 0.09,
+    "displacement": 0.0915,
+    "road_km": 5.75,
+    "permeability": 0.482,
+    "conductance_m2": 318950.0,
+    "seconds": 1087.428965330124,
+    "row": 9
+   },
+   {
+    "budget": 0.1,
+    "displacement": 0.1027,
+    "road_km": 6.45,
+    "permeability": 0.504,
+    "conductance_m2": 356777.0,
+    "seconds": 1148.7000143527985,
+    "row": 10
+   },
+   {
+    "budget": 0.11,
+    "displacement": 0.1122,
+    "road_km": 7.18,
+    "permeability": 0.519,
+    "conductance_m2": 383814.0,
+    "seconds": 1291.3215963840485,
+    "row": 11
+   },
+   {
+    "budget": 0.12,
+    "displacement": 0.1218,
+    "road_km": 7.85,
+    "permeability": 0.537,
+    "conductance_m2": 416512.0,
+    "seconds": 1493.2813494205475,
+    "row": 12
+   },
+   {
+    "budget": 0.13,
+    "displacement": 0.1306,
+    "road_km": 8.41,
+    "permeability": 0.551,
+    "conductance_m2": 448574.0,
+    "seconds": 1590.7163155078888,
+    "row": 13
+   },
+   {
+    "budget": 0.14,
+    "displacement": 0.142,
+    "road_km": 8.99,
+    "permeability": 0.573,
+    "conductance_m2": 478478.0,
+    "seconds": 1736.9870641231537,
+    "row": 14
+   },
+   {
+    "budget": 0.15,
+    "displacement": 0.1531,
+    "road_km": 9.57,
+    "permeability": 0.586,
+    "conductance_m2": 511894.0,
+    "seconds": 1947.8078384399414,
+    "row": 15
+   }
+  ]
+ },
+ "sheets": {
+  "width": 800,
+  "frame_height": 724,
+  "rows": 16,
+  "sheet": "loop_time.webp"
+ },
+ "encoding": {
+  "road": "#475569",
+  "street": "#1e293b",
+  "edge": "#94a3b8",
+  "water": "#bfdbf3",
+  "escape_ramp": [
+   "#a2d0f9",
+   "#9ebef3",
+   "#9daae9",
+   "#a097db",
+   "#a382c8",
+   "#a56eb1",
+   "#a35c98",
+   "#9f497b",
+   "#99375e",
+   "#91253d",
+   "#861118"
+  ],
+  "escape_scale": 1063.5,
+  "iso_step": 0.1,
+  "road_width_m": 7.0,
+  "road_conductance": 10.0,
+  "gone_share": 0.1
+ },
+ "topology": {
+  "alpha": 10,
+  "runs": [
+   {
+    "block": "ZAF.9.3.1_1_38136",
+    "n": 51,
+    "seconds": 1.5
+   },
+   {
+    "block": "ZAF.9.3.1_1_21016",
+    "n": 93,
+    "seconds": 4.2
+   },
+   {
+    "block": "ZAF.9.3.1_1_20254",
+    "n": 122,
+    "seconds": 14.4
+   },
+   {
+    "block": "ZAF.9.3.1_1_45919",
+    "n": 159,
+    "seconds": 14.5
+   },
+   {
+    "block": "ZAF.9.3.1_1_44918",
+    "n": 257,
+    "seconds": 82.6
+   },
+   {
+    "block": "ZAF.9.3.1_1_5618",
+    "n": 759,
+    "seconds": 42477.5
+   }
+  ],
+  "n_buildings": 6619,
+  "exponent": 3.805546033418746,
+  "se": 0.5047696161970066,
+  "central_s": 55521514.36160379,
+  "low_s": 8515763.523534348,
+  "high_s": 11223601727.801607,
+  "small_exponent": 2.4475712754078724,
+  "top_exponent": 5.764680038220273
+ }
+}
