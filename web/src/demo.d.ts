@@ -2,12 +2,9 @@
 // research/roadless) -- do not edit. Regenerate there: build.py site <this checkout>
 // This file is what makes a renamed Python field a TypeScript error instead of a
 // blank panel.
-/** The block under the shipped screen: its buildings `n`, area and perimeter (the three numbers
- * the score is made of), its score, its rank (1 the highest) among all `n_blocks` of the city,
- * whether the City's informal-settlement survey flags it, and its outline as the screen bundle
- * draws it (`rings`: exterior first, then any interiors, in the bundle's local metres,
- * simplified as the bundle simplifies them, so their drawn length runs a little under
- * `perimeter_m`, the unsimplified block's). */
+/** The block under the shipped screen: its buildings `n`, area and perimeter (the three
+ * numbers the score is made of), its score, its rank (1 the highest) among all of the city's
+ * blocks, and whether the City's informal-settlement survey flags it. */
 export interface DemoProxy {
   n: number;
   area_m2: number;
@@ -15,7 +12,6 @@ export interface DemoProxy {
   score: number;
   rank: number;
   informal: boolean;
-  rings: [number, number][][];
 }
 /** The block under the two-stage depth_density screen: its score (`rings`, its peel depth --
  * rings of parcels from the street to its deepest home -- times buildings per m²) and its rank
@@ -33,13 +29,12 @@ export interface Report {
   title: string | null;
   url: string;
 }
-/** One fire reported near a block (`near`, its id): its month (ISO, YYYY-MM), where the
+/** One fire reported near the page's block: its month (ISO, YYYY-MM), where the
  * reports place it (with OpenStreetMap's distance to the block where the street can be found),
  * what they say happened, and the reports. Each was checked against its article (2026-10-28);
  * none is placed inside the block, and the page draws none of them on a map (owner 2026-10-28:
  * some reports' streets cannot be placed). */
 export interface Fire {
-  near: string;
   month: string;
   where: string;
   what: string;
@@ -47,7 +42,7 @@ export interface Fire {
 }
 /** One slider position: the network the method has built by the displacement budget `budget`
  * (a share of the homes' floor area; 0 the block with no new road). `displacement` is the share
- * it reaches (at least `budget`; a run's ears can overshoot several budgets at once, so several
+ * it reaches (at least `budget`; a run's step can overshoot several budgets at once, so several
  * positions can share one network), `road_km` its new road, `permeability` its L_P,
  * `conductance_m2` the conductance it adds (m² of open ground), `seconds` the method's run time
  * to it, `row` its frame's row in the block's sprite sheet. */
@@ -109,7 +104,7 @@ export interface DemoTopologyMeasured {
   fit_central_s: number;
   fit_runs: number;
 }
-/** One block the page shows: its id, buildings, place in words, centroid and a Google Maps
+/** The block the page follows: its id, buildings, place in words, centroid and a Google Maps
  * link; whether it is plainly an informal settlement on the ground (Block's), whatever the
  * survey (`proxy.informal`) says; the screens' verdicts on it; the fires reported near it; the
  * method's build-out on it (its frames, its plates, the escape-time scale -- the model's units
@@ -133,10 +128,37 @@ export interface DemoBlock {
   machine: string;
   topology: DemoTopologyExtrapolated | DemoTopologyMeasured;
 }
+/** One method's network on the compared block, drawn as the page's escape-time plate on that
+ * block's scale (`plate`, beside demo.json, `width` x `height` px), and its scores: the share of
+ * floor area it displaces, its L_P and its new road. */
+export interface DemoNetwork {
+  plate: string;
+  width: number;
+  height: number;
+  displacement: number;
+  permeability: number;
+  road_km: number;
+}
+/** The methods compared on a block where topology has run: the block (id, buildings, place,
+ * Maps link, its rank under the shipped screen, its escape-time scale), the method's full
+ * build-out (`ours`, its run time and where it ran) and topology's network (`earlier`, its run
+ * time measured there). */
+export interface DemoComparison {
+  block_id: string;
+  n_buildings: number;
+  place: string;
+  maps_url: string;
+  proxy_rank: number;
+  escape_scale: number;
+  ours: DemoNetwork;
+  ours_seconds: number;
+  ours_machine: string;
+  earlier: DemoNetwork;
+  earlier_time: DemoTopologyMeasured;
+}
 /** The screens, city-wide: the shipped proxy (`metric`) at its `floor`, its `pool`, and that
- * pool's precision and recall against the City's survey, over `n_blocks`; the screen map's
- * close-up margin around a block (m); and the two-stage screen (`peel_metric`), which peels
- * the proxy's top `peel_keep_n`. */
+ * pool's precision and recall against the City's survey, over `n_blocks`; and the two-stage
+ * screen (`peel_metric`), which peels the proxy's top `peel_keep_n`. */
 export interface DemoScreen {
   metric: string;
   floor: number;
@@ -144,7 +166,6 @@ export interface DemoScreen {
   precision: number;
   recall: number;
   n_blocks: number;
-  closeup_pad_m: number;
   peel_metric: string;
   peel_keep_n: number;
 }
@@ -160,7 +181,9 @@ export interface DemoMethod {
  * `iso_step` of it. `road` is the grey of a new road's corridor and of a wholly destroyed
  * building, which a building is once `gone_share` of it is gone; roads are `road_width_m` wide
  * and conduct `road_conductance` times what open ground does. The block's edge: `street`
- * (where people walk out), `edge` (a railway's or a ditch's line), `water` (a ditch). */
+ * (where people walk out), `edge` (a railway's or a ditch's line), `water` (a ditch).
+ * `depth_ramp` is the peel figure's (reblock.render's depth colouring, ring 1 to the deepest),
+ * evenly spaced stops. */
 export interface DemoEncoding {
   road: string;
   street: string;
@@ -171,11 +194,13 @@ export interface DemoEncoding {
   road_width_m: number;
   road_conductance: number;
   gone_share: number;
+  depth_ramp: string[];
 }
-/** The Demo page's numbers: its blocks (the first the page's default), the screens, the
- * method, and the plates' encoding. */
+/** The Demo page's numbers: the block it follows, the methods compared on another, the
+ * screens, the method, and the plates' encoding. */
 export interface DemoBundle {
-  blocks: DemoBlock[];
+  block: DemoBlock;
+  comparison: DemoComparison;
   screen: DemoScreen;
   method: DemoMethod;
   encoding: DemoEncoding;

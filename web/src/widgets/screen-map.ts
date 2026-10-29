@@ -3,7 +3,7 @@
 // evaluation while the page still looked fine (see mount.ts's registration comment). This file
 // must never import `register`.
 import type { Widget } from "../mount.js";
-import type { CityBundle, CityFollow } from "../screen_map.js";
+import type { CityBundle } from "../screen_map.js";
 import type { StateFactory, StateSource } from "../state.js";
 import { enumParam, nullableNumberParam, type UrlCodec } from "../url/param.js";
 import { requireAttr } from "../dom/attrs.js";
@@ -12,8 +12,6 @@ import { removeFallbackImage } from "../dom/fallback.js";
 import { observeSize } from "../dom/resize.js";
 import { ranking, scores, selectAt, type MetricName, type Selection } from "../model/screen.js";
 import { createLayer } from "../render/city.js";
-import { createCloseup, type Closeup } from "../render/closeup.js";
-import { DEMO_BLOCK, type Channel } from "../page/channel.js";
 import { sizeCanvas } from "../render/canvas.js";
 import { fitBbox, type Bbox, type View } from "../view/transform.js";
 
@@ -235,47 +233,10 @@ function describeSelection(city: ScreenState["city"], bundle: CityBundle, sel: S
  * it on a switch to a city that carries no `follow` -- text set once would leave Cape Town's block
  * named over Nairobi's map. Rewriting a NON-live element announces nothing, so per-render writing
  * costs the reader no repeats. The id comes off the bundle, never typed here. */
-function describeFollow(follow: CityFollow | undefined, closeup: boolean,
-                        page: boolean): string {
-  if (follow === undefined) return "";
-  const where = closeup ? "ringed on the map and outlined in blue in the close-up"
-    : "ringed on the map";
-  const which = page ? "the block this page is showing" : "the one the rest of the site follows";
-  return `Block ${follow.block_id} is ${where}: it is ${which}.`;
-}
-
-/** The page's block in `bundle` as a follow marker: its index, and the centre of its exterior
- * ring's bbox for the ring (the bundle's own `follow` carries a representative point; a page
- * block other than that one has only its rings here). `undefined` where the bundle has no such
- * block -- Nairobi's has none of Cape Town's. */
-export function followOfBlock(bundle: CityBundle, blockId: string): CityFollow | undefined {
-  const index = bundle.block_id.indexOf(blockId);
-  if (index < 0) return undefined;
-  if (bundle.follow?.index === index) return bundle.follow;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const [x, y] of bundle.rings[index]![0]!) {
-    if (x < minX) minX = x;
-    if (x > maxX) maxX = x;
-    if (y < minY) minY = y;
-    if (y > maxY) maxY = y;
-  }
-  return { block_id: blockId, index, x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
-}
-
-/** `data-closeup-pad-m`: the close-up's margin around the followed block, in metres, or `null`
- * where the mount point asks for no close-up -- a real optional, not a defaulted one: the
- * Screening and Explore pages' mount points carry no such attribute and draw the city map alone,
- * exactly as before the Demo page asked for one. Present but not a positive number is a page
- * authoring error, so it throws (into the figure's caption, mount.ts's route) rather than being
- * read as "no close-up". */
-function closeupPad(raw: string | undefined): number | null {
-  if (raw === undefined) return null;
-  const v = Number(raw);
-  if (raw.trim() === "" || !Number.isFinite(v) || !(v > 0)) {
-    throw new Error(
-      `${LABEL}: data-closeup-pad-m must be a positive number of metres, got "${raw}"`);
-  }
-  return v;
+function describeFollow(bundle: CityBundle): string {
+  const follow = bundle.follow;
+  return follow === undefined ? ""
+    : `Block ${follow.block_id} is ringed on the map: it is the one the rest of the site follows.`;
 }
 
 function fetchBundle(src: string): Promise<CityBundle> {
@@ -285,44 +246,24 @@ function fetchBundle(src: string): Promise<CityBundle> {
   });
 }
 
-/** The widget, reading the page's block from `channel` where the mount point asks it to
- * (`data-follow-block`; DEMO_BLOCK on the page, its own channel in tests). */
-export function screenMapOn(channel: Channel<string>): Widget<ScreenState> {
-  return (host, makeState) => {
-    // Not `host.dataset.bundleCapetown!`: a missing attribute then reaches `fetch(undefined)` and
-    // surfaces as "fetch undefined failed: 404", which sends the reader looking for a missing FILE
-    // rather than the missing ATTRIBUTE that is actually wrong (region-grow.ts's own reasoning).
-    const srcCapetown = requireAttr(host.dataset.bundleCapetown, "data-bundle-capetown", LABEL);
-    const srcNairobi = requireAttr(host.dataset.bundleNairobi, "data-bundle-nairobi", LABEL);
-    // Both cities fetched eagerly, not the active one only: the city toggle is then an instant
-    // client-side swap with no second network round trip, and "7.33 MB / 2.42 MB gz" (this branch's
-    // own spec) is already the combined figure for both tiers together.
-    void Promise.all([fetchBundle(srcCapetown), fetchBundle(srcNairobi)])
-      .then(([capetown, nairobi]) => boot(host, makeState, { capetown, nairobi }, channel))
-      .catch((err: unknown) => showWidgetError(host, LABEL, err));
-  };
-}
-
-export const screenMap: Widget<ScreenState> = screenMapOn(DEMO_BLOCK);
+export const screenMap: Widget<ScreenState> = (host, makeState) => {
+  // Not `host.dataset.bundleCapetown!`: a missing attribute then reaches `fetch(undefined)` and
+  // surfaces as "fetch undefined failed: 404", which sends the reader looking for a missing FILE
+  // rather than the missing ATTRIBUTE that is actually wrong (region-grow.ts's own reasoning).
+  const srcCapetown = requireAttr(host.dataset.bundleCapetown, "data-bundle-capetown", LABEL);
+  const srcNairobi = requireAttr(host.dataset.bundleNairobi, "data-bundle-nairobi", LABEL);
+  // Both cities fetched eagerly, not the active one only: the city toggle is then an instant
+  // client-side swap with no second network round trip, and "7.33 MB / 2.42 MB gz" (this branch's
+  // own spec) is already the combined figure for both tiers together.
+  void Promise.all([fetchBundle(srcCapetown), fetchBundle(srcNairobi)])
+    .then(([capetown, nairobi]) => boot(host, makeState, { capetown, nairobi }))
+    .catch((err: unknown) => showWidgetError(host, LABEL, err));
+};
 
 interface Bundles { capetown: CityBundle; nairobi: CityBundle }
 
-function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: Bundles,
-              channel: Channel<string>): void {
+function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: Bundles): void {
   const caption = host.querySelector("figcaption");
-
-  // `data-follow-block` (the Demo page's mount point): the ring and the close-up follow the
-  // page's block switch rather than the bundle's own `follow`. A real optional: Screening and
-  // Explore carry no such attribute and ring the bundle's block, as before. Before any switch has
-  // published, or on a page without one, the bundle's own follow stands.
-  const followsPage = host.dataset.followBlock !== undefined;
-  const followOf = (bundle: CityBundle): CityFollow | undefined => {
-    const id = followsPage ? channel.get() : null;
-    return id === null ? bundle.follow : followOfBlock(bundle, id);
-  };
-
-  const pad = closeupPad(host.dataset.closeupPadM);
-  const closeup: Closeup | null = pad === null ? null : createCloseup(pad);
 
   const cv = document.createElement("canvas");
   // Inline styles, never presentation attributes -- Material's `.md-typeset svg{height:auto;
@@ -371,13 +312,12 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
   // reading order. The fallback <img> is NOT removed here: it goes after the first successful
   // draw, below, so a canvas that mounts into a zero-width container or a draw that throws leaves
   // the static picture the error text points the reader at.
-  // The close-up, where asked for, sits directly after the city map it zooms into; the page's
-  // stylesheet puts the two side by side where there is room (`figure[data-closeup-pad-m]`).
-  const pictures: HTMLElement[] = closeup === null ? [cv] : [cv, closeup.canvas];
   if (caption) {
-    for (const el of [...pictures, followNote, controls]) host.insertBefore(el, caption);
+    host.insertBefore(cv, caption);
+    host.insertBefore(followNote, caption);
+    host.insertBefore(controls, caption);
   } else {
-    host.append(...pictures, followNote, controls);
+    host.append(cv, followNote, controls);
   }
 
   const state: StateSource<ScreenState> = makeState({
@@ -466,16 +406,13 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
     // metric's own calibration instead of at the previous metric's number.
     const floor = st.floor ?? defaultFloorFor(bundle, st.metric, s);
     const sel = selectAt(bundle, order, s, floor);
-    const follow = followOf(bundle);
-    layer.paintFrame(ctx, bundle, view, bundle.encoding, order, sel.count, size, follow);
-    // From the same `order` and `sel.count`, so the close-up can never show a different pool.
-    closeup?.paint(bundle, follow, order, sel.count);
+    layer.paintFrame(ctx, bundle, view, bundle.encoding, order, sel.count, size);
     // Every number the picture shows is also present as text, computed from the same `sel` the
     // picture was drawn from -- there is no second call to `selectAt` that could disagree with it.
     readout.textContent = describeSelection(st.city, bundle, sel);
     // From the SAME `bundle` the frame above was painted from, so the sentence and the ring can
     // never name different cities.
-    followNote.textContent = describeFollow(follow, closeup !== null, followsPage);
+    followNote.textContent = describeFollow(bundle);
   };
 
   // Coalesces every state-driven redraw (a floor drag, a metric switch, a city toggle) onto the
@@ -506,14 +443,6 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
   // `runOrReport`: a real ResizeObserver delivers from the browser's own dispatch, OUTSIDE the
   // fetch chain above, so that chain's `.catch` cannot see a throw in here -- it would be an
   // uncaught exception with a blank figure and no message (dom/error.ts).
-  // The close-up's own size, observed BEFORE the city canvas's: its `resize` only stores the size
-  // and repaints the last frame, so it is harmless before the first `render`, and observing it
-  // first keeps the city canvas's observer the most recent one -- the one the boot tests'
-  // `fireResize` drives.
-  if (closeup !== null) {
-    observeSize(closeup.canvas,
-                (measured) => runOrReport(host, LABEL, () => closeup.resize(measured)));
-  }
   let firstDraw = true;
   observeSize(cv, (measured) => runOrReport(host, LABEL, () => {
     size = measured;
@@ -527,7 +456,6 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
       // is harmless before any subscriber exists. Only the SUBSCRIPTION itself is deferred, so a
       // later resize can never register a second one and double-render every state change.
       state.subscribe(() => scheduleRender());
-      if (followsPage) channel.subscribe(() => scheduleRender());
       // Only now: the static picture is the honest one until a real one has replaced it.
       removeFallbackImage(host);
     }

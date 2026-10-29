@@ -3,17 +3,18 @@
 
 # The Demo page's bundle
 
-What the site's Demo page reads: 2 Cape Town blocks (`ZAF.9.3.1_1_5810`, `ZAF.9.3.1_1_41785`), each followed from the
-city-wide screens to the roads one method builds through it.
+What the site's Demo page reads: Cape Town block `ZAF.9.3.1_1_5810`, followed from the city-wide screens to
+the roads one method builds through it, and a comparison of that method with the original topology
+algorithm on block `ZAF.9.3.1_1_41785`, where topology has run.
 
-- `demo.json`: every number the page shows. Per block: its place, the shipped screen's verdict
-  on it (checked against `../screen-map/capetown.json`) and the two-stage depth_density screen's,
-  the fires reported near it (each quoted from its report and checked against the article; none
-  is placed inside a block, and the page draws none of them on a map), the method's frames under
-  a displacement budget with its recorded run time, and the original topology algorithm's run
-  time on it, measured or extrapolated from 6 recorded runs on smaller blocks.
-- `loop_ZAF.9.3.1_1_5810.webp`, `loop_ZAF.9.3.1_1_41785.webp`: each block's escape-time plates as one sprite sheet (the block with no new road
-  first).
+- `demo.json`: every number the page shows -- the block's place, the shipped screen's verdict on
+  it (checked against `../screen-map/capetown.json`) and the two-stage depth_density screen's, the
+  fires reported near it (each quoted from its report and checked against the article; none is
+  placed inside the block, and the page draws none of them on a map), the method's frames under a
+  displacement budget with its recorded run time, topology's run time (extrapolated there), and
+  the comparison's scores and run times (topology's measured).
+- `loop_ZAF.9.3.1_1_5810.webp`: the block's escape-time plates as one sprite sheet (the block with no new road
+  first); `loop_ZAF.9.3.1_1_41785.webp` and `topology_ZAF.9.3.1_1_41785.webp`: the two networks on `ZAF.9.3.1_1_41785`, the same plate.
 
 `web/src/demo.d.ts` is generated beside it from the same dataclasses, so a renamed field is a
 TypeScript error.
