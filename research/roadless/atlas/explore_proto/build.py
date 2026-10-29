@@ -648,23 +648,55 @@ def field(w: World, u: np.ndarray, ok: np.ndarray) -> tuple[np.ndarray, np.ndarr
     return X, Y, Z
 
 
-# Damage, on the escape-time plate (owner 2026-10-29: a destroyed building must not read as road).
-# The damage share `c` is the build-out page's network view's (roads5810's DESTROYED ramp): 0
-# untouched, 1 wholly destroyed -- which a building is once GONE_SHARE of it is taken or a road
-# cuts it in two -- and partly damaged in between. A wholly destroyed building is a GHOST: a pale
-# fill with a thin warm-grey outline, so the road beside it stays the only dark slate. A partly
-# damaged one still has its people, so it keeps its escape-time colour and gains the same outline.
-GHOST_FILL = "#ece8e2"       # a pale neutral, lighter than any escape-time stop, on the white plate
-GHOST_EDGE = "#7d7468"       # the outline of every damaged building, wholly or partly
-GHOST_LW = 0.7               # px at the plate's 100 dpi
+# Damage, on the escape-time plate (owner 2026-10-29): a building fades from its escape-time colour
+# to one sand colour, DESTROYED, as it is damaged -- by the damage share `c`, the build-out page's
+# network view's ramp (roads5810's DESTROYED: min(1, share taken / GONE_SHARE), 1 for a building a
+# road cuts in two): 0 untouched, 1 wholly destroyed. The blend is in OKLab, as SEQ is built, so
+# the fade is even to the eye; from SEQ's red end it passes through orange. SEQ has no yellow, so a
+# destroyed building cannot be read as an escape time, nor as road. Every damaged building keeps a
+# thin outline (DAMAGE_EDGE), so a destroyed one still reads as a footprint, not open ground.
+DESTROYED = oklch(0.80, 0.09, 88.0)   # a muted sand: lighter than SEQ's red, no blue or purple
+DAMAGE_EDGE = "#7d7468"      # the thin outline of every damaged building
+DAMAGE_LW = 0.7              # px at the plate's 100 dpi
+NO_HOME = (1.0, 1.0, 1.0)    # what a building with no home fades from: the plate's white
+
+
+def to_oklab(rgb: np.ndarray) -> np.ndarray:
+    """sRGB rows (0-1) as OKLab rows (Ottosson's)."""
+    c = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    lms = c @ np.array([[0.4122214708, 0.2119034982, 0.0883024619],
+                        [0.5363325363, 0.6806995451, 0.2817188376],
+                        [0.0514459929, 0.1073969566, 0.6299787005]])
+    return np.cbrt(lms) @ np.array([[0.2104542553, 1.9779984951, 0.0259040371],
+                                    [0.7936177850, -2.4285922050, 0.7827717662],
+                                    [-0.0040720468, 0.4505937099, -0.8086757660]])
+
+
+def from_oklab(lab: np.ndarray) -> np.ndarray:
+    """OKLab rows as sRGB rows (0-1), clipped to the gamut."""
+    lms = lab @ np.array([[1.0, 1.0, 1.0], [0.3963377774, -0.1055613458, -0.0894841775],
+                          [0.2158037573, -0.0638541728, -1.2914855480]])
+    lin = (lms ** 3) @ np.array([[4.0767416621, -1.2684380046, -0.0041960863],
+                                 [-3.3077115913, 2.6097574011, -0.7034186147],
+                                 [0.2309699292, -0.3413193965, 1.7076147010]])
+    lin = np.clip(lin, 0.0, 1.0)
+    return np.where(lin <= 0.0031308, 12.92 * lin, 1.055 * lin ** (1 / 2.4) - 0.055)
+
+
+def damaged(rgb: np.ndarray, c: np.ndarray) -> np.ndarray:
+    """Each row of `rgb` faded toward DESTROYED by its damage `c` (0-1), in OKLab."""
+    lab = to_oklab(rgb)
+    to = to_oklab(np.asarray([DESTROYED]))
+    t = np.clip(c, 0.0, 1.0)[:, None]
+    return from_oklab((1 - t) * lab + t * to)
 
 
 def homes_plate(w: World, u: np.ndarray, *, c: np.ndarray, corridor,  # type: ignore[no-untyped-def]
                 out: Path) -> None:
     """The escape-time plate (render.time_plate's figure on SEQ): each home filled by its time on
-    the block's scale (nan: no home, outlined), the damage by `c` (the GHOST encoding above), the
-    corridor in render.ROAD, and the isochrones every ISO_STEP of the scale, dark lines on a white
-    halo."""
+    the block's scale (nan: no home, outlined), faded toward DESTROYED by its damage `c` and then
+    outlined (above), the corridor in render.ROAD, and the isochrones every ISO_STEP of the
+    scale, dark lines on a white halo."""
     fig = plt.figure(figsize=(w.nx / 100, w.ny / 100), dpi=100)
     ax = fig.add_axes((0, 0, 1, 1))
     norm = mcolors.Normalize(0.0, w.scale, clip=True)
@@ -672,17 +704,18 @@ def homes_plate(w: World, u: np.ndarray, *, c: np.ndarray, corridor,  # type: ig
     # with the escape-time colours over it.
     draw_context(ax, w.context, lw=CONTEXT_LW)
     gone = c >= 1.0
-    partly = (c > 0.0) & ~gone
-    has = np.isfinite(u) & ~gone
-    gpd.GeoSeries(list(w.polys[has])).plot(ax=ax, color=SEQ(norm(u[has])), lw=0)
-    gpd.GeoSeries(list(w.polys[~has & ~gone])).boundary.plot(ax=ax, color=rnd.BUILDING, lw=0.4)
-    # The ghosts under the road, so the road reads as one unbroken 7 m band and each ghost shows
-    # the rest of the footprint the road took.
-    if gone.any():
-        gpd.GeoSeries(list(w.polys[gone])).plot(ax=ax, facecolor=GHOST_FILL,
-                                                edgecolor=GHOST_EDGE, lw=GHOST_LW)
-    if partly.any():
-        gpd.GeoSeries(list(w.polys[partly])).boundary.plot(ax=ax, color=GHOST_EDGE, lw=GHOST_LW)
+    hit = c > 0.0
+    home = np.isfinite(u)
+    base = np.tile(np.asarray(NO_HOME), (len(u), 1))
+    base[home] = SEQ(norm(u[home]))[:, :3]
+    fill = damaged(base, c)
+    # Homes, and every damaged building, filled -- under the road, so the road reads as one
+    # unbroken 7 m band and each damaged footprint shows the rest of what the road took.
+    shown = home | hit
+    gpd.GeoSeries(list(w.polys[shown])).plot(ax=ax, color=fill[shown], lw=0)
+    gpd.GeoSeries(list(w.polys[~shown])).boundary.plot(ax=ax, color=rnd.BUILDING, lw=0.4)
+    if hit.any():
+        gpd.GeoSeries(list(w.polys[hit])).boundary.plot(ax=ax, color=DAMAGE_EDGE, lw=DAMAGE_LW)
     if corridor is not None:
         gpd.GeoSeries([corridor]).plot(ax=ax, color=render.ROAD, lw=0)
     X, Y, Z = field(w, u, np.isfinite(u) & ~gone)
@@ -1109,10 +1142,10 @@ class DemoMethod:
 class DemoEncoding:
     """The plates' colours and the quantities their legend states. `escape_ramp` maps escape time
     from 0 to 100% of a block's `escape_scale`, short blue to long red, with an isochrone every
-    `iso_step` of it. `road` is a new road's corridor, `road_width_m` wide. A wholly destroyed
-    building -- once `gone_share` of it is gone, or a road cuts it in two -- is a ghost
-    (`ghost_fill`, outlined `ghost_edge`); a partly damaged one keeps its escape-time colour and
-    the same outline. The
+    `iso_step` of it. `road` is a new road's corridor, `road_width_m` wide. A damaged building
+    fades from its escape-time colour to `destroyed`, which it reaches once `gone_share` of it is
+    gone or a road cuts it in two, outlined in `damage_edge`; `damage_ramp` is that fade's legend,
+    from a short escape time to destroyed, in OKLab. The
     block's edge: `street` (where people walk out), `edge` (a railway's or a ditch's line),
     `water` (a ditch).
     `depth_ramp` is the peel figure's (reblock.render's depth colouring, ring 1 to the deepest),
@@ -1125,8 +1158,9 @@ class DemoEncoding:
     iso_step: float
     road_width_m: float
     gone_share: float
-    ghost_fill: str
-    ghost_edge: str
+    destroyed: str
+    damage_edge: str
+    damage_ramp: tuple[str, ...]
     depth_ramp: tuple[str, ...]
 
 
@@ -1479,7 +1513,9 @@ def site(root: Path) -> None:
         road=render.ROAD, street=rnd.STREET, edge=rnd.EDGE, water=nw.cp.gm.WATER_FILL,
         escape_ramp=tuple(mcolors.to_hex(SEQ(t)) for t in np.linspace(0, 1, 11)),
         iso_step=ISO_STEP, road_width_m=road_simp.ROAD_W,
-        gone_share=GONE_SHARE, ghost_fill=GHOST_FILL, ghost_edge=GHOST_EDGE,
+        gone_share=GONE_SHARE, destroyed=mcolors.to_hex(DESTROYED), damage_edge=DAMAGE_EDGE,
+        damage_ramp=tuple(mcolors.to_hex(v) for v in damaged(
+            np.tile(np.asarray(SEQ(0.25)[:3]), (5, 1)), np.linspace(0, 1, 5))),
         depth_ramp=tuple(mcolors.to_hex(depth(t)) for t in np.linspace(0, 1, 9)))
     # The peel figure is drawn here, not taken from the depth_density example (whose render has no
     # surroundings): it must show that example's numbers.
