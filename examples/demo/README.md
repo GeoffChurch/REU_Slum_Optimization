@@ -12,8 +12,9 @@ to the roads one method builds through it.
   draws none of them on a map), the method's frames under a displacement budget with its recorded
   run time, the plates' colours, and the original topology algorithm's run time on this block,
   extrapolated from 6 recorded runs on smaller blocks.
-- `loop_network.webp`, `loop_time.webp`, `loop_saved.webp`: the method's plates, one sprite sheet per view (16 frames each, the block with no
-  new road first).
+- `loop_time.webp`: the method's escape-time plates as one sprite sheet (16 frames, the block with
+  no new road first). The prototype's other two views (the roads alone, the time saved) are not
+  shipped: the site shows this one (owner 2026-10-28).
 
 `web/src/demo.d.ts` is generated beside it from the same dataclasses, so a renamed field is a
 TypeScript error.

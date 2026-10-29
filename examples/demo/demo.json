@@ -14,7 +14,23 @@
   "pool": 3169,
   "precision": 0.200379,
   "recall": 0.819355,
-  "closeup_pad_m": 450.0
+  "closeup_pad_m": 450.0,
+  "followed": {
+   "block_id": "ZAF.9.3.1_1_5810",
+   "n": 6619,
+   "area_m2": 576948.0,
+   "perimeter_m": 5606.33,
+   "score": 0.12645662242251568,
+   "rank": 2
+  },
+  "typical": {
+   "block_id": "ZAF.9.3.1_1_8426",
+   "n": 94,
+   "area_m2": 33091.4,
+   "perimeter_m": 848.629,
+   "score": 0.005903592074458694,
+   "rank": 9155
+  }
  },
  "fires": [
   {
@@ -245,13 +261,9 @@
   "width": 800,
   "frame_height": 724,
   "rows": 16,
-  "network": "loop_network.webp",
-  "time": "loop_time.webp",
-  "saved": "loop_saved.webp"
+  "sheet": "loop_time.webp"
  },
  "encoding": {
-  "building": "#b8b2a7",
-  "destroyed": "#c2410c",
   "road": "#475569",
   "street": "#1e293b",
   "edge": "#94a3b8",
@@ -269,22 +281,8 @@
    "#91253d",
    "#861118"
   ],
-  "saved_ramp": [
-   "#dbe6f2",
-   "#c3d6eb",
-   "#aac6e4",
-   "#92b7dd",
-   "#7aa6d5",
-   "#6196cd",
-   "#5084bf",
-   "#4072b1",
-   "#3161a3",
-   "#244f94",
-   "#183d86"
-  ],
   "escape_scale": 1063.5,
   "iso_step": 0.1,
-  "saved_max": 0.75,
   "road_width_m": 7.0,
   "road_conductance": 10.0,
   "gone_share": 0.1

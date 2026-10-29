@@ -2,8 +2,20 @@
 // research/roadless) -- do not edit. Regenerate there: build.py site <this checkout>
 // This file is what makes a renamed Python field a TypeScript error instead of a
 // blank panel.
+/** One block's inputs to the screen -- its buildings `n`, area and perimeter, the three
+ * numbers the score is made of -- with its score and its rank (1 the highest) in the city. */
+export interface DemoScreenBlock {
+  block_id: string;
+  n: number;
+  area_m2: number;
+  perimeter_m: number;
+  score: number;
+  rank: number;
+}
 /** The block under the shipped screen (ScreenFacts), and the close-up's margin around it (m):
- * the site's screen map frames its close-up of the block the way the prototype's does. */
+ * the site's screen map frames its close-up of the block the way the prototype's does. The
+ * page's diagram of the score's geometry opens on `followed` (the block) and offers `typical`,
+ * the city's median block by score, beside it. */
 export interface DemoScreen {
   metric: string;
   score: number;
@@ -14,6 +26,8 @@ export interface DemoScreen {
   precision: number;
   recall: number;
   closeup_pad_m: number;
+  followed: DemoScreenBlock;
+  typical: DemoScreenBlock;
 }
 /** One news report: its outlet, its date (ISO), its headline (None where the page cites
  * none) and its URL. */
@@ -57,36 +71,31 @@ export interface DemoMethod {
   default_frame: number;
   frames: DemoFrame[];
 }
-/** The plates as sprite sheets beside demo.json, one per view, each `rows` frames of `width` x
- * `frame_height` px stacked top to bottom: the roads (`network`), each home's escape time
- * (`time`), and the share of it the roads save (`saved`). */
+/** The escape-time plates as one sprite sheet beside demo.json (`sheet`): `rows` frames of
+ * `width` x `frame_height` px stacked top to bottom. The site shows this view alone (owner
+ * 2026-10-28: "just keep the escape time view with the nice topographical overlay"); the roads
+ * are on it too, in `DemoEncoding.road`. */
 export interface DemoSheets {
   width: number;
   frame_height: number;
   rows: number;
-  network: string;
-  time: string;
-  saved: string;
+  sheet: string;
 }
-/** The plates' colours and the quantities their legends state. `escape_ramp` maps escape time
+/** The plate's colours and the quantities its legend states. `escape_ramp` maps escape time
  * from 0 to 100% of `escape_scale` (the model's units: the 99th-percentile home with no new
- * road), short blue to long red, with an isochrone every `iso_step` of it; `saved_ramp` maps the
- * share saved from none to `saved_max`. Roads are `road_width_m` wide and conduct
- * `road_conductance` times what open ground does; a building counts as wholly destroyed once
- * `gone_share` of it is gone. The block's edge: `street` (where people walk out), `edge` (a
+ * road), short blue to long red, with an isochrone every `iso_step` of it. `road` is the grey
+ * of a new road's corridor and of a wholly destroyed building, which a building is once
+ * `gone_share` of it is gone; roads are `road_width_m` wide and conduct `road_conductance` times
+ * what open ground does. The block's edge: `street` (where people walk out), `edge` (a
  * railway's or a ditch's line), `water` (a ditch). */
 export interface DemoEncoding {
-  building: string;
-  destroyed: string;
   road: string;
   street: string;
   edge: string;
   water: string;
   escape_ramp: string[];
-  saved_ramp: string[];
   escape_scale: number;
   iso_step: number;
-  saved_max: number;
   road_width_m: number;
   road_conductance: number;
   gone_share: number;
