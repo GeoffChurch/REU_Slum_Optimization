@@ -823,13 +823,17 @@ GONE_SHARE = 0.1
 @dataclass(frozen=True)
 class DemoScreenBlock:
     """One block's inputs to the screen -- its buildings `n`, area and perimeter, the three
-    numbers the score is made of -- with its score and its rank (1 the highest) in the city."""
+    numbers the score is made of -- with its score, its rank (1 the highest) in the city, and its
+    outline as the screen bundle draws it (`rings`: exterior first, then any interiors, in the
+    bundle's local metres, simplified as the bundle simplifies them -- so their drawn length runs
+    a little under `perimeter_m`, the unsimplified block's)."""
     block_id: str
     n: int
     area_m2: float
     perimeter_m: float
     score: float
     rank: int
+    rings: tuple[tuple[tuple[float, float], ...], ...]
 
 
 @dataclass(frozen=True)
@@ -956,10 +960,10 @@ def ts_type(t: Any) -> str:
     if t is int or t is float:
         return "number"
     if typing.get_origin(t) is tuple:
-        item, more = typing.get_args(t)
-        if more is not Ellipsis:
-            raise TypeError(f"{t!r}: only tuple[X, ...] has a TypeScript spelling here")
-        return f"{ts_type(item)}[]"
+        args = typing.get_args(t)
+        if len(args) == 2 and args[1] is Ellipsis:
+            return f"{ts_type(args[0])}[]"
+        return "[" + ", ".join(ts_type(a) for a in args) + "]"
     if typing.get_origin(t) is types.UnionType:
         return " | ".join("null" if a is type(None) else ts_type(a) for a in typing.get_args(t))
     if dataclasses.is_dataclass(t):
@@ -1028,7 +1032,9 @@ def screen_block(sc: Screen, i: int) -> DemoScreenBlock:
     b = sc.bundle
     return DemoScreenBlock(block_id=b["block_id"][i], n=int(b["n"][i]),
                            area_m2=float(b["area_m2"][i]), perimeter_m=float(b["perimeter_m"][i]),
-                           score=float(sc.score[i]), rank=int((sc.score > sc.score[i]).sum()) + 1)
+                           score=float(sc.score[i]), rank=int((sc.score > sc.score[i]).sum()) + 1,
+                           rings=tuple(tuple((float(x), float(y)) for x, y in ring)
+                                       for ring in b["rings"][i]))
 
 
 def site(root: Path) -> None:
