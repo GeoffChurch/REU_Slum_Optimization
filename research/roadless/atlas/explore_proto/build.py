@@ -320,19 +320,23 @@ EXTRAPOLATED = Extrapolated(TOPOLOGY_RUNS, TOPOLOGY_ALPHA)
 @dataclass(frozen=True)
 class Block:
     """A block the page shows: its id, where it is in words, the Google Maps zoom that frames it,
-    and how topology's run time on it is known. The first is the page's default."""
+    whether it is plainly an informal settlement on the ground whatever the City's survey says
+    (imagery, and the news reports of fires around it; False makes no claim), and how topology's
+    run time on it is known. The first is the page's default."""
     bid: str
     place: str
     zoom: int
+    plainly_informal: bool
     topology: TopologyTime
 
 
 BLOCKS = (
     Block("ZAF.9.3.1_1_5810", "the Bloekombos and Wallacedene area of Kraaifontein", zoom=17,
-          topology=EXTRAPOLATED),
+          plainly_informal=True, topology=EXTRAPOLATED),
     # Philippi: OpenStreetMap's suburb at its centre (Nominatim's reverse lookup, 2026-10-28).
     # About 165 m across, so a closer zoom than 5810's.
-    Block("ZAF.9.3.1_1_41785", "Philippi", zoom=18, topology=EXTRAPOLATED),
+    Block("ZAF.9.3.1_1_41785", "Philippi", zoom=18, plainly_informal=False,
+          topology=EXTRAPOLATED),
 )
 
 
@@ -661,9 +665,11 @@ class DemoSheet:
 @dataclass(frozen=True)
 class DemoBlock:
     """One block the page shows: its id, buildings, place in words, centroid and a Google Maps
-    link; the screens' verdicts on it; the fires reported near it; the method's build-out on it
-    (its frames, its plates, the escape-time scale -- the model's units at the block's plain
-    baseline's 99th-percentile home, 100% on its plates -- and where it ran); and the original
+    link; whether it is plainly an informal settlement on the ground (Block's), whatever the
+    survey (`proxy.informal`) says; the screens' verdicts on it; the fires reported near it; the
+    method's build-out on it (its frames, its plates, the escape-time scale -- the model's units
+    at the block's plain baseline's 99th-percentile home, 100% on its plates -- and where it
+    ran); and the original
     topology algorithm's run time on it, measured or extrapolated (`kind`)."""
     block_id: str
     n_buildings: int
@@ -671,6 +677,7 @@ class DemoBlock:
     lat: float
     lon: float
     maps_url: str
+    plainly_informal: bool
     proxy: DemoProxy
     peel: DemoPeel
     fires: tuple[Fire, ...]
@@ -886,7 +893,7 @@ def demo_block(block: Block, sc: Screen, pl: Peeled, out: Path) -> DemoBlock:
     lat, lon = centroid_wgs84(block.bid)
     return DemoBlock(
         block_id=block.bid, n_buildings=n, place=block.place, lat=lat, lon=lon,
-        maps_url=maps_url(lat, lon, block.zoom),
+        maps_url=maps_url(lat, lon, block.zoom), plainly_informal=block.plainly_informal,
         proxy=DemoProxy(n=n, area_m2=area, perimeter_m=float(b["perimeter_m"][i]),
                         score=float(sc.score[i]), rank=int((sc.score > sc.score[i]).sum()) + 1,
                         informal=bool(b["informal"][i]),
