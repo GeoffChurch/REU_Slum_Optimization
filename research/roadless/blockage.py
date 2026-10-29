@@ -145,7 +145,7 @@ def roads(path: Path, frames: Any, meshes: Path) -> Callable[[Any, Params], list
 
 R3 = "pt.K5.R10.band.t0.2,0.1,0.05,0.03,0.02.b1,2,4,8,16.q1,2,3,3,3.e0.2,0.1,0.05,0.02,0.i40"
 NETWORKS = {s.name: s for s in (
-    Shown("loop", grown("ears.paths.b20.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1")),
+    Shown("loop", grown("ears.paths.b20.f2000.e30.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1")),
     Shown("cut", answers(("partition", "cut", f"{R3}.D{{D}}.s0.1.spec{{n}}s0.p1e0.0001v4"))),
     Shown("spurs", answers(("spurs", "ps.lazy5.D{D}.spec{n}s0.x{x}.v4"))),
     Shown("lazy", roads(FLOW / "dp_greedy_lineup_lazy5_D" / "built.parquet",

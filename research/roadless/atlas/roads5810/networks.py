@@ -60,7 +60,7 @@ On the page (2026-10-28), each one `add`:
   joint paved 'rs.D{D}.s0.1.r7.q1,2,3,3,3.b1,2,4,8,16.i60.uOC.cjoint.p1e0.0001v8'
   joint roads 'rs.D{D}.s0.1.r7.q1,2,3,3,3.b1,2,4,8,16.i60.uOC.cjoint.p1e0.0001v8'
   growth gr.k10.att.greedy.N48.sep14.n2s0.3.B21m8k2.K0.D0.15.v2           (price 0.3)
-  ears ears.paths.b20.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1
+  ears ears.paths.b20.f2000.e30.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1
   templates 'tp.D{D}.s0.1.v1'
   growth gr.gl0.25Croad.free0.03.greedy.N48.sep14.n2s0.1.B0.K4.D0.15.v2  (islands: the charge
       that scores best under RUNTIME, the growth study's frames.py score: 0.492 at D 0.15, 0.01's
