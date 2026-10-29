@@ -873,6 +873,56 @@ body,
 
 /* ------------------------------------------------------------------------------ the Demo page */
 
+/* The block switch (web/src/widgets/block-switch.ts): the site's segmented control, as the
+   diagram's pickers are. Hidden in the markup until the widget mounts; the flex here would
+   otherwise outrank the user-agent rule that hides it. */
+.md-typeset .sbu-demo-switch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  padding: 2px;
+  margin: 0 0 0.6rem;
+  border: 1px solid var(--sbu-rule-strong);
+  border-radius: 999px;
+}
+
+.md-typeset .sbu-demo-switch[hidden] {
+  display: none;
+}
+
+.md-typeset .sbu-demo-switch button {
+  font: inherit;
+  font-size: var(--sbu-step--1);
+  font-weight: 700;
+  padding: 0.25rem 1rem;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--sbu-ink-muted);
+  cursor: pointer;
+}
+
+.md-typeset .sbu-demo-switch button span {
+  font-weight: 400;
+}
+
+/* Pressed is the brand red with white on it: 8.92:1 in both schemes (the --sbu-red-fill token). */
+.md-typeset .sbu-demo-switch button[aria-pressed="true"] {
+  background: var(--sbu-red-fill);
+  color: #ffffff;
+}
+
+.md-typeset .sbu-demo-switch button:focus-visible {
+  outline: 3px solid var(--sbu-red-ink);
+  outline-offset: 2px;
+}
+
+/* A sentence the build-out adds when a budget shares an earlier budget's network. */
+.md-typeset .sbu-buildout__same {
+  margin: 0;
+  font-size: var(--sbu-step--1);
+  color: var(--sbu-ink-muted);
+}
+
 /* The block's one-line identity under the H1: a fact line, so it reads as metadata, not lede. */
 .md-typeset .sbu-demo-place {
   font-size: var(--sbu-step--1);

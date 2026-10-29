@@ -1,31 +1,37 @@
 <!-- Handwritten partial for docs/demo.md. scripts/gen_site_pages.py prepends the do-not-edit note
-     and fills ten markers (named, not spelled out in full here, for the reason
+     and fills thirteen markers (named, not spelled out in full here, for the reason
      docs/_partials/intro.md's own note gives -- spelling them out would fill this note too), every
      one of them from examples/demo/demo.json, whose README names its producer on the
      research/roadless branch:
 
-     * DEMOPLACE -- the block, its buildings, where it is, and a Google Maps link.
+     * DEMOBLOCKSWITCH -- the block switch (web/src/widgets/block-switch.ts): it owns the `block`
+       URL key, shows the chosen block's passages below and hides the others, and every figure on
+       the page follows it. Each per-block passage is the generator's, one per block, all but the
+       first hidden, so a reader without JavaScript reads the first block's.
+     * DEMOPLACE -- each block, its buildings, where it is, and a Google Maps link.
      * DEMOGEOMETRY -- the screen's formula drawn on the block's real outline, ticked every parcel
        side along its street (its frontage slots), with a reference disk, square and strip of the
-       same area, the city's median block, and a buildings slider
-       (web/src/widgets/screen-geometry.ts). No shape is presumed: the depth factor is the homes
-       behind each frontage slot.
-     * DEMOSCREENFACTORS -- the score's factors for the block and for the city's median block, and
-       the peel's true depth for the block where the flagship run measured it.
+       same area and a buildings slider (web/src/widgets/screen-geometry.ts). No shape is
+       presumed: the depth factor is the homes behind each frontage slot.
+     * DEMOSCREENFACTORS -- the score's factors for every block on the page, side by side, and
+       each one's true depth from the two-stage screen's peel.
      * DEMOSCREENMAP -- the site's own ScreenMap widget (the Screening and Explore pages' screen),
        here with a close-up of the block beside the city map. Not a second screen widget: the
        prototype's map is this one's, extended.
-     * DEMOSCREENFACTS -- the block's score, rank and pool, checked against the city bundle the
-       map draws from.
-     * DEMOFIRES -- the fires reported near the block, as a list. NO map draws them: some reports'
+     * DEMOSCREENFACTS -- each block's shipped-screen score and rank, and its rank by the two-stage
+       depth_density screen, each saying what it is ranked by; checked against the city bundle
+       the map draws from.
+     * DEMOSURVEYNOTE -- the floor's pool against the City's survey, and why a block the survey
+       does not flag can still be plainly informal (the survey's age; the bake-off's caveats).
+     * DEMOFIRES -- the fires reported near each block, as a list. NO map draws them: some reports'
        streets cannot be placed (owner, 2026-10-28), so none is drawn. Keep it that way.
      * DEMOMETHOD -- the method's name and how it works, in the bundle's words (the method is one
        setting of the producer, so it is never named here).
-     * DEMOTIMES -- its recorded run time beside the original topology algorithm's, extrapolated,
-       led by the range.
+     * DEMOTIMES -- each block's recorded run time beside the original topology algorithm's,
+       measured where it has been run, extrapolated (led by the range) where not.
      * DEMOBUILDOUT -- the build-out widget: the budget slider, each frame's escape-time plate
        (the one view the owner kept, 2026-10-28), and three plots whose dots follow the slider.
-     * DEMOTOPOLOGYNOTE -- the footnote saying how the topology time was extrapolated.
+     * DEMOTOPOLOGYNOTE -- each block's footnote saying how its topology time was had.
 
      Edit HERE, never docs/demo.md (it is generated and gitignored). This file is committed but
      excluded from the built site (see exclude_docs in mkdocs.yml).
@@ -40,11 +46,14 @@
 
 # Demo
 
+<!-- DEMOBLOCKSWITCH -->
+
 <!-- DEMOPLACE -->
 
-One Cape Town block, followed from the city-wide screen that picked it out to the roads one method
-builds through it. Every control writes to the address bar, so a view you find here is a link you can
-share.
+Cape Town blocks, each followed from the city-wide screens that pick it out to the roads one method
+builds through it. The shipped screen and a slower, deeper one disagree about which of them comes
+first; the switch above picks the block every figure below shows. Every control writes to the address
+bar, so a view you find here is a link you can share.
 
 ## Why this block {#screening}
 
@@ -58,22 +67,25 @@ Why that formula finds deep blocks is geometry, and it needs no particular shape
 an equal square of ground; its side is √(*A*/*n*). Count how many of those squares fit along the
 street: that is the block's frontage. Then √(*nA*)/*P* is simply how many homes stand behind each
 square of frontage, and *n*/*A* how crowded they are. A block scores high when many homes share each
-stretch of street and they are packed close. Below, the street of this block is ticked off one parcel
-at a time; swap its outline for a disk, a square or a strip of the same area, switch to a typical
-block, or change how many buildings it holds.
+stretch of street and they are packed close. Below, the block's street is ticked off one parcel at a
+time; swap its outline for a disk, a square or a strip of the same area, or change how many buildings
+it holds.
 
 <!-- DEMOGEOMETRY -->
 
 <!-- DEMOSCREENFACTORS -->
 
 Scored this way, every block in the city gets one number. Drag the floor to grow or shrink the pool,
-and watch this block in the close-up. The floor is absolute, not a percentile, so it applies the same
+and watch the block in the close-up. The floor is absolute, not a percentile, so it applies the same
 bar however the corpus grows or shrinks; screening only decides which blocks are worth the expensive
-work below. The [Screening](methodology/screening.md) page says how the screen was chosen.
+work below. The slower screen peels the shipped screen's top blocks for their true depth and ranks
+them again. The [Screening](methodology/screening.md) page says how the screens were chosen.
 
 <!-- DEMOSCREENMAP -->
 
 <!-- DEMOSCREENFACTS -->
+
+<!-- DEMOSURVEYNOTE -->
 
 ## Shack fires reported near the block {#fires}
 
@@ -90,9 +102,9 @@ a map, because not every report's street can be placed; each place is stated as 
 
 Drag the budget to grow the network: each step lets the method displace a larger share of the homes'
 floor area, the dots on the plots follow, and the rings of equal escape time shrink as the roads
-reach into the block. Below, the method's own run time on this block is set against that of the original
-[topology](methodology/methods/topology.md) algorithm, which on a block this size can only be
-extrapolated.
+reach into the block. Below, the method's own run time on the block is set against that of the
+original [topology](methodology/methods/topology.md) algorithm, measured where it has been run on the
+block and extrapolated where it has not.
 
 <!-- DEMOTIMES -->
 
