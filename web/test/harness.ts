@@ -140,6 +140,8 @@ export class FakeElement {
   readonly style: Record<string, string> = {};
   readonly dataset: Record<string, string> = {};
   textContent = "";
+  /** Written by widgets that build their own markup (build-out.ts), read back by their tests. */
+  className = "";
   /** Only a canvas has one; the widget reads it back through `getContext`. */
   readonly ctx = new RecordingContext();
   /** The backing store `sizeCanvas` sets from the observed box times devicePixelRatio. */

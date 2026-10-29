@@ -4,17 +4,16 @@
 # The Demo page's bundle
 
 What the site's Demo page reads: Cape Town block `ZAF.9.3.1_1_5810`, followed from the city-wide screens to
-the roads one method builds through it, and a comparison of that method with the original topology
-algorithm on block `ZAF.9.3.1_1_41785`, where topology has run.
+the roads one method builds through it, and that method beside the original topology algorithm
+on block `ZAF.9.3.1_1_41785`, where topology has run.
 
-- `demo.json`: every number the page shows -- the block's place, the shipped screen's verdict on
-  it (checked against `../screen-map/capetown.json`) and the two-stage depth_density screen's, the
-  fires reported near it (each quoted from its report and checked against the article; none is
-  placed inside the block, and the page draws none of them on a map), the method's frames under a
-  displacement budget with its recorded run time, topology's run time (extrapolated there), and
-  the comparison's scores and run times (topology's measured).
-- `loop_ZAF.9.3.1_1_5810.webp`: the block's escape-time plates as one sprite sheet (the block with no new road
-  first); `loop_ZAF.9.3.1_1_41785.webp` and `topology_ZAF.9.3.1_1_41785.webp`: the two networks on `ZAF.9.3.1_1_41785`, the same plate.
+- `demo.json`: the page's facts -- the block's place, the shipped screen's verdict on it (checked
+  against `../screen-map/capetown.json`) and the two-stage depth_density screen's, the fires
+  reported near it (each quoted from its report and checked against the article; none is placed
+  inside the block, and the page draws none of them on a map), topology's run time on each block
+  (extrapolated on the first, measured on the second), and the encoding.
+- `buildout_ZAF.9.3.1_1_5810.json` and `buildout_ZAF.9.3.1_1_41785.json`: the two build-outs the page's slider widgets fetch -- budgets, and per
+  method its escape-time sprite sheet (beside them) and what it shows at each budget.
 
 `web/src/demo.d.ts` is generated beside it from the same dataclasses, so a renamed field is a
 TypeScript error.

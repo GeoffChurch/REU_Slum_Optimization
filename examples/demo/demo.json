@@ -93,160 +93,7 @@
     ]
    }
   ],
-  "frames": [
-   {
-    "budget": 0.0,
-    "displacement": 0.0,
-    "road_km": 0.0,
-    "permeability": 0.0,
-    "conductance_m2": 0.0,
-    "seconds": 0.0,
-    "row": 0
-   },
-   {
-    "budget": 0.01,
-    "displacement": 0.0122,
-    "road_km": 0.87,
-    "permeability": 0.204,
-    "conductance_m2": 49856.0,
-    "seconds": 196.72972893714905,
-    "row": 1
-   },
-   {
-    "budget": 0.02,
-    "displacement": 0.0227,
-    "road_km": 1.78,
-    "permeability": 0.308,
-    "conductance_m2": 97623.0,
-    "seconds": 322.67055010795593,
-    "row": 2
-   },
-   {
-    "budget": 0.03,
-    "displacement": 0.0321,
-    "road_km": 2.2,
-    "permeability": 0.364,
-    "conductance_m2": 122398.0,
-    "seconds": 398.06657433509827,
-    "row": 3
-   },
-   {
-    "budget": 0.04,
-    "displacement": 0.0454,
-    "road_km": 2.91,
-    "permeability": 0.403,
-    "conductance_m2": 164324.0,
-    "seconds": 550.5276434421539,
-    "row": 4
-   },
-   {
-    "budget": 0.05,
-    "displacement": 0.0556,
-    "road_km": 3.11,
-    "permeability": 0.431,
-    "conductance_m2": 175755.0,
-    "seconds": 598.9586958885193,
-    "row": 5
-   },
-   {
-    "budget": 0.06,
-    "displacement": 0.0624,
-    "road_km": 3.66,
-    "permeability": 0.439,
-    "conductance_m2": 208082.0,
-    "seconds": 727.0155868530273,
-    "row": 6
-   },
-   {
-    "budget": 0.07,
-    "displacement": 0.0733,
-    "road_km": 4.15,
-    "permeability": 0.464,
-    "conductance_m2": 237024.0,
-    "seconds": 847.4073979854584,
-    "row": 7
-   },
-   {
-    "budget": 0.08,
-    "displacement": 0.083,
-    "road_km": 4.56,
-    "permeability": 0.469,
-    "conductance_m2": 260651.0,
-    "seconds": 970.4124236106873,
-    "row": 8
-   },
-   {
-    "budget": 0.09,
-    "displacement": 0.0915,
-    "road_km": 5.75,
-    "permeability": 0.482,
-    "conductance_m2": 318950.0,
-    "seconds": 1087.428965330124,
-    "row": 9
-   },
-   {
-    "budget": 0.1,
-    "displacement": 0.1027,
-    "road_km": 6.45,
-    "permeability": 0.504,
-    "conductance_m2": 356777.0,
-    "seconds": 1148.7000143527985,
-    "row": 10
-   },
-   {
-    "budget": 0.11,
-    "displacement": 0.1122,
-    "road_km": 7.18,
-    "permeability": 0.519,
-    "conductance_m2": 383814.0,
-    "seconds": 1291.3215963840485,
-    "row": 11
-   },
-   {
-    "budget": 0.12,
-    "displacement": 0.1218,
-    "road_km": 7.85,
-    "permeability": 0.537,
-    "conductance_m2": 416512.0,
-    "seconds": 1493.2813494205475,
-    "row": 12
-   },
-   {
-    "budget": 0.13,
-    "displacement": 0.1306,
-    "road_km": 8.41,
-    "permeability": 0.551,
-    "conductance_m2": 448574.0,
-    "seconds": 1590.7163155078888,
-    "row": 13
-   },
-   {
-    "budget": 0.14,
-    "displacement": 0.142,
-    "road_km": 8.99,
-    "permeability": 0.573,
-    "conductance_m2": 478478.0,
-    "seconds": 1736.9870641231537,
-    "row": 14
-   },
-   {
-    "budget": 0.15,
-    "displacement": 0.1531,
-    "road_km": 9.57,
-    "permeability": 0.586,
-    "conductance_m2": 511894.0,
-    "seconds": 1947.8078384399414,
-    "row": 15
-   }
-  ],
-  "sheet": {
-   "file": "loop_ZAF.9.3.1_1_5810.webp",
-   "width": 800,
-   "frame_height": 724,
-   "rows": 16
-  },
-  "escape_scale": 1063.5,
-  "machine": "one process on a workstation CPU (Intel Xeon w7-3455)",
+  "buildout": "buildout_ZAF.9.3.1_1_5810.json",
   "topology": {
    "kind": "extrapolated",
    "alpha": 10,
@@ -298,26 +145,8 @@
   "place": "Philippi",
   "maps_url": "https://www.google.com/maps/@?api=1&map_action=map&center=-34.00416%2C18.56748&zoom=18&basemap=satellite",
   "proxy_rank": 1,
-  "escape_scale": 566.7,
-  "ours": {
-   "plate": "loop_ZAF.9.3.1_1_41785.webp",
-   "width": 800,
-   "height": 1105,
-   "displacement": 0.1508,
-   "permeability": 0.73,
-   "road_km": 0.37
-  },
-  "ours_seconds": 20.890394926071167,
-  "ours_machine": "one process on a workstation CPU (Intel Xeon w7-3455)",
-  "earlier": {
-   "plate": "topology_ZAF.9.3.1_1_41785.webp",
-   "width": 800,
-   "height": 1105,
-   "displacement": 0.9066202515723024,
-   "permeability": 0.9347676761286854,
-   "road_km": 1.92
-  },
-  "earlier_time": {
+  "buildout": "buildout_ZAF.9.3.1_1_41785.json",
+  "topology": {
    "kind": "measured",
    "alpha": 10,
    "n_buildings": 638,
@@ -340,8 +169,7 @@
  },
  "method": {
   "name": "Loop roads",
-  "blurb": "Each new road runs from the street, or a road already built, across the block and back to a street or road, so every road is on a loop and none is a dead end. At each step the method tries the cheapest routes through the gaps between buildings and builds the one that saves the most escape time for the homes it displaces.",
-  "default_frame": 5
+  "blurb": "Each new road runs from the street, or a road already built, across the block and back to a street or road, so every road is on a loop and none is a dead end. At each step the method tries the cheapest routes through the gaps between buildings and builds the one that saves the most escape time for the homes it displaces."
  },
  "encoding": {
   "road": "#475569",
@@ -365,6 +193,8 @@
   "road_width_m": 7.0,
   "road_conductance": 10.0,
   "gone_share": 0.1,
+  "ghost_fill": "#ece8e2",
+  "ghost_edge": "#7d7468",
   "depth_ramp": [
    "#ffffcc",
    "#ffeda0",

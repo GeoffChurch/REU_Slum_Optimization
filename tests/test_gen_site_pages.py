@@ -1116,6 +1116,14 @@ def _demo_bundle() -> dict[str, Any]:
     return out
 
 
+def _demo_buildout(name: str) -> dict[str, Any]:
+    """One of the bundle's build-out files, as demo.json names it."""
+    import json
+    out: dict[str, Any] = json.loads(
+        (ROOT / "examples" / "demo" / name).read_text(encoding="utf-8"))
+    return out
+
+
 def json_text(bundle: dict[str, Any]) -> str:
     import json
     return json.dumps(bundle)
@@ -1186,7 +1194,8 @@ def test_the_demo_mounts_the_sites_screen_map_untouched_and_the_build_out(demo_b
     or page-following code left to rot."""
     import scripts.gen_site_pages as gsp
 
-    assert re.findall(r'data-widget="([a-z-]+)"', demo_body) == ["screen-map", "build-out"]
+    assert re.findall(r'data-widget="([a-z-]+)"', demo_body) == [
+        "screen-map", "build-out", "build-out-compare"]
     assert gsp._screen_map_figure() in demo_body
     for page in ("explore", "screening", "demo"):
         body = render_page(page)
@@ -1202,37 +1211,67 @@ def test_the_demo_mounts_the_sites_screen_map_untouched_and_the_build_out(demo_b
 
 def test_the_demo_rewrites_its_asset_urls_for_its_served_depth() -> None:
     """docs/demo.md serves at <base>/demo/, url_depth 1: every asset it points at needs one `../`
-    -- the build-out's bundle and fallback sheet, the comparison's plates, the peel figure."""
+    -- each build-out's file and fallback sheet, the peel figure."""
     page = render_page("demo")
     bundle = _demo_bundle()
-    assert 'data-bundle="../assets/demo/demo.json"' in page
-    for name in (bundle["block"]["sheet"]["file"], bundle["comparison"]["ours"]["plate"],
-                 bundle["comparison"]["earlier"]["plate"]):
-        assert f'src="../assets/demo/{name}"' in page, name
+    for name in (bundle["block"]["buildout"], bundle["comparison"]["buildout"]):
+        assert f'data-bundle="../assets/demo/{name}"' in page, name
+        sheet = _demo_buildout(name)["series"][0]["sheet"]["file"]
+        assert f'src="../assets/demo/{sheet}"' in page, sheet
     assert 'src="../assets/multiblock_depth_density/before_depth.png"' in page
     for attr in ("src", "href", "data-bundle", "data-bundle-capetown", "data-bundle-nairobi"):
         assert f'{attr}="assets/' not in page, attr
 
 
-def test_the_demo_ships_the_sheet_and_both_plates_and_no_view_switch(
+def test_the_demo_ships_every_sheet_beside_its_build_out(
         monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """The page block's escape-time sheet (the one view the owner kept) beside the bundle, where
-    build-out.ts's `besideBundle` looks, and the comparison's two plates; no view switch or
-    `view` URL key; the caption says what grey is."""
+    """Each build-out file, and every series' sheet beside it, where build-out.ts's
+    `besideBundle` looks; no view switch or `view` URL key."""
     import scripts.gen_site_pages as gsp
 
     monkeypatch.setattr(gsp, "DOCS", tmp_path)
     monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
-    figure = gsp._demo_build_out()
+    gsp._demo_build_out()
     gsp._demo_compare()
     bundle = _demo_bundle()
-    assert set(bundle["block"]["sheet"]) == {"file", "width", "frame_height", "rows"}
-    for name in (bundle["block"]["sheet"]["file"], bundle["comparison"]["ours"]["plate"],
-                 bundle["comparison"]["earlier"]["plate"]):
+    names = (bundle["block"]["buildout"], bundle["comparison"]["buildout"])
+    assert [len(_demo_buildout(n)["series"]) for n in names] == [1, 2]
+    for name in names:
         assert (tmp_path / "assets" / "demo" / name).is_file(), name
+        for s in _demo_buildout(name)["series"]:
+            assert (tmp_path / "assets" / "demo" / s["sheet"]["file"]).is_file(), s["method"]
     widget = (ROOT / "web" / "src" / "widgets" / "build-out.ts").read_text(encoding="utf-8")
     assert '"view"' not in widget, "the build-out widget still carries a view URL key"
-    assert "Grey is new road" in figure and "destroyed" in figure
+
+
+def test_both_build_out_captions_tell_road_from_a_destroyed_building(demo_body: str) -> None:
+    """Owner, 2026-10-29: a destroyed building is not road. Both build-outs' captions name the
+    two encodings and a damaged home's, and no caption calls a destroyed building grey."""
+    captions = re.findall(r"<figcaption>(.*?)</figcaption>", demo_body, flags=re.S)
+    keyed = [c for c in captions if "Dark slate is new road" in c]
+    assert len(keyed) == 2, captions
+    for c in keyed:
+        assert "a pale footprint with a thin outline is a building the roads destroyed" in c
+        assert "keeps its colour inside the same outline" in c
+    assert not re.search(r"[Gg]rey is|road,? or a destroyed building", demo_body)
+
+
+def test_the_comparison_leads_with_what_the_build_out_shows(demo_body: str) -> None:
+    """The finding over the comparison's slider is read from its build-out: the first of our
+    networks to save as much escape time as topology's whole one, and at what displacement; and
+    each method's stop is said with its reason."""
+    bundle = _demo_bundle()
+    ours, earlier = _demo_buildout(bundle["comparison"]["buildout"])["series"]
+    target = earlier["cells"][-1]["step"]["permeability"]
+    reach = next(c["step"] for c in ours["cells"] if c["step"]["permeability"] >= target)
+    section = demo_body.split("## Our method and the earlier one")[1]
+    takeaway = re.search(r'<p class="sbu-compare__takeaway">([^<]*)</p>', section)
+    assert takeaway is not None
+    assert f"with {reach['displacement']:.0%} of the floor area displaced" in takeaway.group(1)
+    assert f"topology needs {earlier['cells'][-1]['step']['displacement']:.0%}" in takeaway.group(1)
+    short = next(c for c in ours["cells"] if c["kind"] == "short")
+    assert f"stops at {short['step']['displacement']:.0%}, with {short['why']}" in section
+    assert ours["order"] in section and earlier["order"] in section
 
 
 def test_the_screens_two_factors_are_the_blocks_and_multiply_to_its_score(demo_body: str) -> None:
@@ -1331,21 +1370,28 @@ def test_every_big_time_names_its_method_and_says_how_it_was_had(demo_body: str)
     section = demo_body.split("## Our method and the earlier one")[1]
     pairs = re.findall(r'<p class="sbu-compare__head">([^<]*)</p>\s*'
                        r'<p class="sbu-compare__time">([^<]*)', section)
-    assert len(pairs) == 4 and demo_body.count('class="sbu-compare__time"') == 4, pairs
+    assert len(pairs) == 2 and demo_body.count('class="sbu-compare__time"') == 2, pairs
     name = bundle["method"]["name"]
-    assert [h for h, _ in pairs] == [f"Our method: {name}", "Earlier method: topology"] * 2
+    assert [h for h, _ in pairs] == [f"Our method: {name}", "Earlier method: topology"]
     c, b = bundle["comparison"], bundle["block"]
-    assert c["earlier_time"]["kind"] == "measured" and b["topology"]["kind"] == "extrapolated"
-    v, unit = gsp._span(c["earlier_time"]["seconds"])
-    assert pairs[1][1] == f"{v:.3g} {unit}"
+    # On the comparison block the build-out widget heads each plate with its series' label and
+    # whole run time (build-out.ts); the lead sentence states topology's, footnoted.
+    series = _demo_buildout(c["buildout"])["series"]
+    assert [s["label"] for s in series] == [f"Our method: {name}", "Earlier method: topology"]
+    assert c["topology"]["kind"] == "measured" and b["topology"]["kind"] == "extrapolated"
+    assert series[1]["run"] == c["topology"]
+    v, unit = gsp._span(c["topology"]["seconds"])
+    assert re.search(rf"in {v:.3g} {unit}<sup><a [^>]*How this was measured", section)
     lo, hi = sorted((b["topology"]["by_small_s"], b["topology"]["by_top_s"]))
     (vlo, ulo), (vhi, uhi) = gsp._span(lo), gsp._span(hi)
-    assert pairs[3][1] == (f"{vlo:.1f} to {vhi:.1f} {uhi}" if ulo == uhi
-                           else f"{ulo.capitalize()} to {uhi}")
+    assert pairs[1][1].startswith(f"{vlo:.1f} to {vhi:.1f} {uhi}" if ulo == uhi
+                                  else f"{ulo.capitalize()} to {uhi}")
     assert section.count('aria-label="How this was measured"') == 1
     assert section.count('aria-label="How this was estimated"') == 1
-    assert f"displaces {c['earlier']['displacement']:.0%} of the floor area" in section
-    ours = gsp._duration(max(f["seconds"] for f in b["frames"]))
+    whole = series[1]["cells"][-1]["step"]["displacement"]
+    assert f"displaces {whole:.0%} of the floor area" in section
+    [page] = _demo_buildout(b["buildout"])["series"]
+    ours = gsp._duration(page["run"]["seconds"])
     assert ours not in demo_body.split("## Our method and the earlier one")[0], (
         "the page block's run time is back under the build-out")
 
@@ -1358,8 +1404,10 @@ def test_an_unknown_topology_kind_refuses_to_build(monkeypatch: pytest.MonkeyPat
     import scripts.gen_site_pages as gsp
 
     bundle = _demo_bundle()
-    for net in (bundle["comparison"]["ours"], bundle["comparison"]["earlier"]):
-        shutil.copy(ROOT / "examples" / "demo" / net["plate"], tmp_path / net["plate"])
+    for f in (ROOT / "examples" / "demo").glob("buildout_*.json"):
+        shutil.copy(f, tmp_path / f.name)
+    for s in _demo_buildout(bundle["comparison"]["buildout"])["series"]:
+        shutil.copy(ROOT / "examples" / "demo" / s["sheet"]["file"], tmp_path / s["sheet"]["file"])
     monkeypatch.setattr(gsp, "DEMO", tmp_path)
     monkeypatch.setattr(gsp, "ASSETS", tmp_path / "assets")
     (tmp_path / "demo.json").write_text(json.dumps(bundle), encoding="utf-8")

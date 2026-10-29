@@ -1920,28 +1920,101 @@ def _topology_of(t: dict[str, Any]) -> _TopologyTime:
             raise SystemExit(f"examples/demo/demo.json: unknown topology kind {other!r}")
 
 
-def _compare_col(head: str, time: str, sub: str, body: str = "") -> str:
-    """One method's column: its plain heading, its run time large, the line saying how, and
-    (where there is one) its network and scores."""
+def _compare_col(head: str, time: str, sub: str) -> str:
+    """One method's column: its plain heading, its run time large, and the line saying how."""
     return (f'  <div class="sbu-compare__col">\n'
             f'    <p class="sbu-compare__head">{head}</p>\n'
             f'    <p class="sbu-compare__time">{time}</p>\n'
-            f'    <p class="sbu-compare__sub">{sub}</p>\n{body}  </div>\n')
+            f'    <p class="sbu-compare__sub">{sub}</p>\n  </div>\n')
 
 
-def _demo_compare() -> str:
-    """Our method and the earlier one (owner, 2026-10-28): on the comparison block, where topology
-    has run, each method's measured time, its network drawn as the same escape-time plate, and
-    its scores; then the page's own block, where topology's time can only be estimated. Each big
-    time is labelled with its method; footnotes say how topology's were had (`_TopologyTime`)."""
+def _buildout(name: str) -> dict[str, Any]:
+    """One of the bundle's build-out files (demo.json names them): budgets, and per method its
+    sprite sheet and its cell at each budget."""
+    out: dict[str, Any] = json.loads((DEMO / name).read_text(encoding="utf-8"))
+    return out
+
+
+def _plate_key(e: dict[str, Any]) -> str:
+    """What a build-out plate's colours and lines are, in one sentence-run: escape time's ramp,
+    the road, a destroyed building and a damaged home, each its own encoding."""
+    return (f"blue a short way out, red a long one, a line every {e['iso_step']:.0%}. Dark slate "
+            f"is new road, {e['road_width_m']:.0f} m wide; a pale footprint with a thin outline "
+            f"is a building the roads destroyed ({e['gone_share']:.0%} or more of it taken, or "
+            f"cut in two); a home that keeps its colour inside the same outline lost less and is "
+            f"still lived in.")
+
+
+def _build_out_figure(name: str, widget: str, alt: str, caption: str) -> str:
+    """A build-out widget's figure (`web/src/widgets/build-out.ts`): the build-out file and every
+    series' sheet copied beside each other, the widget registered as `widget` (one URL key per
+    name, so two build-outs share a page).
+
+    The fallback is the first series' sprite sheet itself, cropped to the frame the widget opens
+    on by `object-fit`/`object-position` -- no second image to bake or let drift. That crop needs
+    a one-column sheet, so the first series must have one. Marked skip-lightbox: zoomed, it would
+    show the whole sheet. The widget removes it once it has drawn, like every mount point's
+    fallback on this site."""
+    bo = _buildout(name)
+    url = _copy_asset(DEMO / name, "demo")
+    sheets = [_copy_asset(DEMO / s["sheet"]["file"], "demo") for s in bo["series"]]
+    if url is None or None in sheets:
+        return ""
+    first = bo["series"][0]
+    sheet = first["sheet"]
+    if sheet["columns"] != 1:
+        raise SystemExit(f"examples/demo/{name}: the fallback crops the first series' sheet, which "
+                         f"has {sheet['columns']} columns")
+    row = first["cells"][bo["default_step"]]["step"]["row"]
+    crop = 100 * row / (sheet["frames"] - 1)
+    style = (f"width:100%;aspect-ratio:{sheet['width']}/{sheet['frame_height']};"
+             f"object-fit:cover;object-position:50% {crop:.4g}%")
+    attrs = f'data-widget="{widget}" data-bundle="{url}" data-metric-label="{DEMO_METRIC}"'
+    return _figure(sheets[0] or "", alt, caption, attrs=attrs, skip_lightbox=True,
+                   img_style=style)
+
+
+def _demo_build_out() -> str:
+    """The Demo page's build-out: the bundle's method on the block under a budget slider, each
+    budget's escape-time plate and three plots whose dots follow it (one series of
+    `_build_out_figure`).
+
+    The caption says what the plate and the plots show, every number read from the bundle; the
+    widget writes only labels and each budget's own readouts. `data-metric-label` hands it
+    DEMO_METRIC, so the page names L_P in one place."""
     d = _demo()
     if d is None:
         return ""
-    c, b, m = d["comparison"], d["block"], d["method"]
-    name = html.escape(m["name"])
-    plates = [_copy_asset(DEMO / net["plate"], "demo") for net in (c["ours"], c["earlier"])]
-    if None in plates:
+    b, m, e = d["block"], d["method"], d["encoding"]
+    bo = _buildout(b["buildout"])
+    caption = (
+        f"Each home coloured by its escape time, as a share of the 99th-percentile home's with no "
+        f"new road ({bo['escape_scale']:,.0f} model units): {_plate_key(e)} "
+        f"{DEMO_METRIC.capitalize()} is the share of the homes' total escape time the roads "
+        f"remove, 1 − P(roads) / P(no roads): what the rest of this site calls "
+        '<a href="../methodology/permeability/">permeability</a>. Conductance added is how much '
+        f"easier the roads make the ground to cross, in m² of open ground; a road conducts "
+        f"{e['road_conductance']:.0f} times what open ground does.")
+    opening = bo["budgets"][bo["default_step"]]
+    return _build_out_figure(
+        b["buildout"], "build-out",
+        f"Block {b['block_id']}'s homes coloured by escape time, with the roads "
+        f"{html.escape(m['name'])} builds to a {opening:.0%} displacement budget", caption)
+
+
+def _demo_compare() -> str:
+    """Our method and the earlier one (owner, 2026-10-29): on the comparison block, where topology
+    has run, both methods under one budget slider (`_build_out_figure`, two series), headed by
+    what each does there and when one saves as much escape time as the other's whole network;
+    then the page's own block, where topology's time can only be estimated. Each big time is
+    labelled with its method; footnotes say how topology's were had (`_TopologyTime`)."""
+    d = _demo()
+    if d is None:
         return ""
+    c, b, m, e = d["comparison"], d["block"], d["method"], d["encoding"]
+    name = html.escape(m["name"])
+    bo = _buildout(c["buildout"])
+    ours, earlier = bo["series"]
     notes: list[str] = []
 
     def marked(topology: _TopologyTime, value: str) -> str:
@@ -1950,96 +2023,60 @@ def _demo_compare() -> str:
         return (f'{value}<sup><a href="#topology-note-{k}" aria-label="{topology.how}">{k}</a>'
                 f"</sup>")
 
-    def scores(net: dict[str, Any]) -> str:
-        items = [(f"{net['permeability']:.1%}", DEMO_METRIC.capitalize()),
-                 (f"{net['displacement']:.1%}", "Displaced"),
-                 (f"{net['road_km']:.2f} km", "New road")]
-        cells = "".join(f"<div><dt>{t}</dt><dd>{v}</dd></div>" for v, t in items)
-        return f'    <dl class="sbu-compare__scores">{cells}</dl>\n'
-
-    def plate(url: str, net: dict[str, Any], who: str) -> str:
-        return (f'    <img src="{url}" width="{net["width"]}" height="{net["height"]}" alt="Block '
-                f'{c["block_id"]}\'s homes coloured by escape time, with {who}\'s roads">\n')
+    def whole(s: dict[str, Any]) -> dict[str, Any]:
+        """The series' whole network: its last budget's step."""
+        step: dict[str, Any] = s["cells"][-1]["step"]
+        return step
 
     standing = ("the shipped screen's top block" if c["proxy_rank"] == 1
                 else f"rank {c['proxy_rank']:,} under the shipped screen")
-    earlier = _topology_of(c["earlier_time"])
-    t_head, t_sub = earlier.figure(c["ours_seconds"])
-    cols = (_compare_col(f"Our method: {name}", _duration(c["ours_seconds"]),
-                         f"recorded, {html.escape(c['ours_machine'])}",
-                         plate(plates[0] or "", c["ours"], name) + scores(c["ours"]))
-            + _compare_col("Earlier method: topology", marked(earlier, t_head), t_sub,
-                           plate(plates[1] or "", c["earlier"], "topology")
-                           + scores(c["earlier"])))
-    first = (
+    topology = _topology_of(c["topology"])
+    t_head, _ = topology.figure(ours["run"]["seconds"])
+    o_whole, e_whole = whole(ours), whole(earlier)
+    why = next(x["why"] for x in ours["cells"] if x["kind"] == "short")
+    lead = (
         f'<p>On block <code>{c["block_id"]}</code> in {html.escape(c["place"])}: {standing}, '
         f"and at {c['n_buildings']:,} buildings small enough for topology to run at all. "
         f"Topology builds until every parcel touches a road, which here displaces "
-        f"{c['earlier']['displacement']:.0%} of the floor area; "
-        f"{name} stops at its {b['frames'][-1]['budget']:.0%} budget.</p>\n"
-        f'<div class="sbu-compare">\n{cols}</div>\n'
-        f'<p class="sbu-compare__key">Each home coloured by its escape time on this block\'s '
-        f"scale (blue short, red long); grey is road or a destroyed building.</p>")
+        f"{e_whole['displacement']:.0%} of the floor area, in {marked(topology, t_head)}; "
+        f"{name} stops at {o_whole['displacement']:.0%}, with {html.escape(why)}, in "
+        f"{_duration(ours['run']['seconds'])}. Below, both are cut at the same budgets: {name} in "
+        f"{html.escape(ours['order'])}; topology in {html.escape(earlier['order'])}, so only its "
+        f"whole run is timed.</p>\n")
+    # The takeaway: the first of our networks to save as much as topology's whole one, if any.
+    target = e_whole["permeability"]
+    reach = next((x["step"] for x in ours["cells"] if x["step"]["permeability"] >= target), None)
+    takeaway = (
+        f"{name} saves as much escape time as topology's whole network "
+        f"({target:.1%}) with {reach['displacement']:.0%} of the floor area displaced; topology "
+        f"needs {e_whole['displacement']:.0%}." if reach is not None else
+        f"{name}'s whole network saves {o_whole['permeability']:.1%} of the escape time, "
+        f"topology's {target:.1%}.")
+    caption = (
+        f"Drag the budget: both plates and the dots on every plot follow. Each home coloured by "
+        f"its escape time on this block's scale ({bo['escape_scale']:,.0f} model units at the "
+        f"99th-percentile home with no new road): {_plate_key(e)}")
+    figure = _build_out_figure(
+        c["buildout"], "build-out-compare",
+        f"Block {c['block_id']}'s homes coloured by escape time, with the roads {name} builds to "
+        f"a {bo['budgets'][bo['default_step']]:.0%} displacement budget", caption)
+    first = f'{lead}<p class="sbu-compare__takeaway">{takeaway}</p>\n{figure}'
     page_topology = _topology_of(b["topology"])
-    ours = max(f["seconds"] for f in b["frames"])
-    p_head, p_sub = page_topology.figure(ours)
+    page_bo = _buildout(b["buildout"])
+    [page_ours] = page_bo["series"]
+    p_head, p_sub = page_topology.figure(page_ours["run"]["seconds"])
     second = (
         f'<p class="sbu-compare__block">On block <code>{b["block_id"]}</code>, this page\'s '
         f"block:</p>\n"
         f'<div class="sbu-compare">\n'
-        + _compare_col(f"Our method: {name}", _duration(ours),
-                       f"to a {b['frames'][-1]['budget']:.0%} budget, recorded, "
-                       f"{html.escape(b['machine'])}")
+        + _compare_col(f"Our method: {name}", _duration(page_ours["run"]["seconds"]),
+                       f"to a {page_bo['budgets'][-1]:.0%} budget, recorded, "
+                       f"{html.escape(page_ours['run']['machine'])}")
         + _compare_col("Earlier method: topology", marked(page_topology, p_head), p_sub)
         + "</div>")
     foot = "\n".join(f'<p class="sbu-footnote" id="topology-note-{k}"><sup>{k}</sup> {n}</p>'
                      for k, n in enumerate(notes, start=1))
     return f"{first}\n{second}\n{foot}"
-
-
-def _demo_build_out() -> str:
-    """The Demo page's build-out: the bundle's method on the block under a budget slider, each
-    frame's escape-time plate and three plots whose dots follow it
-    (`web/src/widgets/build-out.ts`).
-
-    The fallback is the sprite sheet itself, cropped to the frame the widget opens on by
-    `object-fit`/`object-position` -- no second image to bake or let drift. Marked skip-lightbox:
-    zoomed, it would show the whole sheet, every frame stacked. The widget removes it once it has
-    drawn, like every mount point's fallback on this site.
-
-    The caption says what the plate and the plots show, every number read from the bundle; the
-    widget writes only labels and the frame's own readouts. `data-metric-label` hands it
-    DEMO_METRIC, so the page names L_P in one place."""
-    d = _demo()
-    if d is None:
-        return ""
-    b, m, e = d["block"], d["method"], d["encoding"]
-    bundle_url = _copy_asset(DEMO / "demo.json", "demo")
-    img_url = _copy_asset(DEMO / b["sheet"]["file"], "demo")
-    if bundle_url is None or img_url is None:
-        return ""
-    frames, sheet = b["frames"], b["sheet"]
-    first = frames[m["default_frame"]]
-    crop = 100 * first["row"] / (sheet["rows"] - 1)
-    style = (f"width:100%;aspect-ratio:{sheet['width']}/{sheet['frame_height']};"
-             f"object-fit:cover;object-position:50% {crop:.4g}%")
-    name = html.escape(m["name"])
-    caption = (
-        f"Each home coloured by its escape time, as a share of the 99th-percentile home's with no "
-        f"new road ({b['escape_scale']:,.0f} model units): blue a short way out, red a long one, "
-        f"a line every {e['iso_step']:.0%}. Grey is new road, {e['road_width_m']:.0f} m wide, or "
-        f"a destroyed building ({e['gone_share']:.0%} or more taken, or cut in two). "
-        f"{DEMO_METRIC.capitalize()} is the share of the homes' total escape time the roads "
-        f"remove, 1 − P(roads) / P(no roads): what the rest of this site calls "
-        '<a href="../methodology/permeability/">permeability</a>. Conductance added is how much '
-        f"easier the roads make the ground to cross, in m² of open ground; a road conducts "
-        f"{e['road_conductance']:.0f} times what open ground does.")
-    attrs = (f'data-widget="build-out" data-bundle="{bundle_url}" '
-             f'data-metric-label="{DEMO_METRIC}"')
-    return _figure(img_url,
-                   f"Block {b['block_id']}'s homes coloured by escape time, with the roads "
-                   f"{name} builds to a {first['budget']:.0%} displacement budget",
-                   caption, attrs=attrs, skip_lightbox=True, img_style=style)
 
 
 # Marker name -> producer. A partial's <!-- NAME --> holes are filled from here; tests assert this

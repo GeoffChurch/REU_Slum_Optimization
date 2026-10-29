@@ -14,8 +14,9 @@
      * DEMOMETHOD -- the method's name and how it works, in the bundle's words.
      * DEMOBUILDOUT -- the build-out widget: the budget slider, each frame's escape-time plate,
        and three plots whose dots follow the slider.
-     * DEMOCOMPARE -- our method beside the earlier one: on the comparison block both run, drawn
-       and scored; on this page's block, run times only, topology's estimated.
+     * DEMOCOMPARE -- our method beside the earlier one: on the comparison block both built out
+       under one budget slider (the build-out widget, two series); on this page's block, run
+       times only, topology's estimated.
 
      Edit HERE, never docs/demo.md (it is generated and gitignored). This file is committed but
      excluded from the built site (see exclude_docs in mkdocs.yml).

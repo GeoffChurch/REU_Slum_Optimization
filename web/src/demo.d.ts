@@ -40,29 +40,6 @@ export interface Fire {
   what: string;
   reports: Report[];
 }
-/** One slider position: the network the method has built by the displacement budget `budget`
- * (a share of the homes' floor area; 0 the block with no new road). `displacement` is the share
- * it reaches (at least `budget`; a run's step can overshoot several budgets at once, so several
- * positions can share one network), `road_km` its new road, `permeability` its L_P,
- * `conductance_m2` the conductance it adds (m² of open ground), `seconds` the method's run time
- * to it, `row` its frame's row in the block's sprite sheet. */
-export interface DemoFrame {
-  budget: number;
-  displacement: number;
-  road_km: number;
-  permeability: number;
-  conductance_m2: number;
-  seconds: number;
-  row: number;
-}
-/** The block's escape-time plates as one sprite sheet beside demo.json (`file`): `rows` frames
- * of `width` x `frame_height` px stacked top to bottom. */
-export interface DemoSheet {
-  file: string;
-  width: number;
-  frame_height: number;
-  rows: number;
-}
 /** One recorded topology run: its block, building count and seconds. */
 export interface Timed {
   block: string;
@@ -106,11 +83,9 @@ export interface DemoTopologyMeasured {
 }
 /** The block the page follows: its id, buildings, place in words, centroid and a Google Maps
  * link; whether it is plainly an informal settlement on the ground (Block's), whatever the
- * survey (`proxy.informal`) says; the screens' verdicts on it; the fires reported near it; the
- * method's build-out on it (its frames, its plates, the escape-time scale -- the model's units
- * at the block's plain baseline's 99th-percentile home, 100% on its plates -- and where it
- * ran); and the original topology algorithm's run time on it, measured or extrapolated
- * (`kind`). */
+ * survey (`proxy.informal`) says; the screens' verdicts on it; the fires reported near it; its
+ * build-out's file (`buildout`); and the original topology algorithm's run time on it,
+ * measured or extrapolated (`kind`). */
 export interface DemoBlock {
   block_id: string;
   n_buildings: number;
@@ -122,39 +97,20 @@ export interface DemoBlock {
   proxy: DemoProxy;
   peel: DemoPeel;
   fires: Fire[];
-  frames: DemoFrame[];
-  sheet: DemoSheet;
-  escape_scale: number;
-  machine: string;
+  buildout: string;
   topology: DemoTopologyExtrapolated | DemoTopologyMeasured;
 }
-/** One method's network on the compared block, drawn as the page's escape-time plate on that
- * block's scale (`plate`, beside demo.json, `width` x `height` px), and its scores: the share of
- * floor area it displaces, its L_P and its new road. */
-export interface DemoNetwork {
-  plate: string;
-  width: number;
-  height: number;
-  displacement: number;
-  permeability: number;
-  road_km: number;
-}
 /** The methods compared on a block where topology has run: the block (id, buildings, place,
- * Maps link, its rank under the shipped screen, its escape-time scale), the method's full
- * build-out (`ours`, its run time and where it ran) and topology's network (`earlier`, its run
- * time measured there). */
+ * Maps link, its rank under the shipped screen), its build-out's file (`buildout`: our method
+ * and topology on one slider), and topology's measured run there. */
 export interface DemoComparison {
   block_id: string;
   n_buildings: number;
   place: string;
   maps_url: string;
   proxy_rank: number;
-  escape_scale: number;
-  ours: DemoNetwork;
-  ours_seconds: number;
-  ours_machine: string;
-  earlier: DemoNetwork;
-  earlier_time: DemoTopologyMeasured;
+  buildout: string;
+  topology: DemoTopologyMeasured;
 }
 /** The screens, city-wide: the shipped proxy (`metric`) at its `floor`, its `pool`, and that
  * pool's precision and recall against the City's survey, over `n_blocks`; and the two-stage
@@ -169,19 +125,19 @@ export interface DemoScreen {
   peel_metric: string;
   peel_keep_n: number;
 }
-/** The method the page builds out: its reader-facing name, how it works, and the slider
- * position the page opens on. */
+/** The method the page builds out: its reader-facing name and how it works. */
 export interface DemoMethod {
   name: string;
   blurb: string;
-  default_frame: number;
 }
 /** The plates' colours and the quantities their legend states. `escape_ramp` maps escape time
  * from 0 to 100% of a block's `escape_scale`, short blue to long red, with an isochrone every
- * `iso_step` of it. `road` is the grey of a new road's corridor and of a wholly destroyed
- * building, which a building is once `gone_share` of it is gone; roads are `road_width_m` wide
- * and conduct `road_conductance` times what open ground does. The block's edge: `street`
- * (where people walk out), `edge` (a railway's or a ditch's line), `water` (a ditch).
+ * `iso_step` of it. `road` is a new road's corridor, `road_width_m` wide, conducting
+ * `road_conductance` times what open ground does. A wholly destroyed building -- once
+ * `gone_share` of it is gone, or a road cuts it in two -- is a ghost (`ghost_fill`, outlined
+ * `ghost_edge`); a partly damaged one keeps its escape-time colour and the same outline. The
+ * block's edge: `street` (where people walk out), `edge` (a railway's or a ditch's line),
+ * `water` (a ditch).
  * `depth_ramp` is the peel figure's (reblock.render's depth colouring, ring 1 to the deepest),
  * evenly spaced stops. */
 export interface DemoEncoding {
@@ -194,6 +150,8 @@ export interface DemoEncoding {
   road_width_m: number;
   road_conductance: number;
   gone_share: number;
+  ghost_fill: string;
+  ghost_edge: string;
   depth_ramp: string[];
 }
 /** The Demo page's numbers: the block it follows, the methods compared on another, the
@@ -203,5 +161,72 @@ export interface DemoBundle {
   comparison: DemoComparison;
   screen: DemoScreen;
   method: DemoMethod;
+  encoding: DemoEncoding;
+}
+/** A series' escape-time plates as one sprite sheet beside its build-out file (`file`):
+ * `frames` frames of `width` x `frame_height` px in `columns` columns, read across then down
+ * (a step's `row` is its frame's index), the block with no new road first. Columns keep a long
+ * series under WebP's 16383 px. */
+export interface DemoSheet {
+  file: string;
+  width: number;
+  frame_height: number;
+  frames: number;
+  columns: number;
+}
+/** A method's whole run time, recorded by its own run, and where it ran in words. */
+export interface DemoRecorded {
+  kind: "recorded";
+  seconds: number;
+  machine: string;
+}
+/** A network the build-out shows: the share of the homes' floor area it displaces, its new
+ * road, its L_P (`permeability`), the conductance it adds (m² of open ground), the method's run
+ * time to it (`seconds`; None where the method has no time to a stretch of its build order --
+ * topology builds its whole network at once), and its frame's row in the series' sheet. */
+export interface DemoStep {
+  displacement: number;
+  road_km: number;
+  permeability: number;
+  conductance_m2: number;
+  seconds: number | null;
+  row: number;
+}
+/** The budget met: the shortest stretch of the method's build order that displaces at least
+ * the budget (`step`; one road can overshoot several budgets, so several can share a step). */
+export interface DemoMet {
+  kind: "met";
+  step: DemoStep;
+}
+/** The method stopped below the budget: `step` is its whole network, displacing less, and
+ * `why` says why it stopped, in words. */
+export interface DemoShort {
+  kind: "short";
+  step: DemoStep;
+  why: string;
+}
+/** One method on the build-out: its name, the label the page heads it with, the order its
+ * roads are cut in for the budgets (`order`, in words), its plates, its whole run time
+ * (recorded, or measured for topology), and what it shows at each of the build-out's budgets. */
+export interface DemoSeries {
+  method: string;
+  label: string;
+  order: string;
+  sheet: DemoSheet;
+  run: DemoRecorded | DemoTopologyMeasured;
+  cells: (DemoMet | DemoShort)[];
+}
+/** One block's build-out under one budget slider: its escape-time scale (the model's units at
+ * its plain baseline's 99th-percentile home, 100% on every plate), the slider's budgets (0 the
+ * block with no new road), the position it opens on, and one series per method shown, each
+ * with a cell per budget; and the plates' encoding (DemoBundle's, repeated so the widget needs
+ * no second file). Written beside demo.json as its own file, which the page's build-out widget
+ * fetches. */
+export interface DemoBuildOut {
+  block_id: string;
+  escape_scale: number;
+  budgets: number[];
+  default_step: number;
+  series: DemoSeries[];
   encoding: DemoEncoding;
 }

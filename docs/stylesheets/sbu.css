@@ -944,6 +944,7 @@ body,
    The Demo page's build-out and peel figures take the column instead; the Demo page hides its
    table of contents to make that column wide enough for the plate and plots side by side. */
 .md-typeset figure[data-widget="build-out"],
+.md-typeset figure[data-widget="build-out-compare"],
 .md-typeset figure.sbu-peel {
   width: 100%;
 }
@@ -951,6 +952,7 @@ body,
 /* Their captions keep the measure but sit at the column's left edge, under the figure they
    describe, rather than centred in a column that is now wider than the measure. */
 .md-typeset figure[data-widget="build-out"] > figcaption,
+.md-typeset figure[data-widget="build-out-compare"] > figcaption,
 .md-typeset figure.sbu-peel > figcaption {
   margin-left: 0;
 }
@@ -1175,6 +1177,107 @@ body,
   stroke-width: 2.5px;
 }
 
+/* Several methods on one slider (the comparison): the plates side by side at every width -- the
+   point is to see them at once -- with the plots beneath, laid across by the widget when the
+   figure is wide enough (it sets the plots' columns, since it also sizes each chart to them). */
+.sbu-buildout--multi .sbu-buildout__stage {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.sbu-buildout__cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.sbu-buildout--multi .sbu-buildout__cols {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem 1.4rem;
+}
+
+.sbu-buildout__col {
+  min-width: 0;
+}
+
+.md-typeset .sbu-buildout__head {
+  margin: 0;
+  font-size: var(--sbu-step--1);
+  font-weight: 700;
+  color: var(--sbu-ink-muted);
+}
+
+.md-typeset .sbu-buildout__time {
+  margin: 0;
+  font-family: var(--sbu-display);
+  font-size: var(--sbu-step-2);
+  font-weight: 600;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Two lines' height whichever wraps, so the two plates under them start level. */
+.md-typeset .sbu-buildout__sub {
+  min-height: 2.7em;
+  margin: 0.1rem 0 0.5rem;
+  font-size: var(--sbu-step--1);
+  line-height: 1.35;
+  color: var(--sbu-ink-muted);
+}
+
+.md-typeset .sbu-buildout--multi .sbu-buildout__read {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.md-typeset .sbu-buildout--multi .sbu-buildout__read dd {
+  white-space: normal;
+}
+
+/* Each method's colour on the plots: ours the brand red, the earlier method the ink. Curves, their
+   points and the moving dot all paint in `currentColor`. */
+.sbu-buildout .sbu-series-0 {
+  color: var(--sbu-red-ink);
+}
+
+.sbu-buildout .sbu-series-1 {
+  color: var(--sbu-ink);
+}
+
+/* Laid across, each plot's heading may wrap to a different height: the charts sit level at the
+   bottom of equal boxes. */
+.sbu-buildout--multi .sbu-buildout__plot {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.sbu-buildout--multi .sbu-buildout__chart .sbu-curve {
+  opacity: 0.85;
+}
+
+.sbu-buildout--multi .sbu-buildout__chart .sbu-cursor {
+  fill: currentColor;
+}
+
+.sbu-buildout__series {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.3rem;
+  grid-column: 1 / -1;
+  font-size: var(--sbu-step--1);
+  font-weight: 700;
+}
+
+.sbu-buildout__serie::before {
+  content: "";
+  display: inline-block;
+  width: 1.4rem;
+  height: 3px;
+  margin-right: 0.45rem;
+  vertical-align: middle;
+  background: currentColor;
+}
+
 /* ---------------------------------------------------------------- the Demo's peel figure */
 
 /* The flagship run's depth figure whole, and its deep core magnified beside it: the same image,
@@ -1337,7 +1440,12 @@ body,
   font-variant-numeric: tabular-nums;
 }
 
-.md-typeset .sbu-compare__key,
+/* The comparison's one-line finding, read from the build-out: the sentence the figure argues. */
+.md-typeset .sbu-compare__takeaway {
+  font-weight: 700;
+  max-width: var(--sbu-measure);
+}
+
 .md-typeset .sbu-compare__block {
   font-size: var(--sbu-step--1);
   color: var(--sbu-ink-muted);

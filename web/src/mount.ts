@@ -157,8 +157,11 @@ import { drawRoad, DRAW_ROAD_URL } from "./widgets/draw-road.js";
 register("draw-road", drawRoad, DRAW_ROAD_URL);
 // Seventh widget, same shape, same reason -- registered HERE, after REGISTRY exists, never from
 // inside the widget module (see the paragraph above).
-import { buildOut, BUILD_OUT_URL } from "./widgets/build-out.js";
+import { buildOut, BUILD_OUT_COMPARE_URL, BUILD_OUT_URL } from "./widgets/build-out.js";
 register("build-out", buildOut, BUILD_OUT_URL);
+// The same widget under a second name, so a page carrying two build-outs (the Demo's block, and
+// the methods compared on another) gives each slider its own URL key: one codec per name.
+register("build-out-compare", buildOut, BUILD_OUT_COMPARE_URL);
 
 // DOMContentLoaded fires once per full page load. That is sufficient only because this project's
 // mkdocs.yml does not enable Material's navigation.instant feature (confirmed absent as of this
