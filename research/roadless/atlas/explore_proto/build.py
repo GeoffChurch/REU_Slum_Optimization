@@ -396,7 +396,7 @@ PAGE = Block("ZAF.9.3.1_1_5810", "the Bloekombos and Wallacedene area of Kraaifo
 # on one thread (atlas/topology_run.py, 2026-10-29). Philippi: OpenStreetMap's suburb at its
 # centre (Nominatim's reverse lookup, 2026-10-28); about 165 m across, so a closer zoom.
 # A method that builds one road at a time is cut in that order.
-OWN_ORDER = "the order it built them in"
+OWN_ORDER = "the order it built its roads"
 # Each method cut into the shortest prefixes reaching every budget (atlas/buildout.py, 2026-10-29):
 # Loop roads in its own build order, topology -- which keeps none -- in common.canonical_order.
 COMPARED = Compared(
@@ -404,8 +404,8 @@ COMPARED = Compared(
     ours=Grid(f"{PATHS[:-len('.D0.15')]}.D0.91.v2", stem="loop", order=OWN_ORDER,
               stops_because="no loop left to add"),
     earlier=Grid("topology.a10.s0.w7.canonical", stem="topology",
-                 order=("drainage first, then each road after the roads that join it to the "
-                        "street (topology keeps no build order of its own)"),
+                 order=("a standard order, since it keeps none of its own: drainage first, "
+                        "then each road after the roads that join it to the street"),
                  stops_because="its network is complete"))
 
 
