@@ -22,9 +22,8 @@
  "default_step": 5,
  "series": [
   {
-   "method": "Loop roads",
-   "label": "Our method: Loop roads",
-   "order": "the order it built its roads",
+   "method": "Shock Reblock",
+   "label": "Our method: Shock Reblock",
    "sheet": {
     "file": "loop_ZAF.9.3.1_1_5810.webp",
     "width": 800,

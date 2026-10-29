@@ -20,6 +20,7 @@ on:
       - "src/reblock/**"
       - "pyproject.toml"
       - "mkdocs.yml"
+      - "hooks/**"
       - ".github/workflows/deploy-site.yml"
   workflow_dispatch:
 

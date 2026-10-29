@@ -150,9 +150,14 @@
    "kind": "measured",
    "alpha": 10,
    "n_buildings": 638,
-   "seconds": 6762.479218959808,
+   "seconds": 6818.354460954666,
    "machine": "one thread on a workstation CPU (Intel Xeon w7-3455)",
    "displacement": 0.9066202515723024,
+   "setup_s": 3.4,
+   "first_road_s": 2534.9,
+   "second_road_s": 5674.2,
+   "n_rest": 285,
+   "rest_median_s": 0.63,
    "fit_central_s": 7553.2562910126035,
    "fit_runs": 6
   }
@@ -168,8 +173,8 @@
   "peel_keep_n": 1000
  },
  "method": {
-  "name": "Loop roads",
-  "blurb": "Each new road runs from the street, or a road already built, across the block and back to a street or road, so every road is on a loop and none is a dead end. At each step the method tries the cheapest routes through the gaps between buildings and builds the one that saves the most escape time for the homes it displaces."
+  "name": "Shock Reblock",
+  "blurb": "Each new road runs from the street, or a road already built, across the block and back to a street or road. At each step the method tries the cheapest routes through the gaps between buildings and builds the one that saves the most escape time for the homes it displaces. Named for thermal-shock cracking: as a quenched ceramic cracks inward from its cold surface and each crack ends on another, each new road here runs in from the street toward the homes with the longest way out and joins the network at both ends, so every road is on a loop."
  },
  "encoding": {
   "road": "#475569",
@@ -206,5 +211,18 @@
    "#bb0026",
    "#800026"
   ]
+ },
+ "topology_port": {
+  "port": "ff74af2",
+  "original": "5972772",
+  "n_blocks": 11,
+  "n_min": 20,
+  "n_max": 150,
+  "speedup_min": 1.27,
+  "speedup_median": 1.84,
+  "speedup_max": 2.38,
+  "same_networks": true,
+  "exponent": 0.27,
+  "n_failed": 2
  }
 }

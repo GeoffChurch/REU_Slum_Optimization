@@ -66,10 +66,12 @@ export interface DemoTopologyExtrapolated {
   small_exponent: number;
   top_exponent: number;
 }
-/** The original topology algorithm run on the block itself, once, at `alpha`, on one thread
- * (atlas/topology_run.py): its wall time, where it ran in words, and the share of the homes'
- * floor area its network displaces (it builds until every parcel touches a road); beside it the
- * six-run fit's time at this block's size (`fit_central_s`, from `fit_runs` runs), which the
+/** Topology (our port) run on the block itself at `alpha`, on one thread, watched as it built
+ * (atlas/topology_order.py): its wall time, where it ran in words, and the share of the homes'
+ * floor area its network displaces (it builds until every parcel touches a road); where the
+ * time went -- setup (`setup_s`), the first and second roads' landing times since the start,
+ * how many roads came after them and the median time each took; and beside it the six-run
+ * fit's time at this block's size (`fit_central_s`, from `fit_runs` runs), which the
  * measurement checks as a further point. */
 export interface DemoTopologyMeasured {
   kind: "measured";
@@ -78,6 +80,11 @@ export interface DemoTopologyMeasured {
   seconds: number;
   machine: string;
   displacement: number;
+  setup_s: number;
+  first_road_s: number;
+  second_road_s: number;
+  n_rest: number;
+  rest_median_s: number;
   fit_central_s: number;
   fit_runs: number;
 }
@@ -154,14 +161,35 @@ export interface DemoEncoding {
   ghost_edge: string;
   depth_ramp: string[];
 }
+/** Topology's run times on the page are our optimized port's (`port`, a commit of
+ * GeoffChurch's topology fork); the original (`original`, the last commit before the
+ * performance changes) timed against it on `n_blocks` blocks of `n_min` to `n_max` buildings:
+ * how many times as long the original took (least, median, most), whether every network was
+ * the same, the slope of log speed-up on log n (`exponent`), and how many blocks failed in both
+ * and are left out (atlas/topology_speed/table.csv). */
+export interface DemoPortSpeed {
+  port: string;
+  original: string;
+  n_blocks: number;
+  n_min: number;
+  n_max: number;
+  speedup_min: number;
+  speedup_median: number;
+  speedup_max: number;
+  same_networks: boolean;
+  exponent: number;
+  n_failed: number;
+}
 /** The Demo page's numbers: the block it follows, the methods compared on another, the
- * screens, the method, and the plates' encoding. */
+ * screens, the method, the plates' encoding, and how topology's times relate to the original
+ * algorithm's (`topology_port`). */
 export interface DemoBundle {
   block: DemoBlock;
   comparison: DemoComparison;
   screen: DemoScreen;
   method: DemoMethod;
   encoding: DemoEncoding;
+  topology_port: DemoPortSpeed;
 }
 /** A series' escape-time plates as one sprite sheet beside its build-out file (`file`):
  * `frames` frames of `width` x `frame_height` px in `columns` columns, read across then down
@@ -182,14 +210,13 @@ export interface DemoRecorded {
 }
 /** A network the build-out shows: the share of the homes' floor area it displaces, its new
  * road, its L_P (`permeability`), the conductance it adds (m² of open ground), the method's run
- * time to it (`seconds`; None where the method has no time to a stretch of its build order --
- * topology builds its whole network at once), and its frame's row in the series' sheet. */
+ * time to it since the run began (`seconds`), and its frame's row in the series' sheet. */
 export interface DemoStep {
   displacement: number;
   road_km: number;
   permeability: number;
   conductance_m2: number;
-  seconds: number | null;
+  seconds: number;
   row: number;
 }
 /** The budget met: the shortest stretch of the method's build order that displaces at least
@@ -205,13 +232,12 @@ export interface DemoShort {
   step: DemoStep;
   why: string;
 }
-/** One method on the build-out: its name, the label the page heads it with, the order its
- * roads are cut in for the budgets (`order`, in words), its plates, its whole run time
- * (recorded, or measured for topology), and what it shows at each of the build-out's budgets. */
+/** One method on the build-out: its name, the label the page heads it with, its plates, its
+ * whole run time (recorded, or measured for topology), and what it shows at each of the
+ * build-out's budgets, each cut in the order the method built its roads. */
 export interface DemoSeries {
   method: string;
   label: string;
-  order: string;
   sheet: DemoSheet;
   run: DemoRecorded | DemoTopologyMeasured;
   cells: (DemoMet | DemoShort)[];

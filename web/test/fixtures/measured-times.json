@@ -1,0 +1,12 @@
+{
+ "about": "A measured run time as the Demo page states it, the generator (scripts/gen_site_pages.py _measured_time) and the build-out widget (web/src/widgets/build-out.ts measuredTime) alike: three significant figures in the largest unit it is at least one and a half of. Both test suites check their formatter against these cases, so the two cannot drift apart.",
+ "cases": [
+  [3.2, "3.2 seconds"],
+  [56.0, "56 seconds"],
+  [90.0, "1.5 minutes"],
+  [600.0, "10 minutes"],
+  [6762.479, "1.88 hours"],
+  [6818.354, "1.89 hours"],
+  [1234567.0, "14.3 days"]
+ ]
+}

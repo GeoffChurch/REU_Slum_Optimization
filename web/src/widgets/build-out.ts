@@ -58,11 +58,25 @@ const capital = (w: string): string => w.charAt(0).toUpperCase() + w.slice(1);
 const SPANS = [["centuries", 100 * 3.156e7], ["years", 3.156e7], ["months", 2.63e6],
                ["days", 86400], ["hours", 3600], ["minutes", 60]] as const;
 
-/** A run time in the largest unit it is at least one and a half of, as the page's generator
- * states run times (gen_site_pages.py `_span`), so the widget and the page agree. */
-export function duration(s: number): string {
-  const [v, unit] = SPANS.reduce<readonly [number, string] | null>(
+/** A run time as (value, unit) in the largest unit it is at least one and a half of:
+ * gen_site_pages.py's `_span`. */
+function span(s: number): readonly [number, string] {
+  return SPANS.reduce<readonly [number, string] | null>(
     (got, [u, len]) => got ?? (s >= 1.5 * len ? [s / len, u] : null), null) ?? [s, "seconds"];
+}
+
+/** A measured whole run's time, to three figures (1.89 hours): gen_site_pages.py's
+ * `_measured_time`, so the column's heading and the page's prose state one run alike
+ * (web/test/fixtures/measured-times.json holds the cases both are tested against). */
+export function measuredTime(s: number): string {
+  const [v, unit] = span(s);
+  return `${Number(v.toPrecision(3))} ${unit}`;
+}
+
+/** Any other run time, to two figures below ten (42 minutes, 1.6 hours): gen_site_pages.py's
+ * `_duration`, so the widget and the page agree. */
+export function duration(s: number): string {
+  const [v, unit] = span(s);
   return `${v >= 10 ? v.toFixed(0) : v.toFixed(1)} ${unit}`;
 }
 
@@ -292,10 +306,12 @@ function column(s: DemoSeries, src: string, metric: string, headed: boolean,
   const col = div("sbu-buildout__col");
   if (headed) {
     const how = s.run.kind === "recorded" ? "recorded" : "measured";
-    // The heading's time is the whole run's; a series with no time to its steps (topology,
-    // whose prefixes are not its own build order) says so in its readouts.
+    // The heading's time is the whole run's; each step's "Built in" is the same run's time to it.
     col.append(para("sbu-buildout__head", s.label),
-               para("sbu-buildout__time", duration(s.run.seconds)),
+               // A measured run as the page's prose states it (1.89 hours), a recorded one as
+               // the page states ours.
+               para("sbu-buildout__time", s.run.kind === "measured"
+                 ? measuredTime(s.run.seconds) : duration(s.run.seconds)),
                para("sbu-buildout__sub", `whole run, ${how}, ${s.run.machine}`));
   }
   const plate = div("sbu-buildout__plate");
@@ -465,9 +481,8 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
       dDisp!.textContent = pct(f.displacement, 1);
       dRoad!.textContent = km(f.road_km);
       dPerm!.textContent = pct(f.permeability, 1);
-      // A series with no time to its steps (topology: its prefixes are not its own build order)
-      // has only its whole run's, in its heading.
-      dTime!.textContent = f.seconds === null ? "whole run only" : duration(f.seconds);
+      // Since the run began, never an average: a run's early roads can take most of it.
+      dTime!.textContent = duration(f.seconds);
       c.note.textContent = cellNote(b.budgets, c.series, k);
     });
     // Each item's words held together (no-break spaces), so a narrow bar wraps between items

@@ -121,7 +121,7 @@ strict = true
 # The whole scripts/ directory, not a hand-picked list of its files: a script left off a list rots
 # where nobody sees it. This is the ONE list of what the gate checks: the Makefile's `typecheck-py`
 # passes mypy no file arguments, because any it passed would override this list.
-files = ["src", "tests", "scripts", "web/src/py/solve.py"]
+files = ["src", "tests", "scripts", "hooks", "web/src/py/solve.py"]
 # No `exclude`: the directory walk checks every file it finds. tests/test_typecheck_config.py pins
 # that, so skipping a file is a decision rather than a regex accident.
 # topology is installed via a PEP 660 "strict" editable install, whose .pth
