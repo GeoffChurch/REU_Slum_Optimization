@@ -186,7 +186,7 @@ test("a series with no time to its steps says its time is the whole run's", asyn
 
 test("a network shared by several budgets is one dot, and the note says whose it is",
      async () => {
-  // Loop roads' first loop overshoots several budgets: they share its network.
+  // Our method's first loop overshoots several budgets: they share its network.
   const { host } = await compared();
   const s = COMPARED.series[0]!;
   const k = s.cells.findIndex((c, j) => j > 0 && c.kind === "met"

@@ -1778,7 +1778,8 @@ def _demo_peel() -> str:
     caption = (
         f"The slower screen's measure of the same block: one Voronoi parcel per building, shaded "
         f"by how many rings of parcels lie between it and the street. The deepest home is {rings} "
-        f"rings in (right, magnified). Depth times density puts this block at rank "
+        f"rings in; the outlined square is shown magnified in the second view. Depth times "
+        f"density puts this block at rank "
         f"{b['peel']['rank']:,} of the shipped screen's top {top:,}.")
     return (
         f'<figure class="sbu-peel">\n'
@@ -1920,6 +1921,29 @@ def _topology_of(t: dict[str, Any]) -> _TopologyTime:
             raise SystemExit(f"examples/demo/demo.json: unknown topology kind {other!r}")
 
 
+# Topology's name wherever its time appears: the times are our optimized port's, not the original's
+# (`_port_note`); the comparison's build-out heads its column the same way, from the bundle.
+TOPOLOGY_LABEL = "topology (our optimized port)"
+
+
+def _port_note(p: dict[str, Any]) -> str:
+    """The footnote on whose topology the times are: our port's, and how much longer the original
+    took on the blocks both were timed on (examples/demo/demo.json `topology_port`)."""
+    same = "the same networks" if p["same_networks"] else "networks that differ"
+    def count(n: int) -> str:
+        return _COUNT_WORDS.get(n, str(n)).lower()
+
+    return (f"Topology's times here are our optimized port's (commit <code>{p['port']}</code>), "
+            f"not the original's. On {count(p['n_blocks'])} blocks of {p['n_min']} to {p['n_max']} "
+            f"buildings the original (commit <code>{p['original']}</code>) took "
+            f"{p['speedup_min']:.1f} to {p['speedup_max']:.1f} times as long, about "
+            f"{p['speedup_median']:.0f}× at the median, building {same}; "
+            f"{count(p['n_failed'])} more blocks failed in both versions and are left out. The "
+            f"gap seems to grow with block size, roughly as "
+            f"n<sup>{p['exponent']:.2f}</sup>, so on blocks this size the original would likely "
+            f"be slower still.")
+
+
 def _compare_col(head: str, time: str, sub: str) -> str:
     """One method's column: its plain heading, its run time large, and the line saying how."""
     return (f'  <div class="sbu-compare__col">\n'
@@ -2017,11 +2041,13 @@ def _demo_compare() -> str:
     ours, earlier = bo["series"]
     notes: list[str] = []
 
-    def marked(topology: _TopologyTime, value: str) -> str:
-        notes.append(topology.note())
+    def marked(how: str, note: str, value: str) -> str:
+        notes.append(note)
         k = len(notes)
-        return (f'{value}<sup><a href="#topology-note-{k}" aria-label="{topology.how}">{k}</a>'
-                f"</sup>")
+        return f'{value}<sup><a href="#topology-note-{k}" aria-label="{how}">{k}</a></sup>'
+
+    def timed(topology: _TopologyTime, value: str) -> str:
+        return marked(topology.how, topology.note(), value)
 
     def whole(s: dict[str, Any]) -> dict[str, Any]:
         """The series' whole network: its last budget's step."""
@@ -2033,12 +2059,13 @@ def _demo_compare() -> str:
     topology = _topology_of(c["topology"])
     t_head, _ = topology.figure(ours["run"]["seconds"])
     o_whole, e_whole = whole(ours), whole(earlier)
+    port = marked("Which topology this is", _port_note(d["topology_port"]), "our optimized port")
     why = next(x["why"] for x in ours["cells"] if x["kind"] == "short")
     lead = (
         f'<p>On block <code>{c["block_id"]}</code> in {html.escape(c["place"])}: {standing}, '
         f"and at {c['n_buildings']:,} buildings small enough for topology to run at all. "
-        f"Topology builds until every parcel touches a road, which here displaces "
-        f"{e_whole['displacement']:.0%} of the floor area, in {marked(topology, t_head)}; "
+        f"Topology, run as {port}, builds until every parcel touches a road, which here displaces "
+        f"{e_whole['displacement']:.0%} of the floor area, in {timed(topology, t_head)}; "
         f"{name} stops at {o_whole['displacement']:.0%}, with {html.escape(why)}, in "
         f"{_duration(ours['run']['seconds'])}. Below, both are cut at the same budgets: {name} in "
         f"{html.escape(ours['order'])}; topology in {html.escape(earlier['order'])}, so only its "
@@ -2072,7 +2099,7 @@ def _demo_compare() -> str:
         + _compare_col(f"Our method: {name}", _duration(page_ours["run"]["seconds"]),
                        f"to a {page_bo['budgets'][-1]:.0%} budget, recorded, "
                        f"{html.escape(page_ours['run']['machine'])}")
-        + _compare_col("Earlier method: topology", marked(page_topology, p_head), p_sub)
+        + _compare_col(f"Earlier method: {TOPOLOGY_LABEL}", timed(page_topology, p_head), p_sub)
         + "</div>")
     foot = "\n".join(f'<p class="sbu-footnote" id="topology-note-{k}"><sup>{k}</sup> {n}</p>'
                      for k, n in enumerate(notes, start=1))

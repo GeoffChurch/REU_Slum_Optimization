@@ -1372,12 +1372,14 @@ def test_every_big_time_names_its_method_and_says_how_it_was_had(demo_body: str)
                        r'<p class="sbu-compare__time">([^<]*)', section)
     assert len(pairs) == 2 and demo_body.count('class="sbu-compare__time"') == 2, pairs
     name = bundle["method"]["name"]
-    assert [h for h, _ in pairs] == [f"Our method: {name}", "Earlier method: topology"]
+    assert [h for h, _ in pairs] == [f"Our method: {name}",
+                                     f"Earlier method: {gsp.TOPOLOGY_LABEL}"]
     c, b = bundle["comparison"], bundle["block"]
     # On the comparison block the build-out widget heads each plate with its series' label and
     # whole run time (build-out.ts); the lead sentence states topology's, footnoted.
     series = _demo_buildout(c["buildout"])["series"]
-    assert [s["label"] for s in series] == [f"Our method: {name}", "Earlier method: topology"]
+    assert [s["label"] for s in series] == [f"Our method: {name}",
+                                            f"Earlier method: {gsp.TOPOLOGY_LABEL}"]
     assert c["topology"]["kind"] == "measured" and b["topology"]["kind"] == "extrapolated"
     assert series[1]["run"] == c["topology"]
     v, unit = gsp._span(c["topology"]["seconds"])
@@ -1394,6 +1396,51 @@ def test_every_big_time_names_its_method_and_says_how_it_was_had(demo_body: str)
     ours = gsp._duration(page["run"]["seconds"])
     assert ours not in demo_body.split("## Our method and the earlier one")[0], (
         "the page block's run time is back under the build-out")
+
+
+def test_topology_is_named_as_our_port_with_the_originals_times_footnoted(
+        demo_body: str) -> None:
+    """Owner, 2026-10-29: the site's topology times are our optimized port's. Every heading over a
+    topology time says so, and one footnote gives the original's times against it, read from the
+    bundle (atlas/topology_speed/table.csv through build.py)."""
+    import scripts.gen_site_pages as gsp
+
+    p = _demo_bundle()["topology_port"]
+    section = demo_body.split("## Our method and the earlier one")[1]
+    heads = re.findall(r'<p class="sbu-compare__head">([^<]*)</p>', section)
+    assert [h for h in heads if "topology" in h] == [f"Earlier method: {gsp.TOPOLOGY_LABEL}"]
+    assert section.count('aria-label="Which topology this is"') == 1
+    note = re.search(r'<p class="sbu-footnote" id="topology-note-1">(.*?)</p>', section)
+    assert note is not None and "our optimized port" in note.group(1)
+    for fact in (f"<code>{p['port']}</code>", f"<code>{p['original']}</code>",
+                 f"{p['n_min']} to {p['n_max']} buildings",
+                 f"{p['speedup_min']:.1f} to {p['speedup_max']:.1f} times as long",
+                 f"n<sup>{p['exponent']:.2f}</sup>"):
+        assert fact in note.group(1), fact
+
+
+def test_the_method_is_named_and_its_name_explained(demo_body: str) -> None:
+    """Owner, 2026-10-29: the method is "Shock Reblock", its description closing on why, in the
+    coordinator's sentence verbatim; the plan keys stay as they are."""
+    m = _demo_bundle()["method"]
+    assert m["name"] == "Shock Reblock"
+    assert m["blurb"].endswith(
+        "Named for thermal-shock cracking: as a quenched ceramic cracks inward from its cold "
+        "surface and each crack ends on another, each new road here runs in from the street "
+        "toward the homes with the longest way out and joins the network at both ends, so every "
+        "road is on a loop.")
+    assert "Loop roads" not in demo_body
+    for name in ("buildout_ZAF.9.3.1_1_5810.json", "buildout_ZAF.9.3.1_1_41785.json"):
+        assert _demo_buildout(name)["series"][0]["label"] == "Our method: Shock Reblock"
+
+
+def test_the_peel_caption_reads_in_either_layout(demo_body: str) -> None:
+    """The magnified view sits right of the whole on a wide screen and below it on a phone, so the
+    caption names neither side."""
+    caption = re.search(r'<figure class="sbu-peel">.*?<figcaption>(.*?)</figcaption>', demo_body,
+                        flags=re.S)
+    assert caption is not None and "magnified" in caption.group(1)
+    assert not re.search(r"(right|left|below|above)", caption.group(1)), caption.group(1)
 
 
 def test_an_unknown_topology_kind_refuses_to_build(monkeypatch: pytest.MonkeyPatch,

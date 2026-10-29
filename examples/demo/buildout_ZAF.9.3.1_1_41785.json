@@ -38,8 +38,8 @@
  "default_step": 20,
  "series": [
   {
-   "method": "Loop roads",
-   "label": "Our method: Loop roads",
+   "method": "Shock Reblock",
+   "label": "Our method: Shock Reblock",
    "order": "the order it built its roads",
    "sheet": {
     "file": "loop_ZAF.9.3.1_1_41785.webp",
@@ -421,7 +421,7 @@
   },
   {
    "method": "topology",
-   "label": "Earlier method: topology",
+   "label": "Earlier method: topology (our optimized port)",
    "order": "a standard order, since it keeps none of its own: drainage first, then each road after the roads that join it to the street",
    "sheet": {
     "file": "topology_ZAF.9.3.1_1_41785.webp",

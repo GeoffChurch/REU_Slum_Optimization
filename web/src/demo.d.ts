@@ -154,14 +154,35 @@ export interface DemoEncoding {
   ghost_edge: string;
   depth_ramp: string[];
 }
+/** Topology's run times on the page are our optimized port's (`port`, a commit of
+ * GeoffChurch's topology fork); the original (`original`, the last commit before the
+ * performance changes) timed against it on `n_blocks` blocks of `n_min` to `n_max` buildings:
+ * how many times as long the original took (least, median, most), whether every network was
+ * the same, the slope of log speed-up on log n (`exponent`), and how many blocks failed in both
+ * and are left out (atlas/topology_speed/table.csv). */
+export interface DemoPortSpeed {
+  port: string;
+  original: string;
+  n_blocks: number;
+  n_min: number;
+  n_max: number;
+  speedup_min: number;
+  speedup_median: number;
+  speedup_max: number;
+  same_networks: boolean;
+  exponent: number;
+  n_failed: number;
+}
 /** The Demo page's numbers: the block it follows, the methods compared on another, the
- * screens, the method, and the plates' encoding. */
+ * screens, the method, the plates' encoding, and how topology's times relate to the original
+ * algorithm's (`topology_port`). */
 export interface DemoBundle {
   block: DemoBlock;
   comparison: DemoComparison;
   screen: DemoScreen;
   method: DemoMethod;
   encoding: DemoEncoding;
+  topology_port: DemoPortSpeed;
 }
 /** A series' escape-time plates as one sprite sheet beside its build-out file (`file`):
  * `frames` frames of `width` x `frame_height` px in `columns` columns, read across then down
