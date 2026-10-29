@@ -782,13 +782,15 @@ class DemoBuildOut:
     """One block's build-out under one budget slider: its escape-time scale (the model's units at
     its plain baseline's 99th-percentile home, 100% on every plate), the slider's budgets (0 the
     block with no new road), the position it opens on, and one series per method shown, each
-    with a cell per budget. Written beside demo.json as its own file, which the page's
-    build-out widget fetches."""
+    with a cell per budget; and the plates' encoding (DemoBundle's, repeated so the widget needs
+    no second file). Written beside demo.json as its own file, which the page's build-out widget
+    fetches."""
     block_id: str
     escape_scale: float
     budgets: tuple[float, ...]
     default_step: int
     series: tuple[DemoSeries, ...]
+    encoding: DemoEncoding
 
 
 @dataclass(frozen=True)
@@ -1071,7 +1073,7 @@ def proxy_of(sc: Screen, bid: str) -> DemoProxy:
                      informal=bool(b["informal"][i]))
 
 
-def page_block(sc: Screen, pl: Peeled, out: Path) -> DemoBlock:
+def page_block(sc: Screen, pl: Peeled, out: Path, enc: DemoEncoding) -> DemoBlock:
     """Everything the page shows about PAGE; its build-out (one series, the method) into `out`."""
     site = Site.of(PAGE.bid)
     proxy = proxy_of(sc, PAGE.bid)
@@ -1085,7 +1087,8 @@ def page_block(sc: Screen, pl: Peeled, out: Path) -> DemoBlock:
     buildout = write_buildout(out, DemoBuildOut(
         block_id=PAGE.bid, escape_scale=round(world(site).scale, 1), budgets=PAGE_BUDGETS,
         default_step=DEFAULT,
-        series=(method_series(site, PAGE_BUDGETS, f"Our method: {METHOD.name}", out),)))
+        series=(method_series(site, PAGE_BUDGETS, f"Our method: {METHOD.name}", out),),
+        encoding=enc))
     lat, lon = centroid_wgs84(PAGE.bid)
     return DemoBlock(
         block_id=PAGE.bid, n_buildings=proxy.n, place=PAGE.place, lat=lat, lon=lon,
@@ -1134,7 +1137,7 @@ def topology_series(site: Site, budgets: tuple[float, ...], whole: DemoTopologyM
                       run=whole, cells=tuple(cells))
 
 
-def comparison(sc: Screen, out: Path) -> DemoComparison:
+def comparison(sc: Screen, out: Path, enc: DemoEncoding) -> DemoComparison:
     """The methods compared on COMPARED under one slider: the method's frames and topology's,
     their sheets and the build-out file into `out`. The budgets are the page's slider's, then
     topology's own displacement (STAND-IN: the grid to come runs every 5% up to it)."""
@@ -1150,7 +1153,7 @@ def comparison(sc: Screen, out: Path) -> DemoComparison:
     buildout = write_buildout(out, DemoBuildOut(
         block_id=COMPARED.bid, escape_scale=round(world(site).scale, 1), budgets=budgets,
         default_step=len(PAGE_BUDGETS) - 1,
-        series=(ours, topology_series(site, budgets, whole, out))))
+        series=(ours, topology_series(site, budgets, whole, out)), encoding=enc))
     lat, lon = centroid_wgs84(COMPARED.bid)
     return DemoComparison(
         block_id=COMPARED.bid, n_buildings=proxy.n, place=COMPARED.place,
@@ -1170,9 +1173,15 @@ def site(root: Path) -> None:
         shutil.rmtree(out)
     out.mkdir(parents=True)
     sc, pl = screen(), peeled()
-    block, compared = page_block(sc, pl, out), comparison(sc, out)
-    floor = sc.floor
     depth = matplotlib.colormaps[reblock_render._CMAP]
+    enc = DemoEncoding(
+        road=render.ROAD, street=rnd.STREET, edge=rnd.EDGE, water=nw.cp.gm.WATER_FILL,
+        escape_ramp=tuple(mcolors.to_hex(SEQ(t)) for t in np.linspace(0, 1, 11)),
+        iso_step=ISO_STEP, road_width_m=road_simp.ROAD_W, road_conductance=growth.ROAD_KAPPA,
+        gone_share=GONE_SHARE, ghost_fill=GHOST_FILL, ghost_edge=GHOST_EDGE,
+        depth_ramp=tuple(mcolors.to_hex(depth(t)) for t in np.linspace(0, 1, 9)))
+    block, compared = page_block(sc, pl, out, enc), comparison(sc, out, enc)
+    floor = sc.floor
     bundle = DemoBundle(
         block=block, comparison=compared,
         screen=DemoScreen(metric=SCREEN_METRIC, floor=float(floor["value"]), pool=int(floor["n"]),
@@ -1180,13 +1189,7 @@ def site(root: Path) -> None:
                           n_blocks=len(sc.score), peel_metric=PEEL_EXAMPLE,
                           peel_keep_n=pl.keep_n),
         method=DemoMethod(name=METHOD.name, blurb=METHOD.blurb, default_frame=DEFAULT),
-        encoding=DemoEncoding(
-            road=render.ROAD, street=rnd.STREET, edge=rnd.EDGE, water=nw.cp.gm.WATER_FILL,
-            escape_ramp=tuple(mcolors.to_hex(SEQ(t)) for t in np.linspace(0, 1, 11)),
-            iso_step=ISO_STEP, road_width_m=road_simp.ROAD_W,
-            road_conductance=growth.ROAD_KAPPA, gone_share=GONE_SHARE, ghost_fill=GHOST_FILL,
-            ghost_edge=GHOST_EDGE,
-            depth_ramp=tuple(mcolors.to_hex(depth(t)) for t in np.linspace(0, 1, 9))))
+        encoding=enc)
     (out / "demo.json").write_text(json.dumps(dataclasses.asdict(bundle), indent=1,
                                               ensure_ascii=False) + "\n")
     (out / "README.md").write_text(SITE_README.format(
