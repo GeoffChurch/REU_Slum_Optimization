@@ -37,8 +37,9 @@ import shutil
 import struct
 import tomllib
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
@@ -740,11 +741,6 @@ def _region_grow_figure() -> str:
 
 
 def _screen_map_figure() -> str:
-    """The Screening and Explore pages' city-scale screen: `_screen_map` with no close-up."""
-    return _screen_map(closeup_pad_m=None)
-
-
-def _screen_map(*, closeup_pad_m: float | None) -> str:
     """The Screening page's figure after *The shipped screen*'s table: which blocks the chosen
     metric selects, city-wide, redrawn live as the floor slider moves or the metric changes -- the
     same arithmetic `reblock.metric` computes, replayed client-side on the raw per-block quantities
@@ -783,12 +779,6 @@ def _screen_map(*, closeup_pad_m: float | None) -> str:
     No `data-aspect`: this widget's canvas is square by construction (`screen-map.ts` sets
     `aspectRatio: 1 / 1`), exactly `_displacement_field_figure`'s reasoning for omitting it there.
 
-    **The close-up.** `closeup_pad_m` adds `data-closeup-pad-m`, which has the widget draw a second
-    canvas framed on the followed block, that many metres around it, in the city map's own
-    encoding (`render/closeup.ts`), and one more caption sentence saying so. The Demo page asks for
-    it, with the margin its bundle carries (`_demo_screen_map`); Screening and Explore do not, and
-    their markup is what it was.
-
     Emits nothing when the artifacts are absent, like every other figure on this site.
     """
     capetown_path = SCREENMAP / "capetown.json"
@@ -810,12 +800,6 @@ def _screen_map(*, closeup_pad_m: float | None) -> str:
 
     attrs = (f'data-widget="screen-map" data-bundle-capetown="{capetown_url}" '
              f'data-bundle-nairobi="{nairobi_url}"')
-    closeup = ""
-    if closeup_pad_m is not None:
-        attrs += f' data-closeup-pad-m="{closeup_pad_m:g}"'
-        closeup = (f" Beside the map, a close-up frames <code>{follow['block_id']}</code> and its "
-                   f"neighbours, {closeup_pad_m:,.0f} m around it, in the same colours, with the "
-                   f"block itself outlined in blue.")
     caption = (
         f"Cape Town at the shipped <code>depth_density_proxy</code> floor: gold marks real "
         f"informal settlements from the City of Cape Town's own survey, the red outline the "
@@ -827,7 +811,7 @@ def _screen_map(*, closeup_pad_m: float | None) -> str:
         f"far too small for its own boundary to be a shape anyone could pick out. Switch metric, "
         f"drag the floor, or toggle to Nairobi — {nai_floor['n']:,} of {nairobi['n_blocks']:,} "
         f"blocks at the same absolute floor, with no equivalent informal-structure survey to "
-        f"check them against, so no precision or recall is shown for that city.{closeup}"
+        f"check them against, so no precision or recall is shown for that city."
     )
     return _figure(img_url,
                    "Cape Town screened at the shipped depth_density_proxy floor: gold marks real "
@@ -1671,63 +1655,146 @@ def _duration(seconds: float) -> str:
     return f"{v:.0f} {unit}" if v >= 10 else f"{v:.1f} {unit}"
 
 
+def _short(block_id: str) -> str:
+    """A block's short id, as the page names it in prose (`5810`)."""
+    return block_id.rsplit("_", 1)[1]
+
+
 def _demo_place() -> str:
-    """The Demo page's opening line: which block, how many buildings, where, and a link to see it
+    """The block's identity line: which block, how many buildings, where, and a link to see it
     from above. Every fact is the bundle's."""
     d = _demo()
     if d is None:
         return ""
-    lat, lon = d["lat"], d["lon"]
+    b = d["block"]
+    lat, lon = b["lat"], b["lon"]
     where = (f"{abs(lat):.4f}° {'S' if lat < 0 else 'N'}, "
              f"{abs(lon):.4f}° {'E' if lon >= 0 else 'W'}")
-    return (f'<p class="sbu-demo-place">Block <code>{d["block_id"]}</code>: '
-            f'{d["n_buildings"]:,} buildings in {html.escape(d["place"])}, at {where}. '
-            f'<a href="{html.escape(d["maps_url"])}" target="_blank" rel="noopener">'
+    return (f'<p class="sbu-demo-place">Block <code>{b["block_id"]}</code>: '
+            f'{b["n_buildings"]:,} buildings in {html.escape(b["place"])}, at {where}. '
+            f'<a href="{html.escape(b["maps_url"])}" target="_blank" rel="noopener">'
             f"See it in Google Maps&nbsp;↗</a></p>")
 
 
-def _demo_screen_map() -> str:
-    """The Demo page's screen: the site's own ScreenMap widget, with a close-up of the block at the
-    margin the bundle carries (the prototype's framing)."""
-    d = _demo()
-    if d is None:
-        return ""
-    return _screen_map(closeup_pad_m=float(d["screen"]["closeup_pad_m"]))
-
-
-def _demo_screen_facts() -> str:
-    """The screen's verdict on the block, as a key-figures row: its score against the floor, its
-    rank, and the pool it falls in. Read from the Demo bundle, and checked against the city bundle
-    the widget above draws from -- the two are baked on different branches, and a figure row that
-    disagreed with the map beside it would be the drift class this site's captions exist to
-    close."""
-    d = _demo()
-    if d is None:
-        return ""
+def _demo_checked(d: dict[str, Any]) -> None:
+    """Check the Demo bundle against the city bundle the screen map draws from: the two are baked
+    on different branches, and a figure row that disagreed with the map beside it would be the
+    drift class this site's captions exist to close."""
+    city: dict[str, Any] = json.loads((SCREENMAP / "capetown.json").read_text(encoding="utf-8"))
     sc = d["screen"]
-    city = json.loads((SCREENMAP / "capetown.json").read_text(encoding="utf-8"))
     floor = next(f for f in city["floors"] if f["metric"] == sc["metric"])
-    theirs = (city["follow"]["block_id"], city["n_blocks"], floor["value"], floor["n"],
-              floor["precision"], floor["recall"])
-    ours = (d["block_id"], sc["n_blocks"], sc["floor"], sc["pool"], sc["precision"], sc["recall"])
+    theirs: list[Any] = [city["n_blocks"], floor["value"], floor["n"], floor["precision"],
+                         floor["recall"]]
+    ours: list[Any] = [sc["n_blocks"], sc["floor"], sc["pool"], sc["precision"], sc["recall"]]
+    for b in (d["block"], d["comparison"]):
+        i = city["block_id"].index(b["block_id"])
+        theirs += [city["n"][i]]
+        ours += [b["n_buildings"]]
+    p = d["block"]["proxy"]
+    i = city["block_id"].index(d["block"]["block_id"])
+    theirs += [city["area_m2"][i], city["perimeter_m"][i], bool(city["informal"][i])]
+    ours += [p["area_m2"], p["perimeter_m"], p["informal"]]
     if theirs != ours:
         raise SystemExit(
             f"examples/demo/demo.json's screen {ours} disagrees with "
             f"examples/screen-map/capetown.json's {theirs} -- re-bake the Demo bundle "
             f"(research/roadless's explore_proto/build.py site)")
-    rank, n = sc["rank"], sc["n_blocks"]
+
+
+def _demo_screen_facts() -> str:
+    """The block under the shipped screen, as a key-figures row: its score against the floor, its
+    rank over the whole city, and the score's two factors -- homes behind each parcel-wide
+    stretch of street (√(nA)/P = n ÷ (P/s), s = √(A/n)) and homes per hectare."""
+    d = _demo()
+    if d is None:
+        return ""
+    _demo_checked(d)
+    sc, p = d["screen"], d["block"]["proxy"]
+    per_slot = math.sqrt(p["n"] * p["area_m2"]) / p["perimeter_m"]
     items = [
-        (f"{sc['score']:.4f}",
-         f"block {d['block_id']}'s score, {sc['score'] / sc['floor']:.1f} times the shipped floor "
-         f"of {sc['floor']:g}"),
-        (f"{rank:,} of {n:,}", f"its rank among Cape Town's blocks: the top {100 * rank / n:.2g}%"),
-        (f"{sc['pool']:,}",
-         f"blocks clear the floor, this one among them; {_pct(sc['precision'])} of them are "
-         f"informal settlements by the City's survey, and they hold {_pct(sc['recall'])} of its "
-         f"settlement blocks"),
+        (f"{p['score']:.4f}", f"its score, {p['score'] / sc['floor']:.1f} times the floor"),
+        (f"{p['rank']:,} of {sc['n_blocks']:,}", "its rank among Cape Town's blocks"),
+        (f"{per_slot:.0f}", "homes behind each parcel-wide stretch of street"),
+        (f"{p['n'] / p['area_m2'] * 10_000:,.0f}", "homes per hectare"),
     ]
-    cells = "\n".join(f"  <div><dd>{value}</dd><dt>{label}</dt></div>" for value, label in items)
+    cells = "\n".join(f"  <div><dd>{v}</dd><dt>{t}</dt></div>" for v, t in items)
     return f'<dl class="sbu-keyfigures">\n{cells}\n</dl>'
+
+
+def _demo_survey_note() -> str:
+    """One sentence on the survey the map's gold comes from, as it bears on this block: a block it
+    does not flag can still be plainly informal, since it predates the buildings (the bake-off's
+    Caveats)."""
+    d = _demo()
+    if d is None:
+        return ""
+    b = d["block"]
+    if b["proxy"]["informal"]:
+        return ("<p>The City's informal-settlement survey, the gold on the map, flags this "
+                "block.</p>")
+    if not b["plainly_informal"]:
+        return ("<p>The City's informal-settlement survey, the gold on the map, does not flag this "
+                "block.</p>")
+    return ('<p>The City\'s survey, the gold on the map, misses this block, though it is plainly '
+            'informal: the survey predates its buildings (the '
+            '<a href="../results/bakeoff/#caveats">bake-off\'s caveats</a>).</p>')
+
+
+# The peel figure's magnified detail: the centre of the block's deep core in
+# examples/multiblock_depth_density/before_depth.png, as fractions of the image's width and
+# height, and how many times it is enlarged. A crop of the committed figure by CSS, so no second
+# image exists to drift from it; tests/test_gen_site_pages.py checks the centre still lands on the
+# figure's deepest colour.
+PEEL_DETAIL = (0.38, 0.56)
+PEEL_ZOOM = 5.0
+
+
+def _demo_peel() -> str:
+    """The slower screen's real measure on the block: the flagship run's depth figure (one Voronoi
+    parcel per building, shaded by its ring counted in from the street), its deep core magnified
+    beside it, and a legend from ring one to the deepest. The depth and the proxy's top are read
+    off the run's meta.json, the rank off the bundle, and the two are checked to agree."""
+    d = _demo()
+    meta_path = MB / "meta.json"
+    if d is None or not meta_path.exists():
+        return ""
+    url = _copy_asset(MB / "before_depth.png", "multiblock_depth_density")
+    if url is None:
+        return ""
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    b, sc = d["block"], d["screen"]
+    rings, top = int(meta["deepest_depth"]), int(meta["flagged"])
+    if (meta["deepest_block"], rings, top) != (b["block_id"], b["peel"]["rings"],
+                                               sc["peel_keep_n"]):
+        raise SystemExit(
+            f"examples/multiblock_depth_density/meta.json ({meta['deepest_block']}, {rings} "
+            f"rings, top {top}) disagrees with examples/demo/demo.json")
+    cx, cy = PEEL_DETAIL
+    z = PEEL_ZOOM
+    left, topp = 50 - cx * z * 100, 50 - cy * z * 100
+    mark = (f"left:{100 * (cx - 0.5 / z):.2f}%;top:{100 * (cy - 0.5 / z):.2f}%;"
+            f"width:{100 / z:.2f}%;height:{100 / z:.2f}%")
+    stops = ", ".join(d["encoding"]["depth_ramp"])
+    caption = (
+        f"The slower screen's measure of the same block: one Voronoi parcel per building, shaded "
+        f"by how many rings of parcels lie between it and the street. The deepest home is {rings} "
+        f"rings in (right, magnified). Depth times density puts this block at rank "
+        f"{b['peel']['rank']:,} of the shipped screen's top {top:,}.")
+    return (
+        f'<figure class="sbu-peel">\n'
+        f'  <div class="sbu-peel__views">\n'
+        f'    <div class="sbu-peel__whole"><img src="{url}" alt="Block {b["block_id"]}\'s Voronoi '
+        f'parcels shaded by depth from the street, deepest at the core"><span '
+        f'class="sbu-peel__mark" style="{mark}" aria-hidden="true"></span></div>\n'
+        f'    <div class="sbu-peel__detail"><img class="skip-lightbox" src="{url}" alt="The '
+        f'block\'s deep core, magnified: individual parcels in the deepest rings" '
+        f'style="width:{z * 100:.0f}%;left:{left:.2f}%;top:{topp:.2f}%"></div>\n'
+        f"  </div>\n"
+        f'  <div class="sbu-peel__legend"><span class="sbu-peel__ramp" '
+        f'style="background:linear-gradient(90deg, {stops})"></span>'
+        f"<span>Ring 1, on the street</span><span>Ring {rings}, the deepest</span></div>\n"
+        f"  <figcaption>{caption}</figcaption>\n"
+        f"</figure>")
 
 
 def _demo_fires() -> str:
@@ -1755,7 +1822,7 @@ def _demo_fires() -> str:
         f"      <p>{html.escape(f['what'], quote=False)}</p>\n"
         f'      <p class="sbu-fires__src">{" · ".join(report(r) for r in f["reports"])}</p>\n'
         f"    </div>\n"
-        f"  </li>\n" for f in d["fires"])
+        f"  </li>\n" for f in d["block"]["fires"])
     return f'<ol class="sbu-fires">\n{items}</ol>'
 
 
@@ -1770,235 +1837,246 @@ def _demo_method() -> str:
             f"{html.escape(m['blurb'], quote=False)}</p>")
 
 
-def _demo_times() -> str:
-    """The method's recorded run time on the block beside the original topology algorithm's,
-    extrapolated -- the second led by its RANGE (owner, 2026-10-28: "months to centuries", the
-    middle estimate after it), since the range is what the extrapolation can honestly claim."""
-    d = _demo()
-    if d is None:
-        return ""
-    m, t = d["method"], d["topology"]
-    frames = m["frames"]
-    ours = max(f["seconds"] for f in frames)
-    (_, low_unit), (_, high_unit) = _span(t["low_s"]), _span(t["high_s"])
-    ratio = float(f"{t['central_s'] / ours:.2g}")
-    items = [
-        (_duration(ours),
-         f"{html.escape(m['name'])} on this block, to a {frames[-1]['budget']:.0%} budget: "
-         f"recorded, {html.escape(m['machine'])}"),
-        (f'{low_unit.capitalize()} to {high_unit}<sup><a href="#topology-estimate" '
-         f'aria-label="How this was estimated">1</a></sup>',
-         f"the original topology algorithm on this block, extrapolated for one run: "
-         f"{_duration(t['low_s'])} to {_duration(t['high_s'])}, about "
-         f"{_duration(t['central_s'])} in the middle, some {ratio:,.0f} times longer"),
-    ]
-    cells = "\n".join(f"  <div><dd>{value}</dd><dt>{label}</dt></div>" for value, label in items)
-    return f'<dl class="sbu-keyfigures sbu-demo-times">\n{cells}\n</dl>'
+class _TopologyTime(Protocol):
+    """Topology's run time on a block, as the page states it: measured there, or estimated by
+    extrapolation. Resolved once from the bundle's tagged `topology` (`_topology_of`); the
+    comparison never asks which it has."""
+
+    @property
+    def how(self) -> str:
+        """The footnote marker's accessible name: what the footnote explains."""
+        ...
+
+    def figure(self, ours_s: float) -> tuple[str, str]:
+        """The large figure and the line under it, against our method's run time `ours_s`."""
+        ...
+
+    def note(self) -> str:
+        """The footnote's sentence or two: how the time was had."""
+        ...
 
 
-def _demo_topology_note() -> str:
-    """The footnote under the topology extrapolation: how it was made, from what, and why it is a
-    range. Every number is the bundle's."""
-    d = _demo()
-    if d is None:
-        return ""
-    t, name = d["topology"], html.escape(d["method"]["name"])
-    runs = t["runs"]
-    timed = "; ".join(f"{r['n']:,} buildings {r['seconds']:,.1f} s" for r in runs)
-    largest = runs[-1]
-    return (
-        f'<p class="sbu-footnote" id="topology-estimate"><sup>1</sup> An extrapolation, not a '
-        f"measurement. Topology was timed once on each of {_COUNT_WORDS[len(runs)].lower()} "
-        f"smaller Cape Town blocks, at α&nbsp;=&nbsp;{t['alpha']} on one thread ({timed}). A "
-        f"least-squares power law through all of them gives time ∝ "
-        f"buildings<sup>{t['exponent']:.1f} ± {t['se']:.1f}</sup>, which reaches about "
-        f"{_duration(t['central_s'])} at this block's {t['n_buildings']:,} buildings. The runs "
-        f"steepen with size, so the fit under-predicts the largest of them "
-        f"({largest['n']:,} buildings, {largest['seconds'] / 3600:.1f} hours). Anchored on that "
-        f"run, the smaller blocks' exponent ({t['small_exponent']:.1f}) gives "
-        f"{_duration(t['low_s'])} and the slope between the two largest "
-        f"({t['top_exponent']:.1f}) gives {_duration(t['high_s'])}. The paper's own procedure "
-        f"keeps the best of many runs, which multiplies the time again. Topology's goal also "
-        f"differs: it builds until every parcel touches a road, where {name} stops at a "
-        f"displacement budget.</p>")
+@dataclass(frozen=True, kw_only=True)
+class _Measured:
+    seconds: float
+    machine: str
+    fit_central_s: float
+    fit_runs: int
+    how: str = "How this was measured"   # a label, not a result: the class's own fact
+
+    def _time(self) -> str:
+        """A measurement to three figures (1.88 hours), where an estimate gets two."""
+        v, unit = _span(self.seconds)
+        return f"{v:.3g} {unit}"
+
+    def figure(self, ours_s: float) -> tuple[str, str]:
+        ratio = float(f"{self.seconds / ours_s:.2g}")       # two figures, as the estimates'
+        return (self._time(), f"measured, {html.escape(self.machine)}: about {ratio:,.0f} times "
+                              f"as long")
+
+    def note(self) -> str:
+        return (f"Measured once on this block. The power law fitted to "
+                f"{_COUNT_WORDS[self.fit_runs].lower()} timed runs on other blocks predicted "
+                f"about {_duration(self.fit_central_s)}.")
 
 
-def _slot_ticks(rings: list[list[list[float]]], step: float) -> list[tuple[float, float]]:
-    """A point every `step` metres along every ring: screen-geometry.ts's `slotTicks`, without
-    the normals, for the no-JS picture."""
-    out = []
-    for ring in rings:
-        offset = 0.0
-        for (x0, y0), (x1, y1) in zip(ring, ring[1:] + ring[:1], strict=True):
-            length = math.hypot(x1 - x0, y1 - y0)
-            if length == 0:
-                continue
-            d = offset
-            while d < length:
-                out.append((x0 + (x1 - x0) * d / length, y0 + (y1 - y0) * d / length))
-                d += step
-            offset = d - length
+@dataclass(frozen=True, kw_only=True)
+class _Extrapolated:
+    t: dict[str, Any]
+    how: str = "How this was estimated"   # a label, not a result: the class's own fact
+
+    def _range(self) -> tuple[float, float]:
+        a, b = self.t["by_small_s"], self.t["by_top_s"]
+        return min(a, b), max(a, b)
+
+    def figure(self, ours_s: float) -> tuple[str, str]:
+        lo, hi = self._range()
+        (vlo, ulo), (vhi, uhi) = _span(lo), _span(hi)
+        # The range leads (owner, 2026-10-28: "months to centuries"); in one unit it is a span of
+        # numbers, across units a span of units.
+        head = (f"{vlo:.1f} to {vhi:.1f} {uhi}" if ulo == uhi
+                else f"{ulo.capitalize()} to {uhi}")
+        return head, "estimated: never run on a block this size"
+
+    def note(self) -> str:
+        lo, hi = self._range()
+        t = self.t
+        return (f"Estimated. A power law fitted to {_COUNT_WORDS[len(t['runs'])].lower()} timed "
+                f"runs on smaller blocks gives about {_duration(t['central_s'])} at this block's "
+                f"{t['n_buildings']:,} buildings; anchored on the largest run instead, "
+                f"{_duration(lo)} to {_duration(hi)}.")
+
+
+def _topology_of(t: dict[str, Any]) -> _TopologyTime:
+    """The bundle's tagged `topology` as a _TopologyTime: the one place its `kind` is read. No
+    default: a kind this generator does not know is a bundle it cannot state honestly."""
+    match t["kind"]:
+        case "measured":
+            return _Measured(seconds=t["seconds"], machine=t["machine"],
+                             fit_central_s=t["fit_central_s"], fit_runs=t["fit_runs"])
+        case "extrapolated":
+            return _Extrapolated(t=t)
+        case other:
+            raise SystemExit(f"examples/demo/demo.json: unknown topology kind {other!r}")
+
+
+def _compare_col(head: str, time: str, sub: str) -> str:
+    """One method's column: its plain heading, its run time large, and the line saying how."""
+    return (f'  <div class="sbu-compare__col">\n'
+            f'    <p class="sbu-compare__head">{head}</p>\n'
+            f'    <p class="sbu-compare__time">{time}</p>\n'
+            f'    <p class="sbu-compare__sub">{sub}</p>\n  </div>\n')
+
+
+def _buildout(name: str) -> dict[str, Any]:
+    """One of the bundle's build-out files (demo.json names them): budgets, and per method its
+    sprite sheet and its cell at each budget."""
+    out: dict[str, Any] = json.loads((DEMO / name).read_text(encoding="utf-8"))
     return out
 
 
-def _geometry_svg(blk: dict[str, Any], street: str) -> str:
-    """The diagram's opening picture without JavaScript: the block's own outline, with a dot every
-    parcel side along its street -- one per frontage slot -- as screen-geometry.ts draws it,
-    without the inset or the row of parcels."""
-    rings = blk["rings"]
-    xs = [x for r in rings for x, _ in r]
-    ys = [y for r in rings for _, y in r]
-    width, pad = 1000.0, 20.0
-    scale = (width - 2 * pad) / (max(xs) - min(xs))
-    height = (max(ys) - min(ys)) * scale + 2 * pad
-
-    def pt(x: float, y: float) -> tuple[float, float]:
-        return pad + (x - min(xs)) * scale, height - pad - (y - min(ys)) * scale
-
-    path = " ".join("M" + " L".join("{:.1f},{:.1f}".format(*pt(x, y)) for x, y in r) + " Z"
-                    for r in rings)
-    side = math.sqrt(blk["area_m2"] / blk["n"])
-    dots = "".join('<circle cx="{:.1f}" cy="{:.1f}" r="1.6"/>'.format(*pt(x, y))
-                   for x, y in _slot_ticks(rings, side))
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:.0f} {height:.0f}">'
-            f'<rect width="100%" height="100%" fill="#ffffff"/>'
-            f'<path d="{path}" fill="#ebe6de" fill-rule="evenodd" stroke="{street}" '
-            f'stroke-width="2"/><g fill="{street}">{dots}</g></svg>\n')
+def _plate_key(e: dict[str, Any]) -> str:
+    """What a build-out plate's colours and lines are, in one sentence-run: escape time's ramp,
+    the road, a destroyed building and a damaged home, each its own encoding."""
+    return (f"blue a short way out, red a long one, a line every {e['iso_step']:.0%}. Dark slate "
+            f"is new road, {e['road_width_m']:.0f} m wide; a pale footprint with a thin outline "
+            f"is a building the roads destroyed ({e['gone_share']:.0%} or more of it taken, or "
+            f"cut in two); a home that keeps its colour inside the same outline lost less and is "
+            f"still lived in.")
 
 
-def _demo_geometry() -> str:
-    """The Demo page's diagram of why the screen's formula finds deep, crowded blocks
-    (`web/src/widgets/screen-geometry.ts`), on the block's real outline: no shape is presumed.
-    s = √(A/n) is a parcel's side, P/s the parcels that fit along the street (frontage slots), and
-    √(nA)/P = n ÷ (P/s) exactly -- the homes behind each slot -- so the score is homes per slot
-    over s², homes per m² of the one-parcel band along the street. The reader swaps the outline
-    for a disk, square or strip of the same area (shape enters only through P), switches to the
-    city's median block, or changes the buildings.
+def _build_out_figure(name: str, widget: str, alt: str, caption: str) -> str:
+    """A build-out widget's figure (`web/src/widgets/build-out.ts`): the build-out file and every
+    series' sheet copied beside each other, the widget registered as `widget` (one URL key per
+    name, so two build-outs share a page).
 
-    The no-JS picture is the block's outline dotted every s along its street, an SVG this function
-    draws from the bundle's rings; the widget removes it once it has drawn. The caption is
-    block-neutral, since the reader can switch block; the widget's own note names the block on
-    show and its numbers."""
-    d = _demo()
-    if d is None:
+    The fallback is the first series' sprite sheet itself, cropped to the frame the widget opens
+    on by `object-fit`/`object-position` -- no second image to bake or let drift. That crop needs
+    a one-column sheet, so the first series must have one. Marked skip-lightbox: zoomed, it would
+    show the whole sheet. The widget removes it once it has drawn, like every mount point's
+    fallback on this site."""
+    bo = _buildout(name)
+    url = _copy_asset(DEMO / name, "demo")
+    sheets = [_copy_asset(DEMO / s["sheet"]["file"], "demo") for s in bo["series"]]
+    if url is None or None in sheets:
         return ""
-    blk = d["screen"]["followed"]
-    bundle_url = _copy_asset(DEMO / "demo.json", "demo")
-    if bundle_url is None:
-        return ""
-    svg = ASSETS / "demo" / "geometry.svg"
-    svg.write_text(_geometry_svg(blk, d["encoding"]["street"]), encoding="utf-8")
-    caption = (
-        "The screen sees three numbers per block: its buildings <em>n</em>, its area <em>A</em> "
-        "and its perimeter <em>P</em>. Give each building an equal share of the ground, a square "
-        "parcel of side <em>s</em> = √(<em>A</em>/<em>n</em>); then <em>P</em>/<em>s</em> parcels "
-        "fit along the street, and each tick on the outline marks one of these frontage slots. "
-        "The depth factor √(<em>nA</em>)/<em>P</em> is exactly <em>n</em> ÷ (<em>P</em>/"
-        "<em>s</em>): how many homes stand behind each slot, whatever the block's shape. The red "
-        "squares are parcels to scale along the longest straight stretch of street, magnified in "
-        "the inset. The score, homes per slot times <em>n</em>/<em>A</em>, is how crowded the "
-        "one-parcel band along the street would be if every home had to fit there. Swap the "
-        "outline for a disk, a square or a strip of the same area: only <em>P</em> changes, and "
-        "the strip, with the most street, puts the fewest homes behind each slot.")
-    attrs = f'data-widget="screen-geometry" data-bundle="{bundle_url}"'
-    return _figure("assets/demo/geometry.svg",
-                   f"Block {blk['block_id']}'s outline with a dot every parcel side along its "
-                   f"street, one per frontage slot", caption, attrs=attrs)
-
-
-def _demo_screen_factors() -> str:
-    """The score's factors for the block and for the city's median block, side by side, read from
-    the bundle and worked out here -- the arithmetic the diagram above does live: parcel side s,
-    frontage slots P/s, homes per slot n ÷ (P/s), homes per hectare, and their product. Where the
-    flagship region's own peel measured this block's true depth (examples/multiblock_depth_
-    density's meta.json names its deepest block and how many rings in its deepest home sits), a
-    paragraph sets homes per slot against it."""
-    d = _demo()
-    if d is None:
-        return ""
-    sc = d["screen"]
-    rows = []
-    for label, blk in (("This block", sc["followed"]), ("A typical block", sc["typical"])):
-        a, n, per = blk["area_m2"], blk["n"], blk["perimeter_m"]
-        side = math.sqrt(a / n)
-        slots = per / side
-        rows.append([f"{label}, <code>{blk['block_id']}</code>", f"{n:,}", f"{a / 10_000:,.1f}",
-                     f"{side:.1f}", f"{slots:,.0f}", f"{n / slots:.1f}",
-                     f"{n / a * 10_000:,.0f}", f"{blk['score']:.4f}",
-                     f"{blk['rank']:,} of {sc['n_blocks']:,}"])
-    table = _table(["", "buildings n", "area A, ha", "parcel side s, m", "frontage slots P/s",
-                    "homes per slot", "homes per ha", "score", "rank"], rows)
-    meta_path = MB / "meta.json"
-    peel = ""
-    if meta_path.exists():
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        if meta["deepest_block"] == d["block_id"]:
-            f = sc["followed"]
-            per_slot = f["n"] / (f["perimeter_m"] / math.sqrt(f["area_m2"] / f["n"]))
-            peel = (f"\n\nHomes per slot is not rows deep, except in a strip. In a strip each "
-                    f"slot's column of parcels runs straight in to the middle, so the homes behind "
-                    f"a slot are the rows to the middle. In a square or a disk the columns narrow "
-                    f"into wedges as they reach in, and the homes behind a slot come to about half "
-                    f"the deepest home's rows. So the full peel, which tessellates this block and "
-                    f"counts rings of parcels in from the street, puts its deepest home "
-                    f"{meta['deepest_depth']:.0f} rings in, against {per_slot:.0f} homes per slot. "
-                    f"The screen uses homes per slot to rank blocks, not to measure them.")
-    return table + peel
+    first = bo["series"][0]
+    sheet = first["sheet"]
+    if sheet["columns"] != 1:
+        raise SystemExit(f"examples/demo/{name}: the fallback crops the first series' sheet, which "
+                         f"has {sheet['columns']} columns")
+    row = first["cells"][bo["default_step"]]["step"]["row"]
+    crop = 100 * row / (sheet["frames"] - 1)
+    style = (f"width:100%;aspect-ratio:{sheet['width']}/{sheet['frame_height']};"
+             f"object-fit:cover;object-position:50% {crop:.4g}%")
+    attrs = f'data-widget="{widget}" data-bundle="{url}" data-metric-label="{DEMO_METRIC}"'
+    return _figure(sheets[0] or "", alt, caption, attrs=attrs, skip_lightbox=True,
+                   img_style=style)
 
 
 def _demo_build_out() -> str:
     """The Demo page's build-out: the bundle's method on the block under a budget slider, each
-    frame's escape-time plate and three plots whose dots follow it
-    (`web/src/widgets/build-out.ts`). One view: the owner kept the escape-time plate with its
-    isochrones and dropped the roads-only and time-saved views (2026-10-28) -- the roads are on
-    this plate too, in the grey the caption names.
+    budget's escape-time plate and three plots whose dots follow it (one series of
+    `_build_out_figure`).
 
-    The fallback is the sprite sheet itself, cropped to the frame the widget opens on by
-    `object-fit`/`object-position` -- no second image to bake or let drift. Marked skip-lightbox:
-    zoomed, it would show the whole sheet, every frame stacked. The widget removes it once it has
-    drawn, like every mount point's fallback on this site.
-
-    The caption carries what the plate and the plots mean, every number read from the bundle; the
-    widget writes only labels and the frame's own readouts. `data-metric-label` hands it
+    The caption says what the plate and the plots show, every number read from the bundle; the
+    widget writes only labels and each budget's own readouts. `data-metric-label` hands it
     DEMO_METRIC, so the page names L_P in one place."""
     d = _demo()
     if d is None:
         return ""
-    sheets = d["sheets"]
-    bundle_url = _copy_asset(DEMO / "demo.json", "demo")
-    img_url = _copy_asset(DEMO / sheets["sheet"], "demo")
-    if bundle_url is None or img_url is None:
-        return ""
-    m, e = d["method"], d["encoding"]
-    frames = m["frames"]
-    first = frames[m["default_frame"]]
-    crop = 100 * first["row"] / (sheets["rows"] - 1)
-    style = (f"width:100%;aspect-ratio:{sheets['width']}/{sheets['frame_height']};"
-             f"object-fit:cover;object-position:50% {crop:.4g}%")
-    name = html.escape(m["name"])
+    b, m, e = d["block"], d["method"], d["encoding"]
+    bo = _buildout(b["buildout"])
     caption = (
-        f"Block <code>{d['block_id']}</code> as {name} builds it out, from no new road to a "
-        f"{frames[-1]['budget']:.0%} displacement budget, one frame per point of budget. Each "
-        f"home is coloured by its escape time: how hard it is for its people to walk out to the "
-        f"street, as a share of the 99th-percentile home's with no new road "
-        f"({e['escape_scale']:,.0f} in the model's own units). Blue is a short way out and red a "
-        f"long one, and each dark line is an isochrone, every {e['iso_step']:.0%} of that scale: "
-        f"homes inside a ring take longer than homes outside it, and the rings shrink as roads go "
-        f"in. Grey is a new road, drawn at its {e['road_width_m']:.0f} m width, or a destroyed "
-        f"building: one {e['gone_share']:.0%} or more of which the roads take, or that a road "
-        f"cuts in two. In the plots, {DEMO_METRIC} is the share of the homes' total escape time "
-        f"the roads remove, 1 − P(roads) / P(no roads), where P is that total, the effort every "
-        f"home's walk out spends; 0 is no change. It is what the rest of this site calls "
+        f"Each home coloured by its escape time, as a share of the 99th-percentile home's with no "
+        f"new road ({bo['escape_scale']:,.0f} model units): {_plate_key(e)} "
+        f"{DEMO_METRIC.capitalize()} is the share of the homes' total escape time the roads "
+        f"remove, 1 − P(roads) / P(no roads): what the rest of this site calls "
         '<a href="../methodology/permeability/">permeability</a>. Conductance added is how much '
-        f"easier the roads make the ground to cross, in m² of open ground, a road conducting "
-        f"{e['road_conductance']:.0f} times what open ground does. <em>Built in</em> is the "
-        f"method's own recorded run time to that frame.")
-    attrs = (f'data-widget="build-out" data-bundle="{bundle_url}" '
-             f'data-metric-label="{DEMO_METRIC}"')
-    return _figure(img_url,
-                   f"Block {d['block_id']}'s homes coloured by escape time, with the roads "
-                   f"{name} builds to a {first['budget']:.0%} displacement budget",
-                   caption, attrs=attrs, skip_lightbox=True, img_style=style)
+        f"easier the roads make the ground to cross, in m² of open ground; a road conducts "
+        f"{e['road_conductance']:.0f} times what open ground does.")
+    opening = bo["budgets"][bo["default_step"]]
+    return _build_out_figure(
+        b["buildout"], "build-out",
+        f"Block {b['block_id']}'s homes coloured by escape time, with the roads "
+        f"{html.escape(m['name'])} builds to a {opening:.0%} displacement budget", caption)
+
+
+def _demo_compare() -> str:
+    """Our method and the earlier one (owner, 2026-10-29): on the comparison block, where topology
+    has run, both methods under one budget slider (`_build_out_figure`, two series), headed by
+    what each does there and when one saves as much escape time as the other's whole network;
+    then the page's own block, where topology's time can only be estimated. Each big time is
+    labelled with its method; footnotes say how topology's were had (`_TopologyTime`)."""
+    d = _demo()
+    if d is None:
+        return ""
+    c, b, m, e = d["comparison"], d["block"], d["method"], d["encoding"]
+    name = html.escape(m["name"])
+    bo = _buildout(c["buildout"])
+    ours, earlier = bo["series"]
+    notes: list[str] = []
+
+    def marked(topology: _TopologyTime, value: str) -> str:
+        notes.append(topology.note())
+        k = len(notes)
+        return (f'{value}<sup><a href="#topology-note-{k}" aria-label="{topology.how}">{k}</a>'
+                f"</sup>")
+
+    def whole(s: dict[str, Any]) -> dict[str, Any]:
+        """The series' whole network: its last budget's step."""
+        step: dict[str, Any] = s["cells"][-1]["step"]
+        return step
+
+    standing = ("the shipped screen's top block" if c["proxy_rank"] == 1
+                else f"rank {c['proxy_rank']:,} under the shipped screen")
+    topology = _topology_of(c["topology"])
+    t_head, _ = topology.figure(ours["run"]["seconds"])
+    o_whole, e_whole = whole(ours), whole(earlier)
+    why = next(x["why"] for x in ours["cells"] if x["kind"] == "short")
+    lead = (
+        f'<p>On block <code>{c["block_id"]}</code> in {html.escape(c["place"])}: {standing}, '
+        f"and at {c['n_buildings']:,} buildings small enough for topology to run at all. "
+        f"Topology builds until every parcel touches a road, which here displaces "
+        f"{e_whole['displacement']:.0%} of the floor area, in {marked(topology, t_head)}; "
+        f"{name} stops at {o_whole['displacement']:.0%}, with {html.escape(why)}, in "
+        f"{_duration(ours['run']['seconds'])}. Below, both are cut at the same budgets: {name} in "
+        f"{html.escape(ours['order'])}; topology in {html.escape(earlier['order'])}, so only its "
+        f"whole run is timed.</p>\n")
+    # The takeaway: the first of our networks to save as much as topology's whole one, if any.
+    target = e_whole["permeability"]
+    reach = next((x["step"] for x in ours["cells"] if x["step"]["permeability"] >= target), None)
+    takeaway = (
+        f"{name} saves as much escape time as topology's whole network "
+        f"({target:.1%}) with {reach['displacement']:.0%} of the floor area displaced; topology "
+        f"needs {e_whole['displacement']:.0%}." if reach is not None else
+        f"{name}'s whole network saves {o_whole['permeability']:.1%} of the escape time, "
+        f"topology's {target:.1%}.")
+    caption = (
+        f"Drag the budget: both plates and the dots on every plot follow. Each home coloured by "
+        f"its escape time on this block's scale ({bo['escape_scale']:,.0f} model units at the "
+        f"99th-percentile home with no new road): {_plate_key(e)}")
+    figure = _build_out_figure(
+        c["buildout"], "build-out-compare",
+        f"Block {c['block_id']}'s homes coloured by escape time, with the roads {name} builds to "
+        f"a {bo['budgets'][bo['default_step']]:.0%} displacement budget", caption)
+    first = f'{lead}<p class="sbu-compare__takeaway">{takeaway}</p>\n{figure}'
+    page_topology = _topology_of(b["topology"])
+    page_bo = _buildout(b["buildout"])
+    [page_ours] = page_bo["series"]
+    p_head, p_sub = page_topology.figure(page_ours["run"]["seconds"])
+    second = (
+        f'<p class="sbu-compare__block">On block <code>{b["block_id"]}</code>, this page\'s '
+        f"block:</p>\n"
+        f'<div class="sbu-compare">\n'
+        + _compare_col(f"Our method: {name}", _duration(page_ours["run"]["seconds"]),
+                       f"to a {page_bo['budgets'][-1]:.0%} budget, recorded, "
+                       f"{html.escape(page_ours['run']['machine'])}")
+        + _compare_col("Earlier method: topology", marked(page_topology, p_head), p_sub)
+        + "</div>")
+    foot = "\n".join(f'<p class="sbu-footnote" id="topology-note-{k}"><sup>{k}</sup> {n}</p>'
+                     for k, n in enumerate(notes, start=1))
+    return f"{first}\n{second}\n{foot}"
 
 
 # Marker name -> producer. A partial's <!-- NAME --> holes are filled from here; tests assert this
@@ -2029,15 +2107,13 @@ MARKERS: dict[str, Callable[[], str]] = {
     # The Demo page's: one block, screened, its fires, and one method built out on it, all read
     # from examples/demo/demo.json (see that directory's README for its producer).
     "DEMOPLACE": _demo_place,
-    "DEMOGEOMETRY": _demo_geometry,
-    "DEMOSCREENFACTORS": _demo_screen_factors,
-    "DEMOSCREENMAP": _demo_screen_map,
     "DEMOSCREENFACTS": _demo_screen_facts,
+    "DEMOSURVEYNOTE": _demo_survey_note,
+    "DEMOPEEL": _demo_peel,
     "DEMOFIRES": _demo_fires,
     "DEMOMETHOD": _demo_method,
-    "DEMOTIMES": _demo_times,
     "DEMOBUILDOUT": _demo_build_out,
-    "DEMOTOPOLOGYNOTE": _demo_topology_note,
+    "DEMOCOMPARE": _demo_compare,
     "REPROCOMMANDS": _repro_commands,
 }
 

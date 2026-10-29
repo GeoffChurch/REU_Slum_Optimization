@@ -102,14 +102,6 @@ export class RecordingContext {
     this.path.push({ op: "arc", args: [x, y, r, a0, a1] });
   }
   clearRect(): void { this.record("clearRect"); }
-  /** Text is not recorded: no test reads a canvas label's position, only that drawing it does not
-   * throw. */
-  font = "";
-  fillText(): void {}
-  /** Clipping is not recorded either: a draw clipped to an inset records the same calls. */
-  save(): void {}
-  restore(): void {}
-  clip(): void {}
   stroke(): void { this.record("stroke"); }
   /** No `Path2D` overload: nothing in this project ever passes one (checked -- `region.ts`,
    * `city.ts` and `canvas.ts` all call `fill()` bare or `fill("evenodd")`, always against the
@@ -148,6 +140,8 @@ export class FakeElement {
   readonly style: Record<string, string> = {};
   readonly dataset: Record<string, string> = {};
   textContent = "";
+  /** Written by widgets that build their own markup (build-out.ts), read back by their tests. */
+  className = "";
   /** Only a canvas has one; the widget reads it back through `getContext`. */
   readonly ctx = new RecordingContext();
   /** The backing store `sizeCanvas` sets from the observed box times devicePixelRatio. */

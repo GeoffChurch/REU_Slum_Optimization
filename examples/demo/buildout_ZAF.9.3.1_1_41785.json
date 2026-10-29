@@ -1,0 +1,835 @@
+{
+ "block_id": "ZAF.9.3.1_1_41785",
+ "escape_scale": 566.7,
+ "budgets": [
+  0.0,
+  0.01,
+  0.02,
+  0.03,
+  0.04,
+  0.05,
+  0.06,
+  0.07,
+  0.08,
+  0.09,
+  0.1,
+  0.11,
+  0.12,
+  0.13,
+  0.14,
+  0.15,
+  0.2,
+  0.25,
+  0.3,
+  0.35,
+  0.4,
+  0.45,
+  0.5,
+  0.55,
+  0.6,
+  0.65,
+  0.7,
+  0.75,
+  0.8,
+  0.85,
+  0.9,
+  0.9066
+ ],
+ "default_step": 20,
+ "series": [
+  {
+   "method": "Loop roads",
+   "label": "Our method: Loop roads",
+   "order": "the order it built its roads",
+   "sheet": {
+    "file": "loop_ZAF.9.3.1_1_41785.webp",
+    "width": 600,
+    "frame_height": 828,
+    "frames": 10,
+    "columns": 1
+   },
+   "run": {
+    "kind": "recorded",
+    "seconds": 56.0,
+    "machine": "one process on a workstation CPU (Intel Xeon w7-3455)"
+   },
+   "cells": [
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0,
+      "road_km": 0.0,
+      "permeability": 0.0,
+      "conductance_m2": 0.0,
+      "seconds": 0.0,
+      "row": 0
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0568,
+      "road_km": 0.162,
+      "permeability": 0.4792,
+      "conductance_m2": 10225.0,
+      "seconds": 10.2,
+      "row": 1
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0568,
+      "road_km": 0.162,
+      "permeability": 0.4792,
+      "conductance_m2": 10225.0,
+      "seconds": 10.2,
+      "row": 1
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0568,
+      "road_km": 0.162,
+      "permeability": 0.4792,
+      "conductance_m2": 10225.0,
+      "seconds": 10.2,
+      "row": 1
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0568,
+      "road_km": 0.162,
+      "permeability": 0.4792,
+      "conductance_m2": 10225.0,
+      "seconds": 10.2,
+      "row": 1
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0568,
+      "road_km": 0.162,
+      "permeability": 0.4792,
+      "conductance_m2": 10225.0,
+      "seconds": 10.2,
+      "row": 1
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1238,
+      "road_km": 0.298,
+      "permeability": 0.683,
+      "conductance_m2": 19264.0,
+      "seconds": 16.7,
+      "row": 2
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1238,
+      "road_km": 0.298,
+      "permeability": 0.683,
+      "conductance_m2": 19264.0,
+      "seconds": 16.7,
+      "row": 2
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1238,
+      "road_km": 0.298,
+      "permeability": 0.683,
+      "conductance_m2": 19264.0,
+      "seconds": 16.7,
+      "row": 2
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1238,
+      "road_km": 0.298,
+      "permeability": 0.683,
+      "conductance_m2": 19264.0,
+      "seconds": 16.7,
+      "row": 2
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1238,
+      "road_km": 0.298,
+      "permeability": 0.683,
+      "conductance_m2": 19264.0,
+      "seconds": 16.7,
+      "row": 2
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1238,
+      "road_km": 0.298,
+      "permeability": 0.683,
+      "conductance_m2": 19264.0,
+      "seconds": 16.7,
+      "row": 2
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1238,
+      "road_km": 0.298,
+      "permeability": 0.683,
+      "conductance_m2": 19264.0,
+      "seconds": 16.7,
+      "row": 2
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1508,
+      "road_km": 0.366,
+      "permeability": 0.73,
+      "conductance_m2": 23376.0,
+      "seconds": 20.9,
+      "row": 3
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1508,
+      "road_km": 0.366,
+      "permeability": 0.73,
+      "conductance_m2": 23376.0,
+      "seconds": 20.9,
+      "row": 3
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1508,
+      "road_km": 0.366,
+      "permeability": 0.73,
+      "conductance_m2": 23376.0,
+      "seconds": 20.9,
+      "row": 3
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.2115,
+      "road_km": 0.556,
+      "permeability": 0.83,
+      "conductance_m2": 33306.0,
+      "seconds": 28.1,
+      "row": 4
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.2526,
+      "road_km": 0.668,
+      "permeability": 0.8743,
+      "conductance_m2": 40518.0,
+      "seconds": 31.9,
+      "row": 5
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.321,
+      "road_km": 0.851,
+      "permeability": 0.9113,
+      "conductance_m2": 51832.0,
+      "seconds": 41.0,
+      "row": 6
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.3709,
+      "road_km": 0.959,
+      "permeability": 0.9352,
+      "conductance_m2": 58461.0,
+      "seconds": 47.5,
+      "row": 7
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.4137,
+      "road_km": 1.071,
+      "permeability": 0.9397,
+      "conductance_m2": 65011.0,
+      "seconds": 53.4,
+      "row": 8
+     }
+    },
+    {
+     "kind": "short",
+     "step": {
+      "displacement": 0.4316,
+      "road_km": 1.151,
+      "permeability": 0.9424,
+      "conductance_m2": 67464.0,
+      "seconds": 56.0,
+      "row": 9
+     },
+     "why": "no loop left to add"
+    },
+    {
+     "kind": "short",
+     "step": {
+      "displacement": 0.4316,
+      "road_km": 1.151,
+      "permeability": 0.9424,
+      "conductance_m2": 67464.0,
+      "seconds": 56.0,
+      "row": 9
+     },
+     "why": "no loop left to add"
+    },
+    {
+     "kind": "short",
+     "step": {
+      "displacement": 0.4316,
+      "road_km": 1.151,
+      "permeability": 0.9424,
+      "conductance_m2": 67464.0,
+      "seconds": 56.0,
+      "row": 9
+     },
+     "why": "no loop left to add"
+    },
+    {
+     "kind": "short",
+     "step": {
+      "displacement": 0.4316,
+      "road_km": 1.151,
+      "permeability": 0.9424,
+      "conductance_m2": 67464.0,
+      "seconds": 56.0,
+      "row": 9
+     },
+     "why": "no loop left to add"
+    },
+    {
+     "kind": "short",
+     "step": {
+      "displacement": 0.4316,
+      "road_km": 1.151,
+      "permeability": 0.9424,
+      "conductance_m2": 67464.0,
+      "seconds": 56.0,
+      "row": 9
+     },
+     "why": "no loop left to add"
+    },
+    {
+     "kind": "short",
+     "step": {
+      "displacement": 0.4316,
+      "road_km": 1.151,
+      "permeability": 0.9424,
+      "conductance_m2": 67464.0,
+      "seconds": 56.0,
+      "row": 9
+     },
+     "why": "no loop left to add"
+    },
+    {
+     "kind": "short",
+     "step": {
+      "displacement": 0.4316,
+      "road_km": 1.151,
+      "permeability": 0.9424,
+      "conductance_m2": 67464.0,
+      "seconds": 56.0,
+      "row": 9
+     },
+     "why": "no loop left to add"
+    },
+    {
+     "kind": "short",
+     "step": {
+      "displacement": 0.4316,
+      "road_km": 1.151,
+      "permeability": 0.9424,
+      "conductance_m2": 67464.0,
+      "seconds": 56.0,
+      "row": 9
+     },
+     "why": "no loop left to add"
+    },
+    {
+     "kind": "short",
+     "step": {
+      "displacement": 0.4316,
+      "road_km": 1.151,
+      "permeability": 0.9424,
+      "conductance_m2": 67464.0,
+      "seconds": 56.0,
+      "row": 9
+     },
+     "why": "no loop left to add"
+    },
+    {
+     "kind": "short",
+     "step": {
+      "displacement": 0.4316,
+      "road_km": 1.151,
+      "permeability": 0.9424,
+      "conductance_m2": 67464.0,
+      "seconds": 56.0,
+      "row": 9
+     },
+     "why": "no loop left to add"
+    },
+    {
+     "kind": "short",
+     "step": {
+      "displacement": 0.4316,
+      "road_km": 1.151,
+      "permeability": 0.9424,
+      "conductance_m2": 67464.0,
+      "seconds": 56.0,
+      "row": 9
+     },
+     "why": "no loop left to add"
+    }
+   ]
+  },
+  {
+   "method": "topology",
+   "label": "Earlier method: topology",
+   "order": "a standard order, since it keeps none of its own: drainage first, then each road after the roads that join it to the street",
+   "sheet": {
+    "file": "topology_ZAF.9.3.1_1_41785.webp",
+    "width": 600,
+    "frame_height": 828,
+    "frames": 32,
+    "columns": 2
+   },
+   "run": {
+    "kind": "measured",
+    "alpha": 10,
+    "n_buildings": 638,
+    "seconds": 6762.479218959808,
+    "machine": "one thread on a workstation CPU (Intel Xeon w7-3455)",
+    "displacement": 0.9066202515723024,
+    "fit_central_s": 7553.2562910126035,
+    "fit_runs": 6
+   },
+   "cells": [
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0,
+      "road_km": 0.0,
+      "permeability": 0.0,
+      "conductance_m2": 0.0,
+      "seconds": 0.0,
+      "row": 0
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0115,
+      "road_km": 0.021,
+      "permeability": 0.0018,
+      "conductance_m2": 1381.0,
+      "seconds": null,
+      "row": 1
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0208,
+      "road_km": 0.039,
+      "permeability": 0.0524,
+      "conductance_m2": 2510.0,
+      "seconds": null,
+      "row": 2
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0319,
+      "road_km": 0.074,
+      "permeability": 0.2035,
+      "conductance_m2": 4581.0,
+      "seconds": null,
+      "row": 3
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0443,
+      "road_km": 0.088,
+      "permeability": 0.2058,
+      "conductance_m2": 5534.0,
+      "seconds": null,
+      "row": 4
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0505,
+      "road_km": 0.102,
+      "permeability": 0.2293,
+      "conductance_m2": 6452.0,
+      "seconds": null,
+      "row": 5
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0645,
+      "road_km": 0.132,
+      "permeability": 0.3836,
+      "conductance_m2": 8322.0,
+      "seconds": null,
+      "row": 6
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0709,
+      "road_km": 0.151,
+      "permeability": 0.4038,
+      "conductance_m2": 9461.0,
+      "seconds": null,
+      "row": 7
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0801,
+      "road_km": 0.172,
+      "permeability": 0.4833,
+      "conductance_m2": 10753.0,
+      "seconds": null,
+      "row": 8
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0901,
+      "road_km": 0.19,
+      "permeability": 0.4937,
+      "conductance_m2": 11886.0,
+      "seconds": null,
+      "row": 9
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1008,
+      "road_km": 0.216,
+      "permeability": 0.5313,
+      "conductance_m2": 13538.0,
+      "seconds": null,
+      "row": 10
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1113,
+      "road_km": 0.236,
+      "permeability": 0.5352,
+      "conductance_m2": 14742.0,
+      "seconds": null,
+      "row": 11
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1203,
+      "road_km": 0.264,
+      "permeability": 0.5497,
+      "conductance_m2": 16453.0,
+      "seconds": null,
+      "row": 12
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1306,
+      "road_km": 0.28,
+      "permeability": 0.5509,
+      "conductance_m2": 17469.0,
+      "seconds": null,
+      "row": 13
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1419,
+      "road_km": 0.31,
+      "permeability": 0.627,
+      "conductance_m2": 19236.0,
+      "seconds": null,
+      "row": 14
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1545,
+      "road_km": 0.327,
+      "permeability": 0.6276,
+      "conductance_m2": 20388.0,
+      "seconds": null,
+      "row": 15
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.2003,
+      "road_km": 0.437,
+      "permeability": 0.7276,
+      "conductance_m2": 27414.0,
+      "seconds": null,
+      "row": 16
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.2511,
+      "road_km": 0.552,
+      "permeability": 0.7763,
+      "conductance_m2": 34501.0,
+      "seconds": null,
+      "row": 17
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.3043,
+      "road_km": 0.667,
+      "permeability": 0.7967,
+      "conductance_m2": 41776.0,
+      "seconds": null,
+      "row": 18
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.3512,
+      "road_km": 0.754,
+      "permeability": 0.8222,
+      "conductance_m2": 47344.0,
+      "seconds": null,
+      "row": 19
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.4003,
+      "road_km": 0.85,
+      "permeability": 0.8313,
+      "conductance_m2": 53355.0,
+      "seconds": null,
+      "row": 20
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.4525,
+      "road_km": 0.944,
+      "permeability": 0.8445,
+      "conductance_m2": 59637.0,
+      "seconds": null,
+      "row": 21
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.5018,
+      "road_km": 1.049,
+      "permeability": 0.8653,
+      "conductance_m2": 66248.0,
+      "seconds": null,
+      "row": 22
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.5503,
+      "road_km": 1.144,
+      "permeability": 0.8741,
+      "conductance_m2": 72262.0,
+      "seconds": null,
+      "row": 23
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.6012,
+      "road_km": 1.254,
+      "permeability": 0.8868,
+      "conductance_m2": 79257.0,
+      "seconds": null,
+      "row": 24
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.651,
+      "road_km": 1.362,
+      "permeability": 0.8973,
+      "conductance_m2": 85922.0,
+      "seconds": null,
+      "row": 25
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.702,
+      "road_km": 1.442,
+      "permeability": 0.9078,
+      "conductance_m2": 90779.0,
+      "seconds": null,
+      "row": 26
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.7512,
+      "road_km": 1.532,
+      "permeability": 0.9101,
+      "conductance_m2": 96518.0,
+      "seconds": null,
+      "row": 27
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.8016,
+      "road_km": 1.627,
+      "permeability": 0.916,
+      "conductance_m2": 102219.0,
+      "seconds": null,
+      "row": 28
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.8501,
+      "road_km": 1.766,
+      "permeability": 0.9256,
+      "conductance_m2": 110216.0,
+      "seconds": null,
+      "row": 29
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.9007,
+      "road_km": 1.883,
+      "permeability": 0.9335,
+      "conductance_m2": 117299.0,
+      "seconds": null,
+      "row": 30
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.9066,
+      "road_km": 1.918,
+      "permeability": 0.9348,
+      "conductance_m2": 119244.0,
+      "seconds": 6762.5,
+      "row": 31
+     }
+    }
+   ]
+  }
+ ],
+ "encoding": {
+  "road": "#475569",
+  "street": "#1e293b",
+  "edge": "#94a3b8",
+  "water": "#bfdbf3",
+  "escape_ramp": [
+   "#a2d0f9",
+   "#9ebef3",
+   "#9daae9",
+   "#a097db",
+   "#a382c8",
+   "#a56eb1",
+   "#a35c98",
+   "#9f497b",
+   "#99375e",
+   "#91253d",
+   "#861118"
+  ],
+  "iso_step": 0.1,
+  "road_width_m": 7.0,
+  "road_conductance": 10.0,
+  "gone_share": 0.1,
+  "ghost_fill": "#ece8e2",
+  "ghost_edge": "#7d7468",
+  "depth_ramp": [
+   "#ffffcc",
+   "#ffeda0",
+   "#fed976",
+   "#feb24c",
+   "#fd8c3c",
+   "#fc4d2a",
+   "#e2191c",
+   "#bb0026",
+   "#800026"
+  ]
+ }
+}

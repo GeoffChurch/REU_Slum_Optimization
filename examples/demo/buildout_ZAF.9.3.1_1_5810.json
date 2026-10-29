@@ -1,0 +1,256 @@
+{
+ "block_id": "ZAF.9.3.1_1_5810",
+ "escape_scale": 1063.5,
+ "budgets": [
+  0.0,
+  0.01,
+  0.02,
+  0.03,
+  0.04,
+  0.05,
+  0.06,
+  0.07,
+  0.08,
+  0.09,
+  0.1,
+  0.11,
+  0.12,
+  0.13,
+  0.14,
+  0.15
+ ],
+ "default_step": 5,
+ "series": [
+  {
+   "method": "Loop roads",
+   "label": "Our method: Loop roads",
+   "order": "the order it built its roads",
+   "sheet": {
+    "file": "loop_ZAF.9.3.1_1_5810.webp",
+    "width": 800,
+    "frame_height": 724,
+    "frames": 16,
+    "columns": 1
+   },
+   "run": {
+    "kind": "recorded",
+    "seconds": 1947.8078384399414,
+    "machine": "one process on a workstation CPU (Intel Xeon w7-3455)"
+   },
+   "cells": [
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0,
+      "road_km": 0.0,
+      "permeability": 0.0,
+      "conductance_m2": 0.0,
+      "seconds": 0.0,
+      "row": 0
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0122,
+      "road_km": 0.87,
+      "permeability": 0.204,
+      "conductance_m2": 49856.0,
+      "seconds": 196.72972893714905,
+      "row": 1
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0227,
+      "road_km": 1.78,
+      "permeability": 0.308,
+      "conductance_m2": 97623.0,
+      "seconds": 322.67055010795593,
+      "row": 2
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0321,
+      "road_km": 2.2,
+      "permeability": 0.364,
+      "conductance_m2": 122398.0,
+      "seconds": 398.06657433509827,
+      "row": 3
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0454,
+      "road_km": 2.91,
+      "permeability": 0.403,
+      "conductance_m2": 164324.0,
+      "seconds": 550.5276434421539,
+      "row": 4
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0556,
+      "road_km": 3.11,
+      "permeability": 0.431,
+      "conductance_m2": 175755.0,
+      "seconds": 598.9586958885193,
+      "row": 5
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0624,
+      "road_km": 3.66,
+      "permeability": 0.439,
+      "conductance_m2": 208082.0,
+      "seconds": 727.0155868530273,
+      "row": 6
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0733,
+      "road_km": 4.15,
+      "permeability": 0.464,
+      "conductance_m2": 237024.0,
+      "seconds": 847.4073979854584,
+      "row": 7
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.083,
+      "road_km": 4.56,
+      "permeability": 0.469,
+      "conductance_m2": 260651.0,
+      "seconds": 970.4124236106873,
+      "row": 8
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0915,
+      "road_km": 5.75,
+      "permeability": 0.482,
+      "conductance_m2": 318950.0,
+      "seconds": 1087.428965330124,
+      "row": 9
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1027,
+      "road_km": 6.45,
+      "permeability": 0.504,
+      "conductance_m2": 356777.0,
+      "seconds": 1148.7000143527985,
+      "row": 10
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1122,
+      "road_km": 7.18,
+      "permeability": 0.519,
+      "conductance_m2": 383814.0,
+      "seconds": 1291.3215963840485,
+      "row": 11
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1218,
+      "road_km": 7.85,
+      "permeability": 0.537,
+      "conductance_m2": 416512.0,
+      "seconds": 1493.2813494205475,
+      "row": 12
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1306,
+      "road_km": 8.41,
+      "permeability": 0.551,
+      "conductance_m2": 448574.0,
+      "seconds": 1590.7163155078888,
+      "row": 13
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.142,
+      "road_km": 8.99,
+      "permeability": 0.573,
+      "conductance_m2": 478478.0,
+      "seconds": 1736.9870641231537,
+      "row": 14
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1531,
+      "road_km": 9.57,
+      "permeability": 0.586,
+      "conductance_m2": 511894.0,
+      "seconds": 1947.8078384399414,
+      "row": 15
+     }
+    }
+   ]
+  }
+ ],
+ "encoding": {
+  "road": "#475569",
+  "street": "#1e293b",
+  "edge": "#94a3b8",
+  "water": "#bfdbf3",
+  "escape_ramp": [
+   "#a2d0f9",
+   "#9ebef3",
+   "#9daae9",
+   "#a097db",
+   "#a382c8",
+   "#a56eb1",
+   "#a35c98",
+   "#9f497b",
+   "#99375e",
+   "#91253d",
+   "#861118"
+  ],
+  "iso_step": 0.1,
+  "road_width_m": 7.0,
+  "road_conductance": 10.0,
+  "gone_share": 0.1,
+  "ghost_fill": "#ece8e2",
+  "ghost_edge": "#7d7468",
+  "depth_ramp": [
+   "#ffffcc",
+   "#ffeda0",
+   "#fed976",
+   "#feb24c",
+   "#fd8c3c",
+   "#fc4d2a",
+   "#e2191c",
+   "#bb0026",
+   "#800026"
+  ]
+ }
+}

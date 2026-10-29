@@ -305,11 +305,13 @@ test("the URL key list is pinned -- a key rename breaks published links silently
     // saved link now names no widget. That is the cost of removing a figure, recorded rather than
     // smoothed over: nothing can honour a key whose widget no longer exists.
     const [{ FRONTIER_URL }, { FIELD_URL }, { REGION_GROW_URL },
-      { SCREEN_MAP_URL }, { DRAW_ROAD_URL }] = await Promise.all([
-      import("../src/widgets/frontier.js"),
-      import("../src/widgets/displacement-field.js"), import("../src/widgets/region-grow.js"),
-      import("../src/widgets/screen-map.js"), import("../src/widgets/draw-road.js"),
-    ]);
+      { SCREEN_MAP_URL }, { DRAW_ROAD_URL }, { BUILD_OUT_URL, BUILD_OUT_COMPARE_URL }] =
+      await Promise.all([
+        import("../src/widgets/frontier.js"),
+        import("../src/widgets/displacement-field.js"), import("../src/widgets/region-grow.js"),
+        import("../src/widgets/screen-map.js"), import("../src/widgets/draw-road.js"),
+        import("../src/widgets/build-out.js"),
+      ]);
     const keysOf = (codec: object): string[] =>
       (Object.values(codec) as readonly { keys: readonly string[] }[])
         .flatMap((p) => [...p.keys]).sort();
@@ -318,11 +320,13 @@ test("the URL key list is pinned -- a key rename breaks published links silently
     assert.deepEqual(keysOf(REGION_GROW_URL), ["budget", "seed"]);
     assert.deepEqual(keysOf(SCREEN_MAP_URL), ["city", "floor", "metric"]);
     assert.deepEqual(keysOf(DRAW_ROAD_URL), ["road"]);
+    assert.deepEqual(keysOf(BUILD_OUT_URL), ["buildout"]);
+    assert.deepEqual(keysOf(BUILD_OUT_COMPARE_URL), ["compare"]);
 
     // And the union is collision-free ACROSS widgets, which is the property mountAll's throw
     // enforces per page and this asserts for the shipped set as a whole.
     const all = [FRONTIER_URL, FIELD_URL, REGION_GROW_URL, SCREEN_MAP_URL,
-      DRAW_ROAD_URL].flatMap(keysOf);
+      DRAW_ROAD_URL, BUILD_OUT_URL, BUILD_OUT_COMPARE_URL].flatMap(keysOf);
     assert.equal(new Set(all).size, all.length, `duplicate URL key across widgets: ${all}`);
   });
 
