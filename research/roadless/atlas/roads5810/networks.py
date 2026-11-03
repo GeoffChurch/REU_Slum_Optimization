@@ -66,7 +66,7 @@ On the page (2026-10-28), each one `add`:
   joint paved 'rs.D{D}.s0.1.r7.q1,2,3,3,3.b1,2,4,8,16.i60.uOC.cjoint.p1e0.0001v8'
   joint roads 'rs.D{D}.s0.1.r7.q1,2,3,3,3.b1,2,4,8,16.i60.uOC.cjoint.p1e0.0001v8'
   growth gr.k10.att.greedy.N48.sep14.n2s0.3.B21m8k2.K0.D0.15.v2           (price 0.3)
-  ears ears.paths.b20.f2000.e30.loop.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1
+  ears ears.paths.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1
   templates 'tp.D{D}.s0.1.v1'
   growth gr.gl0.25Croad.free0.03.greedy.N48.sep14.n2s0.1.B0.K4.D0.15.v2  (islands: the charge
       that scores best under RUNTIME, the growth study's frames.py score: 0.492 at D 0.15, 0.01's
@@ -81,9 +81,9 @@ On the page (2026-10-28), each one `add`:
   (R3=pt.K5.R10.band.t0.2,0.1,0.05,0.03,0.02.b1,2,4,8,16.q1,2,3,3,3.e0.2,0.1,0.05,0.02,0.i40)
   spurs 'ps.lazy5.D{D}.spec{n}s0.x{x}.v4'                (the spectral cuts at D 0.05 and 0.10 plus
       the lazy ΔP greedy's roads to 0.01 and 0.02 more D; 0.15's beyond the slider)
-  ears ears.paths.b20.f2000.e30.spur10-30.gl0.25Croad.n2s0.1.M8.K4.D0.15.v3   (2026-11-03: Shock
-  ears ears.paths.b20.f2000.e30.spur10-80.gl0.25Croad.n2s0.1.M8.K4.D0.15.v3    Reblock with spurs,
-      dead ends on open ground 10 -- 30 and 10 -- 80 m from their start: Ears.SPUR_CLS)
+  ears ears.paths.b20.f2000.e30.spur10-30.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15.v3   (2026-11-03:
+  ears ears.paths.b20.f2000.e30.spur10-80.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15.v3    Shock Reblock
+      with spurs, dead ends on open ground 10 -- 30 and 10 -- 80 m from their start: Ears.SPUR_CLS)
   lineup clearance | cycle_native_betweenness_contrast | euclidean_grid
       | greedy_arterial_access_displacement | resistance_lp     (2026-11-03: Lineup.WORDS)
 `ready` lists the finished runs not on the page, each once, with the spec naming the most budgets

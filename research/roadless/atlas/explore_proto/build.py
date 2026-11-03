@@ -185,7 +185,7 @@ class Shown:
 EARS_PATHS = Shown(
     # The plan names spell out their face and ear floors (rev 3, 2026-10-29).
     runs=(OnBlock("ZAF.9.3.1_1_5810",
-                  GrownRun("ears.paths.b20.f2000.e30.loop.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1",
+                  GrownRun("ears.paths.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1",
                            budget=0.15)),),
     # The owner's name for it (2026-10-29), and the coordinator's sentence for why, verbatim.
     name="Shock Reblock",
@@ -493,7 +493,7 @@ PAGE = Block("ZAF.9.3.1_1_5810", "the Bloekombos and Wallacedene area of Kraaifo
 COMPARED = Compared(
     "ZAF.9.3.1_1_41785", "Philippi", zoom=18, topology=MEASURED,
     # Rev 3's face and ear floors (100 m², 30 m), low enough to reach topology's range (2026-10-29).
-    ours=Grid("ears.paths.b20.f100.e30.loop.gl0.25Croad.n2s0.1.M8.K4.D0.91.v3", stem="loop",
+    ours=Grid("ears.paths.b20.f100.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.91.v3", stem="loop",
               stops_because="no road left that would split a sub-block"),
     earlier=Grid("topology.a10.s0.w7.built", stem="topology",
                  stops_because="its network is complete"))

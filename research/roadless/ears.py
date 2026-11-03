@@ -47,24 +47,25 @@ and leaves its cells as they were, so its exact gain is the same restricted solv
 run sink to sink by construction: their ears are loops, and their names carry no ends.
 
 A term added to the escape objective of `paths` is a Strategy (Attract, owner 2026-11-03: Idea C,
-detour-saving attraction): NoDetour, the objective alone; Detour(lam) (`.dt<lam>`), each ear
-credited lam P0 S / S0, S its detour saving (`savings`: over pairs of homes, each at the road
-point nearest it, the mean metres by which the trip between their road points along the network
-gets shorter with the ear's path a link; the network the state's sinks, its road points one per
-SRC_M square, `roads_of`), S0 the mean such trip on the street alone. A spur shortens no trip and
-earns nothing; the ear that later closes it is credited the whole loop. An ear is scored
-(gain + credit) / cost at every stage, its credit times the last step's first order over exact
-gain where the first order stands in for the exact gain (build).
+detour-saving attraction), a required plan token after the ends: NoDetour (`.nodt`), the objective
+alone; Detour(lam) (`.dt<lam>`), each ear credited lam P0 S / S0, S its detour saving (`savings`:
+over pairs of homes, each at the road point nearest it, the mean metres by which the trip between
+their road points along the network gets shorter with the ear's path a link; the network the state's
+sinks, its road points one per SRC_M square, `roads_of`), S0 the mean such trip on the street alone.
+A spur shortens no trip and earns nothing; the ear that later closes it is credited the whole loop.
+An ear is scored (gain + credit) / cost at every stage, its credit times the last step's first order
+over exact gain where the first order stands in for the exact gain (build).
 
     E=research/roadless/ears.py                        # from the repo root, PYTHONPATH=.
     uv run python $E run <block> <plan>
     uv run python $E check decouple|first|ends|spur|detour|offer <block> [fault]
-    uv run python $E check horseshoe [fault]
+    uv run python $E check horseshoe|names [fault]
 
-plan: ears.<paths.b<bld>.f<face_m2>.e<ear_m>.<loop|spur<min_m>-<max_m>>[.dt<lam>]|divides.p<tau>
-.f<face_m2>.e<ear_m>>.gl<h>Croad.n<nu>s<price>.M<pairs>.K<exact>.D<D> (a face under face_m2 not
-split, an ear's ends at least ear_m apart, a spur's end min_m to max_m from its start, `.dt<lam>`
-Detour, none NoDetour: every run before it, whose names stand), its name adding the code's
+plan: ears.<paths.b<bld>.f<face_m2>.e<ear_m>.<loop|spur<min_m>-<max_m>>.<nodt|dt<lam>>
+|divides.p<tau>.f<face_m2>.e<ear_m>>.gl<h>Croad.n<nu>s<price>.M<pairs>.K<exact>.D<D> (a face under
+face_m2 not split, an ear's ends at least ear_m apart, a spur's end min_m to max_m from its start,
+`.nodt` NoDetour, `.dt<lam>` Detour; a divides name carries neither ends nor attraction, its ears
+loops with no credit by construction), its name adding the code's
 revision (.v<REV>); rows in growth_rows/<block>/<name>/ in growth.py's layout (steps.parquet,
 picks.parquet one row per ear with whether it is a spur and its detour saving and credit,
 bridges.parquet empty, tri_step.parquet), so the growth runs' frames and plates read them.
@@ -92,6 +93,9 @@ horseshoe: synthetic horseshoes (no block; Experiment 1 of the owner's doc): the
   saving rises strictly with the arms at a fixed gap, and its saving per metre of link strictly as
   the gap closes at fixed arms. Fault `crow` (straight-line distances for the road distances: no
   link shortens a trip) fails it.
+names: every check plan's name round-trips (Plan.of(name).name), and each paths one with its
+  attraction token dropped (the old grammar's NoDetour) is refused. Fault `keep` (the token kept:
+  the name parses) fails it.
 offer: after OFFER_EARS ears of the divides check plan (faces of very different sizes), the
   `pairs` divides Divides costs hold a splitting one within TOL_OFFER of the best first order
   per cost among every face's divides. Fault `persistence` (rev 1's order, the most persistent
@@ -433,7 +437,7 @@ class Attract(Protocol):
     built ear's exact gain)."""
 
     @property
-    def suffix(self) -> str: ...                 # its token in the plan's name ('' for none)
+    def name(self) -> str: ...                   # its token in the plan's name
 
     def field(self, e: EarWorld, *, P0: float) -> Field: ...
 
@@ -448,12 +452,11 @@ class _NoField:
 
 @dataclass(frozen=True, kw_only=True)
 class NoDetour:
-    """The escape objective alone (every ears-paths run before Idea C): no credit. Its name adds
-    no token, so those runs' names stand."""
+    """The escape objective alone: no credit (`nodt`)."""
 
     @property
-    def suffix(self) -> str:
-        return ""
+    def name(self) -> str:
+        return "nodt"
 
     def field(self, e: EarWorld, *, P0: float) -> Field:
         return _NoField()
@@ -509,8 +512,8 @@ class Detour:
             raise ValueError(f"lam {self.lam}: positive (NoDetour is the term off)")
 
     @property
-    def suffix(self) -> str:
-        return f".dt{self.lam:g}"
+    def name(self) -> str:
+        return f"dt{self.lam:g}"
 
     def field(self, e: EarWorld, *, P0: float) -> Field:
         homes, share = e.homes()
@@ -538,7 +541,7 @@ class Paths:
     @property
     def name(self) -> str:
         return (f"paths.b{self.bld:g}.f{self.face_m2:g}.e{self.ear_m:g}.{self.ends.name}"
-                f"{self.attract.suffix}")
+                f".{self.attract.name}")
 
     def ears(self, e: EarWorld, faces: Face, gain: F64, *, cost: gr.Cost,
              scale: float) -> list[Ear]:
@@ -897,13 +900,13 @@ class Plan:
     def of(spec: str) -> Plan:
         m = re.fullmatch(r"ears\.(?:paths\.b(?P<bld>[0-9.]+)\.f(?P<pf>[0-9.]+)\.e(?P<pe>[0-9.]+)"
                          r"\.(?P<ends>loop|spur(?P<lo>[0-9.]+)-(?P<hi>[0-9.]+))"
-                         r"(?:\.dt(?P<lam>[0-9.]+))?"
+                         r"\.(?:nodt|dt(?P<lam>[0-9.]+))"
                          r"|divides\.p(?P<tau>[0-9.]+)\.f(?P<df>[0-9.]+)\.e(?P<de>[0-9.]+))"
                          r"\.gl(?P<h>[0-9.]+)Croad\.n(?P<nu>[0-9.e-]+)s(?P<price>[0-9.e-]+)"
                          r"\.M(?P<pairs>[0-9]+)\.K(?P<exact>[0-9]+)\.D(?P<D>[0-9.]+)", spec)
         if m is None:
             raise SystemExit(f"{spec}: a plan is ears.<paths.b<bld>.f<face_m2>.e<ear_m>"
-                             ".<loop|spur<min_m>-<max_m>>[.dt<lam>]|divides.p<tau>.f<face_m2>"
+                             ".<loop|spur<min_m>-<max_m>>.<nodt|dt<lam>>|divides.p<tau>.f<face_m2>"
                              ".e<ear_m>>"
                              ".gl<h>Croad.n<nu>s<price>.M<pairs>.K<exact>.D<D>")
         cands: Candidates
@@ -1144,8 +1147,8 @@ def run(bid: str, plan: Plan) -> None:
 
 # ---------------------------------------------------------------- the checks
 
-CHECK_PLAN = "ears.paths.b20.f2000.e30.loop.gl0.25Croad.n2s0.1.M8.K2.D1"
-CHECK_SPUR = "ears.paths.b20.f2000.e30.spur10-80.gl0.25Croad.n2s0.1.M16.K2.D1"
+CHECK_PLAN = "ears.paths.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K2.D1"
+CHECK_SPUR = "ears.paths.b20.f2000.e30.spur10-80.nodt.gl0.25Croad.n2s0.1.M16.K2.D1"
 CHECK_DIVIDES = "ears.divides.p0.1.f2000.e30.gl0.25Croad.n2s0.1.M16.K4.D1"
 CHECK_DETOUR = "ears.paths.b20.f2000.e30.loop.dt1.gl0.25Croad.n2s0.1.M8.K2.D1"
 
@@ -1204,6 +1207,33 @@ def horseshoe(fault: str | None) -> None:
     ok = (all(b[0] > a[0] for a, b in zip(by_arm, by_arm[1:], strict=False))
           and all(b[0] / b[1] > a[0] / a[1] for a, b in zip(by_gap, by_gap[1:], strict=False)))
     print(f"horseshoe {fault or 'none'}: -> {'PASS' if ok else 'FAIL'}")
+    if not ok:
+        raise SystemExit(1)
+
+
+def names(fault: str | None) -> None:
+    """Every check plan's name round-trips, and each paths name with its attraction token dropped
+    is refused (the token is required: a name that omits it means nothing). Fault `keep` (the
+    token kept) fails it."""
+    if fault not in (None, "keep"):
+        raise SystemExit("names' fault: keep")
+    ok = True
+    for spec in (CHECK_PLAN, CHECK_SPUR, CHECK_DETOUR, CHECK_DIVIDES):
+        p = Plan.of(spec)
+        back = p.name == f"{spec}.v{REV}"
+        ok &= back
+        print(f"  {spec}: {'round-trips' if back else f'named {p.name}'}")
+        if isinstance(p.candidates, Paths):
+            tok = f".{p.candidates.attract.name}."
+            bare = spec if fault == "keep" else spec.replace(tok, ".", 1)
+            try:
+                Plan.of(bare)
+                refused = False
+            except SystemExit:
+                refused = True
+            ok &= refused
+            print(f"    {bare}: {'refused' if refused else 'PARSES'}")
+    print(f"names {fault or 'none'}: -> {'PASS' if ok else 'FAIL'}")
     if not ok:
         raise SystemExit(1)
 
@@ -1411,6 +1441,8 @@ def main(argv: list[str]) -> None:
         run(argv[1], Plan.of(argv[2]))
     elif len(argv) in (2, 3) and argv[:2] == ["check", "horseshoe"]:
         horseshoe(argv[2] if len(argv) == 3 else None)
+    elif len(argv) in (2, 3) and argv[:2] == ["check", "names"]:
+        names(argv[2] if len(argv) == 3 else None)
     elif len(argv) in (3, 4) and argv[0] == "check":
         check(argv[1], argv[2], argv[3] if len(argv) == 4 else None)
     else:

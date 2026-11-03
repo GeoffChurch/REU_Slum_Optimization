@@ -178,8 +178,8 @@ REV = 4                  # 2: the start's cells split into connected regions bef
                          # 4: the answers' grounds on the GRID_M grid (`gridded`), the cut's
                          # regions narrower than a road merged (`thick`): the update is rev 3's
 TAU = common.MEASURE.tau                 # the ramp's knee (the ramp's tail, Partition.D)
-EARS_RUN = "ears.paths.b20.f2000.e30.loop.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1"   # the ears start's run
-                         # (growth_rows/<block>/: the ears arm's paths on 5810)
+EARS_RUN = "ears.paths.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1"
+                         # the ears start's run (growth_rows/<block>/: the ears arm's paths on 5810)
 OUT = HERE / "partition_rows"
 
 

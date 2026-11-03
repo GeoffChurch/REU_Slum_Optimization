@@ -24,7 +24,7 @@ import growth as gr  # noqa: E402
 def label(run: str) -> str:
     c = ears.Plan.of(run.rsplit(".v", 1)[0]).candidates
     if isinstance(c, ears.Paths):
-        return f"{c.ends.name}{c.attract.suffix}"
+        return f"{c.ends.name}.{c.attract.name}"
     return c.name
 
 
