@@ -680,7 +680,8 @@ class Growth:
 
 class Ears:
     """An ears.py run (growth.py's rows): its chart class and words by its candidates and, for
-    paths, where they may end (ears.Ends)."""
+    paths, where they may end (ears.Ends); a path run with an attraction (ears.Detour) has no
+    words yet and is refused."""
     SPUR_CLS = {(10.0, 30.0): "es30", (10.0, 80.0): "es80"}    # a spur's (min_m, max_m) -> class
 
     def __init__(self, plan: str) -> None:
@@ -692,6 +693,9 @@ class Ears:
         paths = "the cheapest paths from one face's edge back to it"
         loops = "refusing one that does not split its face, so every road lies on a loop"
         match self.p.candidates:
+            case ears.Paths(attract=a) if not isinstance(a, ears.NoDetour):
+                raise SystemExit(f"{plan}: no page words for an attraction ({a}: the words say "
+                                 "the road lowers P most per cost, nothing credited)")
             case ears.Divides():
                 self.cls, self.name = "eard", "ears, divides"
                 self.among = "the divides of the escape potential across a face"
