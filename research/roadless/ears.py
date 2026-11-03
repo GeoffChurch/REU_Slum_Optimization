@@ -38,15 +38,24 @@ those rescored by the restricted solve, the best exact gain per cost built (gree
 step). Every DEC_EVERY ears the decoupling gap (the global P less the faces' sum, over P) goes into
 the state's row.
 
+Where a path may end is a Strategy of `paths` (Ends): `loop` (Loop), the above; `spur<min>-<max>`
+(Spur, owner 2026-11-03: Idea A, spurs in Shock Reblock), dead ends allowed, so spurs and loops
+compete at one budget: a path may also end on the face's open ground (no building, no sink)
+between min and max m from its source in a straight line, a spur (Ear.spur), its corridor joined
+to the network at its start only and built without splitting its face. A spur lies in one face
+and leaves its cells as they were, so its exact gain is the same restricted solve. `divides` cuts
+run sink to sink by construction: their ears are loops, and their names carry no ends.
+
     E=research/roadless/ears.py                        # from the repo root, PYTHONPATH=.
     uv run python $E run <block> <plan>
-    uv run python $E check decouple|first|ends|offer <block> [fault]
+    uv run python $E check decouple|first|ends|spur|offer <block> [fault]
 
-plan: ears.<paths.b<bld>|divides.p<tau>>.f<face_m2>.e<ear_m>.gl<h>Croad.n<nu>s<price>.M<pairs>
-.K<exact>.D<D> (a face under face_m2 not split, an ear's ends at least ear_m apart), its name
-adding the code's revision (.v<REV>); rows in growth_rows/<block>/<name>/ in growth.py's layout
-(steps.parquet, picks.parquet one row per ear, bridges.parquet empty, tri_step.parquet), so the
-growth runs' frames and plates read them.
+plan: ears.<paths.b<bld>.f<face_m2>.e<ear_m>.<loop|spur<min_m>-<max_m>>|divides.p<tau>.f<face_m2>
+.e<ear_m>>.gl<h>Croad.n<nu>s<price>.M<pairs>.K<exact>.D<D> (a face under face_m2 not split, an
+ear's ends at least ear_m apart, a spur's end min_m to max_m from its start), its name adding the
+code's revision (.v<REV>); rows in growth_rows/<block>/<name>/ in growth.py's layout
+(steps.parquet, picks.parquet one row per ear with whether it is a spur, bridges.parquet empty,
+tri_step.parquet), so the growth runs' frames and plates read them.
 
 Checks, each run both ways:
 decouple: a state with a few ears on the block, the global P against the sum of its faces' P
@@ -59,6 +68,9 @@ first: on that state, for the top ears (their open triangles only, kt0 >= OPEN_K
   (|u| in place of u^2) fails it.
 ends: the top candidate ears each split their face (its faces of FACE_M2 and more rise). Fault
   `spur` (an ear's last third dropped: a dead end) fails it.
+spur: the spur check plan's top SPUR_EARS candidate spurs each a corridor in one piece, touching
+  the network, that splits nothing (its end on open ground). Fault `both-ends` (a spur's
+  corridor extended at its end too, as a loop's is) fails it.
 offer: after OFFER_EARS ears of the divides check plan (faces of very different sizes), the
   `pairs` divides Divides costs hold a splitting one within TOL_OFFER of the best first order
   per cost among every face's divides. Fault `persistence` (rev 1's order, the most persistent
@@ -116,6 +128,7 @@ WEAK_H = 25.0          # m: decouple's fault: a weak leak
 FIRST_H = 2500.0       # m: first's leak (the drop linear in it: an ear's leak times its own
                        # resistance to ground far below 1)
 OPEN_KT = 0.999        # first: the ears' open triangles only (no opening term to speak of)
+SPUR_EARS = 4          # spur: the top candidate spurs judged
 OFFER_EARS = 8         # offer: ears built by the divides check plan before the offers are judged
 TOL_OFFER = 0.9        # offer: the costed divides' best splitting first order per cost over all
                        # divides' (5810, rev 2's states 6 / 8 / 12: 1.0 each; rev 1's persistence
@@ -134,10 +147,13 @@ class Face(NamedTuple):
 
 
 class Ear(NamedTuple):
-    """A candidate: its face, its path's pixels, its corridor's new triangles, dD, dC, its cost,
-    first-order gain, exact gain (nan unless rescored)."""
+    """A candidate: its face, its path's pixels, whether it is a spur (its path ends on the face's
+    open ground, not at a sink: its corridor joins the network at its start only, and it need not
+    split its face), its corridor's new triangles, dD, dC, its cost, first-order gain, exact gain
+    (nan unless rescored)."""
     face: int
     path: I64
+    spur: bool
     tris: I64
     dD: float
     dC: float
@@ -206,19 +222,67 @@ class Candidates(Protocol):
     def ears(self, e: EarWorld, faces: Face, gain: F64, *, cost: gr.Cost) -> list[Ear]: ...
 
 
+class Ends(Protocol):
+    """Where a path may end (Paths): per pixel of the source's face whether it is a target."""
+    @property
+    def name(self) -> str: ...
+
+    def targets(self, sink: B, ground: B, dist: F64, *, ear_m: float) -> B: ...
+
+
+@dataclass(frozen=True, kw_only=True)
+class Loop:
+    """Every road on a loop: a path ends at a sink pixel (`sink`) at least ear_m from its source
+    in a straight line, and an ear that splits nothing is refused (build)."""
+
+    @property
+    def name(self) -> str:
+        return "loop"
+
+    def targets(self, sink: B, ground: B, dist: F64, *, ear_m: float) -> B:
+        return np.asarray(sink & (dist >= ear_m))
+
+
+@dataclass(frozen=True, kw_only=True)
+class Spur:
+    """Dead ends allowed (Idea A, owner 2026-11-03): Loop's targets, and also the face's open
+    ground (`ground`: an ungrown pixel off every building and off every sink) between min_m and
+    max_m from the source in a straight line, where the path is a spur (Ear.spur): its corridor
+    joins the network at its start only and it is built whether or not it splits its face. The
+    loop ears keep ear_m, the spurs min_m (a spur ends nowhere near the source's road by
+    construction, so the two floors guard different things: an ear's ends not crowding one road,
+    a spur not a stub)."""
+    min_m: float
+    max_m: float
+
+    def __post_init__(self) -> None:
+        if not 0 < self.min_m < self.max_m:
+            raise ValueError(f"{self}: 0 < min_m < max_m")
+
+    @property
+    def name(self) -> str:
+        return f"spur{self.min_m:g}-{self.max_m:g}"
+
+    def targets(self, sink: B, ground: B, dist: F64, *, ear_m: float) -> B:
+        return np.asarray((sink & (dist >= ear_m))
+                          | (ground & (dist >= self.min_m) & (dist <= self.max_m)))
+
+
 @dataclass(frozen=True, kw_only=True)
 class Paths:
     """Cheapest paths on the raster (module docstring); `bld` the extra cost of a metre through a
     building, `pairs` the sources whose best ears are built and costed; a face under `face_m2` is
-    not split, an ear's ends at least `ear_m` apart in a straight line."""
+    not split, an ear's ends at least `ear_m` apart in a straight line; `ends` where a path may
+    end (Loop: at a sink; Spur: there or on open ground)."""
     bld: float
     pairs: int
     face_m2: float
     ear_m: float
+    ends: Ends
 
     @property
     def name(self) -> str:
-        return f"paths.b{self.bld:g}.f{self.face_m2:g}.e{self.ear_m:g}"
+        return f"paths.b{self.bld:g}.f{self.face_m2:g}.e{self.ear_m:g}.{self.ends.name}"
 
     def ears(self, e: EarWorld, faces: Face, gain: F64, *, cost: gr.Cost) -> list[Ear]:
         g, ra = e.g, e.ra
@@ -228,6 +292,7 @@ class Paths:
         # the ends: sink pixels of the face (a road or the street, not a wall)
         same = pf[ra.ea] == pf[ra.eb]
         bnd = live & e.sinks()
+        ground = live & (ra.bld == 0) & ~bnd       # open ground: where a spur may end
         # per pixel its first-order gain density (the triangles under it)
         gp = np.bincount(_pix_of(ra, g.cen), weights=gain, minlength=len(pf))
         ok = live[ra.ea] & live[ra.eb] & same
@@ -247,8 +312,9 @@ class Paths:
                 fin = np.isfinite(d)
                 order = np.flatnonzero(fin)[np.argsort(d[fin])]
                 acc = _tree_sum(pred[k], order, gp)
-                far = np.hypot(*(ra.xy - ra.xy[a]).T) >= self.ear_m
-                tg = np.flatnonzero(bnd & fin & far & (pf == pf[a]))
+                crow = np.hypot(*(ra.xy - ra.xy[a]).T)     # straight-line, from the source
+                tg = np.flatnonzero(self.ends.targets(bnd, ground, crow, ear_m=self.ear_m)
+                                    & fin & (pf == pf[a]))
                 if not len(tg):
                     continue
                 r = acc[tg] / np.maximum(d[tg], 1e-9)
@@ -261,13 +327,14 @@ class Paths:
             while path[-1] != a:
                 path.append(int(pr[path[-1]]))
             path_a = np.asarray(path[::-1], dtype=np.int64)
-            tris = e.corridor(ra.xy[path_a])
+            spur = not bool(bnd[t])
+            tris = e.corridor(ra.xy[path_a], spur=spur)
             if not len(tris):
                 continue
             dD, dC = g.costs_of(tris)
             c = float(cost.of(np.array([dD]), np.array([dC]), P0=g.P0)[0])
-            out.append(Ear(face=int(pf[a]), path=path_a, tris=tris, dD=dD, dC=dC, cost=c,
-                           first=float(gain[tris].sum()), exact=np.nan))
+            out.append(Ear(face=int(pf[a]), path=path_a, spur=spur, tris=tris, dD=dD, dC=dC,
+                           cost=c, first=float(gain[tris].sum()), exact=np.nan))
         return out
 
 
@@ -529,12 +596,12 @@ class Divides:
         out = []
         for o in offers:
             f, d = o.face, o.divide
-            tris = e.corridor(ra.xy[d.pixels])
+            tris = e.corridor(ra.xy[d.pixels], spur=False)
             if not len(tris):
                 continue
             dD, dC = g.costs_of(tris)
             c = float(cost.of(np.array([dD]), np.array([dC]), P0=g.P0)[0])
-            out.append(Ear(face=f, path=d.pixels, tris=tris, dD=dD, dC=dC, cost=c,
+            out.append(Ear(face=f, path=d.pixels, spur=False, tris=tris, dD=dD, dC=dC, cost=c,
                            first=float(gain[tris].sum()), exact=np.nan))
         return out
 
@@ -566,19 +633,27 @@ class Plan:
 
     @staticmethod
     def of(spec: str) -> Plan:
-        m = re.fullmatch(r"ears\.(paths\.b|divides\.p)([0-9.]+)\.f([0-9.]+)\.e([0-9.]+)"
-                         r"\.gl([0-9.]+)Croad\.n([0-9.e-]+)s([0-9.e-]+)\.M([0-9]+)\.K([0-9]+)"
-                         r"\.D([0-9.]+)", spec)
+        m = re.fullmatch(r"ears\.(?:paths\.b(?P<bld>[0-9.]+)\.f(?P<pf>[0-9.]+)\.e(?P<pe>[0-9.]+)"
+                         r"\.(?P<ends>loop|spur(?P<lo>[0-9.]+)-(?P<hi>[0-9.]+))"
+                         r"|divides\.p(?P<tau>[0-9.]+)\.f(?P<df>[0-9.]+)\.e(?P<de>[0-9.]+))"
+                         r"\.gl(?P<h>[0-9.]+)Croad\.n(?P<nu>[0-9.e-]+)s(?P<price>[0-9.e-]+)"
+                         r"\.M(?P<pairs>[0-9]+)\.K(?P<exact>[0-9]+)\.D(?P<D>[0-9.]+)", spec)
         if m is None:
-            raise SystemExit(f"{spec}: a plan is ears.<paths.b<bld>|divides.p<tau>>.f<face_m2>"
-                             ".e<ear_m>.gl<h>Croad.n<nu>s<price>.M<pairs>.K<exact>.D<D>")
-        floors = dict(face_m2=float(m[3]), ear_m=float(m[4]))
-        cands: Candidates = (Paths(bld=float(m[2]), pairs=int(m[8]), **floors)
-                             if m[1] == "paths.b" else
-                             Divides(tau=float(m[2]), pairs=int(m[8]), **floors))
-        return Plan(candidates=cands, contrast=gr.GroundedLeak(h=float(m[5])),
-                    cost=gr.Cost(nu=float(m[6]), price=float(m[7])), exact=int(m[9]),
-                    D=float(m[10]))
+            raise SystemExit(f"{spec}: a plan is ears.<paths.b<bld>.f<face_m2>.e<ear_m>"
+                             ".<loop|spur<min_m>-<max_m>>|divides.p<tau>.f<face_m2>.e<ear_m>>"
+                             ".gl<h>Croad.n<nu>s<price>.M<pairs>.K<exact>.D<D>")
+        cands: Candidates
+        if m["bld"] is not None:
+            ends: Ends = (Loop() if m["ends"] == "loop" else
+                          Spur(min_m=float(m["lo"]), max_m=float(m["hi"])))
+            cands = Paths(bld=float(m["bld"]), pairs=int(m["pairs"]), face_m2=float(m["pf"]),
+                          ear_m=float(m["pe"]), ends=ends)
+        else:
+            cands = Divides(tau=float(m["tau"]), pairs=int(m["pairs"]), face_m2=float(m["df"]),
+                            ear_m=float(m["de"]))
+        return Plan(candidates=cands, contrast=gr.GroundedLeak(h=float(m["h"])),
+                    cost=gr.Cost(nu=float(m["nu"]), price=float(m["price"])),
+                    exact=int(m["exact"]), D=float(m["D"]))
 
 
 class EarWorld:
@@ -622,17 +697,17 @@ class EarWorld:
         area = np.bincount(lab[off], weights=g.area[off], minlength=k)
         return Face(lab=lab, area=area)
 
-    def corridor(self, pts: F64) -> I64:
+    def corridor(self, pts: F64, *, spur: bool) -> I64:
         """An ear's corridor along the polyline `pts`, extended at both ends to the nearest
-        bounding triangle (the road or street it joins): the ungrown triangles within
-        growth.PATCH_R of its points, and every triangle its centreline crosses (sampled every
-        STEP_M): on 5810's open ground a triangle can be larger than a road, and one whose
-        centroid lies off the corridor but which straddles it joins the two halves (the first
-        runs' ears split nothing)."""
+        bounding triangle (the road or street it joins; a spur's at its start only, its end on
+        open ground): the ungrown triangles within growth.PATCH_R of its points, and every
+        triangle its centreline crosses (sampled every STEP_M): on 5810's open ground a triangle
+        can be larger than a road, and one whose centroid lies off the corridor but which
+        straddles it joins the two halves (the first runs' ears split nothing)."""
         g = self.g
         att = np.flatnonzero(self.bounding())
         _, k = cKDTree(g.cen[att]).query(pts[[0, -1]], k=1)
-        line = np.vstack([g.cen[att[k[0]]], pts, g.cen[att[k[1]]]])
+        line = np.vstack([g.cen[att[k[0]]], pts] + ([] if spur else [g.cen[att[k[1]]]]))
         seg = np.diff(line, axis=0)
         L = np.hypot(*seg.T)
         dense = [line[:1]]
@@ -730,7 +805,8 @@ def build(e: EarWorld, plan: Plan, *, out: Path, log: Any, steps: int | None = N
             break
         cands.sort(key=lambda q: -q.first / q.cost)
         on = g.step >= 0
-        # the splitting ones only (no dead end), best first order per cost first, `exact` of them
+        # the splitting ones only (no dead end) and the spurs (a dead end by design: Spur), best
+        # first order per cost first, `exact` of them
         split: list[tuple[Ear, Face]] = []
         for q in cands:
             if len(split) == plan.exact:
@@ -738,7 +814,7 @@ def build(e: EarWorld, plan: Plan, *, out: Path, log: Any, steps: int | None = N
             g.step[q.tris] = step
             nf = e.faces()
             g.step[q.tris] = -1
-            if nf.n > faces.n:
+            if nf.n > faces.n or q.spur:
                 split.append((q, nf))
             else:
                 log(f"  refused an ear in face {q.face}: it splits nothing")
@@ -757,7 +833,8 @@ def build(e: EarWorld, plan: Plan, *, out: Path, log: Any, steps: int | None = N
         built, faces = max(scored, key=lambda qn: qn[0].exact / qn[0].cost)
         g.step[built.tris] = step
         xy = e.ra.xy[built.path]
-        picks.append(dict(step=step, face=built.face, ax=float(xy[0, 0]), ay=float(xy[0, 1]),
+        picks.append(dict(step=step, face=built.face, spur=built.spur,
+                          ax=float(xy[0, 0]), ay=float(xy[0, 1]),
                           bx=float(xy[-1, 0]), by=float(xy[-1, 1]),
                           length=float(np.hypot(*np.diff(xy, axis=0).T).sum()),
                           n_tris=len(built.tris), dD=built.dD, dC=built.dC, cost=built.cost,
@@ -784,7 +861,8 @@ def run(bid: str, plan: Plan) -> None:
 
 # ---------------------------------------------------------------- the checks
 
-CHECK_PLAN = "ears.paths.b20.f2000.e30.gl0.25Croad.n2s0.1.M8.K2.D1"
+CHECK_PLAN = "ears.paths.b20.f2000.e30.loop.gl0.25Croad.n2s0.1.M8.K2.D1"
+CHECK_SPUR = "ears.paths.b20.f2000.e30.spur10-80.gl0.25Croad.n2s0.1.M16.K2.D1"
 CHECK_DIVIDES = "ears.divides.p0.1.f2000.e30.gl0.25Croad.n2s0.1.M16.K4.D1"
 
 
@@ -828,7 +906,7 @@ def check(verb: str, bid: str, fault: str | None) -> None:
             gk, _ = g.grad(st, u)
             gain = -gk * (1.0 - g.kt0) + np.abs(u[g.m.c.cell]) * g.contrast.leak_t(g)
         fc = e.faces()
-        cands = Paths(bld=20.0, pairs=6, face_m2=2000.0, ear_m=30.0).ears(
+        cands = Paths(bld=20.0, pairs=6, face_m2=2000.0, ear_m=30.0, ends=Loop()).ears(
             e, fc, gain, cost=gr.Cost(nu=2.0, price=0.1))
         worst = 0.0
         for q in cands[:4]:
@@ -852,13 +930,12 @@ def check(verb: str, bid: str, fault: str | None) -> None:
         st = g.state(g.step >= 0)
         u, _ = g.solve(st)
         fc = e.faces()
-        cands = Paths(bld=20.0, pairs=4, face_m2=2000.0, ear_m=30.0).ears(
-            e, fc, g.contrast.gains(g, st, u),
-                                              cost=gr.Cost(nu=2.0, price=0.1))
+        cands = Paths(bld=20.0, pairs=4, face_m2=2000.0, ear_m=30.0, ends=Loop()).ears(
+            e, fc, g.contrast.gains(g, st, u), cost=gr.Cost(nu=2.0, price=0.1))
         ok = bool(cands)
         for q in cands[:4]:
             path = q.path[: max(1, 2 * len(q.path) // 3)] if fault == "spur" else q.path
-            tris = e.corridor(e.ra.xy[path])
+            tris = e.corridor(e.ra.xy[path], spur=False)
             n0 = fc.n
             g.step[tris] = 0
             n1 = e.faces().n
@@ -868,6 +945,38 @@ def check(verb: str, bid: str, fault: str | None) -> None:
             print(f"  ear of {len(path)} pixels: faces {n0} -> {n1}: "
                   f"{'splits' if split else 'a dead end'}")
         print(f"ends {bid} {fault or 'none'}: -> {'PASS' if ok else 'FAIL'}")
+    elif verb == "spur":
+        if fault not in (None, "both-ends"):
+            raise SystemExit("spur's fault: both-ends")
+        plan = Plan.of(CHECK_SPUR)
+        e = _short(bid, plan.contrast.h, 0, spec=CHECK_SPUR)
+        g = e.g
+        st = g.state(g.step >= 0)
+        u, _ = g.solve(st)
+        fc = e.faces()
+        spurs = [q for q in plan.candidates.ears(e, fc, g.contrast.gains(g, st, u),
+                                                 cost=plan.cost) if q.spur]
+        bounding = e.bounding()
+        ok = bool(spurs)
+        for q in spurs[:SPUR_EARS]:
+            tris = e.corridor(e.ra.xy[q.path], spur=fault != "both-ends")
+            on = np.zeros(g.nt, dtype=bool)
+            on[tris] = True
+            inner = on[g.pa] & on[g.pb]
+            pieces = connected_components(sp.coo_matrix(
+                (np.ones(int(inner.sum())), (g.pa[inner], g.pb[inner])), shape=(g.nt, g.nt)),
+                directed=False)[1][tris]
+            joined = bool(((on[g.pa] & bounding[g.pb]) | (on[g.pb] & bounding[g.pa])).any())
+            g.step[tris] = 0
+            n1 = e.faces().n
+            g.step[tris] = -1
+            good = len(np.unique(pieces)) == 1 and joined and n1 == fc.n
+            ok &= good
+            L = float(np.hypot(*np.diff(e.ra.xy[q.path], axis=0).T).sum())
+            print(f"  spur of {L:.0f} m: {len(np.unique(pieces))} piece(s), "
+                  f"{'joined' if joined else 'detached'}, faces {fc.n} -> {n1}")
+        print(f"spur {bid} {fault or 'none'}: {len(spurs)} spurs among the candidates -> "
+              f"{'PASS' if ok else 'FAIL'}")
     elif verb == "offer":
         if fault not in (None, "persistence"):
             raise SystemExit("offer's fault: persistence")
