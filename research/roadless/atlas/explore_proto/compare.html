@@ -125,6 +125,7 @@ table.shapes tr[data-i]:hover td, table.shapes tr.on td { background: var(--red-
     <p>Each block is coloured blue below the floor and red above it, passing through pale at the floor, so the edge of the set the screen selects is where the colour turns. Two colourings share that scale. <strong>Rank on each side</strong> spends half the colours on each side of the floor and spreads each half by area: a block's shade is the share of that side's area scoring below it, so every shade covers as much of the map as any other and the few blocks above the floor get as many shades as the many below. <strong>Confidence</strong> asks how sure the score is that a block is over the floor. Treating its building count n as Poisson, its log score has standard deviation k/√n, k the score's power of n (3/2 for depth × density, 1 for n/P²: area and perimeter are taken as exact), and the shade is the chance that the true score is above the floor. Most blocks hold enough buildings to sit plainly on one side, so this colouring is nearly two-tone, the pale blocks small and near the floor. Scroll or pinch to zoom, drag to pan. The ring marks <code>5810</code>.</p>
     <p>The outlined shapes are the best circles, ellipses, squares and rectangles under one of two objectives. <strong>Excess</strong> sums each covered pixel's log score above the shipped floor, times its area. A shape grows while the ground it adds is above the floor on balance, so the objective picks its own size. <strong>Surprise</strong> compares a shape's mean log score with the best mean a shape of the same size reaches by chance, with the blocks' scores shuffled among the blocks (32 shuffles): (mean − the shuffled bests' mean) / their spread. That accounts for how many places a small shape can be put. <strong>Raw z</strong> skips the shuffle and compares a shape with every other placement of its size. It is kept to show the bias: small shapes win by chance, and here they just find the single top block. Every objective counts a placement only if blocks cover at least 60% of it, and keeps up to three disjoint shapes per family.</p>
     <p>The numbered outlines are convex hulls of clusters of whole blocks, found by <strong>hull agglomeration</strong>: starting from single blocks, it repeatedly merges the two nearby clusters whose union scores best by mean log score plus log(blocks' area / convex hull's area), so a merge across empty ground is penalised. Each cluster it passes through is a candidate. <strong>Worse than the city</strong> is the upper-level-set scan statistic over those candidates: a likelihood ratio for the cluster's mean log score exceeding the rest of the city's, weighted by buildings, with clusters holding at most half the city's buildings. Its p-value compares that ratio with the largest ratio anywhere in the tree when the scores are shuffled among the blocks. Contrast is the cluster's mean log score minus that of the blocks sharing a street with it.</p>
+    <p><strong>Score bands</strong> look for regions homogeneous inside and distinct from their surroundings. A candidate is a connected group of blocks (sharing streets) whose scores lie in one band, the band the tightest covering them and every bordering block outside it: the spatial analogue of a formal concept. Each is scored by its silhouette: per block, how much further its score lies from the bordering blocks' than from the rest of its region's, from −1 to 1, averaged by buildings. Beside it is the region's own screen score, its buildings, area and outer perimeter scored as if it were one block, so a thin chain of dense blocks reads as what it is.</p>
   </div>
   <figure id="screenfig">
     <div class="bar">
@@ -139,7 +140,7 @@ table.shapes tr[data-i]:hover td, table.shapes tr.on td { background: var(--red-
       <span class="fams" id="sm-fams"></span>
     </div>
     <div class="bar" style="margin-top:.5rem">
-      <label for="sm-clu">Anomalous clusters <select id="sm-clu"><option value="">none</option><option value="hull/scan" selected>hull agglomeration: worse than the city</option></select></label>
+      <label for="sm-clu">Anomalous clusters <select id="sm-clu"><option value="">none</option><option value="hull/scan" selected>hull agglomeration: worse than the city</option><option value="concepts/above">score bands: coherent and above their surroundings</option></select></label>
     </div>
     <div class="mapwrap">
       <canvas id="sm-canvas" aria-label="City blocks coloured blue below the screen's floor and red above it"></canvas>
@@ -452,11 +453,29 @@ async function screenMap(enc) {
   const cluSel = document.getElementById("sm-clu");
   let clusters = [], cluFocus = -1;
   cluSel.addEventListener("change", () => { listClusters(); draw(); });
-  async function loadClusters(name) { if (!(name in cluCache)) cluCache[name] = await getJSON(`screen/clusters_${name}.json`).catch(() => null); }
-  function hullOf(mem) {
-    const pts = [];
-    for (const i of mem) for (const r of city.rings[i]) for (const q of r) pts.push(q);
-    pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  // Regions (a Strategy per option of the select): where its rows live, each row's outline (a convex hull), and its table
+  const pval = (p, nperm) => (p <= 1 / (1 + nperm) + 1e-12 ? `≤ ${(1 / (1 + nperm)).toFixed(3)}` : p.toFixed(3));
+  const blockPoints = (c) => c.members.flatMap((i) => city.rings[i].flat());
+  const REGIONS = {
+    "hull/scan": {
+      file: "clusters", of: (res) => res.hull, rows: (r) => r.scan, points: blockPoints,
+      head: ["", "blocks", "buildings", "blocks' area", "geometric-mean score", "× floor", "likelihood ratio", "p", "contrast, decades"],
+      cells: (c, r) => [c.blocks.toLocaleString(), Math.round(c.buildings).toLocaleString(), `${c.area_km2.toFixed(2)} km²`, fmt(c.mean_score), c.x_floor.toFixed(2), Math.round(c.stat).toLocaleString(), pval(c.p, r.nperm), (c.contrast >= 0 ? "+" : "") + c.contrast.toFixed(2)],
+      note: (r) => `p from ${r.nperm} shuffles (seed ${r.seed}); a cluster holds at most half the city's buildings, and a large one with a modest rise can outrank a small, extreme one, so read × floor beside the ratio.`,
+    },
+    "concepts/above": {
+      file: "concepts", of: (res) => res, rows: (r) => r.concepts_above, points: blockPoints,
+      head: ["", "blocks", "buildings", "geometric-mean score", "× floor", "ring × floor", "silhouette", "p, autocorrelated null", "p, shuffled", "region's own × floor", "hull fill"],
+      cells: (c, r) => { const n = (q) => r.params.nulls.find((x) => x.name === q).nperm;
+        return [c.blocks.toLocaleString(), Math.round(c.buildings).toLocaleString(), fmt(c.mean_score), c.x_floor.toFixed(2), (c.x_floor * c.mean_ring_score / c.mean_score).toFixed(2), c.silhouette.toFixed(2), pval(c.p_msr, n("msr")), pval(c.p_shuffle, n("shuffle")), c.region_screen[metSel.value].x_floor.toFixed(2), c.hull_fill.toFixed(2)]; },
+      note: (r) => `Ranked by p under the autocorrelated null (Moran spectral randomization: ${r.params.nulls.find((x) => x.name === "msr").nperm} surrogate cities keeping the scores' spatial autocorrelation on the street adjacency), each region against the best silhouette that null reaches among regions of similar size (effective, buildings-weighted block count within a factor of 1.25); the shuffled null's p beside it shows how much ignoring autocorrelation overstates. Hull fill at least 0.5, and only regions scoring above their ring. Most are settlements below the floor bordering nearly empty land: coherent and distinct, but not what the screen selects.`,
+    },
+  };
+  async function loadClusters(name) {
+    for (const f of new Set(Object.values(REGIONS).map((x) => x.file))) {
+      const k = `${f}_${name}`; if (!(k in cluCache)) cluCache[k] = await getJSON(`screen/${k}.json`).catch(() => null); } }
+  function hullOf(pts) {
+    pts = [...pts].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
     const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
     const lo = [], up = [];
     for (const q of pts) { while (lo.length > 1 && cross(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
@@ -466,20 +485,20 @@ async function screenMap(enc) {
   function listClusters() {
     const tab = document.getElementById("sm-clusters"), note = document.getElementById("sm-clusters-note");
     tab.replaceChildren(); clusters = []; cluFocus = -1;
-    const key = cluSel.value, res = cluCache[citySel.value];
-    if (!key) { note.textContent = ""; return; }
-    if (!res) { note.textContent = "The clusters have not been computed for this city."; return; }
-    const [tree, kind] = key.split("/"), r = res[metSel.value][tree];
-    clusters = r[kind];
-    for (const c of clusters) if (!c.outline) c.outline = hullOf(c.members);
-    const head = el("tr"); for (const t of ["", "blocks", "buildings", "blocks' area", "geometric-mean score", "× floor", "likelihood ratio", "p", "contrast, decades"]) head.append(el("th", null, t)); tab.append(head);
+    if (!cluSel.value) { note.textContent = ""; return; }
+    const R = REGIONS[cluSel.value], res = cluCache[`${R.file}_${citySel.value}`];
+    if (!res) { note.textContent = "These regions have not been computed for this city."; return; }
+    const r = R.of(res[metSel.value]);
+    clusters = R.rows(r);
+    for (const c of clusters) if (!c.outline) c.outline = hullOf(R.points(c));
+    const head = el("tr"); for (const t of R.head) head.append(el("th", null, t)); tab.append(head);
     clusters.forEach((c, i) => { const tr = el("tr"); tr.dataset.i = i;
-      for (const t of [String(i + 1), c.blocks.toLocaleString(), Math.round(c.buildings).toLocaleString(), `${c.area_km2.toFixed(2)} km²`, fmt(c.mean_score), c.x_floor.toFixed(2), Math.round(c.stat).toLocaleString(), c.p <= 1 / (1 + r.nperm) + 1e-12 ? `≤ ${(1 / (1 + r.nperm)).toFixed(3)}` : c.p.toFixed(3), c.contrast == null ? "–" : (c.contrast >= 0 ? "+" : "") + c.contrast.toFixed(2)]) tr.append(el("td", null, t));
+      for (const t of [String(i + 1), ...R.cells(c, r)]) tr.append(el("td", null, t));
       tr.addEventListener("click", () => { cluFocus = i; for (const o of tab.querySelectorAll("tr.on")) o.classList.remove("on"); tr.classList.add("on");
         const xs = c.outline.map((q) => q[0]), ys = c.outline.map((q) => q[1]), [x0, y0, x1, y1] = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], w = cv.width, h = cv.height;
         view.s = Math.min(w / (x1 - x0), h / (y1 - y0)) * 0.6; view.tx = w / 2 - view.s * (x0 + x1) / 2; view.ty = h / 2 + view.s * (y0 + y1) / 2; draw(); });
       tab.append(tr); });
-    note.textContent = `Up to ${clusters.length || 8} disjoint clusters, p from ${r.nperm} shuffles (seed ${r.seed}); a cluster holds at most half the city's buildings, and a large one with a modest rise can outrank a small, extreme one, so read × floor beside the ratio. Click a row to zoom to it.`;
+    note.textContent = `${clusters.length} disjoint regions, each outlined by its convex hull. ${R.note(r)} Click a row to zoom to it.`;
   }
   let shapes = [], focus = -1;
   async function loadShapes(name) { if (!shapeCache[name]) shapeCache[name] = await getJSON(`screen/shapes_${name}.json`).catch(() => null); }
