@@ -46,16 +46,28 @@ to the network at its start only and built without splitting its face. A spur li
 and leaves its cells as they were, so its exact gain is the same restricted solve. `divides` cuts
 run sink to sink by construction: their ears are loops, and their names carry no ends.
 
+A term added to the escape objective of `paths` is a Strategy (Attract, owner 2026-11-03: Idea C,
+detour-saving attraction): NoDetour, the objective alone; Detour(lam) (`.dt<lam>`), each ear
+credited lam P0 S / S0, S its detour saving (`savings`: over pairs of homes, each at the road
+point nearest it, the mean metres by which the trip between their road points along the network
+gets shorter with the ear's path a link; the network the state's sinks, its road points one per
+SRC_M square, `roads_of`), S0 the mean such trip on the street alone. A spur shortens no trip and
+earns nothing; the ear that later closes it is credited the whole loop. An ear is scored
+(gain + credit) / cost at every stage, its credit times the last step's first order over exact
+gain where the first order stands in for the exact gain (build).
+
     E=research/roadless/ears.py                        # from the repo root, PYTHONPATH=.
     uv run python $E run <block> <plan>
-    uv run python $E check decouple|first|ends|spur|offer <block> [fault]
+    uv run python $E check decouple|first|ends|spur|detour|offer <block> [fault]
+    uv run python $E check horseshoe [fault]
 
-plan: ears.<paths.b<bld>.f<face_m2>.e<ear_m>.<loop|spur<min_m>-<max_m>>|divides.p<tau>.f<face_m2>
-.e<ear_m>>.gl<h>Croad.n<nu>s<price>.M<pairs>.K<exact>.D<D> (a face under face_m2 not split, an
-ear's ends at least ear_m apart, a spur's end min_m to max_m from its start), its name adding the
-code's revision (.v<REV>); rows in growth_rows/<block>/<name>/ in growth.py's layout
-(steps.parquet, picks.parquet one row per ear with whether it is a spur, bridges.parquet empty,
-tri_step.parquet), so the growth runs' frames and plates read them.
+plan: ears.<paths.b<bld>.f<face_m2>.e<ear_m>.<loop|spur<min_m>-<max_m>>[.dt<lam>]|divides.p<tau>
+.f<face_m2>.e<ear_m>>.gl<h>Croad.n<nu>s<price>.M<pairs>.K<exact>.D<D> (a face under face_m2 not
+split, an ear's ends at least ear_m apart, a spur's end min_m to max_m from its start, `.dt<lam>`
+Detour, none NoDetour: every run before it, whose names stand), its name adding the code's
+revision (.v<REV>); rows in growth_rows/<block>/<name>/ in growth.py's layout (steps.parquet,
+picks.parquet one row per ear with whether it is a spur and its detour saving and credit,
+bridges.parquet empty, tri_step.parquet), so the growth runs' frames and plates read them.
 
 Checks, each run both ways:
 decouple: a state with a few ears on the block, the global P against the sum of its faces' P
@@ -71,6 +83,15 @@ ends: the top candidate ears each split their face (its faces of FACE_M2 and mor
 spur: the spur check plan's top SPUR_EARS candidate spurs each a corridor in one piece, touching
   the network, that splits nothing (its end on open ground). Fault `both-ends` (a spur's
   corridor extended at its end too, as a loop's is) fails it.
+detour: after DETOUR_EARS loop ears, the detour plan's costed ears' savings (Ear.saving) and
+  DETOUR_TARGETS links from the first one's source at once (`savings`' many targets) against all
+  pairs' distances again with the link an edge of the network's graph, within TOL_DETOUR of the
+  largest. Fault `one-way` (the trips counted from a's side only: savings' factor 2 dropped) fails
+  it.
+horseshoe: synthetic horseshoes (no block; Experiment 1 of the owner's doc): the closing link's
+  saving rises strictly with the arms at a fixed gap, and its saving per metre of link strictly as
+  the gap closes at fixed arms. Fault `crow` (straight-line distances for the road distances: no
+  link shortens a trip) fails it.
 offer: after OFFER_EARS ears of the divides check plan (faces of very different sizes), the
   `pairs` divides Divides costs hold a splitting one within TOL_OFFER of the best first order
   per cost among every face's divides. Fault `persistence` (rev 1's order, the most persistent
@@ -129,6 +150,17 @@ FIRST_H = 2500.0       # m: first's leak (the drop linear in it: an ear's leak t
                        # resistance to ground far below 1)
 OPEN_KT = 0.999        # first: the ears' open triangles only (no opening term to speak of)
 SPUR_EARS = 4          # spur: the top candidate spurs judged
+DETOUR_EARS = 3        # detour: loop ears built before the links are judged
+DETOUR_TARGETS = 8     # detour: links from the first candidate's source judged at once
+DETOUR_SEED = 0        # detour: their targets' draw
+DETOUR_STRETCH = 1.2   # detour: their lengths, this times the straight line (plus PIX)
+TOL_DETOUR = 1e-3      # detour: |S - all pairs again| over the largest S (float32 distances)
+HS_W = 40.0            # m: horseshoe: the arms' spacing
+HS_HOME_M = 4.0        # m: horseshoe: the homes' grid
+HS_GAP_M = 14.0        # m: horseshoe: the gap the arms are compared at (its bars' ends this apart)
+HS_ARMS = (20.0, 40.0, 80.0, 160.0)   # m: horseshoe: the arms compared
+HS_ARM_M = 80.0        # m: horseshoe: the arms the gaps are compared at
+HS_GAPS = (24.0, 16.0, 8.0)           # m: horseshoe: the gaps compared, closing
 OFFER_EARS = 8         # offer: ears built by the divides check plan before the offers are judged
 TOL_OFFER = 0.9        # offer: the costed divides' best splitting first order per cost over all
                        # divides' (5810, rev 2's states 6 / 8 / 12: 1.0 each; rev 1's persistence
@@ -149,7 +181,9 @@ class Face(NamedTuple):
 class Ear(NamedTuple):
     """A candidate: its face, its path's pixels, whether it is a spur (its path ends on the face's
     open ground, not at a sink: its corridor joins the network at its start only, and it need not
-    split its face), its corridor's new triangles, dD, dC, its cost, first-order gain, exact gain
+    split its face), its corridor's new triangles, dD, dC, its cost, first-order gain, its detour
+    saving (m: Detour; 0 without one, and for a spur, which shortens no trip) and the credit it
+    earns in P (added to its first-order and exact gains wherever an ear is scored), exact gain
     (nan unless rescored)."""
     face: int
     path: I64
@@ -159,6 +193,8 @@ class Ear(NamedTuple):
     dC: float
     cost: float
     first: float
+    saving: float
+    credit: float
     exact: float
 
 
@@ -188,6 +224,12 @@ def raster_of(g: gr.Growth) -> Raster:
     blds = shapely.union_all(np.asarray(geo.polys))
     shapely.prepare(blds)
     bld = shapely.contains_xy(blds, xy[:, 0], xy[:, 1]).astype(np.float64)
+    ea, eb, el = _grid_edges(shape)
+    return Raster(shape=shape, lo=lo, xy=xy, tri=tri, bld=bld, ea=ea, eb=eb, el=el)
+
+
+def _grid_edges(shape: tuple[int, int]) -> tuple[I64, I64, F64]:
+    """A PIX raster's 8-neighbour edges (a, b) and their lengths, pixels flat (row-major)."""
     ea, eb, el = [], [], []
     idx = np.arange(shape[0] * shape[1]).reshape(shape)
     for di, dj in ((0, 1), (1, 0), (1, 1), (1, -1)):
@@ -197,8 +239,7 @@ def raster_of(g: gr.Growth) -> Raster:
         ea.append(a.ravel())
         eb.append(b.ravel())
         el.append(np.full(a.size, PIX * np.hypot(di, dj)))
-    return Raster(shape=shape, lo=lo, xy=xy, tri=tri, bld=bld, ea=np.concatenate(ea),
-                  eb=np.concatenate(eb), el=np.concatenate(el))
+    return np.concatenate(ea), np.concatenate(eb), np.concatenate(el)
 
 
 @njit(cache=True)
@@ -219,7 +260,11 @@ class Candidates(Protocol):
     @property
     def pairs(self) -> int: ...                # candidates costed a step
 
-    def ears(self, e: EarWorld, faces: Face, gain: F64, *, cost: gr.Cost) -> list[Ear]: ...
+    def ears(self, e: EarWorld, faces: Face, gain: F64, *, cost: gr.Cost,
+             scale: float) -> list[Ear]:
+        """The step's costed candidates; `scale` puts an ear's credit (in P) on its first-order
+        gain's scale wherever the first order stands in for the exact gain (build)."""
+        ...
 
 
 class Ends(Protocol):
@@ -268,23 +313,228 @@ class Spur:
                           | (ground & (dist >= self.min_m) & (dist <= self.max_m)))
 
 
+# ---------------------------------------------------------------- detour saving (Idea C)
+
+
+class Roads(NamedTuple):
+    """The network on the PIX raster at a state (`roads_of`): per pixel its column (-1 off the
+    network), the road points (network pixels, one per SRC_M square, the first by index), per
+    road point the homes' population share nearest it in a straight line (summing to 1), and per
+    road point its distance along the network to every network pixel (rows road points, columns
+    the network's pixels; inf where the network inside the block does not join them)."""
+    col: I64
+    pts: I64
+    w: F64
+    D: NDArray[np.float32]
+
+    def among(self) -> F64:
+        """The road points' distances to each other (float64)."""
+        return np.asarray(self.D[:, self.col[self.pts]], dtype=np.float64)
+
+    def mean(self) -> float:
+        """The mean distance along the network between two homes' road points (each drawn by
+        w), over the pairs it joins."""
+        DRR = self.among()
+        fin = np.isfinite(DRR)
+        ww = np.outer(self.w, self.w)
+        return float((ww * np.where(fin, DRR, 0.0)).sum() / (ww * fin).sum())
+
+
+def _net_graph(net: B, ea: I64, eb: I64, el: F64) -> tuple[I64, sp.csr_matrix]:
+    """(per pixel its column, -1 off the network; the network's graph on its columns)."""
+    idx = np.flatnonzero(net)
+    col = -np.ones(len(net), dtype=np.int64)
+    col[idx] = np.arange(len(idx))
+    ok = net[ea] & net[eb]
+    m = len(idx)
+    return col, sp.coo_matrix((el[ok], (col[ea[ok]], col[eb[ok]])), shape=(m, m)).tocsr()
+
+
+def roads_of(net: B, xy: F64, ea: I64, eb: I64, el: F64, *, homes: F64, share: F64) -> Roads:
+    """The network `net` (per pixel whether it lies on a road: the faces' sinks) as Roads; pure in
+    its pixel inputs (xy per pixel its centre, (ea, eb, el) the 8-neighbour edges and lengths),
+    `homes` the homes' points and `share` their population shares."""
+    col, G = _net_graph(net, ea, eb, el)
+    idx = np.flatnonzero(net)
+    key = np.floor(xy[idx] / SRC_M).astype(np.int64)
+    _, first = np.unique(key[:, 0] * 1_000_000 + key[:, 1], return_index=True)
+    pts = idx[np.sort(first)]
+    w = np.bincount(cKDTree(xy[pts]).query(homes)[1], weights=share, minlength=len(pts))
+    D = np.empty((len(pts), len(idx)), dtype=np.float32)
+    for c0 in range(0, len(pts), CHUNK):
+        D[c0:c0 + CHUNK] = dijkstra(G, directed=False, indices=col[pts[c0:c0 + CHUNK]])
+    return Roads(col=col, pts=pts, w=w / w.sum(), D=D)
+
+
+@njit(cache=True)
+def _hinge(c: F64, w: F64, z: F64) -> F64:
+    """Per row t of z: sum over (p, q) of w_p w_q (c[p, q] - z[t, q])^+. Per column q, c sorted
+    (descending) with its prefix sums of w and w c, so each (t, q) is one binary search: the p
+    with c[p, q] > z[t, q] are a prefix."""
+    n, m = len(w), z.shape[0]
+    out = np.zeros(m)
+    for q in range(n):
+        if w[q] == 0.0:
+            continue
+        o = np.argsort(-c[:, q])
+        cs = c[o, q]
+        W = np.cumsum(w[o])
+        WC = np.cumsum(w[o] * np.where(np.isfinite(cs), cs, 0.0))
+        top = cs[0]
+        for t in range(m):
+            zz = z[t, q]
+            if not top > zz:
+                continue
+            lo, hi = 0, n
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if cs[mid] > zz:
+                    lo = mid + 1
+                else:
+                    hi = mid
+            out[t] += w[q] * (WC[lo - 1] - zz * W[lo - 1])
+    return out
+
+
+def savings(r: Roads, a: int, tg: I64, length: F64) -> F64:
+    """Per target pixel t of `tg` (network pixels) the detour saving of a new link from the
+    network pixel `a` to t of `length[t]` m: the mean, over pairs of homes (each drawn by the
+    road points' w), of how much shorter the trip between their road points gets, S = sum_pq
+    w_p w_q (D_pq - D'_pq) with D' = min(D_pq, D_pa + l + D_tq, D_pt + l + D_aq), the link used
+    at most once. At most one orientation shortens a pair (the two together would make
+    2 D_pq > D_pa + D_aq + D_pt + D_tq + 2 l >= 2 D_pq + 2 l, by the triangle inequality), and
+    relabelling p, q maps the one onto the other, so S = 2 sum_pq w_p w_q (D_pq - D_pa - l -
+    D_tq)^+ (`_hinge`). A pair the network inside the block does not join (D_pq inf) counts
+    nothing."""
+    DRR = r.among()
+    Da = np.asarray(r.D[:, r.col[a]], dtype=np.float64)
+    with np.errstate(invalid="ignore"):
+        c = np.where(np.isfinite(DRR) & np.isfinite(Da)[:, None], DRR - Da[:, None], -np.inf)
+    z = length[:, None] + np.asarray(r.D[:, r.col[tg]], dtype=np.float64).T
+    return 2.0 * _hinge(c, r.w, z)
+
+
+class Field(Protocol):
+    """The attraction at one state (Attract.field)."""
+
+    def credits(self, a: int, tg: I64, pred: NDArray[np.int32], order: I64) -> F64:
+        """Per target pixel of `tg` the credit in P of the path from `a` to it down the
+        shortest-path tree `pred` (its nodes `order`, nearest first)."""
+        ...
+
+    def of(self, path: I64, *, spur: bool) -> tuple[float, float]:
+        """A costed path's (detour saving in m, credit in P)."""
+        ...
+
+
+class Attract(Protocol):
+    """A term added to the escape objective of `paths` (owner 2026-11-03, Idea C): an ear's score
+    is (gain + credit) / cost at every stage (each source's target, the costed ears' order, the
+    built ear's exact gain)."""
+
+    @property
+    def suffix(self) -> str: ...                 # its token in the plan's name ('' for none)
+
+    def field(self, e: EarWorld, *, P0: float) -> Field: ...
+
+
+class _NoField:
+    def credits(self, a: int, tg: I64, pred: NDArray[np.int32], order: I64) -> F64:
+        return np.zeros(len(tg))
+
+    def of(self, path: I64, *, spur: bool) -> tuple[float, float]:
+        return 0.0, 0.0
+
+
+@dataclass(frozen=True, kw_only=True)
+class NoDetour:
+    """The escape objective alone (every ears-paths run before Idea C): no credit. Its name adds
+    no token, so those runs' names stand."""
+
+    @property
+    def suffix(self) -> str:
+        return ""
+
+    def field(self, e: EarWorld, *, P0: float) -> Field:
+        return _NoField()
+
+
+@dataclass(frozen=True, kw_only=True)
+class _DetourField:
+    roads: Roads
+    xy: F64
+    kappa: float                                 # P per metre of detour saving
+
+    def credits(self, a: int, tg: I64, pred: NDArray[np.int32], order: I64) -> F64:
+        out = np.zeros(len(tg))
+        on = self.roads.col[tg] >= 0             # sinks; a spur's open ground shortens nothing
+        if not on.any():
+            return out
+        p = pred[order]
+        inc = np.zeros(len(pred))
+        inc[order] = np.where(p >= 0, np.hypot(*(self.xy[order] - self.xy[np.maximum(p, 0)]).T),
+                              0.0)
+        length = _tree_sum(pred, order, inc)
+        out[on] = self.kappa * savings(self.roads, a, tg[on], length[tg[on]])
+        return out
+
+    def of(self, path: I64, *, spur: bool) -> tuple[float, float]:
+        if spur:
+            return 0.0, 0.0
+        L = float(np.hypot(*np.diff(self.xy[path], axis=0).T).sum())
+        S = float(savings(self.roads, int(path[0]), path[-1:], np.array([L]))[0])
+        return S, self.kappa * S
+
+
+@dataclass(frozen=True, kw_only=True)
+class Detour:
+    """Detour-saving attraction (owner 2026-11-03, Idea C): a loop ear's credit is lam P0 S /
+    S0, S its detour saving (`savings`: the mean metres a trip between two homes' road points
+    saves, the network the state's sinks, `roads_of`) and S0 the mean such trip on the street
+    alone (the block's own length scale, `Roads.mean`): lam is the credit, as a share of P0, of a
+    saving as long as the mean street-only trip. A spur shortens no trip and earns nothing: the
+    loop it sets up is credited once, when an ear closes it (its saving then large against its
+    short length), which is what makes a nearly finished loop finish."""
+    lam: float
+
+    def __post_init__(self) -> None:
+        if not self.lam > 0:
+            raise ValueError(f"lam {self.lam}: positive (NoDetour is the term off)")
+
+    @property
+    def suffix(self) -> str:
+        return f".dt{self.lam:g}"
+
+    def field(self, e: EarWorld, *, P0: float) -> Field:
+        homes, share = e.homes()
+        ra = e.ra
+        r = roads_of(e.sinks(), ra.xy, ra.ea, ra.eb, ra.el, homes=homes, share=share)
+        r0 = roads_of(e.sinks_of(e.street), ra.xy, ra.ea, ra.eb, ra.el, homes=homes,
+                      share=share)
+        return _DetourField(roads=r, xy=ra.xy, kappa=self.lam * P0 / r0.mean())
+
+
 @dataclass(frozen=True, kw_only=True)
 class Paths:
     """Cheapest paths on the raster (module docstring); `bld` the extra cost of a metre through a
     building, `pairs` the sources whose best ears are built and costed; a face under `face_m2` is
     not split, an ear's ends at least `ear_m` apart in a straight line; `ends` where a path may
-    end (Loop: at a sink; Spur: there or on open ground)."""
+    end (Loop: at a sink; Spur: there or on open ground); `attract` the term added to the escape
+    objective (NoDetour: none; Detour: detour saving)."""
     bld: float
     pairs: int
     face_m2: float
     ear_m: float
     ends: Ends
+    attract: Attract
 
     @property
     def name(self) -> str:
-        return f"paths.b{self.bld:g}.f{self.face_m2:g}.e{self.ear_m:g}.{self.ends.name}"
+        return (f"paths.b{self.bld:g}.f{self.face_m2:g}.e{self.ear_m:g}.{self.ends.name}"
+                f"{self.attract.suffix}")
 
-    def ears(self, e: EarWorld, faces: Face, gain: F64, *, cost: gr.Cost) -> list[Ear]:
+    def ears(self, e: EarWorld, faces: Face, gain: F64, *, cost: gr.Cost,
+             scale: float) -> list[Ear]:
         g, ra = e.g, e.ra
         pf = np.where(ra.tri >= 0, faces.lab[np.maximum(ra.tri, 0)], -1)    # pixel's face
         big = faces.area >= self.face_m2
@@ -295,6 +545,7 @@ class Paths:
         ground = live & (ra.bld == 0) & ~bnd       # open ground: where a spur may end
         # per pixel its first-order gain density (the triangles under it)
         gp = np.bincount(_pix_of(ra, g.cen), weights=gain, minlength=len(pf))
+        fld = self.attract.field(e, P0=g.P0)
         ok = live[ra.ea] & live[ra.eb] & same
         w = ra.el[ok] * (1.0 + self.bld * 0.5 * (ra.bld[ra.ea[ok]] + ra.bld[ra.eb[ok]]))
         n = len(pf)
@@ -317,7 +568,8 @@ class Paths:
                                     & fin & (pf == pf[a]))
                 if not len(tg):
                     continue
-                r = acc[tg] / np.maximum(d[tg], 1e-9)
+                cr = fld.credits(int(a), tg, pred[k], order)
+                r = (acc[tg] + scale * cr) / np.maximum(d[tg], 1e-9)
                 t = int(tg[np.argmax(r)])
                 best.append((float(r.max()), int(a), t, pred[k].copy()))
         best.sort(key=lambda q: -q[0])
@@ -333,8 +585,10 @@ class Paths:
                 continue
             dD, dC = g.costs_of(tris)
             c = float(cost.of(np.array([dD]), np.array([dC]), P0=g.P0)[0])
+            sv, cr = fld.of(path_a, spur=spur)
             out.append(Ear(face=int(pf[a]), path=path_a, spur=spur, tris=tris, dD=dD, dC=dC,
-                           cost=c, first=float(gain[tris].sum()), exact=np.nan))
+                           cost=c, first=float(gain[tris].sum()), saving=sv, credit=cr,
+                           exact=np.nan))
         return out
 
 
@@ -587,7 +841,8 @@ class Divides:
         out.sort(key=lambda o: -o.per_m)
         return out
 
-    def ears(self, e: EarWorld, faces: Face, gain: F64, *, cost: gr.Cost) -> list[Ear]:
+    def ears(self, e: EarWorld, faces: Face, gain: F64, *, cost: gr.Cost,
+             scale: float) -> list[Ear]:
         return self.costed(e, self.offers(e, faces, gain)[:self.pairs], gain, cost=cost)
 
     @staticmethod
@@ -602,7 +857,7 @@ class Divides:
             dD, dC = g.costs_of(tris)
             c = float(cost.of(np.array([dD]), np.array([dC]), P0=g.P0)[0])
             out.append(Ear(face=f, path=d.pixels, spur=False, tris=tris, dD=dD, dC=dC, cost=c,
-                           first=float(gain[tris].sum()), exact=np.nan))
+                           first=float(gain[tris].sum()), saving=0.0, credit=0.0, exact=np.nan))
         return out
 
 
@@ -635,19 +890,22 @@ class Plan:
     def of(spec: str) -> Plan:
         m = re.fullmatch(r"ears\.(?:paths\.b(?P<bld>[0-9.]+)\.f(?P<pf>[0-9.]+)\.e(?P<pe>[0-9.]+)"
                          r"\.(?P<ends>loop|spur(?P<lo>[0-9.]+)-(?P<hi>[0-9.]+))"
+                         r"(?:\.dt(?P<lam>[0-9.]+))?"
                          r"|divides\.p(?P<tau>[0-9.]+)\.f(?P<df>[0-9.]+)\.e(?P<de>[0-9.]+))"
                          r"\.gl(?P<h>[0-9.]+)Croad\.n(?P<nu>[0-9.e-]+)s(?P<price>[0-9.e-]+)"
                          r"\.M(?P<pairs>[0-9]+)\.K(?P<exact>[0-9]+)\.D(?P<D>[0-9.]+)", spec)
         if m is None:
             raise SystemExit(f"{spec}: a plan is ears.<paths.b<bld>.f<face_m2>.e<ear_m>"
-                             ".<loop|spur<min_m>-<max_m>>|divides.p<tau>.f<face_m2>.e<ear_m>>"
+                             ".<loop|spur<min_m>-<max_m>>[.dt<lam>]|divides.p<tau>.f<face_m2>"
+                             ".e<ear_m>>"
                              ".gl<h>Croad.n<nu>s<price>.M<pairs>.K<exact>.D<D>")
         cands: Candidates
         if m["bld"] is not None:
             ends: Ends = (Loop() if m["ends"] == "loop" else
                           Spur(min_m=float(m["lo"]), max_m=float(m["hi"])))
+            att: Attract = NoDetour() if m["lam"] is None else Detour(lam=float(m["lam"]))
             cands = Paths(bld=float(m["bld"]), pairs=int(m["pairs"]), face_m2=float(m["pf"]),
-                          ear_m=float(m["pe"]), ends=ends)
+                          ear_m=float(m["pe"]), ends=ends, attract=att)
         else:
             cands = Divides(tau=float(m["tau"]), pairs=int(m["pairs"]), face_m2=float(m["df"]),
                             ear_m=float(m["de"]))
@@ -675,10 +933,20 @@ class EarWorld:
     def sinks(self) -> B:
         """Per pixel whether a bounding triangle (`bounding`) lies within PIX of its centre: the
         faces' sinks."""
-        g = self.g
-        att = np.flatnonzero(self.bounding())
-        d, _ = cKDTree(g.cen[att]).query(self.ra.xy, k=1, distance_upper_bound=PIX)
+        return self.sinks_of(self.bounding())
+
+    def sinks_of(self, bounding: B) -> B:
+        """`sinks` with the triangles `bounding` the roads (Detour: the street's alone)."""
+        att = np.flatnonzero(bounding)
+        d, _ = cKDTree(self.g.cen[att]).query(self.ra.xy, k=1, distance_upper_bound=PIX)
         return np.asarray(np.isfinite(d) & (self.ra.tri >= 0))
+
+    def homes(self) -> tuple[F64, F64]:
+        """(per home its footprint's centroid, its population share)."""
+        c = shapely.centroid(np.asarray(self.g.m.geo.polys))
+        if len(c) != len(self.g.w):
+            raise ValueError(f"{len(c)} footprints, {len(self.g.w)} homes' shares")
+        return np.column_stack([shapely.get_x(c), shapely.get_y(c)]), self.g.w
 
     def set_u(self, u: F64) -> None:
         """The state's potential per pixel (its nearest triangle's cell's)."""
@@ -773,6 +1041,11 @@ def build(e: EarWorld, plan: Plan, *, out: Path, log: Any, steps: int | None = N
     t0 = time.time()
     faces = e.faces()
     n0 = faces.n
+    # a credit's weight where the first order stands in for the exact gain: the last step's
+    # rescored ears' first order over their exact gain (the grounded leak's first order
+    # overstates it 10^3 -- 10^5 times); 0 before any exact gain (step 0: credit in the exact
+    # stage only), as growth.grow's islands at its first step
+    scale = 0.0
     step = 0
     while True:
         st = g.state(g.step >= 0)
@@ -799,11 +1072,11 @@ def build(e: EarWorld, plan: Plan, *, out: Path, log: Any, steps: int | None = N
             break
         gain = plan.contrast.gains(g, st, u)
         e.set_u(u)
-        cands = plan.candidates.ears(e, faces, gain, cost=plan.cost)
+        cands = plan.candidates.ears(e, faces, gain, cost=plan.cost, scale=scale)
         if not cands:
             log("no ear left: stopped short of the budget")
             break
-        cands.sort(key=lambda q: -q.first / q.cost)
+        cands.sort(key=lambda q: -(q.first + scale * q.credit) / q.cost)
         on = g.step >= 0
         # the splitting ones only (no dead end) and the spurs (a dead end by design: Spur), best
         # first order per cost first, `exact` of them
@@ -830,7 +1103,10 @@ def build(e: EarWorld, plan: Plan, *, out: Path, log: Any, steps: int | None = N
         if not scored:
             log("no candidate ear splits a face: stopped")
             break
-        built, faces = max(scored, key=lambda qn: qn[0].exact / qn[0].cost)
+        built, faces = max(scored, key=lambda qn: (qn[0].exact + qn[0].credit) / qn[0].cost)
+        ex = sum(q.exact for q, _ in scored)
+        if ex > 0:
+            scale = sum(q.first for q, _ in scored) / ex
         g.step[built.tris] = step
         xy = e.ra.xy[built.path]
         picks.append(dict(step=step, face=built.face, spur=built.spur,
@@ -838,8 +1114,8 @@ def build(e: EarWorld, plan: Plan, *, out: Path, log: Any, steps: int | None = N
                           bx=float(xy[-1, 0]), by=float(xy[-1, 1]),
                           length=float(np.hypot(*np.diff(xy, axis=0).T).sum()),
                           n_tris=len(built.tris), dD=built.dD, dC=built.dC, cost=built.cost,
-                          first=built.first, exact=built.exact,
-                          offered=len(cands)))
+                          first=built.first, exact=built.exact, saving=built.saving,
+                          credit=built.credit, offered=len(cands)))
         step += 1
     log(f"{faces.n - n0} faces added by {step} ears")
 
@@ -864,6 +1140,65 @@ def run(bid: str, plan: Plan) -> None:
 CHECK_PLAN = "ears.paths.b20.f2000.e30.loop.gl0.25Croad.n2s0.1.M8.K2.D1"
 CHECK_SPUR = "ears.paths.b20.f2000.e30.spur10-80.gl0.25Croad.n2s0.1.M16.K2.D1"
 CHECK_DIVIDES = "ears.divides.p0.1.f2000.e30.gl0.25Croad.n2s0.1.M16.K4.D1"
+CHECK_DETOUR = "ears.paths.b20.f2000.e30.loop.dt1.gl0.25Croad.n2s0.1.M8.K2.D1"
+
+
+def _horseshoe(arm_m: float, gap_m: float, *, crow: bool) -> tuple[float, float]:
+    """(detour saving S in m, the closing link's length) of the link across a horseshoe's gap:
+    a street along y = 10 m, two arms HS_W m apart rising arm_m from it, joined at the top by two
+    bars that stop gap_m apart (the network the pixels within PIX of these segments), homes on a
+    HS_HOME_M grid over the whole raster; the link joins the network's two tips (on the raster
+    about gap_m apart: its length is returned). crow: the `horseshoe` check's fault (the road
+    points' distances straight lines)."""
+    W, H = 200.0, arm_m + 40.0
+    shape = (int(W / PIX), int(H / PIX))
+    i, j = np.meshgrid(np.arange(shape[0]), np.arange(shape[1]), indexing="ij")
+    xy = np.column_stack([(i.ravel() + 0.5) * PIX, (j.ravel() + 0.5) * PIX])
+    x0, x1, top = 100.0 - HS_W / 2, 100.0 + HS_W / 2, 10.0 + arm_m
+    segs = shapely.MultiLineString([[(0.0, 10.0), (W, 10.0)], [(x0, 10.0), (x0, top)],
+                                    [(x1, 10.0), (x1, top)], [(x0, top), (100.0 - gap_m / 2, top)],
+                                    [(x1, top), (100.0 + gap_m / 2, top)]])
+    net = shapely.distance(segs, shapely.points(xy)) <= PIX
+    ea, eb, el = _grid_edges(shape)
+    hx, hy = np.meshgrid(np.arange(HS_HOME_M / 2, W, HS_HOME_M),
+                         np.arange(HS_HOME_M / 2, H, HS_HOME_M), indexing="ij")
+    homes = np.column_stack([hx.ravel(), hy.ravel()])
+    r = roads_of(net, xy, ea, eb, el, homes=homes, share=np.full(len(homes), 1.0 / len(homes)))
+    on = np.flatnonzero(net)
+    if crow:
+        d = xy[r.pts][:, None, :] - xy[on][None, :, :]
+        r = r._replace(D=np.hypot(d[..., 0], d[..., 1]).astype(np.float32))
+    mid = np.hypot(*(xy[on] - [100.0, top]).T)          # the tips: nearest the gap's middle
+    left = xy[on, 0] < 100.0
+    a = int(on[left][np.argmin(mid[left])])
+    t = int(on[~left][np.argmin(mid[~left])])
+    L = float(np.hypot(*(xy[t] - xy[a])))
+    return float(savings(r, a, np.array([t]), np.array([L]))[0]), L
+
+
+def horseshoe(fault: str | None) -> None:
+    """Experiment 1 (owner's doc, Idea C) as a check, on synthetic horseshoes (`_horseshoe`):
+    with the gap fixed (HS_GAP_M) the closing link's saving S rises strictly with the arms
+    (HS_ARMS: closure more likely the longer the horseshoe), and with the arms fixed (HS_ARM_M)
+    its saving per metre of link S / l rises strictly as the gap closes (HS_GAPS: a spur growing
+    toward the far arm makes the closing ear ever better per cost, so a nearly finished loop
+    finishes). Fault `crow` (straight-line distances in place of distances along the roads: no
+    trip is shorter by a link, by the triangle inequality) fails it."""
+    if fault not in (None, "crow"):
+        raise SystemExit("horseshoe's fault: crow")
+    crow = fault == "crow"
+    by_arm = [_horseshoe(A, HS_GAP_M, crow=crow) for A in HS_ARMS]
+    by_gap = [_horseshoe(HS_ARM_M, g, crow=crow) for g in HS_GAPS]
+    for A, (S, L) in zip(HS_ARMS, by_arm, strict=True):
+        print(f"  arms {A:g} m, gap {HS_GAP_M:g} m: link {L:.1f} m, S {S:.3f} m")
+    for g_, (S, L) in zip(HS_GAPS, by_gap, strict=True):
+        print(f"  arms {HS_ARM_M:g} m, gap {g_:g} m: link {L:.1f} m, S {S:.3f} m, "
+              f"S / l {S / L:.4f}")
+    ok = (all(b[0] > a[0] for a, b in zip(by_arm, by_arm[1:], strict=False))
+          and all(b[0] / b[1] > a[0] / a[1] for a, b in zip(by_gap, by_gap[1:], strict=False)))
+    print(f"horseshoe {fault or 'none'}: -> {'PASS' if ok else 'FAIL'}")
+    if not ok:
+        raise SystemExit(1)
 
 
 def _short(bid: str, h: float, n: int, *, spec: str) -> EarWorld:
@@ -906,8 +1241,9 @@ def check(verb: str, bid: str, fault: str | None) -> None:
             gk, _ = g.grad(st, u)
             gain = -gk * (1.0 - g.kt0) + np.abs(u[g.m.c.cell]) * g.contrast.leak_t(g)
         fc = e.faces()
-        cands = Paths(bld=20.0, pairs=6, face_m2=2000.0, ear_m=30.0, ends=Loop()).ears(
-            e, fc, gain, cost=gr.Cost(nu=2.0, price=0.1))
+        cands = Paths(bld=20.0, pairs=6, face_m2=2000.0, ear_m=30.0, ends=Loop(),
+                      attract=NoDetour()).ears(
+            e, fc, gain, cost=gr.Cost(nu=2.0, price=0.1), scale=0.0)
         worst = 0.0
         for q in cands[:4]:
             tris = q.tris[g.kt0[q.tris] >= OPEN_KT]
@@ -930,8 +1266,9 @@ def check(verb: str, bid: str, fault: str | None) -> None:
         st = g.state(g.step >= 0)
         u, _ = g.solve(st)
         fc = e.faces()
-        cands = Paths(bld=20.0, pairs=4, face_m2=2000.0, ear_m=30.0, ends=Loop()).ears(
-            e, fc, g.contrast.gains(g, st, u), cost=gr.Cost(nu=2.0, price=0.1))
+        cands = Paths(bld=20.0, pairs=4, face_m2=2000.0, ear_m=30.0, ends=Loop(),
+                      attract=NoDetour()).ears(
+            e, fc, g.contrast.gains(g, st, u), cost=gr.Cost(nu=2.0, price=0.1), scale=0.0)
         ok = bool(cands)
         for q in cands[:4]:
             path = q.path[: max(1, 2 * len(q.path) // 3)] if fault == "spur" else q.path
@@ -955,7 +1292,7 @@ def check(verb: str, bid: str, fault: str | None) -> None:
         u, _ = g.solve(st)
         fc = e.faces()
         spurs = [q for q in plan.candidates.ears(e, fc, g.contrast.gains(g, st, u),
-                                                 cost=plan.cost) if q.spur]
+                                                 cost=plan.cost, scale=0.0) if q.spur]
         bounding = e.bounding()
         ok = bool(spurs)
         for q in spurs[:SPUR_EARS]:
@@ -977,6 +1314,54 @@ def check(verb: str, bid: str, fault: str | None) -> None:
                   f"{'joined' if joined else 'detached'}, faces {fc.n} -> {n1}")
         print(f"spur {bid} {fault or 'none'}: {len(spurs)} spurs among the candidates -> "
               f"{'PASS' if ok else 'FAIL'}")
+    elif verb == "detour":
+        if fault not in (None, "one-way"):
+            raise SystemExit("detour's fault: one-way")
+        plan = Plan.of(CHECK_DETOUR)
+        pa = plan.candidates
+        assert isinstance(pa, Paths)
+        e = _short(bid, plan.contrast.h, DETOUR_EARS, spec=CHECK_PLAN)
+        g, ra = e.g, e.ra
+        st = g.state(g.step >= 0)
+        u, _ = g.solve(st)
+        fld = pa.attract.field(e, P0=g.P0)
+        assert isinstance(fld, _DetourField)
+        rd = fld.roads
+        net = e.sinks()
+        col, G = _net_graph(net, ra.ea, ra.eb, ra.el)
+        DRR = rd.among()
+        fin = np.isfinite(DRR)
+        ww = np.outer(rd.w, rd.w)
+
+        def brute(a: int, t: int, L: float) -> float:
+            """All pairs again, the link an edge of the network's graph."""
+            link = sp.coo_matrix(([L], ([col[a]], [col[t]])), shape=G.shape).tocsr()
+            D2 = dijkstra(G + link, directed=False, indices=col[rd.pts])[:, col[rd.pts]]
+            return float((ww * np.where(fin, DRR - D2, 0.0)).sum())
+
+        half = 0.5 if fault == "one-way" else 1.0  # the trips counted from a's side only
+        cands = [q for q in pa.ears(e, e.faces(), g.contrast.gains(g, st, u), cost=plan.cost,
+                                    scale=0.0) if not q.spur]
+        judged: list[tuple[str, float, float]] = []
+        for q in cands:
+            L = float(np.hypot(*np.diff(ra.xy[q.path], axis=0).T).sum())
+            judged.append((f"ear of {L:.0f} m (credit {q.credit / g.P0:.3g} P0)", half * q.saving,
+                           brute(int(q.path[0]), int(q.path[-1]), L)))
+        a0 = int(cands[0].path[0])
+        on = np.flatnonzero(net & np.isfinite(rd.D[0, np.maximum(col, 0)]) & (col >= 0))
+        tg = np.random.default_rng(DETOUR_SEED).choice(on, size=DETOUR_TARGETS, replace=False)
+        Ls = DETOUR_STRETCH * np.hypot(*(ra.xy[tg] - ra.xy[a0]).T) + PIX
+        fast = savings(rd, a0, tg, Ls)
+        for t, L, f in zip(tg, Ls, fast, strict=True):
+            judged.append((f"link of {L:.0f} m from the first ear's source", half * float(f),
+                           brute(a0, int(t), float(L))))
+        top = max(b for _, _, b in judged)
+        worst = max(abs(f - b) for _, f, b in judged) / top
+        for what, f, b in judged:
+            print(f"  {what}: S {f:.4f} m, all pairs again {b:.4f} m")
+        ok = top > 0 and worst <= TOL_DETOUR
+        print(f"detour {bid} {fault or 'none'}: {len(rd.pts)} road points, worst |S - all pairs| "
+              f"{worst:.2e} of the largest S (tol {TOL_DETOUR:g}) -> {'PASS' if ok else 'FAIL'}")
     elif verb == "offer":
         if fault not in (None, "persistence"):
             raise SystemExit("offer's fault: persistence")
@@ -1017,6 +1402,8 @@ def check(verb: str, bid: str, fault: str | None) -> None:
 def main(argv: list[str]) -> None:
     if len(argv) == 3 and argv[0] == "run":
         run(argv[1], Plan.of(argv[2]))
+    elif len(argv) in (2, 3) and argv[:2] == ["check", "horseshoe"]:
+        horseshoe(argv[2] if len(argv) == 3 else None)
     elif len(argv) in (3, 4) and argv[0] == "check":
         check(argv[1], argv[2], argv[3] if len(argv) == 4 else None)
     else:
