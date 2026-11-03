@@ -494,7 +494,14 @@ class Detour:
     alone (the block's own length scale, `Roads.mean`): lam is the credit, as a share of P0, of a
     saving as long as the mean street-only trip. A spur shortens no trip and earns nothing: the
     loop it sets up is credited once, when an ear closes it (its saving then large against its
-    short length), which is what makes a nearly finished loop finish."""
+    short length), which is what makes a nearly finished loop finish.
+
+    Runs (2026-11-03, spur10-80, ears_compare.py): it ends spur takeover (dead-end share of
+    length, 41785 f100 at D 0.4: .92 plain, .07 / .05 / .02 at lam 0.1 / 0.3 / 1; 5810 f2000 at
+    D 0.15: .34 plain, .04 / .05 at lam 0.1 / 0.3), but buys no L_P: 41785 L_P at D 0.1 / 0.2 /
+    0.4 plain .748 / .894 / .978, lam 0.1 .740 / .880 / .978, loop .656 / .855 / .980; 5810 at D
+    0.08 / 0.10 / 0.15 plain .949 / .960 / .978, lam 0.1 .950 / .962 / .978, lam 0.3 .952 / .960
+    / .977, loop .951 / .968 / .983, at 1.7 -- 1.9 times plain spurs' wall time."""
     lam: float
 
     def __post_init__(self) -> None:
