@@ -9,18 +9,18 @@
 :root {
   --red: #990000; --red-soft: #99000022; --ink: #111111; --muted: #5c5c5c;
   --bg: #ffffff; --surface: #fbf9f8; --rule: #e4ded8; --rule-strong: #948a81;
-  --other: #8f877f; --iso: #b7d634; --iso-halo: #26310a; --plate: #ffffff;
+  --other: #8f877f; --plate: #ffffff;
   --display: "Crimson Pro", Georgia, "Times New Roman", serif;
   --body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --red: #e87070; --red-soft: #e8707033; --ink: #e8e6e3; --muted: #a8a4a0;
   --bg: #0f0f10; --surface: #16243e; --rule: #2c2b2a; --rule-strong: #78736c;
-  --other: #77716b; --iso: #c6e64a; --iso-halo: #0d1203; --plate: #ffffff; color-scheme: dark } }
+  --other: #77716b; --plate: #ffffff; color-scheme: dark } }
 :root[data-theme="dark"] {
   --red: #e87070; --red-soft: #e8707033; --ink: #e8e6e3; --muted: #a8a4a0;
   --bg: #0f0f10; --surface: #16243e; --rule: #2c2b2a; --rule-strong: #78736c;
-  --other: #77716b; --iso: #c6e64a; --iso-halo: #0d1203; --plate: #ffffff; color-scheme: dark }
+  --other: #77716b; --plate: #ffffff; color-scheme: dark }
 [hidden] { display: none !important; }
 body { background: var(--bg); color: var(--ink); font: 16px/1.55 var(--body); }
 .page { max-width: 1180px; margin: 0 auto; padding-block: 28px 64px;
@@ -122,7 +122,7 @@ table.shapes tr[data-i]:hover td, table.shapes tr.on td { background: var(--red-
 
   <h2 id="screen">The screen as a height map</h2>
   <div class="prose">
-    <p>Each block is shaded by its screen score, on a log scale from blue (low) to red (high). The yellow-green line is the isocline at the floor: the edge of the set of blocks the screen selects. Scroll or pinch to zoom, drag to pan. The ring marks <code>5810</code>.</p>
+    <p>Each block is coloured blue below the floor and red above it, passing through pale at the floor, so the edge of the set the screen selects is where the colour turns. Two colourings share that scale. <strong>Rank on each side</strong> spends half the colours on each side of the floor and spreads each half by area: a block's shade is the share of that side's area scoring below it, so every shade covers as much of the map as any other and the few blocks above the floor get as many shades as the many below. <strong>Confidence</strong> asks how sure the score is that a block is over the floor. Treating its building count n as Poisson, its log score has standard deviation k/√n, k the score's power of n (3/2 for depth × density, 1 for n/P²: area and perimeter are taken as exact), and the shade is the chance that the true score is above the floor. Most blocks hold enough buildings to sit plainly on one side, so this colouring is nearly two-tone, the pale blocks small and near the floor. Scroll or pinch to zoom, drag to pan. The ring marks <code>5810</code>.</p>
     <p>The outlined shapes are the best circles, ellipses, squares and rectangles under one of two objectives. <strong>Excess</strong> sums each covered pixel's log score above the shipped floor, times its area. A shape grows while the ground it adds is above the floor on balance, so the objective picks its own size. <strong>Surprise</strong> compares a shape's mean log score with the best mean a shape of the same size reaches by chance, with the blocks' scores shuffled among the blocks (32 shuffles): (mean − the shuffled bests' mean) / their spread. That accounts for how many places a small shape can be put. <strong>Raw z</strong> skips the shuffle and compares a shape with every other placement of its size. It is kept to show the bias: small shapes win by chance, and here they just find the single top block. Every objective counts a placement only if blocks cover at least 60% of it, and keeps up to three disjoint shapes per family.</p>
     <p>The numbered outlines are convex hulls of clusters of whole blocks, found by <strong>hull agglomeration</strong>: starting from single blocks, it repeatedly merges the two nearby clusters whose union scores best by mean log score plus log(blocks' area / convex hull's area), so a merge across empty ground is penalised. Each cluster it passes through is a candidate. <strong>Worse than the city</strong> is the upper-level-set scan statistic over those candidates: a likelihood ratio for the cluster's mean log score exceeding the rest of the city's, weighted by buildings, with clusters holding at most half the city's buildings. Its p-value compares that ratio with the largest ratio anywhere in the tree when the scores are shuffled among the blocks. Contrast is the cluster's mean log score minus that of the blocks sharing a street with it.</p>
   </div>
@@ -132,6 +132,7 @@ table.shapes tr[data-i]:hover td, table.shapes tr.on td { background: var(--red-
       <label for="sm-metric">Score <select id="sm-metric"><option value="depth_density_proxy">depth × density, √(nA)/P · n/A</option><option value="density_compactness">density × compactness, n/P²</option></select></label>
       <label for="sm-floor">Floor <input id="sm-floor" type="range" min="0" max="1000" step="1"><output id="sm-floor-out"></output></label>
       <button id="sm-reset" type="button">Shipped floor</button>
+      <label for="sm-colour">Colour <select id="sm-colour"><option value="rank" selected>rank on each side of the floor</option><option value="confidence">confidence above the floor</option></select></label>
     </div>
     <div class="bar" style="margin-top:.5rem">
       <label for="sm-obj">Best regions <select id="sm-obj"><option value="" selected>none</option><option value="excess">excess over the shipped floor</option><option value="surprise">surprise against chance, same size</option><option value="raw">raw z among same-size placements</option></select></label>
@@ -141,12 +142,11 @@ table.shapes tr[data-i]:hover td, table.shapes tr.on td { background: var(--red-
       <label for="sm-clu">Anomalous clusters <select id="sm-clu"><option value="">none</option><option value="hull/scan" selected>hull agglomeration: worse than the city</option></select></label>
     </div>
     <div class="mapwrap">
-      <canvas id="sm-canvas" aria-label="City blocks shaded by screen score, with the floor's isocline"></canvas>
+      <canvas id="sm-canvas" aria-label="City blocks coloured blue below the screen's floor and red above it"></canvas>
       <div class="mapctl"><button id="sm-in" type="button" aria-label="Zoom in">+</button><button id="sm-out" type="button" aria-label="Zoom out">−</button><button id="sm-home" type="button" aria-label="Fit the city">⌂</button></div>
     </div>
     <div class="legend" style="margin-top:.7rem">
       <div class="ramp"><div class="rbar" id="sm-ramp"></div><div class="ticks" id="sm-ticks"></div></div>
-      <span><i class="sw" style="background:var(--iso);border-color:var(--rule-strong)"></i>floor isocline</span>
       <span id="sm-hover">Hover a block for its score.</span>
     </div>
     <dl class="stats" id="sm-stats"></dl>
@@ -391,17 +391,47 @@ async function block41785() {
 }
 
 // ---------------------------------------------------------------- the screen's height map
+// each score and its power of n (d ln s / d ln n): a Poisson count's log has sd 1/sqrt(n)
 const METRIC = {
-  depth_density_proxy: (n, A, P) => Math.sqrt(n * A) / P * n / A,
-  density_compactness: (n, A, P) => n / (P * P),
+  depth_density_proxy: { score: (n, A, P) => Math.sqrt(n * A) / P * n / A, power: 1.5 },
+  density_compactness: { score: (n, A, P) => n / (P * P), power: 1 },
 };
+// blue below the floor, pale at it, red above (ColorBrewer RdBu)
+// the map's ground: dark in both themes, so the pale shades at the floor still read as blocks
+const MAP_GROUND = "#2b2e33";
+const DIVERGING = ["#2166ac", "#67a9cf", "#d1e5f0", "#f7f7f7", "#fddbc7", "#ef8a62", "#b2182b"];
+const PHI = (z) => { const t = 1 / (1 + 0.2316419 * Math.abs(z)), q = 0.3989422804 * Math.exp(-z * z / 2) * t * (0.31938153 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429)))); return z >= 0 ? 1 - q : q; };
 async function screenMap(enc) {
   const cv = document.getElementById("sm-canvas"), ctx = cv.getContext("2d");
   const pickCv = document.createElement("canvas"), pctx = pickCv.getContext("2d", { willReadFrequently: true });
-  const maskCv = document.createElement("canvas"), mctx = maskCv.getContext("2d", { willReadFrequently: true });
   const citySel = document.getElementById("sm-city"), metSel = document.getElementById("sm-metric");
   const floorIn = document.getElementById("sm-floor"), floorOut = document.getElementById("sm-floor-out");
-  const ramp = enc.escape_ramp.map((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)));
+  const ramp = DIVERGING.map((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)));
+  const colSel = document.getElementById("sm-colour");
+  let shade = null;   // each block's place on the ramp, 0 -- 1, the floor at 1/2
+  // Colouring (a Strategy, chosen by the select): each block's place on the ramp given the floor, and the ramp's ticks
+  const COLOURINGS = {
+    rank: {
+      shades() { // area-weighted mid-ranks within each side of the floor
+        const t = new Float64Array(score.length); let below = 0, above = 0;
+        for (const i of order) if (score[i] >= floor) above += city.area_m2[i]; else below += city.area_m2[i];
+        let run = 0;
+        for (const i of order) { const a = city.area_m2[i], up = score[i] >= floor, side = up ? above : below;
+          t[i] = (up ? 0.5 : 0) + 0.5 * (run + a / 2 - (up ? below : 0)) / side; run += a; }
+        return t; },
+      ticks() { const lowest = score[order[0]], highest = score[order[order.length - 1]]; return [fmt(lowest), `floor ${fmt(floor)}`, fmt(highest)]; },
+      words(i) { return `${Math.round(100 * (2 * shade[i] - (score[i] >= floor ? 1 : 0)))}% of the ${score[i] >= floor ? "selected" : "unselected"} area scores lower`; },
+    },
+    confidence: {
+      shades() { const k = METRIC[metSel.value].power, lf = Math.log(floor);
+        return Float64Array.from(score, (s, i) => PHI((Math.log(s) - lf) / (k / Math.sqrt(city.n[i])))); },
+      ticks() { return ["surely below", "even", "surely above"]; },
+      words(i) { return `${(100 * shade[i]).toFixed(shade[i] > 0.001 && shade[i] < 0.999 ? 0 : 1)}% sure it is above the floor`; },
+    },
+  };
+  function recolour() { const c = COLOURINGS[colSel.value]; shade = c.shades();
+    const ticks = document.getElementById("sm-ticks"); ticks.replaceChildren(); for (const t of c.ticks()) ticks.append(el("span", null, t)); }
+  colSel.addEventListener("change", () => { recolour(); draw(); });
   const cache = {};
   let city = null, score = null, order = null, lo = 0, hi = 1, floor = 0, view = null, paths = null, dpr = 1;
   const objSel = document.getElementById("sm-obj"), famBox = document.getElementById("sm-fams");
@@ -483,9 +513,9 @@ async function screenMap(enc) {
     });
     ctx.restore();
   }
-  document.getElementById("sm-ramp").style.background = `linear-gradient(90deg, ${enc.escape_ramp.join(", ")})`;
+  document.getElementById("sm-ramp").style.background = `linear-gradient(90deg, ${DIVERGING.join(", ")})`;
 
-  const colorOf = (s) => { if (!(s > 0)) return "#cfcac4"; let t = (Math.log10(s) - lo) / (hi - lo); t = Math.max(0, Math.min(1, t)) * (ramp.length - 1);
+  const colorOf = (u) => { const t = Math.max(0, Math.min(1, u)) * (ramp.length - 1);
     const i = Math.min(ramp.length - 2, Math.floor(t)), f = t - i, a = ramp[i], b = ramp[i + 1];
     return `rgb(${a.map((v, j) => Math.round(v + (b[j] - v) * f)).join(",")})`; };
   const fmt = (v) => (v >= 0.01 ? v.toFixed(4) : v.toPrecision(3));
@@ -500,15 +530,13 @@ async function screenMap(enc) {
   }
   function setMetric() {
     const f = METRIC[metSel.value];
-    score = city.n.map((n, i) => f(n, city.area_m2[i], city.perimeter_m[i]));
+    score = city.n.map((n, i) => f.score(n, city.area_m2[i], city.perimeter_m[i]));
     const logs = score.filter((s) => s > 0).map(Math.log10).sort((a, b) => a - b);
     lo = logs[Math.floor(0.01 * logs.length)]; hi = logs[Math.floor(0.995 * (logs.length - 1))];
     order = score.map((_, i) => i).sort((a, b) => score[a] - score[b]);
     const shipped = city.floors.find((x) => x.metric === metSel.value);
     floor = shipped.value;
-    const ticks = document.getElementById("sm-ticks"); ticks.replaceChildren();
-    for (const t of [0, 0.5, 1]) ticks.append(el("span", null, fmt(10 ** (lo + t * (hi - lo)))));
-    syncFloor();
+    syncFloor(); recolour();
   }
   const toSlider = (v) => Math.round(1000 * (Math.log10(v) - lo) / (hi - lo));
   const fromSlider = (u) => 10 ** (lo + u / 1000 * (hi - lo));
@@ -523,37 +551,25 @@ async function screenMap(enc) {
     dpr = Math.min(2, devicePixelRatio || 1);
     const w = cv.clientWidth, h = Math.round(Math.min(Math.max(w * 0.8, 320), innerHeight * 0.78));
     cv.style.height = `${h}px`;
-    for (const c of [cv, pickCv, maskCv]) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+    for (const c of [cv, pickCv]) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
     if (view) { /* keep the view across a resize */ } else fit();
   }
   let queued = false;
   const draw = () => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; paint(); }); } };
   function paint() {
     const w = cv.width, h = cv.height;
-    for (const c of [ctx, pctx, mctx]) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); }
-    ctx.fillStyle = css("--surface"); ctx.fillRect(0, 0, w, h);
-    for (const c of [ctx, pctx, mctx]) c.setTransform(view.s, 0, 0, view.s, view.tx, view.ty);
+    for (const c of [ctx, pctx]) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); }
+    ctx.fillStyle = MAP_GROUND; ctx.fillRect(0, 0, w, h);
+    for (const c of [ctx, pctx]) c.setTransform(view.s, 0, 0, view.s, view.tx, view.ty);
     const hair = 0.6 * dpr / view.s;
     ctx.lineWidth = hair; ctx.strokeStyle = "rgba(255,255,255,0.35)";
-    mctx.fillStyle = "#fff";
     for (const i of order) {
       const p = paths[i];
-      ctx.fillStyle = colorOf(score[i]); ctx.fill(p, "evenodd");
+      ctx.fillStyle = colorOf(shade[i]); ctx.fill(p, "evenodd");
       if (view.s > 0.05) ctx.stroke(p);
       const id = i + 1; pctx.fillStyle = `rgb(${id & 255},${(id >> 8) & 255},${(id >> 16) & 255})`; pctx.fill(p, "evenodd");
-      if (score[i] >= floor) mctx.fill(p, "evenodd");
     }
-    // the floor's isocline: every pixel where the selected set's mask changes, thickened
-    for (const c of [ctx]) c.setTransform(1, 0, 0, 1, 0, 0);
-    const m = mctx.getImageData(0, 0, w, h).data, on = new Uint8Array(w * h);
-    for (let i = 0; i < w * h; i++) on[i] = m[4 * i + 3] > 127 ? 1 : 0;
-    const edge = new Uint8Array(w * h);
-    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x, v = on[i]; if (v !== on[i - 1] || v !== on[i + 1] || v !== on[i - w] || v !== on[i + w]) edge[i] = 1; }
-    // the line: the edge pixels on both sides of the change (two device pixels wide), at any zoom
-    const img = ctx.getImageData(0, 0, w, h), d = img.data;
-    const [ir, ig, ib] = [1, 3, 5].map((j) => parseInt(css("--iso").slice(j, j + 2), 16));
-    for (let j = 0; j < w * h; j++) if (edge[j]) { d[4 * j] = ir; d[4 * j + 1] = ig; d[4 * j + 2] = ib; }
-    ctx.putImageData(img, 0, 0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (clusters.length) {
       ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.lineJoin = "round";
       clusters.forEach((c, k) => { ctx.beginPath(); c.outline.forEach(([x, y], m) => { const X = view.s * x + view.tx, Y = -view.s * y + view.ty; m ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }); ctx.closePath();
@@ -594,7 +610,7 @@ async function screenMap(enc) {
       const x = Math.round((e.clientX - r.left) * dpr), y = Math.round((e.clientY - r.top) * dpr);
       const p = pctx.getImageData(x, y, 1, 1).data, id = (p[0] | (p[1] << 8) | (p[2] << 16)) - 1;
       const hov = document.getElementById("sm-hover");
-      if (id >= 0 && id < score.length && p[3] === 255) { const s = score[id]; hov.textContent = `${city.block_id[id]}: ${fmt(s)}, ${city.n[id].toLocaleString()} buildings${s >= floor ? ", selected" : ""}`; }
+      if (id >= 0 && id < score.length && p[3] === 255) { const s = score[id]; hov.textContent = `${city.block_id[id]}: ${fmt(s)}, ${city.n[id].toLocaleString()} buildings${s >= floor ? ", selected" : ""}; ${COLOURINGS[colSel.value].words(id)}`; }
       else hov.textContent = "Hover a block for its score.";
       return;
     }
@@ -611,8 +627,8 @@ async function screenMap(enc) {
   document.getElementById("sm-in").onclick = () => zoomAt(cv.width / 2, cv.height / 2, 1.6);
   document.getElementById("sm-out").onclick = () => zoomAt(cv.width / 2, cv.height / 2, 1 / 1.6);
   document.getElementById("sm-home").onclick = () => { fit(); draw(); };
-  floorIn.addEventListener("input", () => { floor = fromSlider(+floorIn.value); floorOut.textContent = fmt(floor); draw(); });
-  document.getElementById("sm-reset").onclick = () => { floor = city.floors.find((x) => x.metric === metSel.value).value; syncFloor(); draw(); };
+  floorIn.addEventListener("input", () => { floor = fromSlider(+floorIn.value); floorOut.textContent = fmt(floor); recolour(); draw(); });
+  document.getElementById("sm-reset").onclick = () => { floor = city.floors.find((x) => x.metric === metSel.value).value; syncFloor(); recolour(); draw(); };
   metSel.addEventListener("change", () => { setMetric(); listShapes(); listClusters(); draw(); });
   citySel.addEventListener("change", async () => { await loadCity(citySel.value); await loadShapes(citySel.value); await loadClusters(citySel.value); setMetric(); listShapes(); listClusters(); size(); fit(); draw(); });
   new ResizeObserver(() => { if (city) { size(); fit(); draw(); } }).observe(cv.parentElement);
