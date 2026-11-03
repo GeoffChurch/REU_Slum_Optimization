@@ -163,9 +163,9 @@ table.shapes tr[data-i]:hover td, table.shapes tr.on td { background: var(--red-
   </div>
   <figure id="b5810"></figure>
 
-  <h2 id="faceoff">Shock Reblock and topology on block 41785</h2>
+  <h2 id="faceoff">Shock Reblock, its spurs, and topology on block 41785</h2>
   <div class="prose">
-    <p>The Demo's face-off, unchanged: the shipped screen's top block, small enough (638 buildings) for topology to finish. Each method is cut at the same budgets in the order it built its roads; run time is each method's since its start.</p>
+    <p>The Demo's face-off on the shipped screen's top block, small enough (638 buildings) for topology to finish, with Shock Reblock's two spur runs added to the pickers. Each method is cut at the same budgets in the order it built its roads; run time is each method's since its start. Escape saved is measured as on 5810, the network carved as an ordinary road, so the spurs' lead in their own grounded score shrinks here to budgets of 5 to 15%, and beyond 30% the loops lead.</p>
   </div>
   <figure id="b41785"></figure>
 </div>
@@ -351,7 +351,8 @@ function buildOut(host, cfg) {
 
 // ---------------------------------------------------------------- 5810: every method
 const GROUPS = [
-  ["Shock Reblock and other ears", ["ear", "eard"]],
+  ["Shock Reblock and other ears", ["ear", "es30", "es80", "eard"]],
+  ["Shipped lineup", ["cnbc", "rlp", "eg", "gaa", "clr"]],
   ["cycle_native (shipped lineup)", ["cn", "cnp", "cna7", "cna14", "cndp", "cndp7", "cndp14"]],
   ["clearance_looped (shipped lineup)", ["cl", "clp"]],
   ["ΔP greedy", ["dpg", "dpg12", "dpl", "dplj", "dps", "dpsj"]],
@@ -359,7 +360,7 @@ const GROUPS = [
   ["Laplacian growth", ["gk", "gke", "gk3", "gl", "gle", "gli"]],
   ["Solved per budget", ["jp", "jr", "tp", "ptc", "ptb", "pte", "pts"]],
 ];
-const RENAME = { ear: "Shock Reblock (ears, paths)", eard: "ears, divides" };
+const RENAME = { ear: "Shock Reblock (ears, paths)", es30: "Shock Reblock, spurs 10–30 m", es80: "Shock Reblock, spurs 10–80 m", eard: "ears, divides", cnbc: "Loop Network, desire-routed (cycle_native_betweenness_contrast)" };
 
 async function block5810(enc) {
   const m = await getJSON("methods.json");
@@ -373,7 +374,7 @@ async function block5810(enc) {
   buildOut(document.getElementById("b5810"), {
     budgets: [0, ...m.budgets], series, plots: ["displacement", "road"], base: "s/", pick: true, start: 5, a: "ear", b: "cn",
     fourth: ["Added C", (c) => (c.C == null ? "–" : `${Math.round(c.C / 1000).toLocaleString()}k m²`)], ramp: enc.escape_ramp, road: enc.road, damage: enc.damage_ramp,
-    caption: `Escape times on this block's scale: ${m.escape_scale.toFixed(0)} model units at the 99th-percentile home with no new road. Added C is the sheet conductance the network adds over the block with no new road. A dashed curve is a method solved afresh at each budget, so its points are separate networks, not one build order. Rows are the 5810 build-out page's (roads5810/index.html); Shock Reblock here is its rev-1 run at the 2,000 m² face and 30 m ear floors.`,
+    caption: `Escape times on this block's scale: ${m.escape_scale.toFixed(0)} model units at the 99th-percentile home with no new road. Added C is the sheet conductance the network adds over the block with no new road. A dashed curve is a method solved afresh at each budget, so its points are separate networks, not one build order. Rows are the 5810 build-out page's (roads5810/index.html); Shock Reblock here is its rev-1 run at the 2,000 m² face and 30 m ear floors; rev 3 at the 100 m² face floor builds the identical network on this block, every state's escape and displacement the same. Escape saved here is the page's: each network carved as an ordinary road and solved under one metric for every method, so it reads lower than the build's own grounded score.`,
   });
 }
 
@@ -381,9 +382,16 @@ async function block5810(enc) {
 async function block41785() {
   const b = await getJSON("d/buildout_ZAF.9.3.1_1_41785.json");
   const cell = (c) => ({ D: c.step.displacement, km: c.step.road_km, LP: c.step.permeability, sec: c.step.seconds, row: c.step.row, why: c.kind === "short" ? c.why : null });
-  const series = b.series.map((s, i) => ({ id: `s${i}`, label: s.label, group: "", blurb: i ? "Topology's run (our optimized port), as the Demo shows it: it builds until every parcel touches a road." : "Shock Reblock at rev 3, face floor 100 m², ear floor 30 m.", sheet: s.sheet, cells: s.cells.map(cell) }));
+  const more = await getJSON("d/faceoff.json");
+  const BLURB = [
+    "Shock Reblock at rev 3, face floor 100 m², ear floor 30 m: every road closes a loop.",
+    "Topology's run (our optimized port), as the Demo shows it: it builds until every parcel touches a road.",
+    "Shock Reblock at rev 3 as above, but a path may also end on open ground 10 to 30 m from its start: a dead-end road, built whether or not it splits its face (though one ending near another road can close a face).",
+    "The same with spurs of 10 to 80 m.",
+  ];
+  const series = [...b.series, ...more].map((s, i) => ({ id: `s${i}`, label: s.label, group: i === 1 ? "Earlier method" : "Shock Reblock", blurb: BLURB[i], sheet: s.sheet, cells: s.cells.map(cell) }));
   buildOut(document.getElementById("b41785"), {
-    budgets: b.budgets, series, plots: b.plots, base: "d/", pick: false, start: b.default_step, a: "s0", b: "s1",
+    budgets: b.budgets, series, plots: b.plots, base: "d/", pick: true, start: b.default_step, a: "s0", b: "s1",
     fourth: ["Built in", (c) => (c.sec > 0 ? duration(c.sec) : "–")], ramp: b.encoding.escape_ramp, road: b.encoding.road, damage: b.encoding.damage_ramp,
     caption: `Escape times on this block's scale: ${b.escape_scale.toFixed(0)} model units at the 99th-percentile home with no new road. Run time is each method's since its start, on a log scale.`,
   });

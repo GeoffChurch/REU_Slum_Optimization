@@ -12,6 +12,8 @@ and escape times (build.stored_plates' reading, its frame checked against the ba
     C=research/roadless/atlas/explore_proto/compare.py     # from the repo root, PYTHONPATH=.
     uv run python $C plates <workers>       # every frame's plate into build.FRAMES/<block>/cmp/
     uv run python $C sheets                 # the sprite sheets and methods.json into OUT
+    uv run python $C faceoff ~/src/wt_demo  # FACEOFF's grids on the Demo's 41785 slider: their
+                                            # plates, sheets and series into OUT/d/faceoff.json
     uv run python $C artifact ~/src/wt_demo # compare.html and its files into OUT (the Demo's
                                             # 41785 bundle and the ScreenMap bundles from a site
                                             # checkout that `build.py site` has written)
@@ -143,6 +145,43 @@ def sheets() -> None:
     print(f"{len(methods)} methods, sheets {mb:.1f} MB", flush=True)
 
 
+# The face-off's further methods (owner 2026-11-03: the spur runs beside Shock Reblock's loops):
+# each a grid on 41785 (atlas/buildout.py `table`), with the label the picker shows.
+FACEOFF = (
+    (bd.Grid("ears.paths.b20.f100.e30.spur10-30.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.91.v3",
+             stem="es30", stops_because="no road left that would split a sub-block or end a spur"),
+     "Shock Reblock with spurs of 10 to 30 m"),
+    (bd.Grid("ears.paths.b20.f100.e30.spur10-80.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.91.v3",
+             stem="es80", stops_because="no road left that would split a sub-block or end a spur"),
+     "Shock Reblock with spurs of 10 to 80 m"),
+)
+
+
+def faceoff(root: Path) -> None:
+    """FACEOFF's grids on the Demo's 41785 build-out (its budgets, read from the site checkout
+    `root`): each grid's plates, its sheet and its series, into OUT/d/faceoff.json."""
+    demo = root / bd.SITE_DIR
+    bundle = json.loads((demo / "demo.json").read_text())
+    b = json.loads((demo / bundle["comparison"]["buildout"]).read_text())
+    site = Site.of(b["block_id"])
+    scale = bd.escape_scale(site)
+    (OUT / "d").mkdir(parents=True, exist_ok=True)
+    w = bd.world(site, bd.context_source())
+    series = []
+    for g, label in FACEOFF:
+        g.plates(site, w)
+        t = g.table(site)
+        series.append(bd.grid_series(site, scale, g, tuple(b["budgets"]), method=g.key,
+                                     label=label,
+                                     run=bd.DemoRecorded(kind="recorded",
+                                                         seconds=t["whole"]["seconds"],
+                                                         machine=bd.METHOD.runtime.machine),
+                                     out=OUT / "d"))
+        print(f"  {g.stem}: {len(series[-1].cells)} budgets", flush=True)
+    (OUT / "d" / "faceoff.json").write_text(json.dumps(
+        [bd.dataclasses.asdict(x) for x in series], ensure_ascii=False))
+
+
 def artifact(root: Path) -> None:
     """compare.html as OUT/index.html beside the sheets, with the Demo's 41785 build-out and its
     sheets (OUT/d/) and the ScreenMap bundles (OUT/screen/) copied from the site checkout `root`."""
@@ -172,6 +211,8 @@ def main(argv: list[str]) -> None:
             plates(int(n))
         case ["sheets"]:
             sheets()
+        case ["faceoff", root]:
+            faceoff(Path(root).expanduser())
         case ["artifact", root]:
             artifact(Path(root).expanduser())
         case _:
