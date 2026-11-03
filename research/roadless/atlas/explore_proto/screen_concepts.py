@@ -2,7 +2,86 @@
 distinct from what surrounds them, surprisingly well silhouetted for their size, for the Demo
 Lineup artifact's height map.
 
-DOCSTRING-PENDING
+The blocks (the site's ScreenMap bundle) each carry a weight w, their buildings, and a value v,
+their log10 score (depth_density_proxy sqrt(nA)/P n/A, or density_compactness n/P^2; a score of
+0 at the city's 1st percentile), on screen_clusters.py's street adjacency (blocks are street
+faces; neighbours share >= 5 m of boundary within 0.5 m).
+
+Candidates (a Strategy: Candidates; only Concepts implemented, the hull tree's nodes of
+screen_clusters.py would be scored the same way). A concept, after formal concept analysis, is a
+pair (R, [lo, hi]) closed both ways: R a connected component of the blocks with v in [lo, hi],
+[lo, hi] the tightest band holding R's scores. So R is homogeneous (within its band), distinct
+(every block bordering it, its ring, lies outside the band) and maximal. Its span is hi - lo;
+its gap the lowest ring score above the band less the highest below (+inf with none). R is a
+component of some window [x, x + d] exactly when span <= d < gap, so a concept lives over the
+widths [span, gap). Enumeration: for each width d of the ladder WIDTHS (8, geometric, 0.05 to 1
+decade, ratio 1.53; the scores' sd is 0.38 -- 0.59 decades, so the ladder runs from a tenth of
+it, where most windows' components are single blocks, to two, where one component would hold
+most of the city), an exact sweep of x up the scores, a block entering at x = v - d and leaving
+once x passes v (entries first at a tie), the components each event changes (the entering
+block's; the leaving block's neighbours' pieces) BFS'd and emitted, distinct member sets kept
+(128-bit Zobrist hash, collisions counted and refused). Coverage, checked against every band's
+components on small graphs: exactly the concepts living at some ladder width, so every concept
+whose life gap / span exceeds 1.53 is found, and one is missed only if its life falls between
+two rungs. Kept: >= 2 blocks, at most MAX_SHARE of the city's buildings, a ring with buildings.
+A sweep is 0.1 s on Nairobi, 0.6 s on Cape Town (2.2 s on an autocorrelated MSR surrogate,
+whose components are larger).
+
+Score: the building-weighted silhouette against the ring. For block i of R, a_i the weighted
+mean |v_i - v_j| over R's other blocks, b_i over the ring's; s_i = (b_i - a_i) / max(a_i, b_i);
+S(R) their weighted mean (-1 to 1), with a and b their weighted means. O(k log k) a region from
+sorted scores' prefix sums (numba). Also the contrast, R's weighted mean log score less the
+ring's: signed, the top lists below take both signs, a second list only regions above their ring.
+
+Size: n_eff = (sum w)^2 / sum w^2, the effective number of blocks (the ring's recorded too).
+Calibration, per null, from NPERM replicates, each regenerating every candidate (so selection
+is in the null): p = (1 + #replicates whose best S among their concepts with n_eff within a
+factor WINDOW of the region's is >= S) / (1 + NPERM), on log10 n_eff bins of log10(WINDOW) / 8
+(the region's n_eff snapped to its bin); z = (S - mean) / sd of every null concept's S at that
+n_eff, a Nadaraya-Watson Gaussian kernel in log10 n_eff of bandwidth log10(WINDOW). A region
+larger than any null concept gets p's floor (counted in the output: concepts_beyond_null_sizes).
+The q95 and q50 of the per-replicate best go to the output as the page's null curve.
+
+Nulls (a Strategy each: Null), reported side by side:
+  shuffle: the log scores permuted among the blocks (weights and geometry kept).
+  msr: Moran spectral randomization (Wagner and Dray 2015, Methods Ecol Evol 6:1169): the n - 1
+    Moran eigenvector maps of the binary street adjacency (eigenvectors of the doubly centred
+    HAH less K J/n, K past the spectrum so the constant falls out alone; one dense LAPACK evd a
+    city, 1 s Nairobi, ~90 s Cape Town on EIG_THREADS threads, 2.7 GB), the centred scores'
+    coefficients each sign-flipped ('singleton': the spectrum, hence Moran's I, kept exactly),
+    mapped back, and the observed scores re-dealt by the surrogate's ranks (the marginal is the
+    observed one, as under the shuffle: the silhouette is not invariant to a monotone
+    transform). The re-deal costs a little of Moran's I (Nairobi 0.543 -> 0.536 +- 0.015 and
+    0.544 -> 0.523 +- 0.022); IAAFT-style rounds re-imposing the magnitudes did not recover it
+    (1, 3, 10 rounds: 0.534, 0.523 on Nairobi) and were dropped.
+Replicates seeded default_rng([SEED, null index, replicate]); batches of BATCH per task so the
+basis is read once a batch (no effect on a result).
+
+Shape (the top lists only): the screen applied to the region as one block: its blocks' union
+closed by CLOSE_M (the shared streets), P its exterior's length, A its area (holes excluded), n
+its buildings: both metrics and x their floors; hull fill, the blocks' area over their convex
+hull's. The top list: hull fill >= HULL_FILL_MIN, ranked by p under msr, then z under msr, TOP
+disjoint (greedy: a region sharing a block with a better one skipped).
+
+Also per metric: the counts of concepts at p < 0.05 and 0.01 under each null (over every
+concept, nested ones included, so one region counts many times), and `follow`, the best-ranked
+concept holding the bundle's followed block (Cape Town's 5810), hull fill not required.
+
+Run 2026-11-03 (NPERM 999 per null, 16 workers, load ~1): Nairobi 45 s, Cape Town 250 s (the
+eigenvectors 86 s, each metric's 1,998 replicates 74 -- 84 s). Concepts: Nairobi 14,903
+(depth_density_proxy) and 13,166 (density_compactness); Cape Town 77,519 and 61,515. Moran's I
+observed / MSR surrogates / shuffles: Cape Town 0.684 / 0.674 +- 0.011 / 0.000 and 0.578 / 0.552
++- 0.012 / 0.000; Nairobi 0.543 / 0.538 +- 0.013 / -0.001 and 0.544 / 0.525 +- 0.023 / -0.001.
+What the silhouette finds: crisp edges, and crisp edges are mostly where a settled area meets
+empty ground: the regions at the top of every list sit below the floor (0.3 -- 0.5x) in rings
+far emptier still (0.01 -- 0.05x). Blocks above the floor grade into their surroundings, so few
+make a crisp concept; 5810's best (depth_density_proxy) is itself and one neighbour, S 0.27,
+rank 69,420 of 77,519. The shuffle overstates: concepts at p < 0.05 under shuffle / MSR, Cape
+Town 214 / 3 and 1,035 / 139, Nairobi 185 / 42 and 104 / 32; on the top lists the shuffle's z
+exceeds MSR's by 1.0 -- 1.4 for regions of n_eff 30 -- 160 (by ~0.05 for a few blocks, where
+autocorrelation barely matters). Under MSR only Nairobi's 176-block region (both metrics, p
+0.001) and Cape Town's density_compactness regions of 95 -- 222 blocks (p 0.004 -- 0.010) stand
+clearly out; Cape Town's depth_density_proxy has no concept at p < 0.01.
 
     S=research/roadless/atlas/explore_proto/screen_concepts.py  # from the repo root, PYTHONPATH=.
     uv run python $S ~/src/wt_demo <out dir>    # concepts_<city>.json per city, both metrics
@@ -555,6 +634,24 @@ def scanned(city: dict, b: sc.Blocks, A: sparse.csr_matrix, gen: Candidates,
     lists = {k: [entry(r, mem, f, s, v, b, floors, metric, zp)
                  for r, mem, f in selected(o, gen, s, v, b)]
              for k, o in (("concepts", order), ("concepts_above", above))}
+    # the bundle's followed block (Cape Town's 5810; Nairobi's bundle has none): its best-ranked
+    # concept, hull fill not required
+    fol = city.get("follow")
+    follow = None
+    if fol is not None:
+        fi = int(fol["index"])
+        for r in order[(s.lo[order] <= v[fi]) & (s.hi[order] >= v[fi])]:
+            mem = gen.members(s, int(r), v)
+            if fi in mem:
+                follow = dict(block_id=fol["block_id"], index=fi,
+                              rank=int(np.flatnonzero(order == r)[0]) + 1,
+                              **entry(int(r), mem, hull_fill(mem, b), s, v, b, floors, metric,
+                                      zp))
+                break
+    up = (s.S / s.W - s.Sr / s.Wr) > 0
+    significant = {nm: {f"{lab}p<{a}": int((sel & (p < a)).sum())
+                        for a in (0.05, 0.01) for lab, sel in (("", True), ("above ring ", up))}
+                   for nm, (_, p) in zp.items()}
     g = np.arange(G)
     keep = np.isfinite(runs[0][0].q(0.95)) | np.isfinite(runs[1][0].q(0.95))
     params = dict(
@@ -589,7 +686,7 @@ def scanned(city: dict, b: sc.Blocks, A: sparse.csr_matrix, gen: Candidates,
                for nl, (cal, _, _) in zip(nulls, runs, strict=True)},
             **{f"sd_{nl.name}": [_finite(x) for x in cal.sd[keep]]
                for nl, (cal, _, _) in zip(nulls, runs, strict=True)}))
-    return dict(params=params, **lists)
+    return dict(params=params, significant=significant, follow=follow, **lists)
 
 
 # ---------------------------------------------------------------- the checks
