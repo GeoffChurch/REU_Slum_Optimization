@@ -1,0 +1,521 @@
+<title>Reblock Demo Lineup</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Crimson+Pro:wght@400;600;700&display=swap">
+<style>
+/* Layout: one reading column for prose, widening to the figures; each figure a slider bar over
+   plates beside (or above) their plots. The site's own tokens (docs/stylesheets/sbu.css). */
+:root {
+  --red: #990000; --red-soft: #99000022; --ink: #111111; --muted: #5c5c5c;
+  --bg: #ffffff; --surface: #fbf9f8; --rule: #e4ded8; --rule-strong: #948a81;
+  --other: #8f877f; --iso: #b7d634; --iso-halo: #26310a; --plate: #ffffff;
+  --display: "Crimson Pro", Georgia, "Times New Roman", serif;
+  --body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --red: #e87070; --red-soft: #e8707033; --ink: #e8e6e3; --muted: #a8a4a0;
+  --bg: #0f0f10; --surface: #16243e; --rule: #2c2b2a; --rule-strong: #78736c;
+  --other: #77716b; --iso: #c6e64a; --iso-halo: #0d1203; --plate: #ffffff; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --red: #e87070; --red-soft: #e8707033; --ink: #e8e6e3; --muted: #a8a4a0;
+  --bg: #0f0f10; --surface: #16243e; --rule: #2c2b2a; --rule-strong: #78736c;
+  --other: #77716b; --iso: #c6e64a; --iso-halo: #0d1203; --plate: #ffffff; color-scheme: dark }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.55 var(--body); }
+.page { max-width: 1180px; margin: 0 auto; padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--display); font-weight: 600; line-height: 1.15; text-wrap: balance; margin: 0; }
+h1 { font-size: 2.6rem; }
+h2 { font-size: 1.9rem; margin-top: 2.6rem; padding-top: 1.2rem; border-top: 1px solid var(--rule); }
+p { margin: 0; max-width: 68ch; }
+.prose { display: grid; gap: .8rem; margin-top: .9rem; }
+code { font-size: .88em; background: var(--surface); padding: .05em .3em; border-radius: 3px; overflow-wrap: anywhere; }
+a { color: var(--red); }
+.eyebrow { font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.lede { font-size: 1.12rem; }
+figure { margin: 1.4rem 0 0; }
+figcaption { color: var(--muted); font-size: .9rem; margin-top: .8rem; max-width: 80ch; }
+.bar { display: flex; flex-wrap: wrap; gap: .6rem 1.4rem; align-items: center; padding: .7rem .9rem;
+  background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; }
+.bar label { display: flex; gap: .55rem; align-items: center; font-weight: 700; }
+.bar input[type=range] { width: min(340px, 52vw); accent-color: var(--red); }
+.bar output { font-variant-numeric: tabular-nums; min-width: 3.2em; }
+.bar .hint { color: var(--muted); font-size: .88rem; }
+select, button { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--rule-strong);
+  border-radius: 4px; padding: .25rem .45rem; max-width: 100%; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+.stage { display: grid; gap: 1.2rem 1.6rem; margin-top: 1rem; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: start; }
+@media (max-width: 860px) { .stage { grid-template-columns: minmax(0, 1fr); } }
+.cols { display: grid; gap: 1rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 560px) { .cols { grid-template-columns: minmax(0, 1fr); } }
+.col { display: grid; gap: .45rem; min-width: 0; align-content: start; }
+.col .head { display: flex; gap: .5rem; align-items: center; min-width: 0; }
+.col .swatch-line { flex: none; width: 18px; height: 3px; border-radius: 2px; }
+.col select { flex: 1; min-width: 0; }
+.col .name { font-weight: 700; }
+.col .blurb { font-size: .84rem; color: var(--muted); min-height: 2.6em; }
+.plate { position: relative; overflow: hidden; background: var(--plate); border: 1px solid var(--rule); border-radius: 4px; max-width: 100%; }
+.plate img { position: absolute; left: 0; top: 0; max-width: none; display: block; will-change: transform; }
+.plate .veil { position: absolute; inset: 0; display: grid; place-items: center; padding: 1rem; text-align: center;
+  background: #ffffffcc; color: #111; font-size: .92rem; }
+dl.read { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .2rem .6rem; margin: 0; font-variant-numeric: tabular-nums; }
+dl.read div { min-width: 0; }
+dl.read dt { font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+dl.read dd { margin: 0; font-weight: 700; }
+.note { font-size: .84rem; color: var(--muted); min-height: 1.2em; }
+.plots { display: grid; gap: 1rem; min-width: 0; }
+.plot-title { font-size: .92rem; font-weight: 700; display: flex; flex-wrap: wrap; gap: 0 .6rem; justify-content: space-between; }
+.plot-title span:last-child { font-weight: 400; color: var(--muted); font-variant-numeric: tabular-nums; }
+svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+svg.chart text { fill: var(--muted); font: 11px var(--body); }
+svg.chart .axis { stroke: var(--rule-strong); stroke-width: 1; fill: none; }
+svg.chart .grid { stroke: var(--rule); stroke-width: 1; fill: none; }
+svg.chart .other { stroke: var(--other); fill: none; stroke-width: 1; opacity: .45; cursor: pointer; }
+svg.chart .other.dashed { stroke-dasharray: 3 3; }
+svg.chart .other.hot { opacity: 1; stroke-width: 2.4; stroke: var(--muted); }
+svg.chart .hit { stroke: transparent; stroke-width: 9; fill: none; cursor: pointer; }
+svg.chart .sel { fill: none; stroke-width: 2.2; }
+svg.chart .a { stroke: var(--red); color: var(--red); }
+svg.chart .b { stroke: var(--ink); color: var(--ink); }
+svg.chart .dot { fill: currentColor; stroke: var(--bg); stroke-width: 1.5; }
+svg.chart .pt { fill: currentColor; stroke: none; }
+.key { display: flex; flex-wrap: wrap; gap: .3rem 1rem; font-size: .84rem; color: var(--muted); }
+.key i { display: inline-block; width: 16px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: .35rem; }
+.legend { display: flex; flex-wrap: wrap; gap: .6rem 1.4rem; align-items: center; font-size: .82rem; color: var(--muted); }
+.ramp { display: grid; gap: 2px; width: min(260px, 100%); }
+.ramp .rbar { height: 10px; border-radius: 2px; }
+.ramp .ticks { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+.sw { display: inline-block; width: 16px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: .35rem; border: 1px solid var(--rule-strong); }
+.tip { position: fixed; pointer-events: none; z-index: 5; background: var(--bg); color: var(--ink); border: 1px solid var(--rule-strong);
+  border-radius: 4px; padding: .25rem .5rem; font-size: .82rem; box-shadow: 0 2px 8px #0002; max-width: 300px; }
+/* the screen's height map */
+.mapwrap { position: relative; margin-top: 1rem; border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; background: var(--surface); }
+.mapwrap canvas { display: block; width: 100%; touch-action: none; cursor: grab; }
+.mapwrap canvas.drag { cursor: grabbing; }
+.mapctl { position: absolute; right: 10px; top: 10px; display: grid; gap: 4px; }
+.mapctl button { width: 34px; height: 34px; padding: 0; font-size: 1.1rem; line-height: 1; background: var(--bg); }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .4rem 1.2rem; margin-top: .8rem; font-variant-numeric: tabular-nums; }
+.stats div { min-width: 0; }
+.stats dt { font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.stats dd { margin: 0; font-size: 1.15rem; font-weight: 700; }
+.err { color: var(--red); font-weight: 700; }
+</style>
+
+<div class="page">
+  <p class="eyebrow">reblock · research/roadless · Demo, every method</p>
+  <h1>Reblock Demo Lineup</h1>
+  <div class="prose">
+    <p class="lede">The Demo page's figures, opened up: the city screen as a continuous height map, every method we have built out on block <code>ZAF.9.3.1_1_5810</code> drawn exactly as the Demo draws Shock Reblock, and the face-off with topology on <code>ZAF.9.3.1_1_41785</code>.</p>
+    <p>Every plate uses one encoding. Each home is coloured by its escape time as a share of the 99th-percentile home's with no new road: blue a short way out, red a long one, a line every 10%. New road is dark slate, 7 m wide. A damaged building fades toward sand. Escape time saved is 1 − P(roads) / P(no roads), the site's permeability.</p>
+  </div>
+
+  <h2 id="screen">The screen as a height map</h2>
+  <div class="prose">
+    <p>Each block is shaded by its screen score, on a log scale from blue (low) to red (high). The yellow-green line is the isocline at the floor: the edge of the set of blocks the screen selects. Scroll or pinch to zoom, drag to pan. The ring marks <code>5810</code>.</p>
+  </div>
+  <figure id="screenfig">
+    <div class="bar">
+      <label for="sm-city">City <select id="sm-city"><option value="capetown">Cape Town</option><option value="nairobi">Nairobi</option></select></label>
+      <label for="sm-metric">Score <select id="sm-metric"><option value="depth_density_proxy">depth × density, √(nA)/P · n/A</option><option value="density_compactness">density × compactness, n/P²</option></select></label>
+      <label for="sm-floor">Floor <input id="sm-floor" type="range" min="0" max="1000" step="1"><output id="sm-floor-out"></output></label>
+      <button id="sm-reset" type="button">Shipped floor</button>
+    </div>
+    <div class="mapwrap">
+      <canvas id="sm-canvas" aria-label="City blocks shaded by screen score, with the floor's isocline"></canvas>
+      <div class="mapctl"><button id="sm-in" type="button" aria-label="Zoom in">+</button><button id="sm-out" type="button" aria-label="Zoom out">−</button><button id="sm-home" type="button" aria-label="Fit the city">⌂</button></div>
+    </div>
+    <div class="legend" style="margin-top:.7rem">
+      <div class="ramp"><div class="rbar" id="sm-ramp"></div><div class="ticks" id="sm-ticks"></div></div>
+      <span><i class="sw" style="background:var(--iso);border-color:var(--rule-strong)"></i>floor isocline</span>
+      <span id="sm-hover">Hover a block for its score.</span>
+    </div>
+    <dl class="stats" id="sm-stats"></dl>
+    <figcaption>Scores are computed in the page from each block's building count n, area A and perimeter P, as <code>reblock.metric</code> computes them; the boundaries are the site's ScreenMap bundle (5 m simplified). Precision and recall are against the City of Cape Town's informal-structure survey; Nairobi has no such survey.</figcaption>
+  </figure>
+
+  <h2 id="block">Roads through block 5810</h2>
+  <div class="prose">
+    <p>Pick any two methods. Both plates follow the budget slider, and the plots draw every method: the two you picked in colour, the rest in grey. Hover a grey curve to name it; click it to put it in the right-hand plate.</p>
+  </div>
+  <figure id="b5810"></figure>
+
+  <h2 id="faceoff">Shock Reblock and topology on block 41785</h2>
+  <div class="prose">
+    <p>The Demo's face-off, unchanged: the shipped screen's top block, small enough (638 buildings) for topology to finish. Each method is cut at the same budgets in the order it built its roads; run time is each method's since its start.</p>
+  </div>
+  <figure id="b41785"></figure>
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+"use strict";
+const pct = (v, d) => `${(v * 100).toFixed(d)}%`;
+const km = (v) => `${v.toFixed(2)} km`;
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const tip = document.getElementById("tip");
+function showTip(text, x, y) { tip.textContent = text; tip.hidden = false; tip.style.left = `${Math.min(x + 12, innerWidth - 310)}px`; tip.style.top = `${y + 14}px`; }
+function hideTip() { tip.hidden = true; }
+async function getJSON(url) { const r = await fetch(url); if (!r.ok) throw new Error(`${url}: ${r.status}`); return r.json(); }
+
+// ---------------------------------------------------------------- nice axes
+function niceStep(max, target) {
+  const raw = max / target, mag = 10 ** Math.floor(Math.log10(raw));
+  for (const m of [1, 2, 2.5, 5, 10]) if (m * mag >= raw) return m * mag;
+  return 10 * mag;
+}
+function axisTo(max, target) {
+  const step = niceStep(max, target), n = Math.ceil(max / step - 1e-9);
+  return { lo: 0, hi: n * step, ticks: Array.from({ length: n + 1 }, (_, i) => +(i * step).toFixed(10)) };
+}
+const TIME_TICKS = [[1, "1 s"], [10, "10 s"], [60, "1 min"], [600, "10 min"], [3600, "1 h"], [7200, "2 h"], [36000, "10 h"], [86400, "1 day"]];
+function duration(s) {
+  const spans = [["hours", 3600], ["minutes", 60]];
+  for (const [u, len] of spans) if (s >= 1.5 * len) { const v = s / len; return `${v >= 10 ? v.toFixed(0) : v.toFixed(1)} ${u}`; }
+  return `${s >= 10 ? s.toFixed(0) : s.toFixed(1)} seconds`;
+}
+const PLOTS = {
+  displacement: { title: "against displacement", xl: "displaced, share of floor area", has: () => true, x: (c) => c.D,
+    axis: (xs) => axisTo(Math.max(...xs), 4), fx: (t) => pct(t, 0), at: (c) => `${pct(c.D, 1)} displaced` },
+  road: { title: "against new road", xl: "new road, km", has: () => true, x: (c) => c.km,
+    axis: (xs) => axisTo(Math.max(...xs), 4), fx: (t) => String(+t.toFixed(1)), at: (c) => km(c.km) },
+  time: { title: "against run time", xl: "run time since the start (log scale)", has: (c) => c.sec > 0, x: (c) => Math.log10(c.sec),
+    axis: (xs) => { const lo = Math.min(...xs), hi = Math.max(...xs), logs = TIME_TICKS.map(([s]) => Math.log10(s));
+      const from = Math.max(...logs.filter((t) => t <= lo + 1e-9)), to = Math.min(...logs.filter((t) => t >= hi - 1e-9));
+      return { lo: from, hi: to, ticks: logs.filter((t) => t >= from && t <= to) }; },
+    fx: (t) => TIME_TICKS.find(([s]) => Math.abs(Math.log10(s) - t) < 1e-9)[1], at: (c) => duration(c.sec) },
+};
+
+// ---------------------------------------------------------------- a build-out figure
+// series: {id, label, group, blurb, dashed, sheet, cells[k] (null: no network at that budget)}
+// cell: {D, km, LP, sec?, row, why? (stopped short)}
+function buildOut(host, cfg) {
+  const { budgets, series, plots, base, pick } = cfg;
+  const byId = new Map(series.map((s) => [s.id, s]));
+  const st = { k: cfg.start, a: cfg.a, b: cfg.b, hot: null };
+
+  const bar = el("div", "bar");
+  const lab = el("label"); lab.htmlFor = `${host.id}-budget`;
+  const slider = el("input"); slider.type = "range"; slider.id = `${host.id}-budget`; slider.min = 0; slider.max = budgets.length - 1; slider.step = 1;
+  const out = el("output");
+  lab.append("Budget ", slider, out);
+  bar.append(lab, el("span", "hint", "displacement budget: the share of the homes' floor area a method may take"));
+  slider.addEventListener("input", () => { st.k = +slider.value; render(); });
+
+  const stage = el("div", "stage");
+  const cols = el("div", "cols");
+  const left = el("div"); left.style.minWidth = "0"; left.style.display = "grid"; left.style.gap = ".8rem";
+  const column = (side) => {
+    const col = el("div", "col");
+    const head = el("div", "head");
+    const line = el("span", "swatch-line"); line.style.background = side === "a" ? "var(--red)" : "var(--ink)";
+    head.append(line);
+    let select = null;
+    if (pick) {
+      select = el("select"); select.id = `${host.id}-${side}`; select.setAttribute("aria-label", side === "a" ? "Left method" : "Right method");
+      const groups = new Map();
+      for (const s of series) { if (!groups.has(s.group)) groups.set(s.group, []); groups.get(s.group).push(s); }
+      for (const [g, ss] of groups) {
+        const og = el("optgroup"); og.label = g;
+        for (const s of ss) { const o = el("option", null, s.label); o.value = s.id; og.append(o); }
+        select.append(og);
+      }
+      select.addEventListener("change", () => { st[side] = select.value; render(); });
+      head.append(select);
+    } else { head.append(el("span", "name")); }
+    const blurb = el("p", "blurb");
+    const plate = el("div", "plate"); const img = el("img"); img.alt = ""; const veil = el("div", "veil"); veil.hidden = true; plate.append(img, veil);
+    const read = el("dl", "read"); read.setAttribute("aria-live", "polite");
+    const dds = ["Displaced", "New road", "Escape saved", cfg.fourth[0]].map((t) => { const d = el("div"); d.append(el("dt", null, t)); const dd = el("dd"); d.append(dd); read.append(d); return dd; });
+    const note = el("p", "note");
+    col.append(head, blurb, plate, read, note);
+    cols.append(col);
+    return { side, select, head, blurb, plate, img, veil, dds, note };
+  };
+  const C = [column("a"), column("b")];
+  const legend = el("div", "legend");
+  const ramp = el("div", "ramp"); const rb = el("div", "rbar"); rb.style.background = `linear-gradient(90deg, ${cfg.ramp.join(", ")})`;
+  const rt = el("div", "ticks"); for (const t of ["0%", "25%", "50%", "75%", "100%+"]) rt.append(el("span", null, t));
+  ramp.append(rb, rt);
+  const road = el("span"); road.innerHTML = `<i class="sw" style="background:${cfg.road}"></i>new road`;
+  const dmg = el("span"); dmg.innerHTML = `<i class="sw" style="background:linear-gradient(90deg, ${cfg.damage.join(", ")})"></i>damage, intact to destroyed`;
+  legend.append(ramp, road, dmg);
+  left.append(cols, legend);
+
+  const plotsBox = el("div", "plots");
+  const key = el("div", "key");
+  plotsBox.append(key);
+  const charts = plots.map((p) => { const box = el("div"); const t = el("p", "plot-title"); const name = el("span", null, `Escape time saved ${PLOTS[p].title}`); const now = el("span"); t.append(name, now);
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svg.setAttribute("class", "chart"); box.append(t, svg); plotsBox.append(box); return { spec: PLOTS[p], svg, now }; });
+  stage.append(left, plotsBox);
+  host.append(bar, stage);
+  if (cfg.caption) host.append(el("figcaption", null, cfg.caption));
+
+  // per series its distinct networks in budget order, from the block with no road
+  const curve = (s) => { const seen = new Set(), pts = []; s.cells.forEach((c) => { if (c && !seen.has(c.row)) { seen.add(c.row); pts.push(c); } }); return pts; };
+  const curves = new Map(series.map((s) => [s.id, curve(s)]));
+  const all = [...curves.values()].flat();
+  const yAx = axisTo(Math.max(...all.map((c) => c.LP)), 4);
+  const W = 440, H = 250, G = { l: 46, r: 12, t: 8, b: 40 };
+  const NS = "http://www.w3.org/2000/svg";
+  const mk = (svg, tag, attrs, cls) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (cls) e.setAttribute("class", cls); svg.append(e); return e; };
+
+  function drawChart(ch) {
+    const { spec, svg } = ch; svg.replaceChildren(); svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    const xAx = spec.axis(all.filter(spec.has).map(spec.x));
+    const X = (v) => G.l + (v - xAx.lo) / (xAx.hi - xAx.lo) * (W - G.l - G.r), Y = (v) => H - G.b - v / yAx.hi * (H - G.t - G.b);
+    for (const t of yAx.ticks) { mk(svg, "line", { x1: G.l, x2: W - G.r, y1: Y(t), y2: Y(t) }, "grid"); if (t) mk(svg, "text", { x: G.l - 6, y: Y(t) + 4, "text-anchor": "end" }).textContent = pct(t, 0); }
+    for (const t of xAx.ticks) { mk(svg, "line", { x1: X(t), x2: X(t), y1: H - G.b, y2: H - G.b + 4 }, "axis"); mk(svg, "text", { x: X(t), y: H - G.b + 16, "text-anchor": "middle" }).textContent = spec.fx(t); }
+    mk(svg, "path", { d: `M${G.l},${G.t}V${H - G.b}H${W - G.r}` }, "axis");
+    mk(svg, "text", { x: (G.l + W - G.r) / 2, y: H - 6, "text-anchor": "middle" }).textContent = spec.xl;
+    const path = (pts) => pts.filter(spec.has).map((c, i) => `${i ? "L" : "M"}${X(spec.x(c)).toFixed(1)},${Y(c.LP).toFixed(1)}`).join("");
+    for (const s of series) {
+      if (s.id === st.a || s.id === st.b) continue;
+      const d = path(curves.get(s.id)); if (!d) continue;
+      mk(svg, "path", { d }, `other${s.dashed ? " dashed" : ""}${st.hot === s.id ? " hot" : ""}`);
+      if (pick) { const h = mk(svg, "path", { d }, "hit");
+        h.addEventListener("pointerenter", (e) => { st.hot = s.id; showTip(`${s.label} · click to compare`, e.clientX, e.clientY); render(); });
+        h.addEventListener("pointermove", (e) => showTip(`${s.label} · click to compare`, e.clientX, e.clientY));
+        h.addEventListener("pointerleave", () => { st.hot = null; hideTip(); render(); });
+        h.addEventListener("click", () => { st.b = s.id; st.hot = null; hideTip(); render(); }); }
+    }
+    for (const side of ["b", "a"]) {
+      const s = byId.get(st[side]); const pts = curves.get(s.id).filter(spec.has);
+      mk(svg, "path", { d: path(pts), ...(s.dashed ? { "stroke-dasharray": "4 3" } : {}) }, `sel ${side}`);
+      const g = mk(svg, "g", {}, side);
+      for (const c of pts) mk(g, "circle", { cx: X(spec.x(c)), cy: Y(c.LP), r: 2.2 }, "pt");
+      const c = s.cells[st.k];
+      if (c && spec.has(c)) mk(g, "circle", { cx: X(spec.x(c)), cy: Y(c.LP), r: 5.5 }, "dot");
+    }
+  }
+
+  function sheetPos(sheet, i) { const down = Math.ceil(sheet.frames / sheet.columns); return { x: -100 * (i % sheet.columns) / sheet.columns, y: -100 * Math.floor(i / sheet.columns) / down }; }
+
+  function render() {
+    const k = st.k, b = budgets[k];
+    slider.value = k; out.textContent = pct(b, 0);
+    for (const col of C) {
+      const s = byId.get(st[col.side]);
+      if (col.select) col.select.value = s.id; else col.head.querySelector(".name").textContent = s.label;
+      col.blurb.textContent = s.blurb || "";
+      col.plate.style.aspectRatio = `${s.sheet.width} / ${s.sheet.frame_height}`;
+      col.img.style.width = `${100 * s.sheet.columns}%`;
+      const src = base + s.sheet.file; if (col.img.getAttribute("src") !== src) col.img.setAttribute("src", src);
+      const c = s.cells[k];
+      const { x, y } = sheetPos(s.sheet, c ? c.row : 0);
+      col.img.style.transform = `translate(${x}%, ${y}%)`;
+      col.img.alt = `${s.label}: homes coloured by escape time` + (c ? `, ${pct(c.D, 1)} displaced` : ", no network at this budget");
+      col.veil.hidden = !!c;
+      if (!c) { const at = budgets.filter((_, j) => s.cells[j] && j > 0).map((v) => pct(v, 0)); col.veil.textContent = `No network at the ${pct(b, 0)} budget: this method was solved at ${at.join(", ")} only. The block with no new road is shown.`; }
+      const [d1, d2, d3, d4] = col.dds;
+      d1.textContent = c ? pct(c.D, 1) : "–"; d2.textContent = c ? km(c.km) : "–"; d3.textContent = c ? pct(c.LP, 1) : "–"; d4.textContent = c ? cfg.fourth[1](c) : "–";
+      let note = "";
+      if (c && c.why) note = `Stops at ${pct(c.D, 0)}: ${c.why}. Its whole network is shown.`;
+      else if (c && k > 0) { const first = s.cells.findIndex((x) => x && x.row === c.row); if (first < k && first > 0) note = `The same network as at the ${pct(budgets[first], 0)} budget.`; }
+      col.note.textContent = note;
+    }
+    key.replaceChildren();
+    for (const side of ["a", "b"]) { const s = byId.get(st[side]); const sp = el("span"); sp.innerHTML = `<i style="background:var(--${side === "a" ? "red" : "ink"})"></i>`; sp.append(s.label); key.append(sp); }
+    if (pick) { const sp = el("span"); sp.innerHTML = `<i style="background:var(--other)"></i>`; sp.append(`${series.length - 2} other methods`); key.append(sp); }
+    for (const ch of charts) {
+      drawChart(ch);
+      ch.now.textContent = ["a", "b"].map((side) => { const s = byId.get(st[side]), c = s.cells[k]; return c && ch.spec.has(c) ? `${pct(c.LP, 1)} at ${ch.spec.at(c)}` : "–"; }).join(" · ");
+    }
+  }
+  render();
+}
+
+// ---------------------------------------------------------------- 5810: every method
+const GROUPS = [
+  ["Shock Reblock and other ears", ["ear", "eard"]],
+  ["cycle_native (shipped lineup)", ["cn", "cnp", "cna7", "cna14", "cndp", "cndp7", "cndp14"]],
+  ["clearance_looped (shipped lineup)", ["cl", "clp"]],
+  ["ΔP greedy", ["dpg", "dpg12", "dpl", "dplj", "dps", "dpsj"]],
+  ["Road SIMP", ["sg05", "sg1", "sg15"]],
+  ["Laplacian growth", ["gk", "gke", "gk3", "gl", "gle", "gli"]],
+  ["Solved per budget", ["jp", "jr", "tp", "ptc", "ptb", "pte", "pts"]],
+];
+const RENAME = { ear: "Shock Reblock (ears, paths)", eard: "ears, divides" };
+
+async function block5810(enc) {
+  const m = await getJSON("methods.json");
+  const group = new Map(GROUPS.flatMap(([g, cs]) => cs.map((c) => [c, g])));
+  const series = m.methods.map((x) => ({
+    id: x.cls, label: RENAME[x.cls] || x.label, group: group.get(x.cls) || "Other", blurb: x.blurb, dashed: x.per_budget,
+    sheet: { ...x.sheet, file: x.sheet.file },
+    cells: [{ D: 0, km: 0, LP: 0, C: 0, row: 0 }, ...x.rows.map((r) => r && { D: r.D, km: r.km, LP: r.LP, C: r.C, row: r.row })],
+  }));
+  series.sort((p, q) => GROUPS.findIndex(([g]) => g === p.group) - GROUPS.findIndex(([g]) => g === q.group));
+  buildOut(document.getElementById("b5810"), {
+    budgets: [0, ...m.budgets], series, plots: ["displacement", "road"], base: "s/", pick: true, start: 5, a: "ear", b: "cn",
+    fourth: ["Added C", (c) => (c.C == null ? "–" : `${Math.round(c.C / 1000).toLocaleString()}k m²`)], ramp: enc.escape_ramp, road: enc.road, damage: enc.damage_ramp,
+    caption: `Escape times on this block's scale: ${m.escape_scale.toFixed(0)} model units at the 99th-percentile home with no new road. Added C is the sheet conductance the network adds over the block with no new road. A dashed curve is a method solved afresh at each budget, so its points are separate networks, not one build order. Rows are the 5810 build-out page's (roads5810/index.html); Shock Reblock here is its rev-1 run at the 2,000 m² face and 30 m ear floors.`,
+  });
+}
+
+// ---------------------------------------------------------------- 41785: the face-off
+async function block41785() {
+  const b = await getJSON("d/buildout_ZAF.9.3.1_1_41785.json");
+  const cell = (c) => ({ D: c.step.displacement, km: c.step.road_km, LP: c.step.permeability, sec: c.step.seconds, row: c.step.row, why: c.kind === "short" ? c.why : null });
+  const series = b.series.map((s, i) => ({ id: `s${i}`, label: s.label, group: "", blurb: i ? "Topology's run (our optimized port), as the Demo shows it: it builds until every parcel touches a road." : "Shock Reblock at rev 3, face floor 100 m², ear floor 30 m.", sheet: s.sheet, cells: s.cells.map(cell) }));
+  buildOut(document.getElementById("b41785"), {
+    budgets: b.budgets, series, plots: b.plots, base: "d/", pick: false, start: b.default_step, a: "s0", b: "s1",
+    fourth: ["Built in", (c) => (c.sec > 0 ? duration(c.sec) : "–")], ramp: b.encoding.escape_ramp, road: b.encoding.road, damage: b.encoding.damage_ramp,
+    caption: `Escape times on this block's scale: ${b.escape_scale.toFixed(0)} model units at the 99th-percentile home with no new road. Run time is each method's since its start, on a log scale.`,
+  });
+  return b.encoding;
+}
+
+// ---------------------------------------------------------------- the screen's height map
+const METRIC = {
+  depth_density_proxy: (n, A, P) => Math.sqrt(n * A) / P * n / A,
+  density_compactness: (n, A, P) => n / (P * P),
+};
+async function screenMap(enc) {
+  const cv = document.getElementById("sm-canvas"), ctx = cv.getContext("2d");
+  const pickCv = document.createElement("canvas"), pctx = pickCv.getContext("2d", { willReadFrequently: true });
+  const maskCv = document.createElement("canvas"), mctx = maskCv.getContext("2d", { willReadFrequently: true });
+  const citySel = document.getElementById("sm-city"), metSel = document.getElementById("sm-metric");
+  const floorIn = document.getElementById("sm-floor"), floorOut = document.getElementById("sm-floor-out");
+  const ramp = enc.escape_ramp.map((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)));
+  const cache = {};
+  let city = null, score = null, order = null, lo = 0, hi = 1, floor = 0, view = null, paths = null, dpr = 1;
+  document.getElementById("sm-ramp").style.background = `linear-gradient(90deg, ${enc.escape_ramp.join(", ")})`;
+
+  const colorOf = (s) => { if (!(s > 0)) return "#cfcac4"; let t = (Math.log10(s) - lo) / (hi - lo); t = Math.max(0, Math.min(1, t)) * (ramp.length - 1);
+    const i = Math.min(ramp.length - 2, Math.floor(t)), f = t - i, a = ramp[i], b = ramp[i + 1];
+    return `rgb(${a.map((v, j) => Math.round(v + (b[j] - v) * f)).join(",")})`; };
+  const fmt = (v) => (v >= 0.01 ? v.toFixed(4) : v.toPrecision(3));
+
+  async function loadCity(name) {
+    if (!cache[name]) cache[name] = await getJSON(`screen/${name}.json`);
+    city = cache[name];
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    paths = city.rings.map((rings) => { const p = new Path2D(); for (const r of rings) { r.forEach(([x, y], i) => { if (i) p.lineTo(x, -y); else p.moveTo(x, -y); if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }); p.closePath(); } return p; });
+    city.bbox = [x0, y0, x1, y1];
+    view = null;
+  }
+  function setMetric() {
+    const f = METRIC[metSel.value];
+    score = city.n.map((n, i) => f(n, city.area_m2[i], city.perimeter_m[i]));
+    const logs = score.filter((s) => s > 0).map(Math.log10).sort((a, b) => a - b);
+    lo = logs[Math.floor(0.01 * logs.length)]; hi = logs[Math.floor(0.995 * (logs.length - 1))];
+    order = score.map((_, i) => i).sort((a, b) => score[a] - score[b]);
+    const shipped = city.floors.find((x) => x.metric === metSel.value);
+    floor = shipped.value;
+    const ticks = document.getElementById("sm-ticks"); ticks.replaceChildren();
+    for (const t of [0, 0.5, 1]) ticks.append(el("span", null, fmt(10 ** (lo + t * (hi - lo)))));
+    syncFloor();
+  }
+  const toSlider = (v) => Math.round(1000 * (Math.log10(v) - lo) / (hi - lo));
+  const fromSlider = (u) => 10 ** (lo + u / 1000 * (hi - lo));
+  function syncFloor() { floorIn.value = toSlider(floor); floorOut.textContent = fmt(floor); }
+
+  function fit() {
+    const [x0, y0, x1, y1] = city.bbox, w = cv.width, h = cv.height, pad = 0.03;
+    const s = Math.min(w / (x1 - x0), h / (y1 - y0)) * (1 - 2 * pad);
+    view = { s, tx: w / 2 - s * (x0 + x1) / 2, ty: h / 2 + s * (y0 + y1) / 2 };
+  }
+  function size() {
+    dpr = Math.min(2, devicePixelRatio || 1);
+    const w = cv.clientWidth, h = Math.round(Math.min(Math.max(w * 0.8, 320), innerHeight * 0.78));
+    cv.style.height = `${h}px`;
+    for (const c of [cv, pickCv, maskCv]) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+    if (view) { /* keep the view across a resize */ } else fit();
+  }
+  let queued = false;
+  const draw = () => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; paint(); }); } };
+  function paint() {
+    const w = cv.width, h = cv.height;
+    for (const c of [ctx, pctx, mctx]) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); }
+    ctx.fillStyle = css("--surface"); ctx.fillRect(0, 0, w, h);
+    for (const c of [ctx, pctx, mctx]) c.setTransform(view.s, 0, 0, view.s, view.tx, view.ty);
+    const hair = 0.6 * dpr / view.s;
+    ctx.lineWidth = hair; ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    mctx.fillStyle = "#fff";
+    for (const i of order) {
+      const p = paths[i];
+      ctx.fillStyle = colorOf(score[i]); ctx.fill(p, "evenodd");
+      if (view.s > 0.05) ctx.stroke(p);
+      const id = i + 1; pctx.fillStyle = `rgb(${id & 255},${(id >> 8) & 255},${(id >> 16) & 255})`; pctx.fill(p, "evenodd");
+      if (score[i] >= floor) mctx.fill(p, "evenodd");
+    }
+    // the floor's isocline: every pixel where the selected set's mask changes, thickened
+    for (const c of [ctx]) c.setTransform(1, 0, 0, 1, 0, 0);
+    const m = mctx.getImageData(0, 0, w, h).data, on = new Uint8Array(w * h);
+    for (let i = 0; i < w * h; i++) on[i] = m[4 * i + 3] > 127 ? 1 : 0;
+    const edge = new Uint8Array(w * h);
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const i = y * w + x, v = on[i]; if (v !== on[i - 1] || v !== on[i + 1] || v !== on[i - w] || v !== on[i + w]) edge[i] = 1; }
+    // the line: the edge pixels on both sides of the change (two device pixels wide), at any zoom
+    const img = ctx.getImageData(0, 0, w, h), d = img.data;
+    const [ir, ig, ib] = [1, 3, 5].map((j) => parseInt(css("--iso").slice(j, j + 2), 16));
+    for (let j = 0; j < w * h; j++) if (edge[j]) { d[4 * j] = ir; d[4 * j + 1] = ig; d[4 * j + 2] = ib; }
+    ctx.putImageData(img, 0, 0);
+    if (city.follow) {
+      const X = view.s * city.follow.x + view.tx, Y = -view.s * city.follow.y + view.ty, R = Math.max(9 * dpr, 70 * view.s);
+      ctx.lineWidth = 4 * dpr; ctx.strokeStyle = "#ffffff"; ctx.beginPath(); ctx.arc(X, Y, R, 0, 2 * Math.PI); ctx.stroke();
+      ctx.lineWidth = 2 * dpr; ctx.strokeStyle = "#111111"; ctx.beginPath(); ctx.arc(X, Y, R, 0, 2 * Math.PI); ctx.stroke();
+    }
+    stats();
+  }
+  function stats() {
+    const sel = score.map((s) => s >= floor);
+    const n = sel.filter(Boolean).length;
+    const box = document.getElementById("sm-stats"); box.replaceChildren();
+    const add = (t, v) => { const d = el("div"); d.append(el("dt", null, t), el("dd", null, v)); box.append(d); };
+    add("Selected", `${n.toLocaleString()} of ${score.length.toLocaleString()}`);
+    if (city.informal) {
+      const inf = city.informal, tp = sel.filter((s, i) => s && inf[i]).length, all = inf.filter(Boolean).length;
+      add("Precision", n ? pct(tp / n, 1) : "–"); add("Recall", pct(tp / all, 1));
+    } else add("Survey", "none for this city");
+    if (city.follow) { const s = score[city.follow.index]; add("5810's score", `${fmt(s)} (${(s / floor).toFixed(1)}× floor)`); }
+  }
+  // interaction
+  const toWorld = (px, py) => [(px - view.tx) / view.s, (py - view.ty) / view.s];
+  function zoomAt(px, py, f) { const [wx, wy] = toWorld(px, py); view.s *= f; view.tx = px - wx * view.s; view.ty = py - wy * view.s; draw(); }
+  cv.addEventListener("wheel", (e) => { e.preventDefault(); const r = cv.getBoundingClientRect(); zoomAt((e.clientX - r.left) * dpr, (e.clientY - r.top) * dpr, Math.exp(-e.deltaY * 0.0015)); }, { passive: false });
+  const ptrs = new Map(); let pinch = null;
+  cv.addEventListener("pointerdown", (e) => { cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]); cv.classList.add("drag"); hideTip(); });
+  cv.addEventListener("pointermove", (e) => {
+    const r = cv.getBoundingClientRect();
+    if (!ptrs.has(e.pointerId)) {
+      const x = Math.round((e.clientX - r.left) * dpr), y = Math.round((e.clientY - r.top) * dpr);
+      const p = pctx.getImageData(x, y, 1, 1).data, id = (p[0] | (p[1] << 8) | (p[2] << 16)) - 1;
+      const hov = document.getElementById("sm-hover");
+      if (id >= 0 && id < score.length && p[3] === 255) { const s = score[id]; hov.textContent = `${city.block_id[id]}: ${fmt(s)}, ${city.n[id].toLocaleString()} buildings${s >= floor ? ", selected" : ""}`; }
+      else hov.textContent = "Hover a block for its score.";
+      return;
+    }
+    const prev = ptrs.get(e.pointerId); ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+    if (ptrs.size === 2) {
+      const [a, b] = [...ptrs.values()], dist = Math.hypot(a[0] - b[0], a[1] - b[1]), mx = ((a[0] + b[0]) / 2 - r.left) * dpr, my = ((a[1] + b[1]) / 2 - r.top) * dpr;
+      if (pinch) zoomAt(mx, my, dist / pinch); pinch = dist; return;
+    }
+    view.tx += (e.clientX - prev[0]) * dpr; view.ty += (e.clientY - prev[1]) * dpr; draw();
+  });
+  const up = (e) => { ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (!ptrs.size) cv.classList.remove("drag"); };
+  cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
+  cv.addEventListener("dblclick", () => { fit(); draw(); });
+  document.getElementById("sm-in").onclick = () => zoomAt(cv.width / 2, cv.height / 2, 1.6);
+  document.getElementById("sm-out").onclick = () => zoomAt(cv.width / 2, cv.height / 2, 1 / 1.6);
+  document.getElementById("sm-home").onclick = () => { fit(); draw(); };
+  floorIn.addEventListener("input", () => { floor = fromSlider(+floorIn.value); floorOut.textContent = fmt(floor); draw(); });
+  document.getElementById("sm-reset").onclick = () => { floor = city.floors.find((x) => x.metric === metSel.value).value; syncFloor(); draw(); };
+  metSel.addEventListener("change", () => { setMetric(); draw(); });
+  citySel.addEventListener("change", async () => { await loadCity(citySel.value); setMetric(); size(); fit(); draw(); });
+  new ResizeObserver(() => { if (city) { size(); fit(); draw(); } }).observe(cv.parentElement);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+  await loadCity("capetown"); setMetric(); size(); fit(); paint();
+}
+
+(async () => {
+  const fail = (id, e) => { const f = document.getElementById(id); f.append(el("p", "err", `This figure did not load: ${e.message}`)); console.error(e); };
+  let enc = null;
+  try { enc = await block41785(); } catch (e) { fail("b41785", e); return; }
+  block5810(enc).catch((e) => fail("b5810", e));
+  screenMap(enc).catch((e) => fail("screenfig", e));
+})();
+</script>
