@@ -1,4 +1,4 @@
-"""The screen's most anomalous convex regions, blocks allowed to be cut (owner 2026-11-03), for the
+"""The screen's most anomalous orthogonally convex regions, blocks allowed to be cut (owner 2026-11-03), for the
 Demo Lineup artifact's height map: where screen_clusters.py scans clusters of whole blocks, this
 scans regions of the plane, a region any set of raster cells that is convex in the sense below.
 
@@ -18,11 +18,15 @@ Regions. An orthogonally convex region: every row and every column of the raster
 run, and it is connected; equivalently a run of rows, each an interval [l, r], consecutive
 intervals overlapping, the left ends non-increasing then non-decreasing and the right ends
 non-decreasing then non-increasing (Yoda, Fukuda, Morishita and Tokuyama 1997's rectilinear
-convex regions). True convexity is approximated by solving at each angle of ANGLES (orthogonal
-convexity is invariant under a quarter turn, so [0, 90) covers every orientation) and keeping the
-best: the cells whose centres a convex region holds are orthogonally convex at any angle (when
-connected), so each angle's optimum is at least any convex region's raster at that angle, and an
-orthogonally convex region is a staircase-sided approximation of a convex one.
+convex regions), solved at each angle of ANGLES (orthogonal convexity is invariant under a
+quarter turn, so [0, 90) covers every orientation), keeping the best. This does NOT approximate
+convexity: a convex region's cells are orthogonally convex at every angle, but the optimum need be
+so at only one, and an orthogonally convex region can be far from convex (a staircase of thin
+diagonal arms). It is a relaxation, so each angle's optimum bounds every convex region's from
+above, and the optima found exploit it: on 2026-11-03 Cape Town's regions fill 2 -- 37% of their
+convex hulls (depth_density_proxy's scan region 1: 179 km^2 in a 1,250 km^2 hull), Nairobi's
+5 -- 63%. True convexity needs a different search (an optimal convex polygon over a vertex set,
+Eppstein, Overmars, Rote and Woeginger 1992), or the regions read as what they are.
 
 The exact solver (numba, `forward`): maximise the sum of a cell value g over orthogonally convex
 regions, by a DP down the rows. Its state at row i: the region's last row is i with interval
