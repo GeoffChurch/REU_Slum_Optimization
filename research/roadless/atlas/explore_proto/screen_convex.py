@@ -59,8 +59,9 @@ and the whole search re-run. A reported region's outline is traced with a tie-br
 cell (the smallest of equal regions, so empty ground does not ride along); its stat is its own.
 
 Significance: the blocks' log scores shuffled among the blocks (their weights and geometry kept;
-NPERM shuffles from SeedSequence(SEED), as many as ~1.5 h of 16 workers allow: Cape Town 19, so
-its p is at least 0.05, Nairobi 99), the whole sweep re-run (every angle and lambda, sigma^2
+NPERM shuffles from SeedSequence(SEED): Cape Town 19, so its p is at least 0.05, Nairobi 99; at
+load ~20 a solve took 2-3.4 s on Nairobi's 50 m rasters and 9-60 s on Cape Town's 100 m ones, the
+run 74 min and 159 min on 16 workers), the whole sweep re-run (every angle and lambda, sigma^2
 recomputed), each shuffle's largest llr and largest excess kept; a region's p = (1 + #null
 maxima >= its stat) / (1 + NPERM), Kulldorff's rule for secondary clusters too (screen_clusters's
 rule).
