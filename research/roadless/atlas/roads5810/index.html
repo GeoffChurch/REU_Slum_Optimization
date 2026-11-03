@@ -26,6 +26,8 @@
   --leak: #8a5a2b;
   --part: #0e7490;
   --tmpl: #52525b;
+  --arterial: #4d7c0f;
+  --lp: #4338ca;
   --plate-frame: #d8dde5;
   --chip: #e9edf2;
   --display: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
@@ -35,13 +37,13 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --paper: #10151c; --surface: #17202a; --ink: #e5e9ef; --muted: #9ba6b5; --rule: #2a3442;
-    --flow: #7bb1e0; --clear: #f0895a; --greedy: #9d6ff0; --scored: #f5d76e; --simp: #6fcf8f; --pool: #e879f9; --select: #46bdae; --grow: #fb7185; --leak: #d6a26b; --part: #5fd4e8; --tmpl: #a1a1aa; --plate-frame: #2f3a49; --chip: #212b37;
+    --flow: #7bb1e0; --clear: #f0895a; --greedy: #9d6ff0; --scored: #f5d76e; --simp: #6fcf8f; --pool: #e879f9; --select: #46bdae; --grow: #fb7185; --leak: #d6a26b; --part: #5fd4e8; --tmpl: #a1a1aa; --arterial: #a3e635; --lp: #a5b4fc; --plate-frame: #2f3a49; --chip: #212b37;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --paper: #10151c; --surface: #17202a; --ink: #e5e9ef; --muted: #9ba6b5; --rule: #2a3442;
-  --flow: #7bb1e0; --clear: #f0895a; --greedy: #9d6ff0; --scored: #f5d76e; --simp: #6fcf8f; --pool: #e879f9; --select: #46bdae; --grow: #fb7185; --leak: #d6a26b; --part: #5fd4e8; --tmpl: #a1a1aa; --plate-frame: #2f3a49; --chip: #212b37;
+  --flow: #7bb1e0; --clear: #f0895a; --greedy: #9d6ff0; --scored: #f5d76e; --simp: #6fcf8f; --pool: #e879f9; --select: #46bdae; --grow: #fb7185; --leak: #d6a26b; --part: #5fd4e8; --tmpl: #a1a1aa; --arterial: #a3e635; --lp: #a5b4fc; --plate-frame: #2f3a49; --chip: #212b37;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -148,6 +150,13 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--select); ou
 .chart .lab { fill: var(--muted); font-family: var(--display); font-size: 14px; letter-spacing: 0.04em; }
 .chart .cn { stroke: var(--clear); fill: none; stroke-width: 2.5; }
 .chart .cl { stroke: var(--flow); fill: none; stroke-width: 2.5; }
+/* the lineup's other shipped methods (networks.py's Lineup): clearance in clearance_looped's blue,
+   the desire-routed loops in cycle_native's orange, the grid in the templates' grey */
+.chart .clr { stroke: var(--flow); fill: none; stroke-width: 2.5; stroke-dasharray: 1 5; stroke-linecap: round; }
+.chart .cnbc { stroke: var(--clear); fill: none; stroke-width: 2.5; stroke-dasharray: 14 4; }
+.chart .eg { stroke: var(--tmpl); fill: none; stroke-width: 2.5; }
+.chart .gaa { stroke: var(--arterial); fill: none; stroke-width: 2.5; }
+.chart .rlp { stroke: var(--lp); fill: none; stroke-width: 2.5; }
 .chart .dpg { stroke: var(--greedy); fill: none; stroke-width: 2.5; stroke-dasharray: 7 5; }
 .chart .dpg12 { stroke: var(--greedy); fill: none; stroke-width: 2.5; }
 .chart .dpl { stroke: var(--greedy); fill: none; stroke-width: 2.5; stroke-dasharray: 1 5; stroke-linecap: round; }
@@ -186,6 +195,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--select); ou
 .gallery figure { margin: 0; display: grid; gap: 6px; min-width: 0; }
 .gallery img { width: 100%; height: auto; border: 1px solid var(--plate-frame); background: #fff; }
 .gallery figcaption { font-size: 14px; color: var(--muted); }
+.chart .egd { fill: var(--tmpl); } .chart .gad { fill: var(--arterial); } .chart .rld { fill: var(--lp); }
 .chart .cnd { fill: var(--clear); } .chart .cld { fill: var(--flow); } .chart .dpd { fill: var(--greedy); } .chart .snd { fill: var(--scored); }
 .chart .csd { fill: var(--clear); } .chart .cgd { fill: var(--greedy); }
 .chart .simp { fill: var(--select); }

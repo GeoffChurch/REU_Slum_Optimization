@@ -58,6 +58,9 @@ from reblock.budget import road_corridor  # noqa: E402
 
 PAGE = Site.of("ZAF.9.3.1_1_5810")     # the 5810 build-out page's block (its edge)
 LINEUP = ROOT / "research/roadless/road_rows/lineup-f8fa4e53"
+LINEUP_NETWORKS = LINEUP / "scratch/networks"    # per block the lineup's networks: lineup_roads
+
+
 class Pass(NamedTuple):
     """A run's frames: its targets, whether the whole network is one."""
     targets: tuple[float, ...]
@@ -217,19 +220,26 @@ class Roads:
         return mm, float(self.ordered.iloc[:mm].geometry.length.sum())
 
 
-def network(name: str, run: str, *, frames: Pass, networks: Path, data: Path,
-            meshes: Path) -> None:
-    """The frames of the network `name` stored in `networks` (<name>.parquet and its canonical
-    order, <name>.ordered.parquet), named <name>_<run> in `data`."""
-    t0 = time.time()
-    [b] = common.build_blocks([PAGE.bid])
+def lineup_roads(b, name: str, *, networks: Path) -> Roads:  # type: ignore[no-untyped-def]
+    """The network `name` stored in `networks` (<name>.parquet and its canonical order,
+    <name>.ordered.parquet) on block b, its order checked against common.canonical_order's."""
     net = gpd.read_parquet(networks / f"{name}.parquet")
     ordered = gpd.read_parquet(networks / f"{name}.ordered.parquet")
     again = common.canonical_order(b, net)
     if len(again) != len(ordered) or not again.geometry.geom_equals_exact(
             ordered.geometry, tolerance=0.0).all():
         raise AssertionError(f"{name}: the stored order is not common.canonical_order's")
-    frames_of(name, run, b, Roads(b, ordered), t0, frames=frames, data=data, meshes=meshes)
+    return Roads(b, ordered)
+
+
+def network(name: str, run: str, *, frames: Pass, networks: Path, data: Path,
+            meshes: Path) -> None:
+    """The frames of the network `name` stored in `networks` (lineup_roads), named <name>_<run>
+    in `data`."""
+    t0 = time.time()
+    [b] = common.build_blocks([PAGE.bid])
+    frames_of(name, run, b, lineup_roads(b, name, networks=networks), t0, frames=frames,
+              data=data, meshes=meshes)
 
 
 def opened(carved: NDArray[np.int64], parent: NDArray[np.int64],
@@ -363,7 +373,7 @@ if __name__ == "__main__":
         baseline(blk, data=Site.of(blk.block_id).data)
     elif arg in ("cycle_native", "clearance_looped") and len(rest) == 1 and rest[0] in PASSES:
         network(arg, rest[0], frames=PASSES[rest[0]],
-                networks=LINEUP / "scratch/networks" / PAGE.bid, data=PAGE.data,
+                networks=LINEUP_NETWORKS / PAGE.bid, data=PAGE.data,
                 meshes=PAGE.data / ".meshes")
     else:
         raise SystemExit(f"{sys.argv[1:]}: baseline <block>, or cycle_native|clearance_looped "

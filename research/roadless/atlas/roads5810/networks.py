@@ -9,6 +9,9 @@ artifact (artifact.py).
 
 A family (Family, a Strategy, chosen on the command line) names the method, styles it and builds
 its source (Source, a Strategy):
+  Lineup: a shipped method's network from the lineup (compute.lineup_roads), as cycle_native's
+    and clearance_looped's are on the page but one run `slider` (compute's two passes, coarse and
+    fine, are those two's), its frames in PAGE.networks. A line on the chart.
   Grown: a growth or ears run's steps (growth_rows/<block>/<plan>/: tri_step.parquet, per
     triangle of the eps world's mesh, the plain mesh, the step it was grown in; steps.parquet,
     a row per state). Prefix s is the triangles grown before step s, unioned and smoothed as the
@@ -51,6 +54,9 @@ families and specs:
   spurs <plan with D{D}, {n}, {x}>            the partition study's spurs_rows/<plan>: a cut ({n}
                                               its start's size) plus the greedy's roads to {x}
                                               more D, at D its total
+  lineup <method>                             the lineup's stored network of a shipped method
+                                              (compute.lineup_roads, in its canonical order), its
+                                              prefixes cut as Grown's are, at the slider's targets
 
 On the page (2026-10-28), each one `add`:
   growth gr.k10.att.greedy.N48.sep14.n2s0.1.B21m8k2.K0.D0.15.v2
@@ -78,6 +84,8 @@ On the page (2026-10-28), each one `add`:
   ears ears.paths.b20.f2000.e30.spur10-30.gl0.25Croad.n2s0.1.M8.K4.D0.15.v3   (2026-11-03: Shock
   ears ears.paths.b20.f2000.e30.spur10-80.gl0.25Croad.n2s0.1.M8.K4.D0.15.v3    Reblock with spurs,
       dead ends on open ground 10 -- 30 and 10 -- 80 m from their start: Ears.SPUR_CLS)
+  lineup clearance | cycle_native_betweenness_contrast | euclidean_grid
+      | greedy_arterial_access_displacement | resistance_lp     (2026-11-03: Lineup.WORDS)
 `ready` lists the finished runs not on the page, each once, with the spec naming the most budgets
 (D{D} alone, or with {n}); each one `add`, its style in place.
 A combination with no style here (STYLES, the families' `entry`) is refused: give it a class in
@@ -340,6 +348,34 @@ def added_of(key: str, *, data: Path) -> dict[str, float]:
     return sheet.added(key, data=folder, runs=runs)
 
 
+def slider_frames(key: str, b, net: cp.Network, t0: float, *,  # type: ignore[no-untyped-def]
+                  full: bool, data: Path) -> None:
+    """A line's frames, one run `slider` at the slider's targets (and the whole network if
+    `full`), into `data` (a Site's networks)."""
+    data.mkdir(parents=True, exist_ok=True)
+    cp.frames_of(key, "slider", b, net, t0, frames=cp.Pass(targets=SLIDER, full=full),
+                 data=data, meshes=data / ".meshes")
+
+
+def slider_rows(key: str, *, data: Path) -> list[dict[str, Any] | None]:
+    """A line's fifteen page rows from its run `slider` in `data`: per slider target its frame,
+    else the whole network's (`full`)."""
+    info = info_of(key, "slider", data=data)
+    names = render.frame_names(info)
+    C = added_of(key, data=data)
+    by_target = {round(t, 2): r for r in info["frames"] for t in r["targets"] if t is not None}
+    [whole] = [r for r in info["frames"] if None in r["targets"]] or [None]
+    out: list[dict[str, Any] | None] = []
+    for t in SLIDER:
+        if t in by_target:
+            out.append(page_row(by_target[t], names[by_target[t]["m"]], C))
+        elif whole is not None:
+            out.append(dict(page_row(whole, names[whole["m"]], C), full=True))
+        else:
+            raise AssertionError(f"{key}: no frame at {t} and no whole run")
+    return out
+
+
 class GrownSource:
     """A growth or ears run's steps (Grown) on a Site's block, one run `slider`, its frames in the
     Site's networks."""
@@ -360,26 +396,37 @@ class GrownSource:
     def frames(self, key: str, b) -> None:  # type: ignore[no-untyped-def]
         t0 = time.time()
         net = Grown(b, self.dir, targets=SLIDER)
-        full = max(SLIDER) not in net.stop_of
-        self.data.mkdir(parents=True, exist_ok=True)
-        cp.frames_of(key, "slider", b, net, t0, frames=cp.Pass(targets=SLIDER, full=full),
-                     data=self.data, meshes=self.data / ".meshes")
+        slider_frames(key, b, net, t0, full=max(SLIDER) not in net.stop_of, data=self.data)
 
     def rows(self, key: str) -> list[dict[str, Any] | None]:
-        info = info_of(key, "slider", data=self.data)
-        names = render.frame_names(info)
-        C = added_of(key, data=self.data)
-        by_target = {round(t, 2): r for r in info["frames"] for t in r["targets"] if t is not None}
-        [whole] = [r for r in info["frames"] if None in r["targets"]] or [None]
-        out: list[dict[str, Any] | None] = []
-        for t in SLIDER:
-            if t in by_target:
-                out.append(page_row(by_target[t], names[by_target[t]["m"]], C))
-            elif whole is not None:
-                out.append(dict(page_row(whole, names[whole["m"]], C), full=True))
-            else:
-                raise AssertionError(f"{key}: no frame at {t} and no whole run")
-        return out
+        return slider_rows(key, data=self.data)
+
+
+class LineupSource:
+    """A lineup method's network on a Site's block (compute.lineup_roads: the lineup's stored
+    network in its canonical order, each prefix its first roads), one run `slider`, its frames in
+    the Site's networks."""
+    points = False
+
+    def __init__(self, method: str, *, site: Site) -> None:
+        self.method = method
+        self.networks = cp.LINEUP_NETWORKS / site.bid
+        self.data = site.networks
+
+    def ready(self) -> bool:
+        return (self.networks / f"{self.method}.ordered.parquet").exists()
+
+    def runs(self) -> list[Run]:
+        return [Run(name="slider", budget=None)]
+
+    def frames(self, key: str, b) -> None:  # type: ignore[no-untyped-def]
+        t0 = time.time()
+        net = cp.lineup_roads(b, self.method, networks=self.networks)
+        D_full = float((net.c(net.size) * net.W).sum() / net.W.sum())
+        slider_frames(key, b, net, t0, full=D_full < max(SLIDER), data=self.data)
+
+    def rows(self, key: str) -> list[dict[str, Any] | None]:
+        return slider_rows(key, data=self.data)
 
 
 class Design(Protocol):
@@ -799,6 +846,46 @@ class TemplatesFamily:
         return AnswerSource(self.design, site=PAGE)
 
 
+class Lineup:
+    """A lineup method's network (LineupSource), named as the lineup names it; its class, dot and
+    words here (WORDS: the shipped methods' pages, docs/methodology/methods/<method>.md)."""
+    WORDS = {
+        "clearance": ("clr", "cld", "Builds a tree. Each road is the least-cost path from the home "
+                      "deepest in the block to the network, on a grid whose costs rise near "
+                      "buildings, until every home is within reach; its dead ends stay "
+                      "(clearance_looped is this tree with connectors closing them)."),
+        "cycle_native_betweenness_contrast": (
+            "cnbc", "cnd", "The site's Loop Network (desire-routed): cycle_native with its "
+            "candidate loops bent toward the desire lines, where the homes' walking routes to the "
+            "street and to each other crowd beyond what the block without its buildings would "
+            "send there, each loop still chosen by permeability per displacement. No dead ends."),
+        "euclidean_grid": ("eg", "egd", "Lays a fixed grid: evenly spaced orthogonal roads, "
+                           "phased so a line runs through the densest homes, with a finer infill "
+                           "where they crowd, each line trimmed to where homes are near it."),
+        "greedy_arterial_access_displacement": (
+            "gaa", "gad", "Drives straight arterials across the block, each step the chord that "
+            "most lowers the sum of squared access depths (the plots a home crosses to reach a "
+            "street) per home displaced, so the roads go to the worst served first."),
+        "resistance_lp": ("rlp", "rld", "Chooses the whole road set at once by a linear "
+                          "program over candidate paths back to the street, the permeability "
+                          "gain against a displacement budget, a building between two roads "
+                          "paying once; re-linearized over eight instalments."),
+    }
+
+    def __init__(self, method: str) -> None:
+        if method not in self.WORDS:
+            raise SystemExit(f"{method}: no page style for this lineup method (Lineup.WORDS)")
+        self.method = method
+
+    def entry(self) -> Entry:
+        cls, dot, how = self.WORDS[self.method]
+        return Entry(key=self.method, name=self.method, how=how, cls=cls, dot=dot,
+                     label=self.method)
+
+    def source(self) -> Source:
+        return LineupSource(self.method, site=PAGE)
+
+
 def family_of(argv: list[str]) -> Family:
     """The command line's family and spec (module docstring)."""
     match argv:
@@ -806,6 +893,8 @@ def family_of(argv: list[str]) -> Family:
             return Growth(plan)
         case ["ears", plan]:
             return Ears(plan)
+        case ["lineup", method]:
+            return Lineup(method)
         case ["joint", kind, plan]:
             return JointFamily(kind, plan)
         case ["partition", answer, plan]:
@@ -879,15 +968,14 @@ def drop(key: str) -> None:
     for v, value in tables.items():
         html = local.with_js(html, v, value, lines=v != "DATA")
     path.write_text(html)
-    files = sorted(PAGE.networks.glob(f"{glob_escape(key)}_*")) + sorted(
-        render.PLATES.glob(f"{glob_escape(key)}_*"))
+    # its own files by their whole names: a key may begin another's (clearance, clearance_looped)
+    ours = re.compile(rf"{re.escape(key)}_(?:(?:{sheet.STUDY_RUN})(?:_times|_sheet)?\.(?:json|npz)"
+                      rf"|[0-9]{{3}}_[a-z_]+\.{render.EXT})")
+    files = sorted(f for d in (PAGE.networks, render.PLATES) for f in d.iterdir()
+                   if ours.fullmatch(f.name))
     for f in files:
         f.unlink()
     print(f"{key}: off the page (class {cls}), {len(files)} files deleted", flush=True)
-
-
-def glob_escape(s: str) -> str:
-    return re.sub(r"([*?\[])", r"[\1]", s)
 
 
 def specs_of(d: Path) -> dict[str, Runs]:
