@@ -75,6 +75,9 @@ On the page (2026-10-28), each one `add`:
   (R3=pt.K5.R10.band.t0.2,0.1,0.05,0.03,0.02.b1,2,4,8,16.q1,2,3,3,3.e0.2,0.1,0.05,0.02,0.i40)
   spurs 'ps.lazy5.D{D}.spec{n}s0.x{x}.v4'                (the spectral cuts at D 0.05 and 0.10 plus
       the lazy ΔP greedy's roads to 0.01 and 0.02 more D; 0.15's beyond the slider)
+  ears ears.paths.b20.f2000.e30.spur10-30.gl0.25Croad.n2s0.1.M8.K4.D0.15.v3   (2026-11-03: Shock
+  ears ears.paths.b20.f2000.e30.spur10-80.gl0.25Croad.n2s0.1.M8.K4.D0.15.v3    Reblock with spurs,
+      dead ends on open ground 10 -- 30 and 10 -- 80 m from their start: Ears.SPUR_CLS)
 `ready` lists the finished runs not on the page, each once, with the spec naming the most budgets
 (D{D} alone, or with {n}); each one `add`, its style in place.
 A combination with no style here (STYLES, the families' `entry`) is refused: give it a class in
@@ -629,8 +632,9 @@ class Growth:
 
 
 class Ears:
-    """An ears.py run (growth.py's rows)."""
-    CLS = {"paths": "ear", "divides": "eard"}        # its candidates -> index.html's class
+    """An ears.py run (growth.py's rows): its chart class and words by its candidates and, for
+    paths, where they may end (ears.Ends)."""
+    SPUR_CLS = {(10.0, 30.0): "es30", (10.0, 80.0): "es80"}    # a spur's (min_m, max_m) -> class
 
     def __init__(self, plan: str) -> None:
         import ears  # noqa: PLC0415  (its own study, still changing: imported only for its runs)
@@ -638,24 +642,36 @@ class Ears:
         self.p = ears.Plan.of(re.sub(r"\.v[0-9]+$", "", plan))
         if self.p.name != plan:
             raise SystemExit(f"{plan}: ears.Plan names it {self.p.name}")
-        c = self.p.candidates
-        if isinstance(c, ears.Paths) and not isinstance(c.ends, ears.Loop):
-            raise SystemExit(f"{plan}: no page words for spurs (entry says every road is on a "
-                             "loop)")
+        paths = "the cheapest paths from one face's edge back to it"
+        loops = "refusing one that does not split its face, so every road lies on a loop"
+        match self.p.candidates:
+            case ears.Divides():
+                self.cls, self.name = "eard", "ears, divides"
+                self.among = "the divides of the escape potential across a face"
+                self.ends = loops
+            case ears.Paths(ends=ears.Loop()):
+                self.cls, self.name, self.among, self.ends = "ear", "ears, paths", paths, loops
+            case ears.Paths(ends=ears.Spur(min_m=lo, max_m=hi)):
+                cls = self.SPUR_CLS.get((lo, hi))
+                if cls is None:
+                    raise SystemExit(f"{plan}: no page style for spurs {lo:g} -- {hi:g} m "
+                                     "(Ears.SPUR_CLS)")
+                self.cls, self.name = cls, f"ears, paths, spurs {lo:g}–{hi:g} m"
+                self.among = (f"{paths} or to the face's open ground {lo:g} to {hi:g} m from its "
+                              "start")
+                self.ends = ("refusing a loop that does not split its face; a path ending on open "
+                             "ground is a dead-end road, a spur, built whether or not it splits "
+                             "its face (its corridor joins the network at its start only, but can "
+                             "still close a face where it ends near another road)")
+            case c:
+                raise SystemExit(f"{plan}: no page style for ears' {c.name} (Ears)")
 
     def entry(self) -> Entry:
-        cand = self.plan.split(".")[1]
-        if cand not in self.CLS:
-            raise SystemExit(f"{self.plan}: no page style for ears' {cand} (Ears.CLS)")
-        name = f"ears, {cand}"
-        how = ("Reblocks by ears: each step builds, among "
-               + ("the cheapest paths from one face's edge back to it" if cand == "paths" else
-                  "the divides of the escape potential across a face")
-               + ", the road that lowers P most per cost (displacement, and "
-               f"{price_words(self.p.cost.price)}), refusing one that does not split its face, "
-               "so every road lies on a loop; grown grounded, carved here as an ordinary road at "
-               "ten times.")
-        return Entry(key=self.plan, name=name, how=how, cls=self.CLS[cand], dot="lkd", label=name)
+        how = (f"Reblocks by ears: each step builds, among {self.among}, the road that lowers P "
+               f"most per cost (displacement, and {price_words(self.p.cost.price)}), "
+               f"{self.ends}; grown grounded, carved here as an ordinary road at ten times.")
+        return Entry(key=self.plan, name=self.name, how=how, cls=self.cls, dot="lkd",
+                     label=self.name)
 
     def source(self) -> Source:
         return GrownSource(self.plan, budget=self.p.D, site=PAGE)
