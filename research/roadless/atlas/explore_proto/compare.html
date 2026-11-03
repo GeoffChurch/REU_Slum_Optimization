@@ -102,6 +102,14 @@ svg.chart .pt { fill: currentColor; stroke: none; }
 .stats dt { font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
 .stats dd { margin: 0; font-size: 1.15rem; font-weight: 700; }
 .err { color: var(--red); font-weight: 700; }
+.fams { display: flex; flex-wrap: wrap; gap: .3rem 1rem; }
+.fams label { font-weight: 400; gap: .35rem; }
+.shapes-wrap { overflow-x: auto; margin-top: .8rem; }
+table.shapes { border-collapse: collapse; font-size: .86rem; font-variant-numeric: tabular-nums; min-width: 560px; }
+table.shapes th { text-align: left; font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); font-weight: 400; padding: .2rem .7rem .2rem 0; border-bottom: 1px solid var(--rule); }
+table.shapes td { padding: .25rem .7rem .25rem 0; border-bottom: 1px solid var(--rule); }
+table.shapes tr[data-i] { cursor: pointer; }
+table.shapes tr[data-i]:hover td, table.shapes tr.on td { background: var(--red-soft); }
 </style>
 
 <div class="page">
@@ -115,6 +123,7 @@ svg.chart .pt { fill: currentColor; stroke: none; }
   <h2 id="screen">The screen as a height map</h2>
   <div class="prose">
     <p>Each block is shaded by its screen score, on a log scale from blue (low) to red (high). The yellow-green line is the isocline at the floor: the edge of the set of blocks the screen selects. Scroll or pinch to zoom, drag to pan. The ring marks <code>5810</code>.</p>
+    <p>The outlined shapes are the best circles, ellipses, squares and rectangles under one of two objectives. <strong>Excess</strong> sums each covered pixel's log score above the shipped floor, times its area. A shape grows while the ground it adds is above the floor on balance, so the objective picks its own size. <strong>Surprise</strong> compares a shape's mean log score with the best mean a shape of the same size reaches by chance, with the blocks' scores shuffled among the blocks (32 shuffles): (mean − the shuffled bests' mean) / their spread. That accounts for how many places a small shape can be put. <strong>Raw z</strong> skips the shuffle and compares a shape with every other placement of its size. It is kept to show the bias: small shapes win by chance, and here they just find the single top block. Every objective counts a placement only if blocks cover at least 60% of it, and keeps up to three disjoint shapes per family.</p>
   </div>
   <figure id="screenfig">
     <div class="bar">
@@ -122,6 +131,10 @@ svg.chart .pt { fill: currentColor; stroke: none; }
       <label for="sm-metric">Score <select id="sm-metric"><option value="depth_density_proxy">depth × density, √(nA)/P · n/A</option><option value="density_compactness">density × compactness, n/P²</option></select></label>
       <label for="sm-floor">Floor <input id="sm-floor" type="range" min="0" max="1000" step="1"><output id="sm-floor-out"></output></label>
       <button id="sm-reset" type="button">Shipped floor</button>
+    </div>
+    <div class="bar" style="margin-top:.5rem">
+      <label for="sm-obj">Best regions <select id="sm-obj"><option value="">none</option><option value="excess" selected>excess over the shipped floor</option><option value="surprise">surprise against chance, same size</option><option value="raw">raw z among same-size placements</option></select></label>
+      <span class="fams" id="sm-fams"></span>
     </div>
     <div class="mapwrap">
       <canvas id="sm-canvas" aria-label="City blocks shaded by screen score, with the floor's isocline"></canvas>
@@ -133,6 +146,8 @@ svg.chart .pt { fill: currentColor; stroke: none; }
       <span id="sm-hover">Hover a block for its score.</span>
     </div>
     <dl class="stats" id="sm-stats"></dl>
+    <div class="shapes-wrap"><table class="shapes" id="sm-shapes"></table></div>
+    <p class="note" id="sm-shapes-note"></p>
     <figcaption>Scores are computed in the page from each block's building count n, area A and perimeter P, as <code>reblock.metric</code> computes them; the boundaries are the site's ScreenMap bundle (5 m simplified). Precision and recall are against the City of Cape Town's informal-structure survey; Nairobi has no such survey.</figcaption>
   </figure>
 
@@ -383,6 +398,53 @@ async function screenMap(enc) {
   const ramp = enc.escape_ramp.map((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)));
   const cache = {};
   let city = null, score = null, order = null, lo = 0, hi = 1, floor = 0, view = null, paths = null, dpr = 1;
+  const objSel = document.getElementById("sm-obj"), famBox = document.getElementById("sm-fams");
+  const FAMS = [["circle", "circles", "C"], ["ellipse", "ellipses", "E"], ["square", "squares", "S"], ["rectangle", "rectangles", "R"]];
+  const famOn = new Set(["circle", "ellipse", "square", "rectangle"]);
+  for (const [f, label] of FAMS) { const l = el("label"); l.htmlFor = `sm-f-${f}`; const c = el("input"); c.type = "checkbox"; c.id = `sm-f-${f}`; c.checked = true;
+    c.addEventListener("change", () => { if (c.checked) famOn.add(f); else famOn.delete(f); listShapes(); draw(); }); l.append(c, label); famBox.append(l); }
+  objSel.addEventListener("change", () => { listShapes(); draw(); });
+  const shapeCache = {};
+  let shapes = [], focus = -1;
+  async function loadShapes(name) { if (!shapeCache[name]) shapeCache[name] = await getJSON(`screen/shapes_${name}.json`).catch(() => null); }
+  function listShapes() {
+    const tab = document.getElementById("sm-shapes"), note = document.getElementById("sm-shapes-note");
+    tab.replaceChildren(); shapes = []; focus = -1;
+    const obj = objSel.value, res = shapeCache[citySel.value];
+    if (!obj) { note.textContent = ""; return; }
+    if (!res) { note.textContent = "The best regions have not been computed for this city."; return; }
+    const r = res[metSel.value];
+    for (const [f, , tag] of FAMS) if (famOn.has(f)) (r[obj][f] || []).forEach((x, i) => shapes.push({ ...x, tag: `${tag}${i + 1}` }));
+    shapes.sort((p, q) => q.value - p.value);
+    const head = el("tr"); for (const t of ["", "shape", { excess: "excess, decades × km²", surprise: "z against chance", raw: "raw z" }[obj], "area", "geometric-mean score", "× floor", "covered"]) head.append(el("th", null, t)); tab.append(head);
+    shapes.forEach((x, i) => { const tr = el("tr"); tr.dataset.i = i;
+      const dims = x.family === "circle" ? `r ${(x.a / 1000).toFixed(2)} km` : x.family === "ellipse" ? `${(2 * x.a / 1000).toFixed(1)} × ${(2 * x.b / 1000).toFixed(1)} km at ${Math.round(x.theta * 180 / Math.PI)}°` : `${(2 * x.a / 1000).toFixed(2)} × ${(2 * x.b / 1000).toFixed(2)} km`;
+      for (const t of [x.tag, `${x.family}, ${dims}`, x.value.toFixed(2), `${x.area_km2.toFixed(2)} km²`, fmt(x.mean_score), (x.mean_score / r.floor).toFixed(2), pct(x.cov, 0)]) tr.append(el("td", null, t));
+      tr.addEventListener("click", () => { focus = i; for (const o of tab.querySelectorAll("tr.on")) o.classList.remove("on"); tr.classList.add("on");
+        const R = Math.max(x.a, x.b) * 2.2, w = cv.width, h = cv.height; view.s = Math.min(w, h) / (2 * R); view.tx = w / 2 - view.s * x.cx; view.ty = h / 2 + view.s * x.cy; draw(); });
+      tab.append(tr); });
+    note.textContent = { excess: `Excess is computed at the shipped floor (${fmt(r.floor)}), whatever the slider says.`,
+      surprise: `Against the best placement of each shape and size over ${r.nperm} shuffles of the blocks' scores (seed ${r.seed}). A shuffle moves a block's score onto another block's footprint, so one large block with an extreme score (5810, 0.37 km²) is itself very unlikely: the top shape here fits inside it. A negative z means even the best placement falls short of what chance reaches.`,
+      raw: "Not corrected for the number of placements: a small shape's best z is high by chance." }[obj] + " Click a row to zoom to it.";
+  }
+  function drawShapes() {
+    if (!shapes.length) return;
+    ctx.save();
+    const lw = 1.6 * dpr;
+    shapes.forEach((x, i) => {
+      const X = view.s * x.cx + view.tx, Y = -view.s * x.cy + view.ty, A = view.s * x.a, B = view.s * x.b;
+      const path = new Path2D();
+      if (x.family === "circle" || x.family === "ellipse") path.ellipse(X, Y, A, B, -x.theta, 0, 2 * Math.PI); else path.rect(X - A, Y - B, 2 * A, 2 * B);
+      const strong = i === focus || x.tag.endsWith("1");
+      ctx.setLineDash(x.family === "square" || x.family === "rectangle" ? [6 * dpr, 3 * dpr] : []);
+      ctx.lineWidth = (strong ? 2.6 : 1.4) * lw; ctx.strokeStyle = "#111111"; ctx.stroke(path);
+      ctx.lineWidth = (strong ? 1.3 : 0.7) * lw; ctx.strokeStyle = "#ffffff"; ctx.stroke(path);
+      ctx.setLineDash([]);
+      ctx.font = `700 ${12 * dpr}px "Atkinson Hyperlegible", system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      const ly = Y - B - 9 * dpr; ctx.lineWidth = 3 * dpr; ctx.strokeStyle = "#111111"; ctx.strokeText(x.tag, X, ly); ctx.fillStyle = "#ffffff"; ctx.fillText(x.tag, X, ly);
+    });
+    ctx.restore();
+  }
   document.getElementById("sm-ramp").style.background = `linear-gradient(90deg, ${enc.escape_ramp.join(", ")})`;
 
   const colorOf = (s) => { if (!(s > 0)) return "#cfcac4"; let t = (Math.log10(s) - lo) / (hi - lo); t = Math.max(0, Math.min(1, t)) * (ramp.length - 1);
@@ -459,6 +521,7 @@ async function screenMap(enc) {
       ctx.lineWidth = 4 * dpr; ctx.strokeStyle = "#ffffff"; ctx.beginPath(); ctx.arc(X, Y, R, 0, 2 * Math.PI); ctx.stroke();
       ctx.lineWidth = 2 * dpr; ctx.strokeStyle = "#111111"; ctx.beginPath(); ctx.arc(X, Y, R, 0, 2 * Math.PI); ctx.stroke();
     }
+    drawShapes();
     stats();
   }
   function stats() {
@@ -504,11 +567,11 @@ async function screenMap(enc) {
   document.getElementById("sm-home").onclick = () => { fit(); draw(); };
   floorIn.addEventListener("input", () => { floor = fromSlider(+floorIn.value); floorOut.textContent = fmt(floor); draw(); });
   document.getElementById("sm-reset").onclick = () => { floor = city.floors.find((x) => x.metric === metSel.value).value; syncFloor(); draw(); };
-  metSel.addEventListener("change", () => { setMetric(); draw(); });
-  citySel.addEventListener("change", async () => { await loadCity(citySel.value); setMetric(); size(); fit(); draw(); });
+  metSel.addEventListener("change", () => { setMetric(); listShapes(); draw(); });
+  citySel.addEventListener("change", async () => { await loadCity(citySel.value); await loadShapes(citySel.value); setMetric(); listShapes(); size(); fit(); draw(); });
   new ResizeObserver(() => { if (city) { size(); fit(); draw(); } }).observe(cv.parentElement);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
-  await loadCity("capetown"); setMetric(); size(); fit(); paint();
+  await loadCity("capetown"); await loadShapes("capetown"); setMetric(); listShapes(); size(); fit(); paint();
 }
 
 (async () => {
