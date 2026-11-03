@@ -1,9 +1,11 @@
-"""Ears runs side by side at matched D (Idea A, spurs; Idea C, detour saving): per run, at the
-first state reaching each target D, L_P (and its recomputation from tri_step), faces, the ears and
-spurs built, their length, the share of it in dead ends (a spur whose corridor, ungrown at that
-state, leaves the face count as it is: it bounds one face only; a spur an ear later closed, or one
-that ended near another road, bounds two and is on a loop), and the worst-off home (the largest
-home escape time, and its population-weighted 95th percentile); at the run's end, its wall time.
+"""Ears runs side by side at matched D (Idea A, spurs; Idea C, detour saving): per run, L_P at
+each target D itself (L_P_at: linear between the states on either side, so runs whose ears step D
+differently compare at one D), and at the first state reaching it L_P (and its recomputation from
+tri_step), faces, the ears and spurs built, their length, the share of it in dead ends (a spur
+whose corridor, ungrown at that state, leaves the face count as it is: it bounds one face only;
+a spur an ear later closed, or one that ended near another road, bounds two and is on a loop),
+and the worst-off home (the largest home escape time, and its population-weighted 95th
+percentile); at the run's end, its wall time.
 
     uv run python research/roadless/ears_compare.py <block> <D,D,...> <run> [<run> ...]
 """
@@ -66,8 +68,10 @@ def main(bid: str, targets: list[float], runs: list[str]) -> None:
                 g.step[mine] = q.step
             km = float(pk.length.sum())
             spur_km = float(pk.length[pk.spur].sum())
+            at = float(np.interp(D, s.D, s.L_P)) if D is not None else float(s.L_P[k])
             rows.append(dict(run=label(run), D_target="end" if D is None else D, step=k,
-                             D=float(s.D[k]), L_P=float(s.L_P[k]), L_P_check=1 - P / g.P0,
+                             L_P_at=at, D=float(s.D[k]), L_P=float(s.L_P[k]),
+                             L_P_check=1 - P / g.P0,
                              faces=int(s.faces[k]), ears=k, spurs=int(pk.spur.sum()),
                              km=km / 1e3, spur_share=spur_km / max(km, 1e-9),
                              dead_share=dead / max(km, 1e-9), worst_u=float(np.nanmax(uh)), u95=p95,
