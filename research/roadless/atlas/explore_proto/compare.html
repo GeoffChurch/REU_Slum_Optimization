@@ -124,7 +124,7 @@ table.shapes tr[data-i]:hover td, table.shapes tr.on td { background: var(--red-
   <div class="prose">
     <p>Each block is shaded by its screen score, on a log scale from blue (low) to red (high). The yellow-green line is the isocline at the floor: the edge of the set of blocks the screen selects. Scroll or pinch to zoom, drag to pan. The ring marks <code>5810</code>.</p>
     <p>The outlined shapes are the best circles, ellipses, squares and rectangles under one of two objectives. <strong>Excess</strong> sums each covered pixel's log score above the shipped floor, times its area. A shape grows while the ground it adds is above the floor on balance, so the objective picks its own size. <strong>Surprise</strong> compares a shape's mean log score with the best mean a shape of the same size reaches by chance, with the blocks' scores shuffled among the blocks (32 shuffles): (mean − the shuffled bests' mean) / their spread. That accounts for how many places a small shape can be put. <strong>Raw z</strong> skips the shuffle and compares a shape with every other placement of its size. It is kept to show the bias: small shapes win by chance, and here they just find the single top block. Every objective counts a placement only if blocks cover at least 60% of it, and keeps up to three disjoint shapes per family.</p>
-    <p>The numbered outlines are clusters of whole blocks, from one of two trees of candidates. In the <strong>shared streets</strong> tree, blocks are added from the highest score down, and each joins the clusters of its neighbours: blocks sharing at least 5 m of street. Growing a region greedily from any block, always taking its best-scoring neighbour, passes through exactly these clusters. The <strong>hull agglomeration</strong> needs no adjacency: starting from single blocks, it repeatedly merges the two nearby clusters whose union scores best by mean log score plus log(blocks' area / convex hull's area), so a merge across empty ground is penalised. <strong>Worse than the city</strong> is the upper-level-set scan statistic: a likelihood ratio for the cluster's mean log score exceeding the rest of the city's, weighted by buildings, with clusters holding at most half the city's buildings. Its p-value compares that ratio with the largest ratio anywhere in the tree when the scores are shuffled among the blocks. <strong>Stands above its surroundings</strong> is persistence: how far a cluster's peak score rises above the lowest block you must cross to reach higher ground. Contrast is the cluster's mean log score minus that of the blocks bordering it.</p>
+    <p>The numbered outlines are convex hulls of clusters of whole blocks, found by <strong>hull agglomeration</strong>: starting from single blocks, it repeatedly merges the two nearby clusters whose union scores best by mean log score plus log(blocks' area / convex hull's area), so a merge across empty ground is penalised. Each cluster it passes through is a candidate. <strong>Worse than the city</strong> is the upper-level-set scan statistic over those candidates: a likelihood ratio for the cluster's mean log score exceeding the rest of the city's, weighted by buildings, with clusters holding at most half the city's buildings. Its p-value compares that ratio with the largest ratio anywhere in the tree when the scores are shuffled among the blocks. Contrast is the cluster's mean log score minus that of the blocks sharing a street with it.</p>
   </div>
   <figure id="screenfig">
     <div class="bar">
@@ -138,7 +138,7 @@ table.shapes tr[data-i]:hover td, table.shapes tr.on td { background: var(--red-
       <span class="fams" id="sm-fams"></span>
     </div>
     <div class="bar" style="margin-top:.5rem">
-      <label for="sm-clu">Anomalous clusters <select id="sm-clu"><option value="">none</option><option value="street/scan" selected>shared streets: worse than the city</option><option value="street/local">shared streets: stands above its surroundings</option><option value="hull/scan">hull agglomeration: worse than the city</option></select></label>
+      <label for="sm-clu">Anomalous clusters <select id="sm-clu"><option value="">none</option><option value="hull/scan" selected>hull agglomeration: worse than the city</option></select></label>
     </div>
     <div class="mapwrap">
       <canvas id="sm-canvas" aria-label="City blocks shaded by screen score, with the floor's isocline"></canvas>
@@ -415,9 +415,16 @@ async function screenMap(enc) {
   let clusters = [], cluFocus = -1;
   cluSel.addEventListener("change", () => { listClusters(); draw(); });
   async function loadClusters(name) { if (!(name in cluCache)) cluCache[name] = await getJSON(`screen/clusters_${name}.json`).catch(() => null); }
-  function bboxOf(mem) { let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const i of mem) for (const r of city.rings[i]) for (const [x, y] of r) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-    return [x0, y0, x1, y1]; }
+  function hullOf(mem) {
+    const pts = [];
+    for (const i of mem) for (const r of city.rings[i]) for (const q of r) pts.push(q);
+    pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lo = [], up = [];
+    for (const q of pts) { while (lo.length > 1 && cross(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+    for (let k = pts.length - 1; k >= 0; k--) { const q = pts[k]; while (up.length > 1 && cross(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+    return lo.slice(0, -1).concat(up.slice(0, -1));
+  }
   function listClusters() {
     const tab = document.getElementById("sm-clusters"), note = document.getElementById("sm-clusters-note");
     tab.replaceChildren(); clusters = []; cluFocus = -1;
@@ -425,17 +432,17 @@ async function screenMap(enc) {
     if (!key) { note.textContent = ""; return; }
     if (!res) { note.textContent = "The clusters have not been computed for this city."; return; }
     const [tree, kind] = key.split("/"), r = res[metSel.value][tree];
-    clusters = r[kind] || [];
-    const head = el("tr"); for (const t of ["", "blocks", "buildings", "area", "geometric-mean score", "× floor", kind === "scan" ? "likelihood ratio" : "persistence, decades", "p", "contrast, decades"]) head.append(el("th", null, t)); tab.append(head);
+    clusters = r[kind];
+    for (const c of clusters) if (!c.outline) c.outline = hullOf(c.members);
+    const head = el("tr"); for (const t of ["", "blocks", "buildings", "blocks' area", "geometric-mean score", "× floor", "likelihood ratio", "p", "contrast, decades"]) head.append(el("th", null, t)); tab.append(head);
     clusters.forEach((c, i) => { const tr = el("tr"); tr.dataset.i = i;
-      for (const t of [String(i + 1), c.blocks.toLocaleString(), Math.round(c.buildings).toLocaleString(), `${c.area_km2.toFixed(2)} km²`, fmt(c.mean_score), c.x_floor.toFixed(2), kind === "scan" ? Math.round(c.stat).toLocaleString() : c.stat.toFixed(2), c.p <= 1 / (1 + r.nperm) + 1e-12 ? `≤ ${(1 / (1 + r.nperm)).toFixed(3)}` : c.p.toFixed(3), c.contrast == null ? "–" : (c.contrast >= 0 ? "+" : "") + c.contrast.toFixed(2)]) tr.append(el("td", null, t));
+      for (const t of [String(i + 1), c.blocks.toLocaleString(), Math.round(c.buildings).toLocaleString(), `${c.area_km2.toFixed(2)} km²`, fmt(c.mean_score), c.x_floor.toFixed(2), Math.round(c.stat).toLocaleString(), c.p <= 1 / (1 + r.nperm) + 1e-12 ? `≤ ${(1 / (1 + r.nperm)).toFixed(3)}` : c.p.toFixed(3), c.contrast == null ? "–" : (c.contrast >= 0 ? "+" : "") + c.contrast.toFixed(2)]) tr.append(el("td", null, t));
       tr.addEventListener("click", () => { cluFocus = i; for (const o of tab.querySelectorAll("tr.on")) o.classList.remove("on"); tr.classList.add("on");
-        const [x0, y0, x1, y1] = c.bbox || (c.bbox = bboxOf(c.members)), w = cv.width, h = cv.height;
+        const xs = c.outline.map((q) => q[0]), ys = c.outline.map((q) => q[1]), [x0, y0, x1, y1] = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], w = cv.width, h = cv.height;
         view.s = Math.min(w / (x1 - x0), h / (y1 - y0)) * 0.6; view.tx = w / 2 - view.s * (x0 + x1) / 2; view.ty = h / 2 + view.s * (y0 + y1) / 2; draw(); });
       tab.append(tr); });
-    note.textContent = `Up to ${clusters.length || 8} disjoint clusters, p from ${r.nperm} shuffles (seed ${r.seed}); ${kind === "scan" ? "a cluster holds at most half the city's buildings, and a large one with a modest rise can outrank a small, extreme one, so read × floor beside the ratio" : "a cluster is the component as it was just before it merged into higher ground; persistence measures its peak block, not its mean, so a low-scoring cluster around one extreme block can rank high"}. Click a row to zoom to it.`;
+    note.textContent = `Up to ${clusters.length || 8} disjoint clusters, p from ${r.nperm} shuffles (seed ${r.seed}); a cluster holds at most half the city's buildings, and a large one with a modest rise can outrank a small, extreme one, so read × floor beside the ratio. Click a row to zoom to it.`;
   }
-  const cluCv = document.createElement("canvas"), cctx = cluCv.getContext("2d", { willReadFrequently: true });
   let shapes = [], focus = -1;
   async function loadShapes(name) { if (!shapeCache[name]) shapeCache[name] = await getJSON(`screen/shapes_${name}.json`).catch(() => null); }
   function listShapes() {
@@ -516,7 +523,7 @@ async function screenMap(enc) {
     dpr = Math.min(2, devicePixelRatio || 1);
     const w = cv.clientWidth, h = Math.round(Math.min(Math.max(w * 0.8, 320), innerHeight * 0.78));
     cv.style.height = `${h}px`;
-    for (const c of [cv, pickCv, maskCv, cluCv]) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+    for (const c of [cv, pickCv, maskCv]) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
     if (view) { /* keep the view across a resize */ } else fit();
   }
   let queued = false;
@@ -546,20 +553,11 @@ async function screenMap(enc) {
     const img = ctx.getImageData(0, 0, w, h), d = img.data;
     const [ir, ig, ib] = [1, 3, 5].map((j) => parseInt(css("--iso").slice(j, j + 2), 16));
     for (let j = 0; j < w * h; j++) if (edge[j]) { d[4 * j] = ir; d[4 * j + 1] = ig; d[4 * j + 2] = ib; }
-    if (clusters.length) {
-      cctx.setTransform(1, 0, 0, 1, 0, 0); cctx.clearRect(0, 0, w, h); cctx.setTransform(view.s, 0, 0, view.s, view.tx, view.ty);
-      clusters.forEach((c, k) => { cctx.fillStyle = `rgb(${k + 1},0,0)`; for (const i of c.members) cctx.fill(paths[i], "evenodd"); });
-      const q = cctx.getImageData(0, 0, w, h).data, id = new Uint8Array(w * h);
-      for (let j = 0; j < w * h; j++) id[j] = q[4 * j + 3] > 127 ? q[4 * j] : 0;
-      const core = new Uint8Array(w * h);
-      for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const j = y * w + x, c0 = id[j];
-        if (c0 && (c0 !== id[j - 1] || c0 !== id[j + 1] || c0 !== id[j - w] || c0 !== id[j + w])) core[j] = 1; }
-      for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) { const j = y * w + x;
-        if (core[j]) { d[4 * j] = d[4 * j + 1] = d[4 * j + 2] = 255; }
-        else if (core[j - 1] || core[j + 1] || core[j - w] || core[j + w]) { d[4 * j] = d[4 * j + 1] = d[4 * j + 2] = 17; } }
-    }
     ctx.putImageData(img, 0, 0);
     if (clusters.length) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.lineJoin = "round";
+      clusters.forEach((c, k) => { ctx.beginPath(); c.outline.forEach(([x, y], m) => { const X = view.s * x + view.tx, Y = -view.s * y + view.ty; m ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); }); ctx.closePath();
+        ctx.lineWidth = 4 * dpr; ctx.strokeStyle = "#111111"; ctx.stroke(); ctx.lineWidth = 2 * dpr; ctx.strokeStyle = k === cluFocus ? "#ffe066" : "#ffffff"; ctx.stroke(); });
       ctx.font = `700 ${13 * dpr}px "Atkinson Hyperlegible", system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
       clusters.forEach((c, k) => { const X = view.s * c.cx + view.tx, Y = -view.s * c.cy + view.ty;
         ctx.lineWidth = 3.5 * dpr; ctx.strokeStyle = "#111111"; ctx.strokeText(String(k + 1), X, Y); ctx.fillStyle = k === cluFocus ? "#ffe066" : "#ffffff"; ctx.fillText(String(k + 1), X, Y); });
