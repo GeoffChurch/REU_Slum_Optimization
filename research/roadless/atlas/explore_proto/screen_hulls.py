@@ -29,20 +29,26 @@ merge's hull h contains the larger cluster's hull hb, and h less hb is a set of 
 run of h's edges not hb's, each a convex Q (the run closed by its chord) less hb's part R beyond
 the chord, so a merge reads only the blocks meeting the Qs (a uniform grid index) and clips them
 against Q and R, each a few edges, culling the edges that leave a block's bounding box whole.
-48 -- 83 us a merge evaluation on Cape Town (median 26 us, a heavy tail from merges of
-1,000 km^2 hulls); an intensive tree is 4 s Nairobi, 38 -- 42 s Cape Town (464,000 evaluations),
+~80 us a merge evaluation on Cape Town (median 26 us, a heavy tail from merges of 1,000 km^2
+hulls); an intensive tree is 3 -- 5 s on Nairobi, 39 -- 44 s on Cape Town (464,000 evaluations),
 the as_is depth_density_proxy tree, which snowballs (its sqrt(n) favours the biggest cluster),
-20 s and 180 s (2.2 million). shapely's own clipping was 10x slower; the cheaper route (blocks
-by centroid inclusion) was not needed.
+20 s and 185 s (2.2 million). shapely's own clipping was 10x slower (144 s an intensive Cape
+Town tree before the pockets and edge culling); the cheaper route (blocks by centroid inclusion)
+was not needed.
 
 Rankings, per metric, each the TOP disjoint (hulls overlapping by < OVERLAP_MAX of the smaller's
 area; greedy in rank order):
   as_is: the as_is tree's candidates by as_is score.
   intensive_raw: the intensive tree's by intensive score (MIN_BLOCKS 2: these are tiny).
-  intensive_cal: the intensive tree's by p under msr, then z under msr. p as screen_concepts.py
-    calibrates: per replicate the best intensive log score among its candidates with n_eff within
-    a factor 1.25 (bins of log10(1.25)/8), p = (1 + #replicates >= the region's) / (1 + NPERM);
-    z = (score - mean) / sd of every null candidate's at that n_eff (Gaussian kernel, bandwidth
+  intensive_cal: the intensive tree's by p under msr, then z under msr. p calibrated as in
+    screen_concepts.py but conditional on size: per replicate the best intensive log score among
+    its candidates with n_eff within a factor 1.25 (bins of log10(1.25)/8), p = (1 + #replicates
+    whose best is >= the region's) / (1 + #replicates with a candidate of that size), undefined
+    (and the region unranked) where fewer than MIN_SUPPORT (half) of the replicates have one.
+    screen_concepts.py's p counts a replicate with no candidate of the size as one below, which
+    here gave the largest regions p 0.002 at z -1.8: re-dealt densities times block areas make
+    buildings heavier-tailed, so the null's regions of a given extent have smaller n_eff. z =
+    (score - mean) / sd of every null candidate's at that n_eff (Gaussian kernel, bandwidth
     log10 1.25).
 Nulls (a Strategy each, screen_concepts.py's), each replicate regenerating the whole tree (the
 selection is in the null): the field re-dealt is the block building density d_b = n_b / area_b
@@ -66,7 +72,26 @@ largest llr of hull trees rebuilt on MSR surrogates of the blocks' log scores (s
 py's surrogates, the score marginal kept), as many replicates as its shuffle's (47), seeded
 default_rng([SEED, 1, replicate]).
 
-RUN PENDING
+Run 2026-11-03 (NPERM per null: Nairobi 999, Cape Town 199; 16 workers, load ~25 from others):
+Nairobi 23 min, Cape Town 110 min (the eigenvectors 87 s; trees on MSR surrogates 160 -- 210 s,
+on shuffles 45 s, autocorrelated densities making larger pockets). The intensive candidates with
+an msr p: n_eff up to 117 (Nairobi), 67 and 82 (Cape Town, depth_density_proxy and
+density_compactness); under the shuffle 155 -- 350.
+  as_is depth_density_proxy snowballs to the cap: Cape Town's best 5,914 blocks, 624,420
+    buildings (36%), 209 km^2 at 50x the floor; Nairobi's 1,665 blocks, 46%, 89 km^2 at 22x.
+    The next disjoint one on Cape Town (rank 8,976: every node between overlaps the first) is
+    343 blocks, 4.9 km^2 at 31x, holding 5810.
+  intensive_raw: two- and three-block pairs, 0.01 -- 0.04 km^2 (4 -- 15x the floor; p_msr ~1).
+  intensive_cal: no region at p_msr < 0.05 on Cape Town; the best (both metrics) the same few
+    places, 89 -- 186 blocks, 1.5 -- 3 km^2, at p_msr 0.07 -- 0.21 (p_shuffle 0.005 -- 0.025);
+    the third holds 29% (depth_density_proxy) and 80% (density_compactness) of 5810's area, 5810
+    itself not a member. Nairobi's best a 29-block region of 0.27 km^2, p_msr 0.046 -- 0.053
+    (p_shuffle 0.001).
+  clusters_msr: Cape Town's hull-scan clusters keep p at the floor 1/48 under MSR for the top 5
+    (depth_density_proxy, 1,130 / 1,251 / 373 blocks among them) and the top 3 of density_
+    compactness; further down they rise (183 blocks: 0.042 -> 0.458). Nairobi's rise from the top:
+    0.042 -> 0.104, 0.167, 0.188 (depth_density_proxy), 0.125 -> 0.938 (density_compactness's
+    second).
 
     S=research/roadless/atlas/explore_proto/screen_hulls.py  # from the repo root, PYTHONPATH=.
     uv run python $S ~/src/wt_demo <out dir> [city ...]   # hulls_<city>.json,
