@@ -69,6 +69,16 @@ def _footprint_block() -> Block:
     return replace(b, building_geometries=outlines, building_tier=Footprints)
 
 
+# The greedy-arterial family at a toy scale. Its cost is ~n_anchors^2 candidates per road times
+# max_roads roads, and at the shipped 32 anchors x 15-60 roads its twelve cases here were 1,108 s
+# of CPU, 41% of the whole suite's. The obligation this test checks -- `with_width` on the emitted
+# frame, and building geometry read at its tier -- is one code path per engine/realizer/objective/
+# cost combination, which these two knobs do not select: 6 anchors and 2 roads run every one of
+# them (each case still commits roads) at ~1 s apiece. Applied to every configured method that
+# HAS the knob, so a new arterial preset is scaled down without anyone listing it here.
+TOY_SCALE = {"n_anchors": 6, "max_roads": 2}
+
+
 def _configured_methods() -> list[str]:
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="compare_config", overrides=["shapefile=x"])
@@ -81,7 +91,11 @@ def _configured_methods() -> list[str]:
 def test_method_emits_scorable_roads(name: str, make_block: Callable[[], Block]) -> None:
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="compare_config", overrides=["shapefile=x"])
-    method = load_method(cfg.all_methods[name])
+    node = cfg.all_methods[name]
+    if "n_anchors" in node:
+        for key, value in TOY_SCALE.items():
+            node[key] = value
+    method = load_method(node)
 
     block = make_block()
     roads = method.propose(block).roads
