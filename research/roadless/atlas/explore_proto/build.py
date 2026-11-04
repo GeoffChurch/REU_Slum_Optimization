@@ -25,12 +25,16 @@ this script's own (SEQ).
 
 The method is one setting (METHOD): a Shown, which names its run on each block (an OnBlock's
 Pick), the reader-facing name and blurb, and how its run time is read (a Runtime Strategy).
+Beside it on the page's block, a second series: a shipped method (BESIDE, owner 2026-11-04: the
+site's Loop Network, cycle_native, as the 5810 build-out page's lineup runs it), timed by
+loop_time.py's run (LineupTimed).
 Swapping to the partition SIMP's cut is `METHOD = PARTITION_CUT`, once networks.py `add` has
 written its frames (on 5810, the networks page's block, only; the comparison then needs its Grid
 on 41785 too).
 
     B=research/roadless/atlas/explore_proto/build.py     # from the repo root, PYTHONPATH=.
-    uv run python $B plates                # the escape-time plates (minutes)
+    uv run python $B plates                # the escape-time plates (minutes; BESIDE's needs
+                                           # loop_time.py's TIMES only for `site`)
     uv run python $B site ~/src/wt_demo    # the bundle into a main checkout
 """
 from __future__ import annotations
@@ -90,6 +94,10 @@ class Runtime(Protocol):
         """Per slider row the run time to that row's network (None where the row is none)."""
         ...
 
+    def run(self, key: str, src: Any, site: Site) -> DemoRecorded | DemoTimed:
+        """The whole run's time, however far past the slider it built, and how it was had."""
+        ...
+
 
 @dataclass(frozen=True)
 class GrownSteps:
@@ -104,6 +112,10 @@ class GrownSteps:
         m_of = {f: m for m, f in render.frame_names(info).items()}
         return [None if r is None else float(steps[m_of[r["f"]]]) for r in rows]
 
+    def run(self, key: str, src: Any, site: Site) -> DemoRecorded | DemoTimed:
+        return DemoRecorded(kind="recorded", machine=self.machine,
+                            seconds=float(pd.read_parquet(src.dir / "steps.parquet").t.iloc[-1]))
+
 
 @dataclass(frozen=True)
 class AnswerRows:
@@ -117,6 +129,54 @@ class AnswerRows:
         return [None if r is None else
                 float(nw.last_row(design.dir(r["b"]) / f"{site.bid}.parquet").t_total)
                 for r in rows]
+
+    def run(self, key: str, src: Any, site: Site) -> DemoRecorded | DemoTimed:
+        """The longest budget's run: each budget is a run of its own."""
+        return DemoRecorded(kind="recorded", machine=self.machine, seconds=max(
+            float(nw.last_row(src.design.dir(b) / f"{site.bid}.parquet").t_total)
+            for b in src.design.budgets()))
+
+
+@dataclass(frozen=True)
+class LineupTimed:
+    """A lineup network (networks.LineupSource), timed by loop_time.py's run of its method on the
+    block (`times`, loop_time.TIMES: when each road of the stored network was committed, in its
+    build order). Its frames are canonical prefixes (common.canonical_order: the held roads, then
+    street-first), not prefixes of its build order, so a frame's time is when the run had
+    committed every road in it: the latest of its roads' times."""
+    machine: str
+    times: Path
+
+    def _timed(self, src: Any, site: Site) -> dict[str, Any]:
+        t: dict[str, Any] = json.loads(self.times.read_text())
+        if (t["block"], t["method"]) != (site.bid, src.method):
+            raise SystemExit(f"{self.times}: {t['method']} on {t['block']}, not {src.method} on "
+                             f"{site.bid}")
+        return t
+
+    def seconds(self, key: str, src: Any, rows: list[dict[str, Any] | None],
+                site: Site) -> list[float | None]:
+        road_s = self._timed(src, site)["road_s"]
+        built = gpd.read_parquet(src.networks / f"{src.method}.parquet")
+        ordered = gpd.read_parquet(src.networks / f"{src.method}.ordered.parquet")
+        at = {g: j for j, g in enumerate(shapely.to_wkb(built.geometry.to_numpy()))}
+        if len(at) != len(built) or len(road_s) != len(built):
+            raise SystemExit(f"{src.method}: {len(built)} roads, {len(at)} distinct, "
+                             f"{len(road_s)} timed")
+        built_at = [at[g] for g in shapely.to_wkb(ordered.geometry.to_numpy())]  # KeyError: refused
+        latest = np.maximum.accumulate([road_s[j] for j in built_at])  # per prefix length - 1
+        info = nw.info_of(key, "slider", data=site.networks)
+        m_of = {f: m for m, f in render.frame_names(info).items()}
+        return [None if r is None else float(latest[m_of[r["f"]] - 1]) for r in rows]
+
+    def run(self, key: str, src: Any, site: Site) -> DemoRecorded | DemoTimed:
+        t = self._timed(src, site)
+        threads = set(t["threads"].values())
+        if threads != {"1"}:
+            raise SystemExit(f"{self.times}: run with {t['threads']}, not single-threaded")
+        return DemoTimed(kind="timed", seconds=float(t["seconds"]), machine=self.machine,
+                         load=round(max(t["load_before"][0], t["load_after"][0]), 1),
+                         cores=int(t["nproc"]))
 
 
 class Pick(Protocol):
@@ -213,6 +273,32 @@ PARTITION_CUT = Shown(
     runtime=AnswerRows(machine="partition_rows' t_total (rows do not name the machine)"))
 
 METHOD: Shown = EARS_PATHS
+
+
+@dataclass(frozen=True)
+class Benchmarked:
+    """A shipped method set beside METHOD on the page's block (owner 2026-11-04): what the page
+    shows of it (`shown`), and its key among the site's methods (its page there,
+    docs/methodology/methods/<key>.md, and its public name, which the site's generator checks
+    `shown.name` against)."""
+    shown: Shown
+    key: str
+
+
+# The site's Loop Network: the lineup's cycle_native on the 5810 build-out page (networks.py's
+# Lineup family), timed by loop_time.py. Its blurb is Lineup.WORDS' in the page's terms (escape
+# time saved for permeability, homes for parcels).
+BESIDE = Benchmarked(
+    shown=Shown(
+        runs=(OnBlock("ZAF.9.3.1_1_5810", Family(("lineup", "cycle_native"))),),
+        name="Loop Network",
+        blurb=("Builds loops. Each step lays a path from the street to a chosen home and a "
+               "second path back that shares no edge with the first, and builds the loop that "
+               "saves the most escape time for the homes it displaces. No dead ends."),
+        stem="cycle",
+        runtime=LineupTimed(machine="one process on a workstation CPU (Intel Xeon w7-3455)",
+                            times=HERE / "loop_time_5810.json")),
+    key="cycle_native")
 
 
 # ------------------------------------------------------------------ topology's run time
@@ -750,19 +836,21 @@ def draw_context(ax: Any, ctx: Context, *, lw: float) -> None:
             ax=ax, color=reblock_render._CONTEXT_PT, alpha=CONTEXT_PT_ALPHA, linewidth=0)
 
 
-def plate_name(site: Site, f: str) -> Path:
-    return FRAMES / site.bid / f"{METHOD.stem}_{f}.webp"
+def plate_name(site: Site, shown: Shown, f: str) -> Path:
+    return FRAMES / site.bid / f"{shown.stem}_{f}.webp"
 
 
-def method_plates(site: Site, w: World) -> None:
-    """Every frame of the method's runs on the block, into FRAMES."""
-    pick = METHOD.pick(site.bid)
+def method_plates(site: Site, w: World, shown: Shown) -> None:
+    """The block with no new road and every frame of the method's runs on it, into FRAMES."""
+    homes_plate(w, w.u_plain, c=np.zeros(len(w.polys)), corridor=None,
+                out=plate_name(site, shown, "000"))
+    pick = shown.pick(site.bid)
     key, src = pick.key(), pick.source(site)
     for run in src.runs():
         info = nw.info_of(key, run.name, data=site.networks)
         names = render.frame_names(info)
         for mm, plate in stored_plates(site, w, key, run.name):
-            plate(plate_name(site, names[mm]))
+            plate(plate_name(site, shown, names[mm]))
 
 
 def stored_plates(site: Site, w: World, key: str, run: str):  # type: ignore[no-untyped-def]
@@ -780,15 +868,14 @@ def stored_plates(site: Site, w: World, key: str, run: str):  # type: ignore[no-
 
 
 def plates() -> None:
-    """The page block's plain baseline and every frame of the method on it; the compared block's
-    grids, both methods', all into FRAMES."""
+    """The page block's plain baseline and every frame of the method and the method beside it on
+    it; the compared block's grids, both methods', all into FRAMES."""
     src = context_source()
     site = Site.of(PAGE.bid)
-    plate_name(site, "000").parent.mkdir(parents=True, exist_ok=True)
+    (FRAMES / site.bid).mkdir(parents=True, exist_ok=True)
     w = world(site, src)
-    homes_plate(w, w.u_plain, c=np.zeros(len(w.polys)), corridor=None,
-                out=plate_name(site, "000"))
-    method_plates(site, w)
+    for shown in (METHOD, BESIDE.shown):
+        method_plates(site, w, shown)
     peel_plate(src, PAGE.bid, PEEL_PLATE)
     site = Site.of(COMPARED.bid)
     w = world(site, src)
@@ -1039,6 +1126,19 @@ class DemoRecorded:
 
 
 @dataclass(frozen=True)
+class DemoTimed:
+    """A method's whole run time, from a run made to time it (explore_proto/loop_time.py): one
+    process on `machine`, its numerical libraries on one thread, the machine's one-minute load
+    average at the run's start or end, whichever was higher (`load`), on its `cores`. Its steps'
+    times are when the run had built every road of each step's network."""
+    kind: Literal["timed"]
+    seconds: float
+    machine: str
+    load: float
+    cores: int
+
+
+@dataclass(frozen=True)
 class DemoSheet:
     """A series' escape-time plates as one sprite sheet beside its build-out file (`file`):
     `frames` frames of `width` x `frame_height` px in `columns` columns, read across then down
@@ -1054,12 +1154,13 @@ class DemoSheet:
 @dataclass(frozen=True)
 class DemoSeries:
     """One method on the build-out: its name, the label the page heads it with, its plates, its
-    whole run time (recorded, or measured for topology), and what it shows at each of the
-    build-out's budgets, each cut in the order the method built its roads."""
+    whole run time (recorded by its run, timed by a run made to time it, or measured for
+    topology), and what it shows at each of the build-out's budgets: each cut in the order the
+    method built its roads, or for a timed run its network's shortest street-first prefix."""
     method: str
     label: str
     sheet: DemoSheet
-    run: DemoRecorded | DemoTopologyMeasured
+    run: DemoRecorded | DemoTimed | DemoTopologyMeasured
     cells: tuple[DemoMet | DemoShort, ...]
 
 
@@ -1139,6 +1240,15 @@ class DemoMethod:
 
 
 @dataclass(frozen=True)
+class DemoBeside:
+    """The shipped method set beside it on the page's block: its key among the site's methods (its
+    method page's), its reader-facing name and how it works."""
+    key: str
+    name: str
+    blurb: str
+
+
+@dataclass(frozen=True)
 class DemoEncoding:
     """The plates' colours and the quantities their legend states. `escape_ramp` maps escape time
     from 0 to 100% of a block's `escape_scale`, short blue to long red, with an isochrone every
@@ -1188,12 +1298,13 @@ class DemoPortSpeed:
 @dataclass(frozen=True)
 class DemoBundle:
     """The Demo page's numbers: the block it follows, the methods compared on another, the
-    screens, the method, the plates' encoding, and how topology's times relate to the original
-    algorithm's (`topology_port`)."""
+    screens, the method, the shipped method beside it on the block (`beside`), the plates'
+    encoding, and how topology's times relate to the original algorithm's (`topology_port`)."""
     block: DemoBlock
     comparison: DemoComparison
     screen: DemoScreen
     method: DemoMethod
+    beside: DemoBeside
     encoding: DemoEncoding
     topology_port: DemoPortSpeed
 
@@ -1261,14 +1372,15 @@ SITE_README = """\
 # The Demo page's bundle
 
 What the site's Demo page reads: Cape Town block `{bid}`, followed from the city-wide screens to
-the roads one method builds through it, and that method beside the original topology algorithm
-on block `{cid}`, where topology has run.
+the roads our method builds through it, beside the shipped {beside}'s, and our method beside
+the original topology algorithm on block `{cid}`, where topology has run.
 
 - `demo.json`: the page's facts -- the block's place, the shipped screen's verdict on it (checked
   against `../screen-map/capetown.json`) and the two-stage depth_density screen's, the fires
   reported near it (each quoted from its report and checked against the article; none is placed
   inside the block, and the page draws none of them on a map), topology's run time on each block
-  (extrapolated on the first, measured on the second), and the encoding.
+  (extrapolated on the first, measured on the second), the shipped method set beside ours on the
+  first, and the encoding.
 - `{page}` and `{compared}`: the two build-outs the page's slider widgets fetch -- budgets, and per
   method its escape-time sprite sheet (beside them) and what it shows at each budget.
 
@@ -1314,15 +1426,16 @@ def centroid_wgs84(bid: str) -> tuple[float, float]:
     return float(lat), float(lon)
 
 
-def cells_of(site: Site, budgets: tuple[float, ...]
-             ) -> tuple[list[DemoMet | DemoShort], list[str]]:
+def cells_of(site: Site, shown: Shown, budgets: tuple[float, ...]
+             ) -> tuple[list[DemoMet | DemoShort], list[str], DemoRecorded | DemoTimed]:
     """The method's cells on the block at `budgets` (0 the plain baseline, then the slider's: the
-    stored run's rows, render.SLIDER's), and its sheet's frame names in row order. Budgets the
-    stored run has no row for are refused: the page states what the method did, never pads it."""
-    pick = METHOD.pick(site.bid)
+    stored run's rows, render.SLIDER's), its sheet's frame names in row order, and its whole
+    run's time. Budgets the stored run has no row for are refused: the page states what the
+    method did, never pads it."""
+    pick = shown.pick(site.bid)
     key, src = pick.key(), pick.source(site)
     rows = src.rows(key)
-    secs = METHOD.runtime.seconds(key, src, rows, site)
+    secs = shown.runtime.seconds(key, src, rows, site)
     by_budget = dict(zip(nw.SLIDER, zip(rows, secs, strict=True), strict=True))
     fs = ["000"] + list(dict.fromkeys(r["f"] for r in rows if r is not None))
     cells: list[DemoMet | DemoShort] = []
@@ -1341,7 +1454,7 @@ def cells_of(site: Site, budgets: tuple[float, ...]
         cells.append(DemoMet(kind="met", step=DemoStep(
             displacement=r["D"], road_km=r["km"], permeability=r["LP"],
             seconds=sec, row=fs.index(r["f"]))))
-    return cells, fs
+    return cells, fs, shown.runtime.run(key, src, site)
 
 
 # The block with no new road: every series' first row.
@@ -1349,17 +1462,17 @@ BASELINE_STEP = DemoStep(displacement=0.0, road_km=0.0, permeability=0.0, second
 PAGE_BUDGETS = (0.0, *nw.SLIDER)
 
 
-def method_series(site: Site, budgets: tuple[float, ...], label: str,
+def method_series(site: Site, shown: Shown, budgets: tuple[float, ...], label: str,
                   out: Path) -> DemoSeries:
-    """The method on the block at `budgets`, its sheet into `out`."""
-    cells, fs = cells_of(site, budgets)
-    whole = max(c.step.seconds for c in cells)
-    return DemoSeries(method=METHOD.name, label=label,
-                      sheet=sheet_of([plate_name(site, f) for f in fs],
-                                     out / f"{METHOD.stem}_{site.bid}.webp", WIDTH),
-                      run=DemoRecorded(kind="recorded", seconds=whole,
-                                       machine=METHOD.runtime.machine),
-                      cells=tuple(cells))
+    """The method `shown` on the block at `budgets`, its sheet into `out`."""
+    cells, fs, run = cells_of(site, shown, budgets)
+    if run.seconds < max(c.step.seconds for c in cells):
+        raise AssertionError(f"{shown.name}: its whole run ({run.seconds} s) is shorter than its "
+                             f"time to a frame")
+    return DemoSeries(method=shown.name, label=label,
+                      sheet=sheet_of([plate_name(site, shown, f) for f in fs],
+                                     out / f"{shown.stem}_{site.bid}.webp", WIDTH),
+                      run=run, cells=tuple(cells))
 
 
 def write_buildout(out: Path, b: DemoBuildOut) -> str:
@@ -1391,7 +1504,8 @@ def peel_image(out: Path, rings: int, parcels: int) -> str:
 
 
 def page_block(sc: Screen, pl: Peeled, out: Path, enc: DemoEncoding) -> DemoBlock:
-    """Everything the page shows about PAGE; its build-out (one series, the method) into `out`."""
+    """Everything the page shows about PAGE; its build-out (two series: the method, and the
+    shipped method beside it) into `out`."""
     site = Site.of(PAGE.bid)
     proxy = proxy_of(sc, PAGE.bid)
     peel_score = pl.scores[PAGE.bid]
@@ -1404,8 +1518,11 @@ def page_block(sc: Screen, pl: Peeled, out: Path, enc: DemoEncoding) -> DemoBloc
     buildout = write_buildout(out, DemoBuildOut(
         block_id=PAGE.bid, escape_scale=round(escape_scale(site), 1), budgets=PAGE_BUDGETS,
         default_step=DEFAULT,
-        series=(method_series(site, PAGE_BUDGETS, f"Our method: {METHOD.name}", out),),
-        plots=("displacement", "road"), encoding=enc))
+        series=(method_series(site, METHOD, PAGE_BUDGETS, f"Our method: {METHOD.name}", out),
+                method_series(site, BESIDE.shown, PAGE_BUDGETS,
+                              f"Benchmark method: {BESIDE.shown.name}", out)),
+        # As the face-off's: how fast each method gets there is half the comparison.
+        plots=("displacement", "road", "time"), encoding=enc))
     lat, lon = centroid_wgs84(PAGE.bid)
     return DemoBlock(
         block_id=PAGE.bid, n_buildings=proxy.n, place=PAGE.place, lat=lat, lon=lon,
@@ -1535,12 +1652,14 @@ def site(root: Path) -> None:
                           n_blocks=len(sc.score), peel_metric=PEEL_EXAMPLE,
                           peel_keep_n=pl.keep_n),
         method=DemoMethod(name=METHOD.name, blurb=METHOD.blurb),
+        beside=DemoBeside(key=BESIDE.key, name=BESIDE.shown.name, blurb=BESIDE.shown.blurb),
         topology_port=PORT_SPEED.of(),
         encoding=enc)
     (out / "demo.json").write_text(json.dumps(dataclasses.asdict(bundle), indent=1,
                                               ensure_ascii=False) + "\n")
     (out / "README.md").write_text(SITE_README.format(
-        bid=block.block_id, cid=compared.block_id, page=block.buildout, compared=compared.buildout))
+        bid=block.block_id, cid=compared.block_id, page=block.buildout, compared=compared.buildout,
+        beside=BESIDE.shown.name))
     (root / SITE_DTS).write_text(dts(DemoBundle, DemoBuildOut))
     mb = sum(p.stat().st_size for p in out.iterdir()) / 1e6
     print(f"{out}: {len(list(out.iterdir()))} files, {mb:.1f} MB; {root / SITE_DTS}", flush=True)
