@@ -76,14 +76,22 @@ def test_shortlist_with_non_binding_k_is_the_exact_engine() -> None:
     crashing.
 
     Uses the access objective with cost=displacement because that is the combination the shortlist
-    exists for, and _two_arm_block supplies the building points displacement needs."""
-    pts = gpd.GeoDataFrame(geometry=[Point(0.5, y) for y in range(1, 8)] + [Point(10.5, 4)],
+    exists for, and _two_arm_block supplies the building points displacement needs.
+
+    Bisected 2026-11-04 against handing the shortlist's step an empty committed network: a second
+    road is the least that can see it, which the two-arm block commits from arms 6 tall at any
+    anchor count from 2 (5-tall arms stop at one road). Chosen 7-tall arms, 3 anchors, 3 roads
+    (the run stops at 2, so the terminating step is compared too). The 9-tall, 32-anchor run it
+    replaced cost 20x the CPU and caught the same fault."""
+    pts = gpd.GeoDataFrame(geometry=[Point(0.5, y) for y in range(1, 6)] + [Point(10.5, 3)],
                            crs=UTM)
-    block = _two_arm_block(pts)
-    base = replace(ARTERIAL, objective=Access(), cost=Displacement(), max_roads=3, workers=2)
+    block = _two_arm_block(pts, h=7)
+    base = replace(ARTERIAL, objective=Access(), cost=Displacement(), n_anchors=3, max_roads=3,
+                   workers=1)
     want = replace(base, engine=ExactEngine()).propose(block)
     got = replace(base, engine=ShortlistEngine(k=10_000_000, threads=8)).propose(block)
     assert want.roads is not None and got.roads is not None
+    assert len(want.roads) >= 2, "one road never meets a committed network"
     assert [g.wkt for g in got.roads.geometry] == [g.wkt for g in want.roads.geometry]
 
 
@@ -95,28 +103,21 @@ def test_shortlist_threads_do_not_enter_identity() -> None:
 
 
 def test_lazy_fixed_and_faithful_run_and_differ_from_exact_is_ok():
-    # Every policy driven through the engine end to end. A 3x3 grid, not 5x5: what is checked is
-    # that each policy's initial/after_commit round-trip runs inside the engine and commits roads,
-    # which the smallest grid that commits several roads does as well as a bigger one (5x5 was
-    # 38 s of CPU here, nearly all of it Directness scoring).
-    block = _grid_block(3)
+    # Every policy driven through the engine end to end: each policy's initial/after_commit
+    # round-trip runs inside the engine and commits roads. A 2x2 grid commits one road and then
+    # asks after_commit for the next step's candidates, which is the whole round trip; 2 roads is
+    # the least cap that reaches it. Chosen 3 anchors, 3 roads.
+    block = _grid_block(2)
     for spec in (Fixed(), Grow(), Faithful()):
         roads = replace(
-            ARTERIAL, objective=Directness(), n_anchors=6,
-            max_roads=4, engine=LazyEngine(policy=spec, rescore_every=0), workers=1,
+            ARTERIAL, objective=Directness(), n_anchors=3,
+            max_roads=3, engine=LazyEngine(policy=spec, rescore_every=0), workers=1,
         ).propose(block).roads
         assert roads is not None
         assert len(roads) > 0, spec       # every policy commits roads
-    # rescore_every=1 with fixed equals a full-rescore greedy over that policy's
-    # set: determinism
-    a = replace(
-        ARTERIAL, n_anchors=6, max_roads=3,
-        engine=LazyEngine(policy=Fixed(), rescore_every=1), workers=1).propose(block).roads
-    b = replace(
-        ARTERIAL, n_anchors=6, max_roads=3,
-        engine=LazyEngine(policy=Fixed(), rescore_every=1), workers=1).propose(block).roads
-    assert a is not None and b is not None
-    assert [g.wkt for g in a.geometry] == [g.wkt for g in b.geometry]
+    # The fixed/rescore_every=1 determinism check that ended this test is gone: both heap pushes
+    # are shared by every policy and rescore setting, and a coin-flip tie-break at either one fails
+    # test_lazy_dispatch_and_determinism 30 times of 30 (2026-11-04), as it failed this.
 
 
 def test_fixed_policy_never_changes_after_initial():
@@ -192,23 +193,26 @@ def test_faithful_policy_matches_arterial_candidate_set():
 
 
 def test_lazy_dispatch_and_determinism():
-    block = _grid_block(5)
-    m = replace(ARTERIAL, objective=Directness(), n_anchors=6, max_roads=4,
+    # A 2x2 grid, where a coin-flip heap tie-break (fault-injected 2026-11-04) lands on one of 4
+    # road sets, none above 0.3 of 60 draws: 10 runs agree by chance with probability ~1e-5 (7 is
+    # the least for 1e-3). The 5x5 / 6-anchor / 4-road block it ran on before produced one road
+    # set in 60 coin-flip runs: it could not fail.
+    block = _grid_block(2)
+    m = replace(ARTERIAL, objective=Directness(), n_anchors=3, max_roads=3,
                 engine=LazyEngine(policy=Grow(), rescore_every=0), workers=1)
-    a = m.propose(block).roads
-    b = m.propose(block).roads
-    assert a is not None and b is not None
-    assert [g.wkt for g in a.geometry] == [g.wkt for g in b.geometry]   # deterministic
-    assert len(a) > 0
+    runs = [[g.wkt for g in m.propose(block).roads.geometry] for _ in range(10)]
+    assert runs[0], "no roads: nothing left to be deterministic about"
+    assert all(r == runs[0] for r in runs[1:])   # deterministic
 
 
 def test_lazy_grow_with_max_anchors_runs_end_to_end():
     # max_anchors bounds anchor generation (see test_arterial.py's _anchor_points tests); this is
     # the end-to-end check that the cap threads through the lazy/grow path without breaking the
     # proposal shape.
-    block = _grid_block(5)
+    # A 2x2 grid's 8 vertices plus 32 samples are well over the cap of 8, so the cap binds.
+    block = _grid_block(2)
     roads = replace(ARTERIAL, engine=LazyEngine(policy=Grow(), rescore_every=0),
-                              max_anchors=8, max_roads=3, workers=1).propose(block).roads
+                    max_anchors=8, max_roads=2, workers=1).propose(block).roads
     assert roads is not None
     assert len(roads) >= 0
     assert "drain" in roads.columns
@@ -229,13 +233,17 @@ def test_lazy_far_fewer_scorings_than_exact(monkeypatch):
     # share this one imported `eval_candidate` binding, so a single patch covers both engines.
     monkeypatch.setattr(engines, "eval_candidate", counting)
     # exact
+    # 3 anchors, 4 roads. Re-scoring every live candidate on every step (the lazy engine
+    # degenerating to exact) fails this at every count tried from 3 anchors / 3 roads; with
+    # fewer than 4 roads, or 4 or more anchors at 3 roads, lazy does not reach half on this block
+    # even when it is right, because step 0 scores everything in both engines.
     calls["n"] = 0
-    replace(ARTERIAL, n_anchors=8, max_roads=4, workers=1).propose(block)
+    replace(ARTERIAL, n_anchors=3, max_roads=4, workers=1).propose(block)
     exact_calls = calls["n"]
     # lazy grow
     calls["n"] = 0
     replace(
-        ARTERIAL, n_anchors=8, max_roads=4, workers=1,
+        ARTERIAL, n_anchors=3, max_roads=4, workers=1,
         engine=LazyEngine(policy=Grow(), rescore_every=0)).propose(block)
     lazy_calls = calls["n"]
     # A lower bound, not just an upper one: without it, a future change that moves the lazy engine
@@ -250,11 +258,12 @@ def test_lazy_roads_carry_drain_column_like_exact():
     # not just produce equivalent geometry -- `.roads` is a schema, not just a geometry column,
     # and downstream consumers (e.g. rendering) read `drain`. Regression test for the schema
     # divergence where the lazy engine ended on `_explode(_merge(committed))` with no `drain`.
-    block = _grid_block(5)
-    roads = replace(ARTERIAL, objective=Directness(), n_anchors=6,
-                              max_roads=4,
-                              engine=LazyEngine(policy=Grow(),
-                                                rescore_every=0), workers=1).propose(block).roads
+    # A schema check, so the block size does not matter: dropping the lazy engine's `drain` line
+    # fails it on one road on a 2x2 grid.
+    block = _grid_block(2)
+    roads = replace(ARTERIAL, objective=Directness(), n_anchors=3, max_roads=1,
+                    engine=LazyEngine(policy=Grow(), rescore_every=0), workers=1,
+                    ).propose(block).roads
     assert roads is not None
     assert "drain" in roads.columns
     if len(roads):
@@ -267,9 +276,12 @@ def test_lazy_quality_within_tolerance():
 
     from reblock.budget import network_efficiency
     block = _block_1808()
+    # 4 anchors, 3 roads. Fault-injected 2026-11-04: a lazy engine that never re-scores a stale
+    # heap top (`at == step` -> `True`) fails this from 3 anchors / 2 roads; the 8-anchor /
+    # 4-road run it replaced passed it.
     exact = replace(
-        ARTERIAL, n_anchors=8, max_roads=4, workers=1).propose(block).roads
-    lazy = replace(ARTERIAL, n_anchors=8, max_roads=4, workers=1,
+        ARTERIAL, n_anchors=4, max_roads=3, workers=1).propose(block).roads
+    lazy = replace(ARTERIAL, n_anchors=4, max_roads=3, workers=1,
                              engine=LazyEngine(policy=Grow(),
                                                rescore_every=0)).propose(block).roads
     _e0, d_exact = network_efficiency(block, exact)
