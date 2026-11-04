@@ -29,7 +29,7 @@ export interface PathOp { op: "moveTo" | "lineTo" | "arc" | "closePath"; args: n
  * for parcels, boundary and streets, a single arc for a disk or a handle -- which is how the
  * boundary strokes stay distinguishable from the handle outlines that share their colour. */
 export interface Call {
-  op: "clearRect" | "stroke" | "fill" | "drawImage";
+  op: "clearRect" | "fillRect" | "stroke" | "fill" | "drawImage";
   strokeStyle: string;
   fillStyle: string;
   lineWidth: number;
@@ -102,6 +102,9 @@ export class RecordingContext {
     this.path.push({ op: "arc", args: [x, y, r, a0, a1] });
   }
   clearRect(): void { this.record("clearRect"); }
+  /** The screen map's score view fills its whole ground with one (render/city.ts
+   * `paintScoreFrame`); recorded with the fill style it was made in, like a `fill`. */
+  fillRect(): void { this.record("fillRect"); }
   stroke(): void { this.record("stroke"); }
   /** No `Path2D` overload: nothing in this project ever passes one (checked -- `region.ts`,
    * `city.ts` and `canvas.ts` all call `fill()` bare or `fill("evenodd")`, always against the
@@ -154,6 +157,8 @@ export class FakeElement {
   step = "";
   value = "";
   checked = false;
+  /** An element's `hidden` attribute, which a widget toggles (screen-map.ts's score legend). */
+  hidden = false;
   readonly createdAt = ++clock;
   removedAt: number | null = null;
 

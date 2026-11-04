@@ -10,8 +10,10 @@ import { requireAttr } from "../dom/attrs.js";
 import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
 import { observeSize } from "../dom/resize.js";
-import { ranking, scores, selectAt, type MetricName, type Selection } from "../model/screen.js";
-import { createLayer } from "../render/city.js";
+import {
+  rankShades, ranking, scores, selectAt, type MetricName, type Selection,
+} from "../model/screen.js";
+import { createLayer, paintScoreFrame, SCORE_GROUND, SCORE_RAMP } from "../render/city.js";
 import { sizeCanvas } from "../render/canvas.js";
 import { fitBbox, type Bbox, type View } from "../view/transform.js";
 import {
@@ -41,6 +43,22 @@ export interface ScreenState {
   city: "capetown" | "nairobi";
   metric: MetricName;
   floor: number | null;
+  /** What a block's fill says (`COLOURINGS`): `selection`, the default, what the floor selects
+   * and what the survey marks that it leaves -- the encoding the readout's precision and recall
+   * are about; or `score`, every block shaded by its rank on its side of the floor. */
+  colour: Colouring;
+}
+
+/** The fill's two views, the default first. */
+const COLOURINGS = ["selection", "score"] as const;
+type Colouring = (typeof COLOURINGS)[number];
+
+/** Each view's words in the control. Exhaustive over `Colouring` by its switch. */
+function colouringName(c: Colouring): string {
+  switch (c) {
+    case "selection": return "what the floor selects";
+    case "score": return "score, ranked on each side of the floor";
+  }
 }
 
 /** All four candidate screens (design §3.1), calibrated or not -- `MetricName`'s own four members,
@@ -78,6 +96,8 @@ export const SCREEN_MAP_URL: UrlCodec<ScreenState> = {
   // therefore publishes no `?floor=` at all, and a `?floor=` this codec refuses falls back to the
   // initial, which is that same `null` rather than some other metric's number.
   floor: nullableNumberParam("floor", 6),
+  // Not `view`, `fill` or `color`: `colour` is the control's own word, and no other widget's key.
+  colour: enumParam("colour", COLOURINGS),
 };
 
 /** The metric every OTHER metric's own no-calibration floor default is measured against -- the
@@ -242,6 +262,59 @@ function describeFollow(bundle: CityBundle): string {
     : `Block ${follow.block_id} is ringed on the map: it is the one the rest of the site follows.`;
 }
 
+/** The `<select>`'s value, validated as `asMetric`'s is: no default. */
+function asColouring(raw: string): Colouring {
+  for (const c of COLOURINGS) if (c === raw) return c;
+  throw new Error(`${LABEL}: unrecognised colouring "${raw}"`);
+}
+
+/** A score as the legend states it: four decimals, or three significant figures under 0.01 (the
+ * uncalibrated metrics' scores are small). */
+function scoreText(v: number): string {
+  return v >= 0.01 ? v.toFixed(4) : v.toPrecision(3);
+}
+
+interface ScoreLegend {
+  readonly box: HTMLDivElement;
+  /** Shown or hidden, with the lowest score, the floor and the highest written under the ramp. */
+  show(on: boolean, lowest: number, floor: number, highest: number): void;
+}
+
+function scoreLegend(): ScoreLegend {
+  const box = document.createElement("div");
+  box.className = "sbu-screenmap__legend";
+  const bar = document.createElement("div");
+  bar.className = "sbu-screenmap__ramp";
+  // The ramp framed in the map's own ground, as its colours are seen on the map: its pale middle
+  // would vanish on a light page.
+  bar.style.background = `linear-gradient(90deg, ${SCORE_RAMP.join(", ")})`;
+  bar.style.border = `3px solid ${SCORE_GROUND}`;
+  const ticks = document.createElement("div");
+  ticks.className = "sbu-screenmap__ticks";
+  const [lo, mid, hi] = [0, 1, 2].map(() => {
+    const t = document.createElement("span");
+    ticks.append(t);
+    return t;
+  });
+  // A span, not a paragraph: the follow note is the widget's one static paragraph
+  // (screen-map-boot.test.ts's `followNoteText` holds it to that).
+  const words = document.createElement("span");
+  words.className = "sbu-screenmap__note";
+  words.textContent = "Blue below the floor, pale at it, red above. A block's shade is its rank "
+    + "by score among the blocks on its side of the floor, by area, so each side takes half the "
+    + "colours.";
+  box.append(bar, ticks, words);
+  return {
+    box,
+    show(on, lowest, floor, highest) {
+      box.hidden = !on;
+      lo!.textContent = `lowest ${scoreText(lowest)}`;
+      mid!.textContent = `floor ${scoreText(floor)}`;
+      hi!.textContent = `highest ${scoreText(highest)}`;
+    },
+  };
+}
+
 function fetchBundle(src: string): Promise<CityBundle> {
   return fetch(src).then((r) => {
     if (!r.ok) throw new Error(`fetch ${src} failed: ${r.status} ${r.statusText}`);
@@ -291,6 +364,20 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
   const cityToggle = checkboxInput();
   const cityLabel = controlLabel(cityToggle, " Show Nairobi instead of Cape Town");
 
+  const colourSelect = selectInput();
+  for (const c of COLOURINGS) {
+    const opt = document.createElement("option");
+    opt.value = c;
+    opt.textContent = colouringName(c);
+    colourSelect.append(opt);
+  }
+  const colourLabel = controlLabel("Colour by ", colourSelect);
+
+  // The score view's legend, under the picture and shown only in that view: the ramp, its ends
+  // and the floor between them, and what a shade means. Its ticks are the scores at the ends and
+  // the floor, rewritten every render.
+  const legend = scoreLegend();
+
   // Static, no `aria-live`: see `describeFollow`. It sits between the canvas and the controls so a
   // screen reader meets the picture's own description where the picture is, before the controls
   // that change it.
@@ -304,7 +391,7 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
   // must not interrupt itself.
   readout.setAttribute("aria-live", "polite");
 
-  controls.append(metricLabel, floorLabel, cityLabel, readout);
+  controls.append(metricLabel, floorLabel, cityLabel, colourLabel, readout);
 
   // Canvas and controls go BEFORE any <figcaption>, so the mount point keeps picture-then-caption
   // reading order. The fallback <img> is NOT removed here: it goes after the first successful
@@ -312,14 +399,15 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
   // the static picture the error text points the reader at.
   if (caption) {
     host.insertBefore(cv, caption);
+    host.insertBefore(legend.box, caption);
     host.insertBefore(followNote, caption);
     host.insertBefore(controls, caption);
   } else {
-    host.append(cv, followNote, controls);
+    host.append(cv, legend.box, followNote, controls);
   }
 
   const state: StateSource<ScreenState> = makeState({
-    city: "capetown", metric: "depth_density_proxy", floor: null,
+    city: "capetown", metric: "depth_density_proxy", floor: null, colour: "selection",
   });
   // A URL (piece E) may have set any of the three before this line, so all three controls are
   // written from STATE rather than from the initials above -- and the slider's bounds and value are
@@ -328,6 +416,7 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
   const s0 = state.get();
   metricSelect.value = s0.metric;
   cityToggle.checked = s0.city === "nairobi";
+  colourSelect.value = s0.colour;
   const resolved = syncFloor(floorSlider, bundles[s0.city], s0.metric, s0.floor);
   // `?floor=` is a bare finite number; where it falls in THIS metric's score range is a property of
   // the fetched bundle, which no codec can know (design §2.3). `syncFloor` has already pinned the
@@ -347,6 +436,9 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
     // through the same `defaultFloorFor`, and `null` additionally keeps `?floor=` out of the URL
     // for a reader who only switched metric.
     state.set({ metric, floor: null });
+  });
+  colourSelect.addEventListener("change", () => {
+    state.set({ colour: asColouring(colourSelect.value) });
   });
   cityToggle.addEventListener("change", () => {
     const city: ScreenState["city"] = cityToggle.checked ? "nairobi" : "capetown";
@@ -404,7 +496,16 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
     // metric's own calibration instead of at the previous metric's number.
     const floor = st.floor ?? defaultFloorFor(bundle, st.metric, s);
     const sel = selectAt(bundle, order, s, floor);
-    layer.paintFrame(ctx, bundle, view, bundle.encoding, order, sel.count, size);
+    switch (st.colour) {
+      case "selection":
+        layer.paintFrame(ctx, bundle, view, bundle.encoding, order, sel.count, size);
+        break;
+      case "score":
+        paintScoreFrame(ctx, bundle, view, bundle.encoding, rankShades(bundle, order, s, floor),
+                        size);
+        break;
+    }
+    legend.show(st.colour === "score", s[order[order.length - 1]!]!, floor, s[order[0]!]!);
     // Every number the picture shows is also present as text, computed from the same `sel` the
     // picture was drawn from -- there is no second call to `selectAt` that could disagree with it.
     readout.textContent = describeSelection(st.city, bundle, sel);

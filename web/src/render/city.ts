@@ -202,15 +202,68 @@ export function createLayer(): CityLayer {
       //
       // `follow` is absent for Nairobi (screen_map.d.ts), so this branch is a real optional, not a
       // guard: a bundle that carries no followed block draws no ring.
-      const follow = bundle.follow;
-      if (follow !== undefined) {
-        const [fx, fy] = toScreen(view, follow.x, follow.y);
-        ctx.beginPath();
-        ctx.arc(fx, fy, FOLLOW_RADIUS_PX, 0, Math.PI * 2);
-        ctx.strokeStyle = e.follow_color;
-        ctx.lineWidth = FOLLOW_LW_PX;
-        ctx.stroke();
-      }
+      drawFollow(ctx, bundle, view, e, false);
     },
   };
+}
+
+/** `bundle.follow`'s ring in `e.follow_color`, over whatever the frame has drawn; `halo` puts a
+ * white ring under it first, for the score view's dark ground and blue blocks, where the blue
+ * alone would sink in. Absent for Nairobi (screen_map.d.ts), so a bundle that carries no followed
+ * block draws no ring. */
+function drawFollow(ctx: CanvasRenderingContext2D, bundle: CityBundle, view: View, e: CityEncoding,
+                    halo: boolean): void {
+  const follow = bundle.follow;
+  if (follow === undefined) return;
+  const [fx, fy] = toScreen(view, follow.x, follow.y);
+  const ring = (style: string, lineWidth: number): void => {
+    ctx.beginPath();
+    ctx.arc(fx, fy, FOLLOW_RADIUS_PX, 0, Math.PI * 2);
+    ctx.strokeStyle = style;
+    ctx.lineWidth = lineWidth;
+    ctx.stroke();
+  };
+  if (halo) ring(FOLLOW_HALO, FOLLOW_LW_PX * 2);
+  ring(e.follow_color, FOLLOW_LW_PX);
+}
+
+/** The score view's ramp: blue below the floor, pale at it, red above (ColorBrewer's RdBu, seven
+ * classes, read as a continuous ramp), and the ground it is drawn on -- dark in BOTH colour
+ * schemes, since the pale colours at the floor vanish on a light page. The widget's own, not the
+ * bundle's: the static figure and gen_screen_map.py draw only the selection view. */
+export const SCORE_RAMP = [
+  "#2166ac", "#67a9cf", "#d1e5f0", "#f7f7f7", "#fddbc7", "#ef8a62", "#b2182b",
+] as const;
+export const SCORE_GROUND = "#2b2e33";
+const FOLLOW_HALO = "#ffffff";
+
+const RAMP_RGB = SCORE_RAMP.map((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)));
+
+/** The colour at `u` (0 to 1) along SCORE_RAMP, linear in sRGB between its stops. */
+export function rampColour(u: number): string {
+  const t = Math.max(0, Math.min(1, u)) * (RAMP_RGB.length - 1);
+  const i = Math.min(RAMP_RGB.length - 2, Math.floor(t));
+  const f = t - i, a = RAMP_RGB[i]!, b = RAMP_RGB[i + 1]!;
+  return `rgb(${a.map((v, j) => Math.round(v + (b[j]! - v) * f)).join(",")})`;
+}
+
+/** The score view's frame: the ground, then EVERY block in its own shade (`shades`, model/screen.ts
+ * `rankShades`), filled and outlined in it at `e.block_lw` as the base layer's blocks are (a
+ * sub-pixel block is nothing but its outline), then the follow ring with its halo. An O(n_blocks)
+ * pass per frame, unlike the selection view's blit: a floor move changes every block's rank on
+ * its side, so there is no unchanged layer to keep. Drawn straight onto the visible canvas, never
+ * into the selection view's offscreen base layer, which stays valid for a switch back. */
+export function paintScoreFrame(ctx: CanvasRenderingContext2D, bundle: CityBundle, view: View,
+                                e: CityEncoding, shades: Float64Array,
+                                size: { width: number; height: number }): void {
+  ctx.clearRect(0, 0, size.width, size.height);
+  ctx.fillStyle = SCORE_GROUND;
+  ctx.fillRect(0, 0, size.width, size.height);
+  const screen = screenRingsOf(bundle, view);
+  for (let i = 0; i < screen.length; i++) {
+    const style = rampColour(shades[i]!);
+    fillBlock(ctx, screen[i]!, style);
+    strokeBlock(ctx, screen[i]!, style, e.block_lw);
+  }
+  drawFollow(ctx, bundle, view, e, true);
 }

@@ -343,11 +343,21 @@ interface Column {
   readonly note: HTMLParagraphElement;
 }
 
+/** How a series' whole run time was had, in the heading's words: recorded by the method's own
+ * run, timed by a run made to time it, or measured (topology's). Exhaustive over the kinds. */
+function runHow(run: DemoSeries["run"]): string {
+  switch (run.kind) {
+    case "recorded": return "recorded";
+    case "timed": return "timed";
+    case "measured": return "measured";
+  }
+}
+
 function column(s: DemoSeries, src: string, metric: string, headed: boolean,
                 parent: HTMLElement): Column {
   const col = div("sbu-buildout__col");
   if (headed) {
-    const how = s.run.kind === "recorded" ? "recorded" : "measured";
+    const how = runHow(s.run);
     // The heading's time is the whole run's; each step's "Built in" is the same run's time to it.
     col.append(para("sbu-buildout__head", s.label),
                // A measured run as the page's prose states it (1.9 hours), a recorded one as

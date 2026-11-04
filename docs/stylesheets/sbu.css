@@ -1459,11 +1459,60 @@ body,
   font-variant-numeric: tabular-nums;
 }
 
+/* On a phone five columns leave a word per line, so each block's row stacks: the block on a line
+   of its own, then a line per method, its name (the cell's `data-label`, the column's header) to
+   the left of its time. The header row stays for screen readers, off screen. */
 @media screen and (max-width: 44.9375em) {
-  .md-typeset .sbu-runtimes th,
+  .md-typeset .sbu-runtimes,
+  .md-typeset .sbu-runtimes tbody,
+  .md-typeset .sbu-runtimes tr {
+    display: block;
+  }
+
+  .md-typeset .sbu-runtimes caption {
+    display: block;
+  }
+
+  .md-typeset .sbu-runtimes thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .md-typeset .sbu-runtimes tbody th {
+    display: block;
+    padding: 0.6rem 0.3rem 0.2rem;
+    border-top: 2px solid var(--sbu-red-fill);
+  }
+
+  [data-md-color-scheme="slate"] .md-typeset .sbu-runtimes tbody th {
+    border-top-color: var(--sbu-red-ink);
+  }
+
+  .md-typeset .sbu-runtimes tbody th span {
+    display: inline;
+    margin-left: 0.5rem;
+  }
+
   .md-typeset .sbu-runtimes td {
+    display: grid;
+    grid-template-columns: 9rem 1fr;
+    column-gap: 0.6rem;
     padding: 0.4rem 0.3rem;
-    hyphens: auto;
+  }
+
+  .md-typeset .sbu-runtimes td::before {
+    content: attr(data-label);
+    grid-row: span 2;
+    font-weight: 700;
+    color: var(--sbu-ink);
+  }
+
+  .md-typeset .sbu-runtimes td strong {
+    font-size: var(--sbu-step-0);
   }
 }
 
@@ -1584,6 +1633,7 @@ body,
   .sbu-formula--narrow {
     display: block;
   }
+}
 
 /* ------------------------------------------------------------------- shared controls */
 
@@ -1684,4 +1734,32 @@ body,
   display: block;
   width: 50% !important;
   margin-inline: auto;
+}
+
+/* The screen map's score view legend (screen-map.ts `scoreLegend`): the ramp, framed in the map's
+   dark ground by the widget, its three ticks under it (the lowest score, the floor at the middle,
+   the highest), and a line on what a shade means. Hidden in the selection view. */
+.md-typeset .sbu-screenmap__legend {
+  margin: 0.6rem auto 0;
+  max-width: 28rem;
+  font-size: var(--sbu-step--1);
+  color: var(--sbu-ink);
+}
+.md-typeset .sbu-screenmap__legend[hidden] {
+  display: none;
+}
+.md-typeset .sbu-screenmap__ramp {
+  height: 0.9rem;
+  border-radius: 3px;
+}
+.md-typeset .sbu-screenmap__ticks {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.15rem;
+  font-variant-numeric: tabular-nums;
+}
+.md-typeset .sbu-screenmap__note {
+  display: block;
+  margin-top: 0.3rem;
 }

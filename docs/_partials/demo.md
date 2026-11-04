@@ -12,12 +12,16 @@
        meta.json and the bundle.
      * DEMOFIRES -- the fires reported near the block, as a list. NO map draws them: some reports'
        streets cannot be placed (owner, 2026-10-28). Keep it that way.
-     * DEMOMETHOD -- the method's name and how it works, in the bundle's words.
-     * DEMOBUILDOUT -- the build-out widget: the budget slider, each frame's escape-time plate,
-       and three plots whose dots follow the slider.
-     * DEMOCOMPARE -- our method beside the earlier one: on the comparison block both built out
-       under one budget slider (the build-out widget, two series); on this page's block, run
-       times only, topology's estimated.
+     * DEMOMETHOD -- our method's name and how it works, and the shipped method's set beside it
+       (owner, 2026-11-04: that one alone of the shipped methods), linked to its page, in the
+       bundle's words.
+     * DEMOBUILDOUT -- the two side by side on this page's block, in words at three budgets, then
+       the build-out widget: the budget slider, each method's escape-time plate, and three plots
+       whose dots follow the slider.
+     * DEMOCOMPARE -- our method beside the earlier one: a run-times table for every method on
+       both blocks (topology's estimated on this page's block, the shipped method's timed on it
+       alone); on the comparison block both built out under one budget slider (the build-out
+       widget, two series).
 
      Edit HERE, never docs/demo.md (it is generated and gitignored). This file is committed but
      excluded from the built site (see exclude_docs in mkdocs.yml).
@@ -33,8 +37,9 @@
 
 <!-- DEMOPLACE -->
 
-One Cape Town block, from the screen that picks it out to the roads one method builds through it,
-and that method set beside the earlier one. Every control writes to the address bar.
+One Cape Town block, from the screen that picks it out to the roads our method builds through it,
+set beside one of the methods this site ships, and our method set beside the earlier one on a
+second block. Every control writes to the address bar.
 
 ## Why this block {#screening}
 
@@ -84,10 +89,12 @@ inside the block, and none is mapped, since not every report's street can be pla
 
 ## Roads through the block {#methods}
 
+Our method, and beside it one of the [methods this site ships](methodology/methods/index.md):
+
 <!-- DEMOMETHOD -->
 
-Drag the budget: each step lets the method displace more of the homes' floor area, and the dots on
-the plots follow.
+Drag the budget: each step lets both methods displace more of the homes' floor area, and both
+plates and the dots on the plots follow.
 
 <!-- DEMOBUILDOUT -->
 

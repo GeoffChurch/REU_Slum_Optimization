@@ -1177,10 +1177,35 @@ def test_the_demo_shows_the_screen_map_at_half_size_and_only_the_demo() -> None:
     assert re.search(
         r'<div class="sbu-demo-screenmap" markdown>\s*<figure data-widget="screen-map"', demo)
     assert "sbu-demo-screenmap" not in screening and 'data-widget="screen-map"' in screening
-    css = (ROOT / "docs" / "stylesheets" / "sbu.css").read_text(encoding="utf-8")
+    css = _css_without_comments()
     rule = re.search(
         r'\.sbu-demo-screenmap figure\[data-widget="screen-map"\] > canvas,[^{]*\{([^}]*)\}', css)
     assert rule is not None and "width: 50% !important" in rule.group(1)
+    # At every width: a rule left inside an unclosed @media applies only under its query.
+    assert _css_depth(css, rule.start()) == 0, "the rule sits inside an at-rule"
+
+
+def _css_without_comments() -> str:
+    """sbu.css with each comment blanked to spaces (newlines kept), so braces in prose do not
+    count and offsets stay those of the file."""
+    css = (ROOT / "docs" / "stylesheets" / "sbu.css").read_text(encoding="utf-8")
+    return re.sub(r"/\*.*?\*/", lambda m: re.sub(r"[^\n]", " ", m.group(0)), css, flags=re.S)
+
+
+def _css_depth(css: str, at: int) -> int:
+    """How many blocks are open at offset `at`."""
+    return css.count("{", 0, at) - css.count("}", 0, at)
+
+
+def test_the_stylesheet_closes_every_block() -> None:
+    """89f9dbc1 left an @media (max-width: 55.9375em) open: every rule after it -- the shared
+    controls, the Demo's half-size map -- applied only on narrow screens, and nothing failed. Each
+    block the sheet opens it closes, and no closing brace runs ahead of its opening one."""
+    css = _css_without_comments()
+    depths = [_css_depth(css, i) for i, ch in enumerate(css) if ch in "{}"]
+    assert min(depths, default=0) >= 0, "a closing brace with no block open"
+    assert _css_depth(css, len(css)) == 0, "a block left open at the end of the sheet"
+    assert _css_depth(css, css.index(".sbu-controls {")) == 0
 
 
 def test_the_demo_hides_its_table_of_contents(tmp_path: Path,
@@ -1278,7 +1303,7 @@ def test_the_demo_ships_every_sheet_beside_its_build_out(
     gsp._demo_compare()
     bundle = _demo_bundle()
     names = (bundle["block"]["buildout"], bundle["comparison"]["buildout"])
-    assert [len(_demo_buildout(n)["series"]) for n in names] == [1, 2]
+    assert [len(_demo_buildout(n)["series"]) for n in names] == [2, 2]
     for name in names:
         assert (tmp_path / "assets" / "demo" / name).is_file(), name
         for s in _demo_buildout(name)["series"]:
@@ -1434,12 +1459,12 @@ def _demo_views() -> list[tuple[str, Any]]:
 
 
 def test_every_block_level_view_shows_what_surrounds_the_block() -> None:
-    """Owner, 2026-10-29: the four block-level views -- 5810's build-out, the two 41785 plates,
-    the peel figure -- show the neighbouring blocks and their buildings in the Explore page's
-    pale grey. Each view's border strip, outside the block, holds some of that grey; without the
+    """Owner, 2026-10-29: the block-level views -- 5810's two plates, the two 41785 plates, the
+    peel figure -- show the neighbouring blocks and their buildings in the Explore page's pale
+    grey. Each view's border strip, outside the block, holds some of that grey; without the
     layer it is white."""
     views = _demo_views()
-    assert len(views) == 4
+    assert len(views) == 5
     for name, im in views:
         share = _context_share(im)
         # 6.5-22% on the views drawn with it; at most 1.8% on the same views without it (main
@@ -1462,27 +1487,30 @@ def test_the_fires_are_listed_and_carry_nothing_a_map_could_draw(demo_body: str)
 
 def _runtime_rows(section: str) -> dict[str, list[tuple[str, str, str]]]:
     """The comparison's runtime table: per row's block (its short id), each cell's (time, how,
-    class)."""
+    class). Each cell's label (what a phone shows beside it) is its column's header."""
     m = re.search(r'<table class="sbu-runtimes">(.*?)</table>', section, flags=re.S)
     assert m is not None, "the comparison has no runtime table"
+    heads = re.findall(r'<th scope="col">([^<]*)</th>', m.group(1))[1:]
     rows: dict[str, list[tuple[str, str, str]]] = {}
     for row in re.findall(r'<tr><th scope="row">(.*?)</tr>', m.group(1), flags=re.S):
         block = re.search(r"<code>([^<]*)</code>", row)
         assert block is not None
-        rows[block.group(1)] = [
-            (time, re.sub(r"<[^>]*>", "", how), cls)
-            for cls, time, how in re.findall(
-                r'<td(?: class="([^"]*)")?><strong>([^<]*)</strong><span>(.*?)</span></td>', row)]
+        cells = re.findall(r'<td(?: class="([^"]*)")? data-label="([^"]*)"><strong>([^<]*)'
+                           r"</strong><span>(.*?)</span></td>", row)
+        assert [label for _, label, _, _ in cells] == heads, (block.group(1), heads)
+        rows[block.group(1)] = [(time, re.sub(r"<[^>]*>", "", how), cls)
+                                for cls, _, time, how in cells]
     return rows
 
 
 def test_the_demo_plots_displacement_and_road_and_the_faceoff_run_time(demo_body: str) -> None:
     """Owner, 2026-10-29: conductance leaves the Demo -- no plot, readout or bundle field; the
-    5810 caption says in one sentence why it is not plotted. 5810's build-out plots escape time
-    saved against displacement and new road; the face-off adds run time."""
+    5810 caption says in one sentence why it is not plotted. Both build-outs plot escape time
+    saved against displacement, new road and run time (5810's since it set two methods side by
+    side, owner 2026-11-04)."""
     d = _demo_bundle()
     page, faceoff = (_demo_buildout(d[k]["buildout"]) for k in ("block", "comparison"))
-    assert page["plots"] == ["displacement", "road"]
+    assert page["plots"] == ["displacement", "road", "time"]
     assert faceoff["plots"] == ["displacement", "road", "time"]
     for bo in (page, faceoff):
         for s in bo["series"]:
@@ -1516,9 +1544,10 @@ def test_the_faceoff_opens_at_the_six_percent_budget() -> None:
 def test_the_runtime_table_times_every_method_on_both_blocks(demo_body: str) -> None:
     """Owner, 2026-10-29: one small table near the top of the comparison -- the two blocks by
     topology's original implementation, our optimized port of it, and our method -- each cell
-    saying whether it was measured, expected or estimated, every number from the bundle; our
-    method's cells green and marked "fastest", so colour is not the only cue; the old times row
-    at the end is gone."""
+    saying whether it was measured, expected or estimated, every number from the bundle; the old
+    times row at the end is gone. Owner, 2026-11-04: the shipped method set beside ours on the
+    page's block has a column too, timed there alone. The fastest cell on each block is green and
+    marked "fastest", so colour is not the only cue, wherever it falls."""
     import scripts.gen_site_pages as gsp
 
     d = _demo_bundle()
@@ -1527,7 +1556,8 @@ def test_the_runtime_table_times_every_method_on_both_blocks(demo_body: str) -> 
     head = re.search(r"<thead>(.*?)</thead>", section, flags=re.S)
     assert head is not None
     assert re.findall(r'<th scope="col">([^<]*)</th>', head.group(1)) == [
-        "Block", "Topology, original implementation", "Topology, our optimized port", name]
+        "Block", "Topology, original implementation", "Topology, our optimized port", name,
+        d["beside"]["name"]]
     assert section.index('class="sbu-runtimes"') < section.index('data-widget="build-out-compare"')
     rows = _runtime_rows(section)
     short_c, short_b = gsp._short(c["block_id"]), gsp._short(b["block_id"])
@@ -1535,17 +1565,33 @@ def test_the_runtime_table_times_every_method_on_both_blocks(demo_body: str) -> 
     t = gsp._topology_of(c["topology"], c["block_id"])
     pt = gsp._topology_of(b["topology"], b["block_id"])
     [ours] = [s for s in _demo_buildout(c["buildout"])["series"] if s["label"].endswith(name)]
-    [page] = _demo_buildout(b["buildout"])["series"]
-    (o1, h1, _), (p1, hp1, _), (s1, hs1, cs1) = rows[short_c]
-    (o2, h2, _), (p2, hp2, _), (s2, hs2, cs2) = rows[short_b]
+    page_bo = _demo_buildout(b["buildout"])
+    page, beside = page_bo["series"]
+    last = f"{page_bo['budgets'][-1]:.0%}"
+    (o1, h1, _), (p1, hp1, _), (s1, hs1, _), (n1, hn1, cn1) = rows[short_c]
+    (o2, h2, _), (p2, hp2, _), (s2, hs2, _), (n2, hn2, _) = rows[short_b]
     assert (o1, h1) == (t.original(), "expected1")
     assert (p1, hp1) == (gsp._measured_time(c["topology"]["seconds"]), "measured2")
     assert (o2, h2) == (pt.original(), "estimated1")
     assert (p2, hp2) == (pt.figure(page["run"]["seconds"])[0], "estimated1")
-    assert s1 == gsp._duration(ours["run"]["seconds"])
-    assert s2 == gsp._duration(page["run"]["seconds"])
-    for how, cls in ((hs1, cs1), (hs2, cs2)):
-        assert cls == "sbu-runtimes__fastest" and "fastest" in how and "measured" in how
+    assert s1 == gsp._duration(ours["run"]["seconds"]) and hs1.startswith("measured, whole run")
+    # On the page's block, each method's time to the slider's last budget: the whole run for
+    # ours (it stops there), the timed run's time to that network for the method beside it.
+    assert s2 == gsp._duration(page["cells"][-1]["step"]["seconds"])
+    assert hs2.startswith(f"measured, to a {last} budget")
+    assert n2 == gsp._duration(beside["cells"][-1]["step"]["seconds"])
+    assert hn2.startswith(f"measured, to a {last} budget{gsp._TIMED_K}")
+    assert (n1, hn1, cn1) == ("—", "not timed on this block", "")
+    # The fastest on each block, by the bundle's own seconds, is the one marked.
+    for blk, cells, secs in (
+            (short_c, rows[short_c], [t.original_s(), t.least_s(), ours["run"]["seconds"]]),
+            (short_b, rows[short_b], [pt.original_s(), pt.least_s(),
+                                      page["cells"][-1]["step"]["seconds"],
+                                      beside["cells"][-1]["step"]["seconds"]])):
+        k = secs.index(min(secs))
+        marked = [i for i, (_, how, cls) in enumerate(cells)
+                  if cls == "sbu-runtimes__fastest" and how.endswith("fastest")]
+        assert marked == [k], f"{blk}: fastest marked at {marked}, the bundle's is {k}"
     # The original's time follows from the port's by the fit at the block's size.
     expected = c["topology"]["seconds"] * c["topology"]["original_factor"]
     assert t.original() == f"about {gsp._duration(expected)}"
@@ -1553,6 +1599,79 @@ def test_the_runtime_table_times_every_method_on_both_blocks(demo_body: str) -> 
     assert 'class="sbu-compare__time"' not in demo_body, "the old times row is back"
     assert section.count('aria-label="How these were estimated"') == 4
     assert section.count('aria-label="How this was measured"') == 2
+    assert section.count('aria-label="How this was timed"') == 1
+
+
+def test_the_page_block_sets_the_shipped_method_beside_ours_in_words_from_the_bundle(
+        demo_body: str) -> None:
+    """Owner, 2026-11-04: on 5810 our method beside the Loop Network alone, both on one slider,
+    and said plainly: at each of the three budgets who is ahead and by how much, every number the
+    build-out's, "narrowly" under two points; each one's time to the last budget's network."""
+    import scripts.gen_site_pages as gsp
+
+    d = _demo_bundle()
+    bo = _demo_buildout(d["block"]["buildout"])
+    ours, beside = bo["series"]
+    assert (ours["method"], beside["method"]) == (d["method"]["name"], d["beside"]["name"])
+    section = demo_body.split("## Roads through the block")[1].split("## Our method")[0]
+    takeaway = re.search(r'<p class="sbu-compare__takeaway">([^<]*)</p>', section)
+    assert takeaway is not None
+    text = takeaway.group(1)
+    for b in gsp._FACEOFF_AT:
+        k = bo["budgets"].index(b)
+        o, t = (s["cells"][k]["step"]["permeability"] for s in (ours, beside))
+        side = "ahead" if o > t else "behind"
+        word = f"narrowly {side}" if abs(o - t) < gsp._NARROW else side
+        assert f"{b:.0%}" in text and f"{o:.1%}" in text and f"{t:.1%}" in text, (b, text)
+        assert re.search(rf"{b:.0%}[^;]*is {word}", text), (b, word, text)
+    assert "beats" not in text and "outperform" not in text
+    for s in (ours, beside):
+        assert gsp._duration(s["cells"][-1]["step"]["seconds"]) in text
+    assert section.index('class="sbu-compare__takeaway"') < section.index('data-widget="build-out"')
+    # Both methods named and explained, the shipped one linked to its page under the site's name.
+    m = next(m for m in gsp.METHODS if m.slug == d["beside"]["key"])
+    assert (f'<a href="../methodology/methods/{m.slug}/">{m.display_title}</a>.</strong> '
+            f"{d['beside']['blurb']}") in section
+    assert f"<strong>{d['method']['name']}.</strong> {d['method']['blurb']}" in section
+
+
+def test_the_timed_run_is_noted_with_its_conditions(demo_body: str) -> None:
+    """The shipped method's time on 5810 is a run made to time it (build.py's DemoTimed): the
+    note says where and how it ran, why a plate's time is when every road on it was built, and
+    the whole run's time; the 5810 caption links it."""
+    import scripts.gen_site_pages as gsp
+
+    d = _demo_bundle()
+    bo = _demo_buildout(d["block"]["buildout"])
+    ours, beside = bo["series"]
+    r = beside["run"]
+    assert r["kind"] == "timed" and r["machine"] == ours["run"]["machine"]
+    note = re.search(rf'id="{gsp._TIMED_NOTE}"><sup>\d+</sup> (.*?)</p>', demo_body)
+    assert note is not None
+    for fact in (f"load average {r['load']:.1f} on its {r['cores']} cores", "one thread",
+                 f"{gsp._duration(beside['cells'][-1]['step']['seconds'])} to the "
+                 f"{bo['budgets'][-1]:.0%} network",
+                 f"took {gsp._duration(r['seconds'])}", "every road on it"):
+        assert fact in note.group(1), fact
+    caption = demo_body.split("## Roads through the block")[1].split("</figure>")[0]
+    assert f'href="#{gsp._TIMED_NOTE}"' in caption
+
+
+def test_a_beside_method_the_site_does_not_name_so_refuses_to_build(
+        monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """The bundle names the shipped method by its key and its name; a name the site's METHODS
+    does not give that key (a rename on one branch only) fails the build."""
+    import json
+
+    import scripts.gen_site_pages as gsp
+
+    bundle = _demo_bundle()
+    assert gsp._demo_method(), "the committed bundle renders nothing; this would check nothing"
+    bundle["beside"]["name"] = "Loop Road"
+    (tmp_path / "demo.json").write_text(json.dumps(bundle), encoding="utf-8")
+    monkeypatch.setattr(gsp, "DEMO", tmp_path)
+    with pytest.raises(SystemExit, match="the site names it"):
+        gsp._demo_method()
 
 
 def test_topology_is_named_as_our_port_with_the_originals_times_footnoted(
@@ -1578,7 +1697,7 @@ def test_topology_is_named_as_our_port_with_the_originals_times_footnoted(
                  f"{d['block']['topology']['original_factor']:.1f}×",
                  f"<code>{gsp._short(d['block']['block_id'])}</code>, never run"):
         assert fact in note.group(1), fact
-    assert len(re.findall(r'class="sbu-footnote"', section)) == 2
+    assert len(re.findall(r'class="sbu-footnote"', section)) == 3
 
 
 def test_the_measured_note_says_where_topologys_time_went(demo_body: str) -> None:

@@ -180,6 +180,11 @@
   "name": "Shock Reblock",
   "blurb": "Each new road runs from the street, or a road already built, across the block and back to a street or road. At each step the method tries the cheapest routes through the gaps between buildings and builds the one that saves the most escape time for the homes it displaces. Named for thermal-shock cracking: as a quenched ceramic cracks inward from its cold surface and each crack ends on another, each new road here runs in from the street toward the homes with the longest way out and joins the network at both ends, so every road is on a loop."
  },
+ "beside": {
+  "key": "cycle_native",
+  "name": "Loop Network",
+  "blurb": "Builds loops. Each step lays a path from the street to a chosen home and a second path back that shares no edge with the first, and builds the loop that saves the most escape time for the homes it displaces. No dead ends."
+ },
  "encoding": {
   "road": "#475569",
   "street": "#1e293b",

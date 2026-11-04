@@ -2,7 +2,9 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { CityBundle } from "../src/screen_map.js";
-import { METRICS, ranking, scores, selectAt, type MetricName } from "../src/model/screen.js";
+import {
+  METRICS, rankShades, ranking, scores, selectAt, type MetricName,
+} from "../src/model/screen.js";
 
 const ct = JSON.parse(
   readFileSync("../examples/screen-map/capetown.json", "utf8")) as CityBundle;
@@ -79,4 +81,41 @@ test("raising the floor never enlarges the selection", () => {
   // A selection that never changes satisfies `n <= prev` at every step while testing nothing.
   assert.ok(new Set(counts).size > 2,
     `the floor sweep produced ${new Set(counts).size} distinct pool size(s): ${counts}`);
+});
+
+test("score shades: each side of the floor takes half the ramp, by area-weighted mid-rank", () => {
+  // Brute force on a five-block bundle, against the definition: a block's shade is the share of
+  // its side's area scoring lower than it, its own counted half, put into its side's half.
+  const area = [10, 30, 20, 40, 50];
+  const b = { n_blocks: 5, area_m2: area } as unknown as CityBundle;
+  const s = Float64Array.from([0.1, 0.5, 0.3, 0.9, 0.7]);
+  const order = Int32Array.from([3, 4, 1, 2, 0]);               // descending by score
+  const floor = 0.5;                                            // selects 1, 3, 4 (>= floor)
+  const t = rankShades(b, order, s, floor);
+  const below = 10 + 20, above = 30 + 50 + 40;
+  const want = [0.5 * (5 / below), 0.5 + 0.5 * (15 / above), 0.5 * ((10 + 10) / below),
+                0.5 + 0.5 * ((30 + 50 + 20) / above), 0.5 + 0.5 * ((30 + 25) / above)];
+  want.forEach((w, i) => assert.ok(Math.abs(t[i]! - w) < 1e-12, `block ${i}: ${t[i]} not ${w}`));
+});
+
+test("score shades on Cape Town: sides split at 1/2, ranks ordered, each side's area mean its middle",
+  () => {
+  const s = scores(ct, "depth_density_proxy");
+  const order = ranking(ct, "depth_density_proxy");
+  const floor = ct.floors.find((f) => f.metric === "depth_density_proxy")!.value;
+  const t = rankShades(ct, order, s, floor);
+  let prev = -1, aBelow = 0, aAbove = 0, mBelow = 0, mAbove = 0;
+  for (let i = order.length - 1; i >= 0; i--) {
+    const k = order[i]!, a = ct.area_m2[k]!;
+    const up = s[k]! >= floor;
+    assert.ok(up ? t[k]! >= 0.5 && t[k]! <= 1 : t[k]! >= 0 && t[k]! < 0.5,
+      `block ${k} (score ${s[k]}) shaded ${t[k]} on the wrong side of the floor`);
+    assert.ok(t[k]! >= prev, `shade falls at block ${k} though its score does not`);
+    prev = t[k]!;
+    if (up) { aAbove += a; mAbove += a * t[k]!; } else { aBelow += a; mBelow += a * t[k]!; }
+  }
+  // An area-weighted mid-rank's area-weighted mean is exactly the middle of its range: 1/4 and
+  // 3/4. A count-weighted rank, or a rank over the whole city, misses both.
+  assert.ok(Math.abs(mBelow / aBelow - 0.25) < 1e-9, `below: ${mBelow / aBelow}`);
+  assert.ok(Math.abs(mAbove / aAbove - 0.75) < 1e-9, `above: ${mAbove / aAbove}`);
 });
