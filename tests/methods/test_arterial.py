@@ -201,41 +201,40 @@ def test_arterial_serial_refactor_identical() -> None:
         assert sorted(g.wkt for g in roads.geometry) == want
 
 
-def test_arterial_parallel_identical_to_serial(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("grid_n,n_anchors,max_roads,realizer", [
+    (2, 3, 2, SnapToBoundary(lam=2.0)),
+    (3, 3, 4, IdealChord()),
+], ids=["snap", "ideal"])
+def test_arterial_parallel_identical_to_serial(monkeypatch: pytest.MonkeyPatch, grid_n: int,
+                                               n_anchors: int, max_roads: int,
+                                               realizer: SnapToBoundary | IdealChord) -> None:
     # The acceptance gate for the fork process pool: parallel roads must be WKT-identical to serial.
-    # Force the threshold to 1 so EVERY step genuinely dispatches the fork pool on this small, fast,
-    # EARLY-TERMINATING block. n_anchors=6 (the same known-fast config as
-    # test_arterial_serial_refactor_identical) keeps candidate counts modest so each step forks
-    # quickly, while the block still terminates well before max_roads=15 in BOTH modes -- so the
-    # final all-non-positive-gain step also runs through the pool. Without the forced-low
-    # threshold, candidates < 128 and the "parallel" run would silently fall back to serial, proving
-    # nothing.
-    #
-    # Two workers, once. A pool of 2 runs the same fork/map/chunk path a pool of 16 does (and its
-    # chunks are longer, so a chunk-boundary bug has more room to show); the mapping is
-    # deterministic, so repeating it re-asks the same question. This and
-    # test_arterial_proposal_wkt_unchanged (serial == the pinned 1808 reference) are what the
-    # deleted `..._matches_reference_1808` (pool on 1808 == reference) and
-    # `..._deterministic` (pool == pool) checked between them: fault-injected 2026-11-04,
-    # scoring only half of each step's candidates in the pool fails this test, as it failed the
-    # first (the second, comparing a pool with itself, passed it).
+    # Force the threshold to 1 so EVERY step genuinely dispatches the fork pool. Without it, these
+    # candidate counts stay under 128 and the "parallel" run silently falls back to serial,
+    # proving nothing. Two workers: the least that is a pool (workers=1 IS the serial path), and
+    # the same fork/map/chunk path as 16. Once: the mapping is deterministic.
     #
     # `.wkt` is full precision under shapely 2 (the round trip returns the same doubles), so this
-    # also checks what the deleted `..._geometry_bit_identical` did -- coordinate-exact winners
-    # across the process boundary -- on the same propose: a pool returning its winners through a
-    # 1-decimal wkt fails both.
+    # compares winners coordinate-exactly across the process boundary. Bisected 2026-11-04 against
+    # two faults in the pool path, then one step past the minimum:
+    #   - scoring only half of each step's candidates fails `snap` from a 2x2 grid, 2 anchors,
+    #     1 road up (chosen 3 anchors, 2 roads -- the 2x2 grid runs out of gain after one road,
+    #     so the terminating step goes through the pool too); `ideal` fails it as well;
+    #   - returning winners through a 1-decimal wkt fails only `ideal` (snapped vertices are whole
+    #     metres here), and only on a 3x3 grid from 3 roads up, at 3 or 6 anchors -- 2 and 4 put
+    #     every chord end on a whole metre. Chosen 3 anchors, 4 roads.
+    # Between them this covers what the deleted `..._matches_reference_1808` (pool on 1808 ==
+    # reference, with test_arterial_proposal_wkt_unchanged), `..._deterministic` (pool == pool,
+    # which passed the half-candidates fault) and `..._geometry_bit_identical` (which passed the
+    # 1-decimal fault) checked.
     monkeypatch.setattr(engines, "_PARALLEL_THRESHOLD", 1)
-    for realizer in (SnapToBoundary(lam=2.0), IdealChord()):
-        block = _grid_block(3)
-        serial = replace(ARTERIAL, realizer=realizer, n_anchors=6, workers=1).propose(block).roads
-        par = replace(ARTERIAL, realizer=realizer, n_anchors=6, workers=2).propose(block).roads
-        assert serial is not None and par is not None
-        # Non-vacuity guard: both modes commit roads on this block before terminating (5
-        # buildable, 6 aspirational -- see test_arterial_serial_refactor_identical), so an
-        # empty-vs-empty comparison here would mean the fixture regressed, not that the pool
-        # matched serial.
-        assert len(serial.geometry) > 0
-        assert sorted(g.wkt for g in serial.geometry) == sorted(g.wkt for g in par.geometry)
+    block = _grid_block(grid_n)
+    config = replace(ARTERIAL, realizer=realizer, n_anchors=n_anchors, max_roads=max_roads)
+    serial = replace(config, workers=1).propose(block).roads
+    par = replace(config, workers=2).propose(block).roads
+    assert serial is not None and par is not None
+    assert len(serial.geometry) > 0, "no roads: an empty-vs-empty comparison proves nothing"
+    assert sorted(g.wkt for g in serial.geometry) == sorted(g.wkt for g in par.geometry)
 
 
 def test_arterial_pools_leave_no_worker_alive(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,11 +246,13 @@ def test_arterial_pools_leave_no_worker_alive(monkeypatch: pytest.MonkeyPatch) -
     # propose returned roads -- fault-injected 2026-11-04, a pool that is never shut down passed
     # it, leaking a few hundred workers. Asking the process for its live children fails on that
     # fault after one propose.
+    # Bisected: one propose of one road on a 2x2 grid at 2 anchors fails on that fault; this
+    # runs two proposes of up to 2 roads at 3 anchors.
     monkeypatch.setattr(engines, "_PARALLEL_THRESHOLD", 1)
     before = set(multiprocessing.active_children())
-    block = _grid_block(3)
+    block = _grid_block(2)
     for _ in range(2):
-        roads = replace(ARTERIAL, objective=Directness(), n_anchors=6,
+        roads = replace(ARTERIAL, objective=Directness(), n_anchors=3, max_roads=2,
                         workers=2).propose(block).roads
         assert roads is not None
         assert len(roads) > 0
@@ -309,16 +310,19 @@ def test_greedy_first_arterial_cuts_the_deep_block() -> None:
 
 
 def test_greedy_is_deterministic() -> None:
-    # A 3x3 grid at 6 anchors, where equal-gain candidates are common, so the result rests on the
+    # A 2x2 grid, where equal-gain candidates come up at every step, so the result rests on the
     # tie-break being a total order. Fault-injected 2026-11-04 with a coin-flip tie-break in
-    # `_best_candidate`: two runs of this block differ about half the time (10 of 20), so it
-    # compares four, which miss it about one time in eight. The 5x5 / 12-anchor block this ran
-    # on before, at 3x the CPU of all four, never caught it (0 of 20).
-    block = _grid_block(3)
+    # `_best_candidate`: this block then lands on one of 4 road sets, the commonest about half the
+    # time (200 draws), so 11 runs agree by chance under 1 time in 1,000; 16 runs put that near
+    # 1 in 50,000, at 0.2 s a run. Any anchor count and road cap from 2 gives the same 4-way
+    # spread; 3 and 3 are one step past that. The 5x5 / 12-anchor pair this ran on first never
+    # produced a tie and passed the fault 20 times of 20; a 3x3 grid splits only 2 ways.
+    block = _grid_block(2)
     runs = [[g.wkt for g in _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(), max_roads=3,
-        n_anchors=6, workers=1).geometry] for _ in range(4)]
+        n_anchors=3, workers=1).geometry] for _ in range(16)]
+    assert runs[0], "no roads: nothing left to be deterministic about"
     assert all(r == runs[0] for r in runs[1:])
 
 

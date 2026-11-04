@@ -138,9 +138,9 @@ def test_grow_policy_only_adds():
 
 
 @pytest.mark.parametrize("grid_n,n_anchors,max_roads,realizer", [
-    (4, 8, 6, SnapToBoundary(lam=2.0)),   # an equal-gain tie: real.wkt vs chord.wkt tie-break
-    (3, 6, 8, SnapToBoundary(lam=2.0)),   # runs out of positive gains: termination
-    (3, 6, 6, IdealChord()),              # termination again, on the aspirational realizer
+    (4, 3, 7, SnapToBoundary(lam=2.0)),   # an equal-gain tie at road 6: real.wkt vs chord.wkt
+    (2, 3, 3, SnapToBoundary(lam=2.0)),   # runs out of positive gains after one road: termination
+    (2, 3, 3, IdealChord()),              # termination again, on the aspirational realizer
 ], ids=["tie-snap", "stop-snap", "stop-ideal"])
 def test_lazy_faithful_rescore1_equals_exact(grid_n, n_anchors, max_roads, realizer):
     # The engine-correctness gate (the oracle): rescore_every=1 + faithful policy re-scores every
@@ -148,15 +148,19 @@ def test_lazy_faithful_rescore1_equals_exact(grid_n, n_anchors, max_roads, reali
     # candidate set -- byte-identical road sequence to the exact greedy. A failure here is a
     # bookkeeping bug (a _StepState field, the heap tie-break, or termination), NOT submodularity.
     #
-    # One case per bug, each the cheapest that catches it (fault-injected 2026-11-04 against a
-    # 5-config x 2-realizer grid that cost 232 s of CPU; these three are ~22 s):
-    #   - ordering the heap by chord.wkt instead of real.wkt fails `tie-snap` (it needs a snapping
-    #     realizer, whose `real` differs from its chord, and a candidate set with an equal-gain
-    #     tie: of the old grid only the 6-road snap cases had one);
-    #   - continuing on zero gain (`<= 0.0` -> `< 0.0`) fails both `stop-*` cases, which run out of
-    #     positive gains before max_roads -- NONE of the old grid's five configs did, so it never
-    #     caught this;
-    #   - dropping this step's `after_commit` additions on a full re-score fails all three.
+    # One case per bug, each bisected to the smallest config that catches it and then one step
+    # past it on every parameter (fault-injected 2026-11-04):
+    #   - ordering the heap by chord.wkt instead of real.wkt fails `tie-snap`. It needs a snapping
+    #     realizer (whose `real` differs from its chord) and a candidate set with an equal-gain tie:
+    #     the smallest is a 4x4 grid at road 6, with any anchor count down to 2 (3x3 grids and
+    #     5-road runs never tie). Chosen: 3 anchors, 7 roads.
+    #   - continuing on zero gain (`<= 0.0` -> `< 0.0`) fails both `stop-*` cases: a 2x2 grid runs
+    #     out of positive gains after one road, so max_roads=2 is the least that reaches the
+    #     termination step, at any anchor count down to 2. Chosen: 3 anchors, 3 roads.
+    #   - dropping this step's `after_commit` additions on a full re-score fails `tie-snap` (it
+    #     needs a 3x3 grid or larger; the 2x2 cases commit too few roads to re-score).
+    # The 10 cases this replaced (5 configs x 2 realizers) cost 232 s of CPU and caught only the
+    # first and last of these three bugs.
     from reblock.methods.arterial.engines import _greedy_arterials, _greedy_arterials_lazy
     block = _grid_block(grid_n)
     exact = _greedy_arterials(
