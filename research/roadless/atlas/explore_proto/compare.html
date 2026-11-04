@@ -126,6 +126,7 @@ table.shapes tr[data-i]:hover td, table.shapes tr.on td { background: var(--red-
     <p>The outlined shapes are the best circles, ellipses, squares and rectangles under one of two objectives. <strong>Excess</strong> sums each covered pixel's log score above the shipped floor, times its area. A shape grows while the ground it adds is above the floor on balance, so the objective picks its own size. <strong>Surprise</strong> compares a shape's mean log score with the best mean a shape of the same size reaches by chance, with the blocks' scores shuffled among the blocks (32 shuffles): (mean − the shuffled bests' mean) / their spread. That accounts for how many places a small shape can be put. <strong>Raw z</strong> skips the shuffle and compares a shape with every other placement of its size. It is kept to show the bias: small shapes win by chance, and here they just find the single top block. Every objective counts a placement only if blocks cover at least 60% of it, and keeps up to three disjoint shapes per family.</p>
     <p>The numbered outlines are convex hulls of clusters of whole blocks, found by <strong>hull agglomeration</strong>: starting from single blocks, it repeatedly merges the two nearby clusters whose union scores best by mean log score plus log(blocks' area / convex hull's area), so a merge across empty ground is penalised. Each cluster it passes through is a candidate. <strong>Worse than the city</strong> is the upper-level-set scan statistic over those candidates: a likelihood ratio for the cluster's mean log score exceeding the rest of the city's, weighted by buildings, with clusters holding at most half the city's buildings. Its p-value compares that ratio with the largest ratio anywhere in the tree when the scores are shuffled among the blocks. Contrast is the cluster's mean log score minus that of the blocks sharing a street with it.</p>
     <p><strong>Score bands</strong> look for regions homogeneous inside and distinct from their surroundings. A candidate is a connected group of blocks (sharing streets) whose scores lie in one band, the band the tightest covering them and every bordering block outside it: the spatial analogue of a formal concept. Each is scored by its silhouette: per block, how much further its score lies from the bordering blocks' than from the rest of its region's, from −1 to 1, averaged by buildings. Beside it is the region's own screen score, its buildings, area and outer perimeter scored as if it were one block, so a thin chain of dense blocks reads as what it is.</p>
+    <p><strong>Hulls screened as one block</strong> score each candidate region the way the screen scores a block: its convex hull's buildings (each block's prorated by how much of it the hull covers), the hull's whole area, streets and empty ground included, and its perimeter. Candidates are the nodes of a merge tree over neighbouring blocks that joins, at each step, the pair whose merged hull scores best. Three rankings: the formula as is, which for depth × density grows as the square root of the buildings and so favours the largest region allowed; the size-free score (depth × density without that factor; density × compactness is size-free already), which favours pairs of small blocks, since small regions vary most; and the size-free score against the best that surrogate cities reach at the same effective size, the surrogates keeping the blocks' spatial autocorrelation. A size-free score removes the bias with size by construction; only a null can remove the extra noise of small regions.</p>
   </div>
   <figure id="screenfig">
     <div class="bar">
@@ -140,7 +141,7 @@ table.shapes tr[data-i]:hover td, table.shapes tr.on td { background: var(--red-
       <span class="fams" id="sm-fams"></span>
     </div>
     <div class="bar" style="margin-top:.5rem">
-      <label for="sm-clu">Anomalous clusters <select id="sm-clu"><option value="">none</option><option value="hull/scan" selected>hull agglomeration: worse than the city</option><option value="concepts/above">score bands: coherent and above their surroundings</option></select></label>
+      <label for="sm-clu">Anomalous clusters <select id="sm-clu"><option value="">none</option><option value="hull/scan">hull agglomeration: worse than the city</option><option value="hulls/as_is">hulls screened as one block: the score as is</option><option value="hulls/intensive_raw">hulls screened as one block: size-free score</option><option value="hulls/intensive_cal" selected>hulls screened as one block: size-free score against its size&rsquo;s null</option><option value="concepts/above">score bands: coherent and above their surroundings</option></select></label>
     </div>
     <div class="mapwrap">
       <canvas id="sm-canvas" aria-label="City blocks coloured blue below the screen's floor and red above it"></canvas>
@@ -458,11 +459,15 @@ async function screenMap(enc) {
   const blockPoints = (c) => c.members.flatMap((i) => city.rings[i].flat());
   const REGIONS = {
     "hull/scan": {
-      file: "clusters", of: (res) => res.hull, rows: (r) => r.scan, points: blockPoints,
-      head: ["", "blocks", "buildings", "blocks' area", "geometric-mean score", "× floor", "likelihood ratio", "p", "contrast, decades"],
-      cells: (c, r) => [c.blocks.toLocaleString(), Math.round(c.buildings).toLocaleString(), `${c.area_km2.toFixed(2)} km²`, fmt(c.mean_score), c.x_floor.toFixed(2), Math.round(c.stat).toLocaleString(), pval(c.p, r.nperm), (c.contrast >= 0 ? "+" : "") + c.contrast.toFixed(2)],
-      note: (r) => `p from ${r.nperm} shuffles (seed ${r.seed}); a cluster holds at most half the city's buildings, and a large one with a modest rise can outrank a small, extreme one, so read × floor beside the ratio.`,
+      file: "clusters_msr", of: (res) => res, rows: (r) => r.scan, points: blockPoints,
+      head: ["", "blocks", "buildings", "blocks' area", "geometric-mean score", "× floor", "likelihood ratio", "p, autocorrelated null", "p, shuffled", "contrast, decades"],
+      cells: (c, r) => [c.blocks.toLocaleString(), Math.round(c.buildings).toLocaleString(), `${c.area_km2.toFixed(2)} km²`, fmt(c.mean_score), c.x_floor.toFixed(2), Math.round(c.stat).toLocaleString(), pval(c.p_msr, r.nperm), pval(c.p, r.nperm), (c.contrast >= 0 ? "+" : "") + c.contrast.toFixed(2)],
+      note: (r) => `p against the largest ratio anywhere in the tree over ${r.nperm} surrogate cities, each rebuilt into its own tree: under the autocorrelated null (Moran spectral randomization of the block scores) and, beside it, plain shuffles (seed ${r.seed}). A cluster holds at most half the city's buildings, and a large one with a modest rise can outrank a small, extreme one, so read × floor beside the ratio.`,
     },
+    "hulls/as_is": hullRegions((r) => r.as_is, (r) => r.follow.as_is, (r) => `Ranked by the shipped formula on the hull itself, as if it were one block. Depth × density carries a factor of √buildings, so its top region runs to the cap of half the city's buildings; density × compactness has none, so its top regions are pairs of blocks.`),
+    "hulls/intensive_raw": hullRegions((r) => r.intensive_raw, (r) => r.follow.intensive_raw, (r) => `Ranked by the size-free score (depth × density less its √buildings; density × compactness is size-free already), uncalibrated. The best are pairs of blocks: the smallest regions vary most, so they reach the extremes, and none is surprising for its size.`),
+    "hulls/intensive_cal": hullRegions((r) => r.intensive_cal, (r) => r.follow.intensive_cal, (r) => { const m = r.params.nulls.find((x) => x.name === "msr");
+      return `Ranked by p under the autocorrelated null: ${m.nperm} surrogate cities whose block building densities keep their spatial autocorrelation (Moran's I ${m.moran_observed.toFixed(2)} observed, ${m.moran_surrogates.mean.toFixed(2)} in the surrogates), each rebuilt into its own tree. A region is compared with the best size-free score among the null's regions of similar effective block count (within a factor of 1.25), over the replicates that have one; a region larger than half the replicates reach (n_eff above about ${Math.round(m.largest_candidate_n_eff_with_p)}) has no p and is not ranked.`; }),
     "concepts/above": {
       file: "concepts", of: (res) => res, rows: (r) => r.concepts_above, points: blockPoints,
       head: ["", "blocks", "buildings", "geometric-mean score", "× floor", "ring × floor", "silhouette", "p, autocorrelated null", "p, shuffled", "region's own × floor", "hull fill"],
@@ -471,6 +476,18 @@ async function screenMap(enc) {
       note: (r) => `Ranked by p under the autocorrelated null (Moran spectral randomization: ${r.params.nulls.find((x) => x.name === "msr").nperm} surrogate cities keeping the scores' spatial autocorrelation on the street adjacency), each region against the best silhouette that null reaches among regions of similar size (effective, buildings-weighted block count within a factor of 1.25); the shuffled null's p beside it shows how much ignoring autocorrelation overstates. Hull fill at least 0.5, and only regions scoring above their ring. Most are settlements below the floor bordering nearly empty land: coherent and distinct, but not what the screen selects.`,
     },
   };
+  function hullRegions(rows, followed, why) {
+    const p = (x) => (x == null ? "—" : x.toFixed(3));
+    return {
+      file: "hulls", of: (res) => res, rows, points: (c) => c.hull,
+      head: ["", "blocks", "buildings", "effective blocks", "hull's area", "street share", "× floor", "blocks only × floor", "p, autocorrelated null", "p, shuffled"],
+      cells: (c) => { const s = c.scores[metSel.value];
+        return [c.blocks.toLocaleString(), Math.round(c.buildings).toLocaleString(), c.n_eff.toFixed(1), `${c.area_km2.toFixed(2)} km²`, pct(Math.max(0, c.street_share), 0), s.x_floor.toFixed(2), s.blocks_only_x_floor.toFixed(2), p(c.p_msr), p(c.p_shuffle)]; },
+      note: (r) => { const f = followed(r);
+        return `Each hull is scored as one block: its buildings prorated by overlap over every block it meets, its whole area (streets and empty ground included), its perimeter. ${why(r)}` +
+          (f ? ` Block 5810: the best-ranked region holding it is ${f.rank.toLocaleString()} of ${f.of.toLocaleString()} candidates (${f.blocks} blocks, n_eff ${f.n_eff.toFixed(1)}).` : ""); },
+    };
+  }
   async function loadClusters(name) {
     for (const f of new Set(Object.values(REGIONS).map((x) => x.file))) {
       const k = `${f}_${name}`; if (!(k in cluCache)) cluCache[k] = await getJSON(`screen/${k}.json`).catch(() => null); } }
