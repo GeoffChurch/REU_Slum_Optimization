@@ -72,8 +72,9 @@ RUN PENDING
     uv run python $S ~/src/wt_demo <out dir> [city ...]   # hulls_<city>.json,
                                                 # clusters_msr_<city>.json (default both)
     uv run python $S check [fault]              # proration, factorisation, scale invariance,
-                                                # the tree; faults: drop-ratio, drop-sqrt,
-                                                # as-is-intensive, skip-member
+                                                # conditional p, the tree; faults:
+                                                # drop-ratio, drop-sqrt, as-is-intensive,
+                                                # unconditional, skip-member
 """
 from __future__ import annotations
 
@@ -105,6 +106,8 @@ MAX_SHARE = 0.5        # a candidate's buildings n(H) at most this share of the 
 MIN_BLOCKS = 2         # a candidate region: at least this many member blocks (one is the block)
 TOP = 8                # regions per ranking
 OVERLAP_MAX = 0.05     # disjoint: two hulls overlap by less than this share of the smaller's area
+MIN_SUPPORT = 0.5      # p defined where at least this share of null replicates has a candidate of
+                       # the region's n_eff (within WINDOW)
 NPERM = {"capetown": 199, "nairobi": 999}      # null replicates per null (a tree each)
 SEED = 0
 WORKERS = 16
@@ -714,6 +717,24 @@ def ranked(order: I64, t: Tree, city: City, floors: dict[str, float], fol: int |
     return lst, follow
 
 
+def conditional_p(cal: cn.Calibration, n_eff: F64, stat: F64) -> F64:
+    """p among the replicates that HAVE a candidate within WINDOW of the region's n_eff: (1 +
+    #those whose best is >= stat) / (1 + #those), undefined (nan) where fewer than
+    MIN_SUPPORT of the replicates have one. screen_concepts.py counts a replicate with no
+    candidate of the size as one below the region, so a size the null seldom reaches gets a
+    small p whatever its score; here it would, since the null's re-dealt densities times block
+    areas give heavier-tailed buildings, hence smaller n_eff for a region of a given extent."""
+    g = cn.bins_of(n_eff)
+    R = cal.wbest.shape[0]
+    out = np.full(len(n_eff), np.nan)
+    for i, (gi, s) in enumerate(zip(g, stat, strict=True)):
+        col = cal.wbest[:, gi]
+        have = int(np.isfinite(col).sum())
+        if have >= MIN_SUPPORT * R:
+            out[i] = (1.0 + R - np.searchsorted(col, s, side="left")) / (1.0 + have)
+    return out
+
+
 def of_null(reps: list[Rep], ni: int, nperm: int) -> list[Rep]:
     return reps[ni * nperm:(ni + 1) * nperm]
 
@@ -745,13 +766,11 @@ def scanned(data: dict, city: City, A: object, nulls: list[cn.Null], nperm: int)
                 for ni in range(len(nulls))]
         zp = {}
         for nl, cal in zip(nulls, cals, strict=True):
-            # a candidate no replicate's candidate comes within WINDOW of in n_eff has no null
-            # at its size: its p and z are left undefined (not given p's floor), and it is not
-            # ranked by intensive_cal
             z, p = np.full(len(ti.kids), np.nan), np.full(len(ti.kids), np.nan)
-            ok = np.isfinite(cal.wbest[-1, cn.bins_of(ti.n_eff[ci])])
+            pc = conditional_p(cal, ti.n_eff[ci], ti.log[ci])
+            ok = np.isfinite(pc)
+            p[ci] = pc
             z[ci[ok]] = cal.z(ti.n_eff[ci[ok]], ti.log[ci[ok]])
-            p[ci[ok]] = cal.p(ti.n_eff[ci[ok]], ti.log[ci[ok]])
             zp[nl.name] = (z, p)
         ca = candidates(ta)
         o_as = ca[np.argsort(-ta.log[ca], kind="stable")]
@@ -804,15 +823,17 @@ def scanned(data: dict, city: City, A: object, nulls: list[cn.Null], nperm: int)
                             sd=float(np.std([r.moran for r in of_null(reps, ni, nperm)]))),
                         seconds_tree_mean=float(np.mean(
                             [r.seconds[metric] for r in of_null(reps, ni, nperm)])),
-                        candidates_beyond_null_sizes=cal.unsupported(ti.n_eff[ci]),
-                        largest_candidate_n_eff_with_null=_f(float(ti.n_eff[ci][np.isfinite(
-                            cal.wbest[-1, cn.bins_of(ti.n_eff[ci])])].max())))
+                        candidates_without_p=int((~np.isfinite(zp[nl.name][1][ci])).sum()),
+                        largest_candidate_n_eff_with_p=_f(float(ti.n_eff[ci][np.isfinite(
+                            zp[nl.name][1][ci])].max())))
                    for ni, (nl, cal) in enumerate(zip(nulls, cals, strict=True))],
             seconds_nulls_all_metrics=t_null,
             size="n_eff = (sum w)^2 / sum w^2 over the member blocks, w their buildings",
-            calibration=(f"as screen_concepts.py: p = (1 + #replicates whose best intensive log "
-                         f"score among candidates with n_eff within x/{cn.WINDOW} is >= the "
-                         f"region's) / (1 + nperm), on log10 n_eff bins of log10({cn.WINDOW})/"
+            calibration=(f"as screen_concepts.py but conditional on size: p = (1 + #replicates "
+                         f"whose best intensive log score among candidates with n_eff within "
+                         f"x/{cn.WINDOW} is >= the region's) / (1 + #replicates with such a "
+                         f"candidate), undefined where fewer than {MIN_SUPPORT} of the replicates "
+                         f"have one; on log10 n_eff bins of log10({cn.WINDOW})/"
                          f"{cn.BINS_PER_WINDOW}; z = (score - mean) / sd of every null "
                          f"candidate's, Gaussian kernel in log10 n_eff, bandwidth "
                          f"log10({cn.WINDOW})"),
@@ -951,7 +972,29 @@ def check() -> bool:
             print(f"  scale x{k}: {m} intensive ratio {v[m][1] / base[m][1]:.12f}, as_is ratio "
                   f"{grow:.9f} (want {want})")
             bad += (ei > 1e-9) + (abs(grow / want - 1) > 1e-9)
-    # 4. the agglomeration: every node's hull is its members' convex hull, its n(H), cover,
+    # 4. the size-conditional p against brute force: replicates with
+    # no candidate near a size neither count for nor against a region there
+    R, G = 40, int(np.ceil(3.0 / cn.STEP)) + 2
+    reps = []
+    for r in range(R):
+        ne = 10 ** rng.uniform(0, 2.0 if r % 3 else 3.0, 50)   # a third reach the large sizes
+        reps.append(cn.binned(ne, rng.normal(size=50) + np.log10(ne), G))
+    cal = cn.calibrate(reps)
+    ne = 10 ** rng.uniform(0, 3.0, 300)
+    st = rng.normal(size=300) + np.log10(ne) + 1.0
+    pc = conditional_p(cal, ne, st)
+    pb = np.full(300, np.nan)
+    for i, (gi, s_) in enumerate(zip(cn.bins_of(ne), st, strict=True)):
+        col = cal.wbest[:, gi]
+        have = col[np.isfinite(col)]
+        if len(have) >= MIN_SUPPORT * R:
+            pb[i] = (1 + (have >= s_).sum()) / (1 + len(have))
+    pe = int((np.isnan(pc) != np.isnan(pb)).sum()
+             + (np.abs(pc - pb)[np.isfinite(pb)] > 1e-12).sum())
+    print(f"  size-conditional p on 300 regions over 40 synthetic replicates: "
+          f"{int(np.isfinite(pb).sum())} defined; unlike brute force {pe}")
+    bad += pe
+    # 5. the agglomeration: every node's hull is its members' convex hull, its n(H), cover,
     # A and P the exact ones, its counts its members'
     city = built["nairobi"]
     t = agglomerate(city, city.b.w, SCORES["depth_density_proxy"].intensive, MAX_SHARE)
@@ -1026,7 +1069,20 @@ def _fault_skip_member() -> None:
     City.merged = skip  # type: ignore[method-assign]
 
 
-FAULTS: dict[str, Callable[[], None]] = {"drop-ratio": _fault_drop_ratio,
+def _fault_unconditional() -> None:
+    """p counts replicates with no candidate of the size as below the region (screen_concepts's
+    p), wherever any replicate has one."""
+    global conditional_p
+
+    def uncond(cal: cn.Calibration, n_eff: F64, stat: F64) -> F64:
+        p = cal.p(n_eff, stat)
+        return np.where(np.isfinite(cal.wbest[-1, cn.bins_of(n_eff)]), p, np.nan)
+
+    conditional_p = uncond
+
+
+FAULTS: dict[str, Callable[[], None]] = {"unconditional": _fault_unconditional,
+                                         "drop-ratio": _fault_drop_ratio,
                                          "drop-sqrt": _fault_drop_sqrt,
                                          "as-is-intensive": _fault_as_is,
                                          "skip-member": _fault_skip_member}
