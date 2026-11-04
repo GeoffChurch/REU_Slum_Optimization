@@ -50,6 +50,9 @@ from scripts._donor_pool import donor_pool
 ARMS = [("exact", 0), ("k=512", 512), ("k=128", 128), ("k=32", 32)]
 N_BLOCKS = 8
 MAX_ROADS = 8
+N_ANCHORS = 32
+TOP_K = 8
+MAX_ANCHORS = 0        # uncapped
 OUT = Path("scripts/perf/shortlist_ab.json")
 
 # the 1e-10 tie-perturbation band from tie_sensitivity.py -- this method's own reproducibility
@@ -75,7 +78,9 @@ def main() -> None:
             r = _greedy_shortlist(b, realizer=SnapToBoundary(lam=2.0), objective=Access(),
                                   cost=Displacement(),
                                   half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
-                                  max_roads=MAX_ROADS, selector=FirstOrder(k, threads=1))
+                                  max_roads=MAX_ROADS,
+                                  n_anchors=N_ANCHORS, top_k=TOP_K, max_anchors=MAX_ANCHORS,
+                                  selector=FirstOrder(k=k, threads=1))
             dt = time.perf_counter() - t0
             if r is None or len(r) == 0:
                 continue

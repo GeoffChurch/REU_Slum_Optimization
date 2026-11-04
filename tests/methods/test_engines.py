@@ -1,5 +1,7 @@
 import dataclasses
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import replace
+from typing import Any
 
 import geopandas as gpd
 import pytest
@@ -32,8 +34,8 @@ from tests.methods.test_arterial import (  # reuse fast fixtures
 
 
 def _policy(spec, block):
-    return spec.build(ParcelAdjacency.of(block, STREET_TOL), list(block.streets.geometry), 6, 4,
-                      0)
+    return spec.build(ParcelAdjacency.of(block, STREET_TOL), list(block.streets.geometry),
+                      n_anchors=6, top_k=4, max_anchors=0)
 
 
 def test_engines_are_their_own_identity_and_discriminate() -> None:
@@ -102,6 +104,36 @@ def test_shortlist_threads_do_not_enter_identity() -> None:
     assert ShortlistEngine(k=512, threads=8).identity != ShortlistEngine(k=256, threads=8).identity
 
 
+@pytest.mark.parametrize("engine", [
+    ExactEngine(), LazyEngine(policy=Grow(), rescore_every=0), ShortlistEngine(k=8, threads=1)])
+def test_pool_matches_serial_on_every_engine(engine: ArterialEngine,
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    """`workers` is the one engine parameter allowed a default, because it cannot change the roads.
+    That holds only while every engine's fork pool returns what its serial path does -- pinned here
+    for all three, not just the exact engine test_arterial.py covers. The threshold is forced to 1
+    so every step really forks (at the shipped 128 this block's steps would all run serial), and
+    the pool constructor is counted so a run that silently stayed serial fails instead of passing.
+    """
+    from reblock.methods.arterial import engines
+    monkeypatch.setattr(engines, "_PARALLEL_THRESHOLD", 1)
+    pools = {"n": 0}
+
+    class CountingPool(ProcessPoolExecutor):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pools["n"] += 1
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(engines, "ProcessPoolExecutor", CountingPool)
+    block = _grid_block(3)
+    method = replace(ARTERIAL, n_anchors=6, engine=engine)
+    serial = replace(method, workers=1).propose(block).roads
+    assert pools["n"] == 0
+    pooled = replace(method, workers=2).propose(block).roads
+    assert pools["n"] > 0, "the pooled run never forked -- it compared serial with serial"
+    assert serial is not None and pooled is not None and len(serial) > 0
+    assert [g.wkt for g in pooled.geometry] == [g.wkt for g in serial.geometry]
+
+
 def test_lazy_fixed_and_faithful_run_and_differ_from_exact_is_ok():
     # Every policy driven through the engine end to end: each policy's initial/after_commit
     # round-trip runs inside the engine and commits roads. A 2x2 grid commits one road and then
@@ -167,12 +199,12 @@ def test_lazy_faithful_rescore1_equals_exact(grid_n, n_anchors, max_roads, reali
     exact = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=realizer, objective=Directness(), cost=Length(), n_anchors=n_anchors,
-        max_roads=max_roads, workers=1)
+        max_roads=max_roads, workers=1, top_k=8, max_anchors=0)
     lazy = _greedy_arterials_lazy(block, realizer=realizer, objective=Directness(),
                                   n_anchors=n_anchors,
                                   top_k=8, max_roads=max_roads, cost=Length(),
                                   half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=1,
-                                  policy_spec=Faithful(), rescore_every=1)
+                                  policy_spec=Faithful(), rescore_every=1, max_anchors=0)
     assert [g.wkt for g in exact.geometry] == [g.wkt for g in lazy.geometry]
 
 
@@ -188,7 +220,8 @@ def test_faithful_policy_matches_arterial_candidate_set():
     live = (live - set(removed)) | {ls.wkt for ls in added}
     network = list(block.streets.geometry) + [road]
     # deep_targets change with roads; compare through-road structure via arterial's own generator
-    expect_roads = {ls.wkt for ls in _candidate_chords(_anchor_points(network, 6), [])}
+    anchors = _anchor_points(network, n=6, max_anchors=0)
+    expect_roads = {ls.wkt for ls in _candidate_chords(anchors, [])}
     assert expect_roads <= live
 
 

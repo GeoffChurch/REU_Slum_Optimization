@@ -65,8 +65,8 @@ def main() -> None:
           f"unreached {(order > n).sum():,}\n")
 
     t0 = time.perf_counter()
-    anchors = _anchor_points(list(block.streets.geometry), 32, 0)
-    targets = _deep_targets(adjacency, None, 8)
+    anchors = _anchor_points(list(block.streets.geometry), n=32, max_anchors=0)
+    targets = _deep_targets(adjacency, None, k=8)
     chords = _candidate_chords(anchors, targets)
     t_enum = time.perf_counter() - t0
     print(f"  enumerate {len(chords):,} chords from {len(anchors):,} anchors: {t_enum:6.1f} s")

@@ -65,6 +65,8 @@ K = 128                       # tier-2 shortlist, held fixed across arms
 CAPS = (0, 32, 64, 128, 256)  # 0 == uncapped == the shipped default
 N_BLOCKS = 12
 MAX_ROADS = 8
+N_ANCHORS = 32
+TOP_K = 8
 DISP = 0.10                   # the displacement budget every arm is truncated to
 OUT = Path("scripts/perf/anchor_cap.json")
 
@@ -104,8 +106,9 @@ def main() -> None:
             r = _greedy_shortlist(b, realizer=SnapToBoundary(lam=2.0), objective=Access(),
                                   cost=Displacement(),
                                   half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
-                                  max_roads=MAX_ROADS, max_anchors=cap,
-                                  selector=FirstOrder(K, threads=1), on_step=tick)
+                                  max_roads=MAX_ROADS,
+                                  max_anchors=cap, n_anchors=N_ANCHORS, top_k=TOP_K,
+                                  selector=FirstOrder(k=K, threads=1), on_step=tick)
             dt = time.perf_counter() - t0
             if r is None or len(r) == 0:
                 continue

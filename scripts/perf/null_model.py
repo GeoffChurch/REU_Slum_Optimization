@@ -52,13 +52,16 @@ KS = (128, 32)
 SEEDS = (1, 2, 3, 4, 5)
 N_BLOCKS = 8
 MAX_ROADS = 8
+N_ANCHORS = 32
+TOP_K = 8
+MAX_ANCHORS = 0        # uncapped
 OUT = Path("scripts/perf/null_model.json")
 
 
 def arms() -> list[tuple[str, CandidateSelector]]:
     out: list[tuple[str, CandidateSelector]] = [("exact", ScoreAll())]
     for k in KS:
-        out.append((f"fo-{k}", FirstOrder(k, threads=1)))
+        out.append((f"fo-{k}", FirstOrder(k=k, threads=1)))
         out += [(f"rand-{k}-s{s}", RandomSample(k, s)) for s in SEEDS]
     return out
 
@@ -83,7 +86,9 @@ def main() -> None:
             r = _greedy_shortlist(b, realizer=SnapToBoundary(lam=2.0), objective=Access(),
                                   cost=Displacement(),
                                   half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
-                                  max_roads=MAX_ROADS, selector=selector)
+                                  max_roads=MAX_ROADS,
+                                  n_anchors=N_ANCHORS, top_k=TOP_K, max_anchors=MAX_ANCHORS,
+                                  selector=selector)
             dt = time.perf_counter() - t0
             if r is None or len(r) == 0:
                 continue

@@ -163,14 +163,14 @@ def test_greedy_routes_aspirational_to_full_rederivation(monkeypatch: pytest.Mon
     roads_a1 = _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=IdealChord(), objective=Directness(), cost=Length(),
-        max_roads=1, n_anchors=3, workers=1)
+        max_roads=1, n_anchors=3, workers=1, top_k=8, max_anchors=0)
     assert calls["n"] == 0, "aspirational must NOT use the incremental scorer (Bug 2)"
 
     calls["n"] = 0
     _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(), max_roads=1,
-        n_anchors=3, workers=1)
+        n_anchors=3, workers=1, top_k=8, max_anchors=0)
     assert calls["n"] > 0, "buildable must score candidates through the incremental scorer"
 
     # Aspirational proposed geometry is deterministic/unchanged across runs (it scores through the
@@ -178,5 +178,5 @@ def test_greedy_routes_aspirational_to_full_rederivation(monkeypatch: pytest.Mon
     roads_a2 = _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=IdealChord(), objective=Directness(), cost=Length(),
-        max_roads=1, n_anchors=3, workers=1)
+        max_roads=1, n_anchors=3, workers=1, top_k=8, max_anchors=0)
     assert [g.wkt for g in roads_a1.geometry] == [g.wkt for g in roads_a2.geometry]

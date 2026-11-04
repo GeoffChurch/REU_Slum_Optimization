@@ -57,7 +57,7 @@ class StochasticFirstOrder:
         if self.k <= 0 or len(chords) <= self.k:
             return chords
         pool = min(max(self.pool, self.k), len(chords))
-        score = first_order_score(chords, ctx)
+        score = first_order_score(chords, ctx, threads=1)
         top = np.argpartition(-score, pool - 1)[:pool]
         rng = np.random.default_rng((self.seed, ctx.step))
         keep = rng.choice(top, size=self.k, replace=False)

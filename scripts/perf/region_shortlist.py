@@ -39,6 +39,9 @@ from scripts.perf.snap_vs_peel import region_block_cached
 
 SHORTLIST = 512
 MAX_ROADS = 15
+N_ANCHORS = 32
+TOP_K = 8
+MAX_ANCHORS = 0        # uncapped
 THREADS = 8            # measured optimum -- see shortlist.first_order_score
 SCALING = False        # the thread-scaling table is already measured and recorded; skip the re-run
 
@@ -74,8 +77,8 @@ def main() -> int:
     btree = STRtree(list(block.building_geometries.geometry))
     depths = parcel_access_layers(adjacency, None, unreached=past_every_parcel)
     weights = depths.loc[block.parcels["parcel_id"]].to_numpy(dtype=float) ** 2 - 1.0
-    anchors = _anchor_points(list(block.streets.geometry), 32, 0)
-    targets = _deep_targets(adjacency, None, 8)
+    anchors = _anchor_points(list(block.streets.geometry), n=N_ANCHORS, max_anchors=MAX_ANCHORS)
+    targets = _deep_targets(adjacency, None, k=TOP_K)
     chords = _candidate_chords(anchors, targets)
     print(f"  step-0 candidates: {len(chords):,}\n")
 
@@ -105,7 +108,8 @@ def main() -> int:
     roads = _greedy_shortlist(block, realizer=SnapToBoundary(lam=2.0), objective=Access(),
                               cost=Displacement(),
                               half_width_m=half_w, workers=16, max_roads=MAX_ROADS,
-                              selector=FirstOrder(SHORTLIST, threads=THREADS), on_step=tick)
+                              n_anchors=N_ANCHORS, top_k=TOP_K, max_anchors=MAX_ANCHORS,
+                              selector=FirstOrder(k=SHORTLIST, threads=THREADS), on_step=tick)
     dt = time.perf_counter() - t0
     print(f"    {len(roads)} road rows, {float(roads.geometry.length.sum()):,.0f} m "
           f"in {dt / 60:.1f} min")

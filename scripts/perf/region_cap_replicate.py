@@ -63,6 +63,8 @@ from scripts.perf import region_pool
 N_REGIONS = 6
 SHORTLIST = 512
 MAX_ROADS = 8
+N_ANCHORS = 32
+TOP_K = 8
 THREADS = 8
 WORKERS = 16
 CAPS = (128, 256, 0)                  # cheapest first; 0 == uncapped == shipped default
@@ -121,8 +123,9 @@ def main() -> None:
 
             roads = _greedy_shortlist(block, realizer=SnapToBoundary(lam=2.0), objective=Access(),
                                       cost=Displacement(), half_width_m=half_w, workers=WORKERS,
-                                      max_roads=MAX_ROADS, max_anchors=cap,
-                                      selector=FirstOrder(SHORTLIST, threads=THREADS),
+                                      max_roads=MAX_ROADS,
+                                      max_anchors=cap, n_anchors=N_ANCHORS, top_k=TOP_K,
+                                      selector=FirstOrder(k=SHORTLIST, threads=THREADS),
                                       on_step=tick)
             dt = time.perf_counter() - t0
             if roads is None or len(roads) == 0:

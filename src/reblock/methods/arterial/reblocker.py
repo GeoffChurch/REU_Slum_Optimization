@@ -25,7 +25,7 @@ from reblock.methods.arterial.realize import ChordRealizer
 from reblock.permeability import with_width
 
 
-@dataclass
+@dataclass(kw_only=True)
 class GreedyArterialReblocker:
     # How a candidate chord becomes the road that is scored and committed -- SnapToBoundary (the
     # shippable navigability method) or IdealChord (a diagnostic isolating the effect of
