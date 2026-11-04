@@ -22,12 +22,16 @@ from reblock.methods.betweenness.routing import (
 
 
 def test_a_straight_route_costs_its_length_at_every_angle() -> None:
-    n, c0, R = 241, (120, 120), 100.0
+    # 50 m routes at 10 angles under 2 bend weights, not 100 m at 29 under 3 (~16x the CPU; each
+    # route builds and searches its own state graph). Fault-injected 2026-11-04: pricing a step at
+    # its Chebyshev length, or averaging a knight move's cells over 2 instead of all it touches,
+    # fails both; the 3 % tolerance holds at this radius as it did at 100 m.
+    n, c0, R = 141, (70, 70), 50.0
     inside = np.ones((n, n), bool)
     cl = np.full((n, n), 1e6)
-    for lam in (5.0, 20.0, 50.0):
+    for lam in (5.0, 50.0):
         ratios = []
-        for a in np.linspace(0, 90, 29):
+        for a in np.linspace(0, 90, 10):
             r = int(round(c0[0] + R * math.sin(math.radians(a))))
             c = int(round(c0[1] + R * math.cos(math.radians(a))))
             cost, _cells = route_cost(inside, cl, 1.0, 0.0, lam, c0, (r, c))
