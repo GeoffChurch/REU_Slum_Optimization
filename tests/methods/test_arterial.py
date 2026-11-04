@@ -477,8 +477,9 @@ def test_both_realizers_produce_roads() -> None:
     actually consulted end to end, on ARTERIAL's ExactEngine."""
     pts = gpd.GeoDataFrame(geometry=[Point(0.5, 4.0)], crs=UTM)
     block = _two_arm_block(pts)
+    # One road from 3 anchors: what is checked is that each realizer reaches the frame.
     for realizer in (SnapToBoundary(lam=2.0), IdealChord()):
-        proposal = replace(ARTERIAL, objective=Directness(), max_roads=1,
+        proposal = replace(ARTERIAL, objective=Directness(), max_roads=1, n_anchors=3,
                            realizer=realizer, workers=1).propose(block)
         assert proposal.roads is not None and len(proposal.roads) >= 1
         assert proposal.params["realizer"] == type(realizer).__name__
@@ -833,6 +834,10 @@ def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
     # so a road that fails to reach the interior leaves the deep parcels untouched. One building
     # point per parcel makes `repulsion` a real, positive, spatially-varying cost (not the
     # empty-field 0.0 short circuit that would let every candidate rank as free/infinite gain).
+    #
+    # One road from 2 anchors: every count from 2 anchors and 1 road to the 12 and 4 this ran at
+    # passes, and none of them fails a zero repulsion (2026-11-04), so the size buys nothing.
+    # An infinite one (no candidate gains) fails it.
     polys = [Polygon([(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)])
              for i in range(3) for j in range(9)]
     parcels = gpd.GeoDataFrame({"parcel_id": list(range(len(polys)))}, geometry=polys, crs=UTM)
@@ -851,7 +856,7 @@ def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Repulsion(),
-                              max_roads=4, n_anchors=12, workers=1)
+        max_roads=1, n_anchors=2, workers=1)
     # (i) non-degeneracy: repulsion commits real, access-improving road(s) -- it reaches the
     # interior rather than building zero-benefit gap roads (a zero-benefit road has raw=0 -> gain=0
     # under the always-positive repulsion denominator, so it can never win).
