@@ -69,7 +69,8 @@ default_rng([SEED, 1, replicate]).
 RUN PENDING
 
     S=research/roadless/atlas/explore_proto/screen_hulls.py  # from the repo root, PYTHONPATH=.
-    uv run python $S ~/src/wt_demo <out dir>    # hulls_<city>.json, clusters_msr_<city>.json
+    uv run python $S ~/src/wt_demo <out dir> [city ...]   # hulls_<city>.json,
+                                                # clusters_msr_<city>.json (default both)
     uv run python $S check [fault]              # proration, factorisation, scale invariance,
                                                 # the tree; faults: drop-ratio, drop-sqrt,
                                                 # as-is-intensive, skip-member
@@ -104,7 +105,7 @@ MAX_SHARE = 0.5        # a candidate's buildings n(H) at most this share of the 
 MIN_BLOCKS = 2         # a candidate region: at least this many member blocks (one is the block)
 TOP = 8                # regions per ranking
 OVERLAP_MAX = 0.05     # disjoint: two hulls overlap by less than this share of the smaller's area
-NPERM = {"capetown": 299, "nairobi": 999}      # null replicates per null (a tree each)
+NPERM = {"capetown": 199, "nairobi": 999}      # null replicates per null (a tree each)
 SEED = 0
 WORKERS = 16
 CITIES = ("nairobi", "capetown")
@@ -689,7 +690,7 @@ def entry(node: int, t: Tree, city: City, floors: dict[str, float], fol: int | N
     if zp is not None:
         for nm, (z, p) in zp.items():
             out[f"z_{nm}"] = _f(z[node])
-            out[f"p_{nm}"] = float(p[node])
+            out[f"p_{nm}"] = _f(p[node])
     if fol is not None:
         out["follow_member"] = bool(fol in set(mem.tolist()))
         f = shapely.area(shapely.intersection(P[fol], H)) / city.pl.area[fol]
@@ -744,14 +745,20 @@ def scanned(data: dict, city: City, A: object, nulls: list[cn.Null], nperm: int)
                 for ni in range(len(nulls))]
         zp = {}
         for nl, cal in zip(nulls, cals, strict=True):
-            z, p = np.full(len(ti.kids), np.nan), np.ones(len(ti.kids))
-            z[ci], p[ci] = cal.z(ti.n_eff[ci], ti.log[ci]), cal.p(ti.n_eff[ci], ti.log[ci])
+            # a candidate no replicate's candidate comes within WINDOW of in n_eff has no null
+            # at its size: its p and z are left undefined (not given p's floor), and it is not
+            # ranked by intensive_cal
+            z, p = np.full(len(ti.kids), np.nan), np.full(len(ti.kids), np.nan)
+            ok = np.isfinite(cal.wbest[-1, cn.bins_of(ti.n_eff[ci])])
+            z[ci[ok]] = cal.z(ti.n_eff[ci[ok]], ti.log[ci[ok]])
+            p[ci[ok]] = cal.p(ti.n_eff[ci[ok]], ti.log[ci[ok]])
             zp[nl.name] = (z, p)
         ca = candidates(ta)
         o_as = ca[np.argsort(-ta.log[ca], kind="stable")]
         o_raw = ci[np.argsort(-ti.log[ci], kind="stable")]
         z_m, p_m = zp["msr"]
-        o_cal = ci[np.lexsort((-np.nan_to_num(z_m[ci], nan=-np.inf), p_m[ci]))]
+        cs = ci[np.isfinite(p_m[ci])]
+        o_cal = cs[np.lexsort((-np.nan_to_num(z_m[cs], nan=-np.inf), p_m[cs]))]
         l_as, f_as = ranked(o_as, ta, city, floors, fol, None)
         l_raw, f_raw = ranked(o_raw, ti, city, floors, fol, zp)
         l_cal, f_cal = ranked(o_cal, ti, city, floors, fol, zp)
@@ -777,12 +784,14 @@ def scanned(data: dict, city: City, A: object, nulls: list[cn.Null], nperm: int)
                   "merged hull's log score (the list's: as_is for as_is, intensive for the "
                   "others) is best; merges over max_share refused; every node with >= "
                   "min_blocks members a candidate"),
-            candidates={"as_is": int(len(ca)), "intensive": int(len(ci))},
+            candidates={"as_is": int(len(ca)), "intensive": int(len(ci)),
+                        "intensive_with_msr_null_at_their_size": int(len(cs))},
             seconds_tree={k: sec[metric, k] for k in ("as_is", "intensive")},
             disjoint=f"hulls overlap < {OVERLAP_MAX} of the smaller's area (greedy, rank order)",
             rankings={"as_is": "as_is log score, descending",
                       "intensive_raw": "intensive log score, descending",
-                      "intensive_cal": "p_msr ascending, then z_msr descending"},
+                      "intensive_cal": ("p_msr ascending, then z_msr descending, over the "
+                                        "candidates with a null at their n_eff under msr")},
             nulls=[dict(name=nl.name, nperm=nperm, seed=SEED, null_index=ni,
                         rng="numpy default_rng([seed, null index, replicate])",
                         field=("block building density n_b / area_b re-dealt among the blocks "
@@ -795,7 +804,9 @@ def scanned(data: dict, city: City, A: object, nulls: list[cn.Null], nperm: int)
                             sd=float(np.std([r.moran for r in of_null(reps, ni, nperm)]))),
                         seconds_tree_mean=float(np.mean(
                             [r.seconds[metric] for r in of_null(reps, ni, nperm)])),
-                        candidates_beyond_null_sizes=cal.unsupported(ti.n_eff[ci]))
+                        candidates_beyond_null_sizes=cal.unsupported(ti.n_eff[ci]),
+                        largest_candidate_n_eff_with_null=_f(float(ti.n_eff[ci][np.isfinite(
+                            cal.wbest[-1, cn.bins_of(ti.n_eff[ci])])].max())))
                    for ni, (nl, cal) in enumerate(zip(nulls, cals, strict=True))],
             seconds_nulls_all_metrics=t_null,
             size="n_eff = (sum w)^2 / sum w^2 over the member blocks, w their buildings",
@@ -1038,11 +1049,11 @@ def main(argv: list[str]) -> None:
         if ok and fault is not None:
             raise SystemExit(f"the fault {fault} went unseen: the check guards nothing")
         return
-    if len(argv) != 2:
+    if len(argv) < 2 or not set(argv[2:]) <= set(CITIES):
         raise SystemExit(__doc__)
     root, out = Path(argv[0]).expanduser(), Path(argv[1])
     out.mkdir(parents=True, exist_ok=True)
-    for name in CITIES:
+    for name in argv[2:] or CITIES:
         t0 = time.time()
         data = json.loads((root / "examples" / "screen-map" / f"{name}.json").read_text())
         city = city_of(data)
@@ -1058,8 +1069,9 @@ def main(argv: list[str]) -> None:
         for metric, r in res.items():
             for k, cal in (("as_is", False), ("intensive_raw", True), ("intensive_cal", True)):
                 for c in r[k][:5]:
-                    z = c["z_msr"] if not cal or c["z_msr"] is None else round(c["z_msr"], 1)
-                    p = f" p {c['p_msr']:.3f}/{c['p_shuffle']:.3f} z {z}" if cal else ""
+                    p = ""
+                    if cal:
+                        p = f" p {c['p_msr']}/{c['p_shuffle']} z {c['z_msr']}"
                     print(f"    {metric} {k}: x{c['scores'][metric]['x_floor']:.2f} (blocks "
                           f"x{c['scores'][metric]['blocks_only_x_floor']:.2f}) n "
                           f"{c['buildings']:.0f} blocks {c['blocks']} n_eff {c['n_eff']:.1f} "
