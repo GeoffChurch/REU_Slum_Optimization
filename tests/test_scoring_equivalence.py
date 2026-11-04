@@ -154,19 +154,21 @@ def test_greedy_routes_aspirational_to_full_rederivation(monkeypatch: pytest.Mon
         return orig(self, real)
 
     monkeypatch.setattr(_StepContext, "score_candidate", spy)
+    # One road per run: which scorer a candidate goes through is decided on every step alike, and
+    # step 0 already scores the region's every candidate (max_roads=2 cost 2.3x for the same check).
     region = _region_deep()
 
     calls["n"] = 0
     roads_a1 = _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=IdealChord(), objective=Directness(), cost=Length(),
-                                          max_roads=2, workers=1)
+                                          max_roads=1, workers=1)
     assert calls["n"] == 0, "aspirational must NOT use the incremental scorer (Bug 2)"
 
     calls["n"] = 0
     _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-        realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(), max_roads=2,
+        realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(), max_roads=1,
                                workers=1)
     assert calls["n"] > 0, "buildable must score candidates through the incremental scorer"
 
@@ -175,5 +177,5 @@ def test_greedy_routes_aspirational_to_full_rederivation(monkeypatch: pytest.Mon
     roads_a2 = _greedy_arterials(
         region, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=IdealChord(), objective=Directness(), cost=Length(),
-                                          max_roads=2, workers=1)
+                                          max_roads=1, workers=1)
     assert [g.wkt for g in roads_a1.geometry] == [g.wkt for g in roads_a2.geometry]

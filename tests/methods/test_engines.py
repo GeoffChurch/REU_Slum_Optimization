@@ -95,22 +95,26 @@ def test_shortlist_threads_do_not_enter_identity() -> None:
 
 
 def test_lazy_fixed_and_faithful_run_and_differ_from_exact_is_ok():
-    block = _grid_block(5)
+    # Every policy driven through the engine end to end. A 3x3 grid, not 5x5: what is checked is
+    # that each policy's initial/after_commit round-trip runs inside the engine and commits roads,
+    # which the smallest grid that commits several roads does as well as a bigger one (5x5 was
+    # 38 s of CPU here, nearly all of it Directness scoring).
+    block = _grid_block(3)
     for spec in (Fixed(), Grow(), Faithful()):
         roads = replace(
             ARTERIAL, objective=Directness(), n_anchors=6,
-            max_roads=4, engine=LazyEngine(policy=spec, rescore_every=0),
+            max_roads=4, engine=LazyEngine(policy=spec, rescore_every=0), workers=1,
         ).propose(block).roads
         assert roads is not None
-        assert len(roads) >= 0            # all policies produce a valid proposal
+        assert len(roads) > 0, spec       # every policy commits roads
     # rescore_every=1 with fixed equals a full-rescore greedy over that policy's
     # set: determinism
     a = replace(
         ARTERIAL, n_anchors=6, max_roads=3,
-        engine=LazyEngine(policy=Fixed(), rescore_every=1)).propose(block).roads
+        engine=LazyEngine(policy=Fixed(), rescore_every=1), workers=1).propose(block).roads
     b = replace(
         ARTERIAL, n_anchors=6, max_roads=3,
-        engine=LazyEngine(policy=Fixed(), rescore_every=1)).propose(block).roads
+        engine=LazyEngine(policy=Fixed(), rescore_every=1), workers=1).propose(block).roads
     assert a is not None and b is not None
     assert [g.wkt for g in a.geometry] == [g.wkt for g in b.geometry]
 
@@ -133,35 +137,38 @@ def test_grow_policy_only_adds():
     assert all(ls.wkt not in base_keys for ls in added)   # only genuinely new candidates
 
 
-@pytest.mark.parametrize("grid_n,n_anchors,max_roads", [
-    (5, 6, 4),      # original aspirational-coverage config -- kept for continuity
-    (5, 6, 6),      # reviewer's known-divergent buildable case (chord.wkt vs real.wkt tie-break)
-    (5, 8, 6),      # more anchors -> denser candidate set, more tie opportunities
-    (4, 6, 4),      # smaller grid
-    (6, 6, 6),      # larger grid
-])
-def test_lazy_faithful_rescore1_equals_exact(grid_n, n_anchors, max_roads):
+@pytest.mark.parametrize("grid_n,n_anchors,max_roads,realizer", [
+    (4, 8, 6, SnapToBoundary(lam=2.0)),   # an equal-gain tie: real.wkt vs chord.wkt tie-break
+    (3, 6, 8, SnapToBoundary(lam=2.0)),   # runs out of positive gains: termination
+    (3, 6, 6, IdealChord()),              # termination again, on the aspirational realizer
+], ids=["tie-snap", "stop-snap", "stop-ideal"])
+def test_lazy_faithful_rescore1_equals_exact(grid_n, n_anchors, max_roads, realizer):
     # The engine-correctness gate (the oracle): rescore_every=1 + faithful policy re-scores every
     # candidate every step, so the heap's top IS the true per-step argmax over arterial's OWN
     # candidate set -- byte-identical road sequence to the exact greedy. A failure here is a
     # bookkeeping bug (a _StepState field, the heap tie-break, or termination), NOT submodularity.
-    # Parametrized over several buildable/aspirational configs (not just one) because the heap's
-    # tie-break only diverges from exact on candidate sets that actually contain an equal-gain tie
-    # -- a single lucky config can pass while the tie-break logic is still wrong.
+    #
+    # One case per bug, each the cheapest that catches it (fault-injected 2026-11-04 against a
+    # 5-config x 2-realizer grid that cost 232 s of CPU; these three are ~22 s):
+    #   - ordering the heap by chord.wkt instead of real.wkt fails `tie-snap` (it needs a snapping
+    #     realizer, whose `real` differs from its chord, and a candidate set with an equal-gain
+    #     tie: of the old grid only the 6-road snap cases had one);
+    #   - continuing on zero gain (`<= 0.0` -> `< 0.0`) fails both `stop-*` cases, which run out of
+    #     positive gains before max_roads -- NONE of the old grid's five configs did, so it never
+    #     caught this;
+    #   - dropping this step's `after_commit` additions on a full re-score fails all three.
     from reblock.methods.arterial.engines import _greedy_arterials, _greedy_arterials_lazy
-    for realizer in (SnapToBoundary(lam=2.0), IdealChord()):
-        block = _grid_block(grid_n)
-        exact = _greedy_arterials(
-            block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-            realizer=realizer, objective=Directness(), cost=Length(), n_anchors=n_anchors,
-                                  max_roads=max_roads, workers=1)
-        lazy = _greedy_arterials_lazy(block, realizer=realizer, objective=Directness(),
-                                      n_anchors=n_anchors,
-                                      top_k=8, max_roads=max_roads, cost=Length(),
-                                      half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=1,
-                                      policy_spec=Faithful(), rescore_every=1)
-        assert [g.wkt for g in exact.geometry] == [g.wkt for g in lazy.geometry], \
-            (realizer, grid_n, n_anchors, max_roads)
+    block = _grid_block(grid_n)
+    exact = _greedy_arterials(
+        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
+        realizer=realizer, objective=Directness(), cost=Length(), n_anchors=n_anchors,
+        max_roads=max_roads, workers=1)
+    lazy = _greedy_arterials_lazy(block, realizer=realizer, objective=Directness(),
+                                  n_anchors=n_anchors,
+                                  top_k=8, max_roads=max_roads, cost=Length(),
+                                  half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=1,
+                                  policy_spec=Faithful(), rescore_every=1)
+    assert [g.wkt for g in exact.geometry] == [g.wkt for g in lazy.geometry]
 
 
 def test_faithful_policy_matches_arterial_candidate_set():
@@ -183,7 +190,7 @@ def test_faithful_policy_matches_arterial_candidate_set():
 def test_lazy_dispatch_and_determinism():
     block = _grid_block(5)
     m = replace(ARTERIAL, objective=Directness(), n_anchors=6, max_roads=4,
-                engine=LazyEngine(policy=Grow(), rescore_every=0))
+                engine=LazyEngine(policy=Grow(), rescore_every=0), workers=1)
     a = m.propose(block).roads
     b = m.propose(block).roads
     assert a is not None and b is not None
@@ -197,7 +204,7 @@ def test_lazy_grow_with_max_anchors_runs_end_to_end():
     # proposal shape.
     block = _grid_block(5)
     roads = replace(ARTERIAL, engine=LazyEngine(policy=Grow(), rescore_every=0),
-                              max_anchors=8, max_roads=3).propose(block).roads
+                              max_anchors=8, max_roads=3, workers=1).propose(block).roads
     assert roads is not None
     assert len(roads) >= 0
     assert "drain" in roads.columns
@@ -243,7 +250,7 @@ def test_lazy_roads_carry_drain_column_like_exact():
     roads = replace(ARTERIAL, objective=Directness(), n_anchors=6,
                               max_roads=4,
                               engine=LazyEngine(policy=Grow(),
-                                                rescore_every=0)).propose(block).roads
+                                                rescore_every=0), workers=1).propose(block).roads
     assert roads is not None
     assert "drain" in roads.columns
     if len(roads):

@@ -1,3 +1,4 @@
+import multiprocessing
 from dataclasses import replace
 from typing import cast
 
@@ -195,92 +196,66 @@ def test_arterial_serial_refactor_identical() -> None:
     block = _grid_block(3)
     for name, want in expected.items():
         roads = replace(ARTERIAL, realizer=realizers[name], objective=Directness(),
-                                  n_anchors=6).propose(block).roads
+                                  n_anchors=6, workers=1).propose(block).roads
         assert roads is not None
         assert sorted(g.wkt for g in roads.geometry) == want
 
 
 def test_arterial_parallel_identical_to_serial(monkeypatch: pytest.MonkeyPatch) -> None:
     # The acceptance gate for the fork process pool: parallel roads must be WKT-identical to serial.
-    # Force the threshold to 1 so EVERY step genuinely dispatches the fork pool (>1 candidate per
-    # step here, so the 16-worker pool is truly exercised -- confirmed by the ~2x wall-clock speedup
-    # over workers=1) on this small, fast, EARLY-TERMINATING block. n_anchors=6 (the same known-fast
-    # config as test_arterial_serial_refactor_identical) keeps candidate counts modest so each step
-    # forks quickly, while the block still terminates well before max_roads=15 in BOTH modes -- so
-    # the final all-non-positive-gain step also runs through the pool. Without the forced-low
+    # Force the threshold to 1 so EVERY step genuinely dispatches the fork pool on this small, fast,
+    # EARLY-TERMINATING block. n_anchors=6 (the same known-fast config as
+    # test_arterial_serial_refactor_identical) keeps candidate counts modest so each step forks
+    # quickly, while the block still terminates well before max_roads=15 in BOTH modes -- so the
+    # final all-non-positive-gain step also runs through the pool. Without the forced-low
     # threshold, candidates < 128 and the "parallel" run would silently fall back to serial, proving
-    # nothing. Repeat a few times because fork races are low-probability per run.
+    # nothing.
+    #
+    # Two workers, once. A pool of 2 runs the same fork/map/chunk path a pool of 16 does (and its
+    # chunks are longer, so a chunk-boundary bug has more room to show); the mapping is
+    # deterministic, so repeating it re-asks the same question. This and
+    # test_arterial_proposal_wkt_unchanged (serial == the pinned 1808 reference) are what the
+    # deleted `..._matches_reference_1808` (pool on 1808 == reference) and
+    # `..._deterministic` (pool == pool) checked between them: fault-injected 2026-11-04,
+    # scoring only half of each step's candidates in the pool fails this test, as it failed the
+    # first (the second, comparing a pool with itself, passed it).
+    #
+    # `.wkt` is full precision under shapely 2 (the round trip returns the same doubles), so this
+    # also checks what the deleted `..._geometry_bit_identical` did -- coordinate-exact winners
+    # across the process boundary -- on the same propose: a pool returning its winners through a
+    # 1-decimal wkt fails both.
     monkeypatch.setattr(engines, "_PARALLEL_THRESHOLD", 1)
-    for _ in range(3):
-        for realizer in (SnapToBoundary(lam=2.0), IdealChord()):
-            block = _grid_block(3)
-            serial = replace(ARTERIAL, realizer=realizer, n_anchors=6,
-                             workers=1).propose(block).roads
-            par = replace(ARTERIAL, realizer=realizer, n_anchors=6,
-                          workers=16).propose(block).roads
-            assert serial is not None and par is not None
-            # Non-vacuity guard: both modes commit roads on this block before terminating (5
-            # buildable, 6 aspirational -- see test_arterial_serial_refactor_identical), so an
-            # empty-vs-empty comparison here would mean the fixture regressed, not that the pool
-            # matched serial.
-            assert len(serial.geometry) > 0
-            assert sorted(g.wkt for g in serial.geometry) == sorted(g.wkt for g in par.geometry)
+    for realizer in (SnapToBoundary(lam=2.0), IdealChord()):
+        block = _grid_block(3)
+        serial = replace(ARTERIAL, realizer=realizer, n_anchors=6, workers=1).propose(block).roads
+        par = replace(ARTERIAL, realizer=realizer, n_anchors=6, workers=2).propose(block).roads
+        assert serial is not None and par is not None
+        # Non-vacuity guard: both modes commit roads on this block before terminating (5
+        # buildable, 6 aspirational -- see test_arterial_serial_refactor_identical), so an
+        # empty-vs-empty comparison here would mean the fixture regressed, not that the pool
+        # matched serial.
+        assert len(serial.geometry) > 0
+        assert sorted(g.wkt for g in serial.geometry) == sorted(g.wkt for g in par.geometry)
 
 
-def test_arterial_parallel_geometry_bit_identical(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The winner geometry returned across the process boundary must be COORDINATE-exact to serial's,
-    # not merely wkt-equal (.wkt rounds at precision 6). This fails fast if a future change reverts
-    # eval_candidate's return from the shapely geometry (pickled lossless via WKB) to a lossy wkt.
+def test_arterial_pools_leave_no_worker_alive(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Guards the fork pools' lifetime: every step that scores through a pool must shut it down, or
+    # a multi-block pipeline run (pools per propose x many proposes) accumulates idle workers.
+    # Forced-low threshold so EVERY step of every propose dispatches a pool.
+    #
+    # This replaced a 30-propose x 16-worker soak (124 s of CPU) that asserted only that each
+    # propose returned roads -- fault-injected 2026-11-04, a pool that is never shut down passed
+    # it, leaking a few hundred workers. Asking the process for its live children fails on that
+    # fault after one propose.
     monkeypatch.setattr(engines, "_PARALLEL_THRESHOLD", 1)
+    before = set(multiprocessing.active_children())
     block = _grid_block(3)
-    serial = replace(ARTERIAL, n_anchors=6, workers=1).propose(block).roads
-    par = replace(ARTERIAL, n_anchors=6, workers=16).propose(block).roads
-    assert serial is not None and par is not None
-    s = sorted(serial.geometry, key=lambda g: g.wkt)
-    p = sorted(par.geometry, key=lambda g: g.wkt)
-    assert len(s) == len(p) and len(s) > 0
-    for gs, gp in zip(s, p, strict=True):
-        assert list(gs.coords) == list(gp.coords)
-
-
-def test_arterial_parallel_matches_reference_1808(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Tie the pool path directly to the committed ground truth: forced-low threshold so the fork
-    # pool actually runs on the real 1808 block, and its buildable roads must WKT-set-equal the
-    # pinned reference (same guarantee the serial test_arterial_proposal_wkt_unchanged asserts).
-    from scoring_fixtures import _REF, _block_1808
-    monkeypatch.setattr(engines, "_PARALLEL_THRESHOLD", 1)
-    roads = replace(ARTERIAL, workers=16).propose(_block_1808()).roads
-    assert roads is not None
-    assert sorted(g.wkt for g in roads.geometry) == sorted(_REF["arterial_buildable"]["wkt"])
-
-
-def test_arterial_parallel_deterministic(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Two identical workers=16 proposes must produce identical sorted WKT. Forced-low threshold so
-    # the pool path (not serial) is what's being checked for determinism.
-    monkeypatch.setattr(engines, "_PARALLEL_THRESHOLD", 1)
-    block = _grid_block(3)
-    a = replace(ARTERIAL, n_anchors=6, workers=16).propose(block).roads
-    b = replace(ARTERIAL, n_anchors=6, workers=16).propose(block).roads
-    assert a is not None and b is not None
-    assert sorted(g.wkt for g in a.geometry) == sorted(g.wkt for g in b.geometry)
-
-
-def test_arterial_parallel_soak(monkeypatch: pytest.MonkeyPatch) -> None:
-    # NOT a correctness check (see test_arterial_parallel_identical_to_serial for that) -- guards
-    # against the fork pool leaking/accumulating semaphores or resource-tracker handles, or hanging,
-    # across many short-lived pools (the ~pools-per-propose x many-proposes churn a real multi-block
-    # pipeline run produces). Force the threshold to 1 so EVERY step of EVERY propose genuinely
-    # dispatches a fork pool: at the default threshold, _grid_block(3)'s modest candidate counts
-    # (n_anchors=6, the same known-fast config as the other parallel tests) stay under 128 and the
-    # soak would take the serial path every time, spawning zero pools and proving nothing. 30
-    # proposes x a handful of greedy steps/propose = a few hundred pool create/teardown cycles.
-    monkeypatch.setattr(engines, "_PARALLEL_THRESHOLD", 1)
-    block = _grid_block(3)
-    for _ in range(30):
+    for _ in range(2):
         roads = replace(ARTERIAL, objective=Directness(), n_anchors=6,
-                                  workers=16).propose(block).roads
+                        workers=2).propose(block).roads
         assert roads is not None
         assert len(roads) > 0
+        assert set(multiprocessing.active_children()) <= before, "a pool's workers outlived it"
 
 
 def test_planarize_nodes_two_crossing_chords() -> None:
@@ -312,7 +287,7 @@ def test_greedy_first_arterial_cuts_the_deep_block() -> None:
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(), max_roads=3,
-                              n_anchors=12)
+                              n_anchors=12, workers=1)
     assert len(roads) >= 1
     # The property is a SPANNING arterial, and the network is what has to span -- not any single
     # emitted row. Max-row-length was a valid proxy only while rows were never split; since
@@ -334,26 +309,29 @@ def test_greedy_first_arterial_cuts_the_deep_block() -> None:
 
 
 def test_greedy_is_deterministic() -> None:
-    block = _grid_block(5)
-    r1 = _greedy_arterials(
+    # A 3x3 grid at 6 anchors, where equal-gain candidates are common, so the result rests on the
+    # tie-break being a total order. Fault-injected 2026-11-04 with a coin-flip tie-break in
+    # `_best_candidate`: two runs of this block differ about half the time (10 of 20), so it
+    # compares four, which miss it about one time in eight. The 5x5 / 12-anchor block this ran
+    # on before, at 3x the CPU of all four, never caught it (0 of 20).
+    block = _grid_block(3)
+    runs = [[g.wkt for g in _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-        realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(), max_roads=4,
-                           n_anchors=12)
-    r2 = _greedy_arterials(
-        block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-        realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(), max_roads=4,
-                           n_anchors=12)
-    assert [g.wkt for g in r1.geometry] == [g.wkt for g in r2.geometry]
+        realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(), max_roads=3,
+        n_anchors=6, workers=1).geometry] for _ in range(4)]
+    assert all(r == runs[0] for r in runs[1:])
 
 
 def test_greedy_roads_carry_drainage_and_slice_into_a_curve() -> None:
     from reblock.budget import road_drainage
     from reblock.permeability import EgressContext, permeability_curve
-    block = _grid_block(6)
+    # 3x3 / 6 anchors / 3 roads, not 6x6 / 12 / 5 (14x the CPU): reversing the engine's `drain`
+    # column fails both.
+    block = _grid_block(3)
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(),
-                              max_roads=5, n_anchors=12)
+                              max_roads=3, n_anchors=6, workers=1)
     assert len(roads) >= 1
     assert list(roads["drain"]) == road_drainage(block, roads)   # drain IS the actual drainage
     # integrates w/ budget machinery
@@ -369,18 +347,24 @@ def test_arterial_proposal_wkt_unchanged() -> None:
     # incremental union are perf-only changes; any drift here means a path or noding decision
     # actually changed.
     from scoring_fixtures import _REF, _block_1808
-    roads = replace(ARTERIAL, realizer=SnapToBoundary(lam=2.0), objective=Directness()).propose(
-        _block_1808()).roads
+    # Serial: `workers` cannot change the roads (test_arterial_parallel_identical_to_serial pins
+    # pool == serial), and a 16-process pool per step doubled this test's CPU.
+    roads = replace(ARTERIAL, realizer=SnapToBoundary(lam=2.0), objective=Directness(),
+                    workers=1).propose(_block_1808()).roads
     assert roads is not None
     assert sorted(g.wkt for g in roads.geometry) == sorted(_REF["arterial_buildable"]["wkt"])
 
 
 def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
-    block = _grid_block(6)
+    # 3x3 / 8 anchors / 4 roads. Fault-injected 2026-11-04: with `_merge` collecting the lines
+    # into a MultiLineString instead of noding them (`unary_union`), this fails -- and the 6x6 /
+    # 12-anchor / 6-road block it ran on before (6x the CPU) PASSED: it found a degree-4 interior
+    # node without any noding.
+    block = _grid_block(3)
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
-        realizer=IdealChord(), objective=Directness(), cost=Length(), max_roads=6,
-                              n_anchors=12)
+        realizer=IdealChord(), objective=Directness(), cost=Length(), max_roads=4,
+                              n_anchors=8, workers=1)
     # Build the road+street graph as a CSR (the nx-free scoring path's own builders) and read
     # node degree off the CSR's per-row nnz -- a real crossroads noded by `_planarize` shows up
     # as one shared node where >= 4 segments meet, vs two overlapping lines that never node.
@@ -422,7 +406,7 @@ def test_road_width_splits_the_cache_key_under_every_cost() -> None:
     width's cached roads back, stamped with the first width."""
     from reblock.derivations import propose
     block = replace(_grid_block(3), source_content_hash="width-splits-the-key")
-    narrow = replace(ARTERIAL, objective=Directness(), n_anchors=6, road_width_m=7.0)
+    narrow = replace(ARTERIAL, objective=Directness(), n_anchors=6, road_width_m=7.0, workers=1)
     wide = replace(narrow, road_width_m=9.0)
     assert narrow.identity != wide.identity
     assert propose(narrow, block).roads is not None
@@ -437,9 +421,10 @@ def test_proposal_identity_distinguishes_configurations_on_one_block() -> None:
     realizer and objective, so a budget or cost variant was scored with the other's depths."""
     from reblock.derivations import access_after
     block = replace(_grid_block(5), source_content_hash="pid-splits-the-key")
-    one = replace(ARTERIAL, objective=Directness(), n_anchors=6, max_roads=1).propose(block)
+    one = replace(ARTERIAL, objective=Directness(), n_anchors=6, max_roads=1,
+                  workers=1).propose(block)
     three = replace(ARTERIAL, objective=Directness(), n_anchors=6,
-                              max_roads=3).propose(block)
+                              max_roads=3, workers=1).propose(block)
     assert one.roads is not None and three.roads is not None
     assert len(one.roads) != len(three.roads)                  # precondition: different roads
     assert one.identity != three.identity
@@ -468,7 +453,7 @@ def test_both_realizers_produce_roads() -> None:
     block = _two_arm_block(pts)
     for realizer in (SnapToBoundary(lam=2.0), IdealChord()):
         proposal = replace(ARTERIAL, objective=Directness(), max_roads=1,
-                           realizer=realizer).propose(block)
+                           realizer=realizer, workers=1).propose(block)
         assert proposal.roads is not None and len(proposal.roads) >= 1
         assert proposal.params["realizer"] == type(realizer).__name__
 
@@ -620,7 +605,7 @@ def test_greedy_handles_multilinestring_streets() -> None:
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(),
-                              max_roads=3, n_anchors=12)
+                              max_roads=3, n_anchors=12, workers=1)
     assert len(roads) >= 1
 
 
@@ -672,9 +657,11 @@ def test_cost_displacement_avoids_the_denser_corridor() -> None:
     block = _two_arm_block(pts)
 
     roads_length = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), max_roads=1,
-                                     n_anchors=8, top_k=2, half_width_m=1.0, cost=Length())
+                                     n_anchors=8, top_k=2, half_width_m=1.0, cost=Length(),
+                                     workers=1)
     roads_disp = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), max_roads=1,
-                                   n_anchors=8, top_k=2, half_width_m=1.0, cost=Displacement())
+                                   n_anchors=8, top_k=2, half_width_m=1.0, cost=Displacement(),
+                                   workers=1)
 
     assert len(roads_length) == 1 and len(roads_disp) == 1
     # the cost switch changed WHICH road is proposed:
@@ -720,9 +707,11 @@ def test_cost_displacement_finite_ranking_prefers_the_sparser_corridor() -> None
     block = _grid_block_with_points(pts)
 
     roads_length = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), max_roads=1,
-                                     n_anchors=10, top_k=4, half_width_m=1.0, cost=Length())
+                                     n_anchors=10, top_k=4, half_width_m=1.0, cost=Length(),
+                                     workers=1)
     roads_disp = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), max_roads=1,
-                                   n_anchors=10, top_k=4, half_width_m=1.0, cost=Displacement())
+                                   n_anchors=10, top_k=4, half_width_m=1.0, cost=Displacement(),
+                                   workers=1)
     radii = SpacingDiscs(pts).radii
     d_length = displacement(Discs(pts, radii), roads_length)
     d_disp = displacement(Discs(pts, radii), roads_disp)
@@ -738,9 +727,9 @@ def test_cost_displacement_is_deterministic() -> None:
     pts = gpd.GeoDataFrame(geometry=left_pts + right_pts, crs=UTM)
     block = _two_arm_block(pts)
     r1 = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), cost=Displacement(),
-                           max_roads=1, n_anchors=8, top_k=2, half_width_m=1.0)
+                           max_roads=1, n_anchors=8, top_k=2, half_width_m=1.0, workers=1)
     r2 = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), cost=Displacement(),
-                           max_roads=1, n_anchors=8, top_k=2, half_width_m=1.0)
+                           max_roads=1, n_anchors=8, top_k=2, half_width_m=1.0, workers=1)
     assert [g.wkt for g in r1.geometry] == [g.wkt for g in r2.geometry]
 
 
@@ -758,7 +747,7 @@ def test_cost_displacement_commits_a_zero_displacement_beneficial_road() -> None
                  parcels=plain.parcels, streets=plain.streets, building_geometries=far_points,
                  source_content_hash=None, building_tier=SpacingDiscs)
     roads = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), cost=Displacement(),
-                              max_roads=1, n_anchors=12, half_width_m=1.0)
+                              max_roads=1, n_anchors=12, half_width_m=1.0, workers=1)
     assert len(roads) == 1
     assert roads.geometry.iloc[0].length > 1.0                 # a real, non-degenerate candidate
     far_radii = SpacingDiscs(far_points).radii
@@ -803,7 +792,7 @@ def test_cost_repulsion_identity_and_valid_proposal() -> None:
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=IdealChord(), objective=Access(), cost=Repulsion(),
-                              max_roads=1, n_anchors=8, top_k=4)
+                              max_roads=1, n_anchors=8, top_k=4, workers=1)
     assert len(roads) == 1
     assert roads.geometry.iloc[0].length > 0.0             # a real, non-degenerate committed road
 
@@ -834,7 +823,7 @@ def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Repulsion(),
-                              max_roads=4, n_anchors=12)
+                              max_roads=4, n_anchors=12, workers=1)
     # (i) non-degeneracy: repulsion commits real, access-improving road(s) -- it reaches the
     # interior rather than building zero-benefit gap roads (a zero-benefit road has raw=0 -> gain=0
     # under the always-positive repulsion denominator, so it can never win).
