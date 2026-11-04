@@ -38,6 +38,16 @@ import tempfile
 
 os.environ["REBLOCK_CACHE_DIR"] = tempfile.mkdtemp(prefix="reblock-test-cache-")
 
+# BLAS and OpenMP on one thread, in this process and every subprocess a test launches (they inherit
+# the environment). Set before numpy loads, which is the only time OpenBLAS reads it. Each xdist
+# worker is already one of many processes, and the suite's arrays are small: on a 48-core machine
+# a bare `import reblock.compare` spent 10.4 s of CPU in 1 s of wall (OpenBLAS's idle threads
+# spinning), 0.8 s with one thread. Threads cannot change a result beyond floating-point order.
+# test_consensus_runners' BLAS tests raise the count themselves (`threadpool_limits(limits=2)`)
+# and still fail on their faults under this.
+for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+    os.environ[_var] = "1"
+
 from collections.abc import Iterator  # noqa: E402
 from pathlib import Path  # noqa: E402
 

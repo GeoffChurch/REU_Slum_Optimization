@@ -176,27 +176,26 @@ def test_best_candidate_reduce() -> None:
 
 def test_arterial_serial_refactor_identical() -> None:
     # The task-1 acceptance gate: the extraction of `eval_candidate` + the shared `_best_candidate`
-    # reduce must be behavior-preserving. `_grid_block(3)` with a small `n_anchors` terminates
-    # (no candidate improves) well before ARTERIAL's `max_roads=15` for BOTH modes -- verified by
-    # comparing against a higher `max_roads` cap -- so this exercises the all-non-positive-gain
-    # reduce path (the critical sentinel), not just positive-gain steps. Expected WKT captured from
-    # the pre-refactor implementation.
+    # reduce must be behavior-preserving, through a whole propose. A 2x2 grid commits one road and
+    # then finds no candidate that improves, well inside max_roads=3, for BOTH realizers -- so this
+    # exercises the all-non-positive-gain reduce (the critical sentinel), not just a positive step.
+    #
+    # Pinned 2026-11-04 from code that reproduces the 3x3 / 6-anchor pins captured from the
+    # pre-refactor implementation (5 buildable and 6 aspirational roads, at 6x the CPU). Each of
+    # three reduce faults fails both realizers here, on a 2x2 grid at any anchor count from 2 and
+    # any road cap from 2 (the least that reaches the terminating step; 3 is one past it):
+    # flipping the wkt tie-break, letting a zero gain win while nothing is chosen yet (the
+    # sentinel), and `>=` for `>`.
     expected = {
-        "buildable": sorted([
-            "LINESTRING (1 0, 1 1)", "LINESTRING (1 1, 1 2)", "LINESTRING (1 1, 2 1)",
-            "LINESTRING (1 2, 2 2, 2 1)", "LINESTRING (2 0, 2 1)",
-        ]),
-        "aspirational": sorted([
-            "LINESTRING (0 1, 1 2)", "LINESTRING (0 3, 1 2)", "LINESTRING (1 2, 1.5 2.5)",
-            "LINESTRING (1 2, 2.5 0.5)", "LINESTRING (1.5 2.5, 2 3)", "LINESTRING (2 0, 2.06 0)",
-        ]),
+        "buildable": ["LINESTRING (0 1, 1 1)"],
+        "aspirational": ["LINESTRING (0 0, 1.5 1.5)"],
     }
     realizers: dict[str, SnapToBoundary | IdealChord] = {
         "buildable": SnapToBoundary(lam=2.0), "aspirational": IdealChord()}
-    block = _grid_block(3)
+    block = _grid_block(2)
     for name, want in expected.items():
         roads = replace(ARTERIAL, realizer=realizers[name], objective=Directness(),
-                                  n_anchors=6, workers=1).propose(block).roads
+                        n_anchors=3, max_roads=3, workers=1).propose(block).roads
         assert roads is not None
         assert sorted(g.wkt for g in roads.geometry) == want
 
@@ -329,13 +328,14 @@ def test_greedy_is_deterministic() -> None:
 def test_greedy_roads_carry_drainage_and_slice_into_a_curve() -> None:
     from reblock.budget import road_drainage
     from reblock.permeability import EgressContext, permeability_curve
-    # 3x3 / 6 anchors / 3 roads, not 6x6 / 12 / 5 (14x the CPU): reversing the engine's `drain`
-    # column fails both.
+    # Reversing the engine's `drain` column fails this from 2 roads on a 3x3 grid at any anchor
+    # count from 2 (one road cannot be out of order; a 2x2 grid stops at one). Chosen 3 anchors,
+    # 3 roads; it ran on 6x6 / 12 / 5 first, at 14x the CPU.
     block = _grid_block(3)
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(),
-                              max_roads=3, n_anchors=6, workers=1)
+        max_roads=3, n_anchors=3, workers=1)
     assert len(roads) >= 1
     assert list(roads["drain"]) == road_drainage(block, roads)   # drain IS the actual drainage
     # integrates w/ budget machinery
@@ -346,29 +346,46 @@ def test_greedy_roads_carry_drainage_and_slice_into_a_curve() -> None:
 
 def test_arterial_proposal_wkt_unchanged() -> None:
     # The perf-refactor gate for `_snap`/`_planarize` (task 5 of the arterial-frozen-context perf
-    # design): buildable arterial roads on the real 1808 block must match the pinned reference WKT
-    # EXACTLY -- not merely score-equivalent. `_snap`'s shapely-ufunc weights and `_planarize`'s
-    # incremental union are perf-only changes; any drift here means a path or noding decision
-    # actually changed.
-    from scoring_fixtures import _REF, _block_1808
+    # design): buildable arterial roads on the real 1808 block must match a pinned WKT EXACTLY --
+    # not merely score-equivalent. Any drift here means a path or noding decision changed.
+    #
+    # 5 anchors, 4 roads, pinned 2026-11-04 from code that reproduces the 12-road shipped-preset
+    # reference (32 anchors, 15 roads; tests/data/scoring/ref_values_1808.json) exactly, at a
+    # twentieth of its CPU. Bisected against two faults the full run catches: `_snap` ignoring
+    # `lam` (fails from 4 to 6 anchors at 4 roads, and at 4 anchors from 3 roads; 2, 3 and 8
+    # anchors miss it), and `_merge` normalizing the union's vertex order (fails at every count
+    # from 3 roads). The full run passes gentler `_snap` faults (lam x4 or x0.5, squared
+    # distances, distances to the chord's centroid) just as this does.
+    from scoring_fixtures import _block_1808
+    want = sorted([
+        "LINESTRING (297626.64 1280301.93, 297627.68 1280297.6, 297633.18 1280297.82)",
+        "LINESTRING (297633.18 1280297.82, 297636.15 1280296.04, 297640.43 1280297.45,"
+        " 297641.97 1280296.27, 297649.04 1280297.54)",
+        "LINESTRING (297633.18 1280297.82, 297637.27 1280304.57)",
+        "LINESTRING (297637.27 1280304.57, 297637.23 1280304.71, 297633.65 1280305.82)",
+        "LINESTRING (297637.27 1280304.57, 297640.37 1280301.42, 297647.58 1280303.71,"
+        " 297649.04 1280297.54)",
+    ])
     # Serial: `workers` cannot change the roads (test_arterial_parallel_identical_to_serial pins
-    # pool == serial), and a 16-process pool per step doubled this test's CPU.
+    # pool == serial).
     roads = replace(ARTERIAL, realizer=SnapToBoundary(lam=2.0), objective=Directness(),
-                    workers=1).propose(_block_1808()).roads
+                    n_anchors=5, max_roads=4, workers=1).propose(_block_1808()).roads
     assert roads is not None
-    assert sorted(g.wkt for g in roads.geometry) == sorted(_REF["arterial_buildable"]["wkt"])
+    assert sorted(g.wkt for g in roads.geometry) == want
 
 
 def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
-    # 3x3 / 8 anchors / 4 roads. Fault-injected 2026-11-04: with `_merge` collecting the lines
-    # into a MultiLineString instead of noding them (`unary_union`), this fails -- and the 6x6 /
-    # 12-anchor / 6-road block it ran on before (6x the CPU) PASSED: it found a degree-4 interior
-    # node without any noding.
+    # Fault-injected 2026-11-04: with `_merge` collecting the lines into a MultiLineString
+    # instead of noding them (`unary_union`), this fails -- and the 6x6 / 12-anchor / 6-road
+    # block it ran on before PASSED: it found a degree-4 interior node without any noding.
+    # The least that makes a crossroads at all is a 3x3 grid, 2 anchors, 3 roads (a 2x2 grid
+    # stops at one road; 2 roads never cross); every such config fails the fault. Chosen 3 anchors,
+    # 4 roads.
     block = _grid_block(3)
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=IdealChord(), objective=Directness(), cost=Length(), max_roads=4,
-                              n_anchors=8, workers=1)
+        n_anchors=3, workers=1)
     # Build the road+street graph as a CSR (the nx-free scoring path's own builders) and read
     # node degree off the CSR's per-row nnz -- a real crossroads noded by `_planarize` shows up
     # as one shared node where >= 4 segments meet, vs two overlapping lines that never node.
@@ -409,8 +426,11 @@ def test_road_width_splits_the_cache_key_under_every_cost() -> None:
     Keying width only for displacement/repulsion let a length-cost width sweep get the first
     width's cached roads back, stamped with the first width."""
     from reblock.derivations import propose
-    block = replace(_grid_block(3), source_content_hash="width-splits-the-key")
-    narrow = replace(ARTERIAL, objective=Directness(), n_anchors=6, road_width_m=7.0, workers=1)
+    # One road on a 2x2 grid is enough: fails when the width is left out of the identity, or the
+    # proposal is stamped with a fixed 7 m.
+    block = replace(_grid_block(2), source_content_hash="width-splits-the-key")
+    narrow = replace(ARTERIAL, objective=Directness(), n_anchors=2, max_roads=1, road_width_m=7.0,
+                     workers=1)
     wide = replace(narrow, road_width_m=9.0)
     assert narrow.identity != wide.identity
     assert propose(narrow, block).roads is not None
@@ -424,11 +444,13 @@ def test_proposal_identity_distinguishes_configurations_on_one_block() -> None:
     that propose different roads on one block must not share it. The id used to encode only the
     realizer and objective, so a budget or cost variant was scored with the other's depths."""
     from reblock.derivations import access_after
-    block = replace(_grid_block(5), source_content_hash="pid-splits-the-key")
-    one = replace(ARTERIAL, objective=Directness(), n_anchors=6, max_roads=1,
+    # One road against two, on a 3x3 grid (a 2x2 grid stops at one): fails when the content hash
+    # skips the roads.
+    block = replace(_grid_block(3), source_content_hash="pid-splits-the-key")
+    one = replace(ARTERIAL, objective=Directness(), n_anchors=2, max_roads=1,
                   workers=1).propose(block)
-    three = replace(ARTERIAL, objective=Directness(), n_anchors=6,
-                              max_roads=3, workers=1).propose(block)
+    three = replace(ARTERIAL, objective=Directness(), n_anchors=2,
+                    max_roads=2, workers=1).propose(block)
     assert one.roads is not None and three.roads is not None
     assert len(one.roads) != len(three.roads)                  # precondition: different roads
     assert one.identity != three.identity
@@ -584,15 +606,15 @@ def _deep_block() -> Block:
 
 
 def _holed_block() -> Block:
-    # A 5x5 grid with the center parcel removed -> the block boundary is a square with a square
+    # A 3x3 grid with the center parcel removed -> the block boundary is a square with a square
     # hole, so `boundary.boundary` is a MultiLineString (outer ring + inner ring).
     polys, ids = [], []
-    for i in range(5):
-        for j in range(5):
-            if (i, j) == (2, 2):
+    for i in range(3):
+        for j in range(3):
+            if (i, j) == (1, 1):
                 continue
             polys.append(Polygon([(i, j), (i + 1, j), (i + 1, j + 1), (i, j + 1)]))
-            ids.append(i * 5 + j)
+            ids.append(i * 3 + j)
     parcels = gpd.GeoDataFrame({"parcel_id": ids}, geometry=polys, crs=UTM)
     boundary = cast(Polygon, parcels.geometry.union_all())
     streets = gpd.GeoDataFrame(geometry=[boundary.boundary], crs=UTM)
@@ -606,10 +628,12 @@ def test_greedy_handles_multilinestring_streets() -> None:
     # rather than filter it out, or the greedy sees no anchors and returns an empty proposal.
     block = _holed_block()
     assert "Multi" in block.streets.geometry.iloc[0].geom_type    # precondition: streets ARE Multi
+    # One road is all this asks for, and the anchor count does not matter (0 passes too). Fails
+    # when the engine keeps only LineString streets, or `_merged_lines` drops a Multi* union.
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(),
-                              max_roads=3, n_anchors=12, workers=1)
+                              max_roads=1, n_anchors=2, workers=1)
     assert len(roads) >= 1
 
 
