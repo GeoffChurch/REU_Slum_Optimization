@@ -118,17 +118,48 @@ function readoutText(host: ReturnType<typeof mountPoint>): string {
   return live.textContent;
 }
 
+/** The floor slider's log track for `bundle`'s `metric`, worked out here from its definition
+ * rather than imported (model/screen.ts's `floorScale` is pinned on its own in
+ * screen-model.test.ts): 1000 whole steps, position u standing for 10^(lo + u/1000 (hi - lo)), lo
+ * and hi the log10 of the lowest and highest score, and the two ends exactly those scores. */
+interface Track {
+  min: number;
+  max: number;
+  position(floor: number): number;
+  floor(u: number): number;
+}
+function track(bundle: CityBundle, metric: MetricName): Track {
+  let min = Infinity, max = -Infinity;
+  for (const v of scores(bundle, metric)) { min = Math.min(min, v); max = Math.max(max, v); }
+  const lo = Math.log10(min), hi = Math.log10(max);
+  return {
+    min, max,
+    position: (floor) => Math.round(1000 * (Math.log10(floor) - lo) / (hi - lo)),
+    floor: (u) => u === 0 ? min : u === 1000 ? max : 10 ** (lo + (u / 1000) * (hi - lo)),
+  };
+}
+const CT_DDP = track(ct, "depth_density_proxy");
+
 /** Drives one control the way a reader's pointer or keyboard would (set `.value`/`.checked`, then
  * dispatch the event the widget listens for -- field-boot.test.ts's and region-grow-boot.test.ts's
  * own `setSlider` shape) and flushes the ONE animation frame that interaction schedules.
  * `state.set()` itself is synchronous, but screen-map.ts's own `scheduleRender` defers the actual
  * redraw to `requestAnimationFrame` (design item 3), so a test that inspected the canvas
- * immediately after `dispatch` would still be looking at the PREVIOUS frame. */
-function setFloor(host: ReturnType<typeof mountPoint>, value: number): void {
+ * immediately after `dispatch` would still be looking at the PREVIOUS frame.
+ *
+ * `dragFloor` moves the slider to a track POSITION, which is all a reader's drag can do; `setFloor`
+ * drags to the position nearest `floor` on the active `tr`ack and returns the floor that position
+ * stands for -- the one the widget should now hold. */
+function dragFloor(host: ReturnType<typeof mountPoint>, position: number): void {
   const el = floorSlider(host);
-  el.value = String(value);
+  el.value = String(position);
   el.dispatch("input");
   fireAnimationFrame();
+}
+function setFloor(host: ReturnType<typeof mountPoint>, tr: Track, floor: number): number {
+  const u = tr.position(floor);
+  dragFloor(host, u);
+  return tr.floor(u);
 }
 function setMetric(host: ReturnType<typeof mountPoint>, metric: MetricName): void {
   const el = metricSelectEl(host);
@@ -304,16 +335,17 @@ test("the number of selected blocks drawn equals what the model selects", async 
 test("moving the floor changes the drawn selection", async () => {
   // A widget that computed the selection but drew a constant would pass a count test at one
   // floor. Assert at two floors and require the counts to differ.
-  const { host, cv } = await mount();
+  const { host, cv, store } = await mount();
   const countAtDefault = selectedPaths(cv).length;
 
-  // The single highest-scoring block's own score: raising the floor to it selects (about) one
-  // block, a difference that cannot be an artefact of two nearly-identical floors.
+  // The track's right end, the single highest-scoring block's own score: raising the floor to it
+  // selects (about) one block, a difference that cannot be an artefact of two nearly-identical
+  // floors.
   const s = scores(ct, "depth_density_proxy");
-  let max = -Infinity;
-  for (const v of s) if (v > max) max = v;
+  const max = CT_DDP.max;
 
-  setFloor(host, max);
+  dragFloor(host, 1000);
+  assert.equal(store.get().floor, max, "the track's right end is not the highest score");
   const countAtMax = selectedPaths(cv).length;
 
   assert.notEqual(countAtMax, countAtDefault,
@@ -412,7 +444,7 @@ test("the base layer is drawn once, not per frame, and blitted every frame in de
     assert.deepEqual(transformsOf(cv).slice(-2), [[1, 0, 0, 1, 0, 0], [DPR, 0, 0, DPR, 0, 0]]);
 
     const shipped = ct.floors.find((f) => f.metric === "depth_density_proxy")!;
-    setFloor(host, shipped.value * 2); // a stricter floor -- the selection shrinks
+    setFloor(host, CT_DDP, shipped.value * 2); // a stricter floor -- the selection shrinks
 
     const frame2 = lastFrame(cv as never);
     assert.equal(frame2.filter((c) => c.op === "drawImage").length, 1,
@@ -442,7 +474,7 @@ test("the blit reuses the DPR the offscreen canvas was actually sized for, not a
     const original = fakeWindow.devicePixelRatio;
     fakeWindow.devicePixelRatio = 3; // no resize follows, so paintBase never sees this
     try {
-      setFloor(host, ct.floors.find((f) => f.metric === "depth_density_proxy")!.value * 2);
+      setFloor(host, CT_DDP, ct.floors.find((f) => f.metric === "depth_density_proxy")!.value * 2);
       const last2 = transformsOf(cv).slice(-2);
       assert.deepEqual(last2, [[1, 0, 0, 1, 0, 0], [DPR, 0, 0, DPR, 0, 0]],
         `blit transform was ${JSON.stringify(last2)} -- should still use the DPR the offscreen `
@@ -510,25 +542,26 @@ test("floor-slider redraws are requestAnimationFrame-coalesced, not synchronous"
   const before = callsOf(cv).length;
 
   const slider = floorSlider(host);
-  slider.value = String(0.02);
+  slider.value = String(CT_DDP.position(0.02));
   slider.dispatch("input");
   // No fireAnimationFrame() yet -- a widget that redrew synchronously on state.set would already
   // show new calls here.
   assert.equal(callsOf(cv).length, before,
     "the canvas redrew synchronously on state.set, before any animation frame fired");
 
-  slider.value = String(0.03); // a second change before the first has ever been flushed
+  const latest = CT_DDP.position(0.03); // a second change before the first has ever been flushed
+  slider.value = String(latest);
   slider.dispatch("input");
   fireAnimationFrame();
 
   // Coalesced: exactly one new frame (one new drawImage), and it reflects the LATEST value
-  // (0.03), not two frames and not the first (stale) one.
+  // (about 0.03), not two frames and not the first (stale) one.
   const added = callsOf(cv).slice(before);
   const blits = added.filter((c) => c.op === "drawImage");
   assert.equal(blits.length, 1,
     `two rapid floor changes before a flush produced ${blits.length} frames, not one`);
   const expected = selectAt(ct, ranking(ct, "depth_density_proxy"), scores(ct, "depth_density_proxy"),
-    0.03).count;
+    CT_DDP.floor(latest)).count;
   const drawn = added.filter((c) => c.op === "stroke" && c.strokeStyle === E.selected_color).length;
   assert.equal(drawn, expected, "the coalesced frame should reflect the LATEST floor, not the first");
 });
@@ -596,10 +629,15 @@ test("?metric= and ?floor= together honour the explicit floor, in state AND on t
     // URL-supplied floor reached the picture and never the control. 0.0004 sits inside
     // `density_compactness`'s own score range on this bundle (its ceiling is ~0.00109), so nothing
     // clamps it and the number the reader typed is the number all three report.
+    //
+    // 0.0004 is not on a step of the track, so it also pins that a floor from the URL keeps its
+    // exact value in state while the slider shows the nearest position.
+    const tr = track(ct, "density_compactness");
+    assert.notEqual(tr.floor(tr.position(0.0004)), 0.0004, "precondition: 0.0004 is off the steps");
     const { host, cv, store } = await mount(700, null, "metric=density_compactness&floor=0.0004");
     assert.equal(store.get().metric, "density_compactness");
     assert.equal(store.get().floor, 0.0004);
-    assert.equal(floorSlider(host).value, "0.0004",
+    assert.equal(floorSlider(host).value, String(tr.position(0.0004)),
       "the slider initialised from the metric's own default while the picture drew 0.0004");
     const expected = selectAt(ct, ranking(ct, "density_compactness"),
       scores(ct, "density_compactness"), 0.0004).count;
@@ -635,20 +673,27 @@ test("switching city carries a floor the READER set, and invents none where they
       "a `?floor=` the reader never typed is in the URL they would copy");
     // The slider tracks the new bundle even though nothing was pinned -- `syncFloor` is called for
     // its side effect on the CONTROL whichever way the state goes. Nairobi's own
-    // depth_density_proxy scores top out well below Cape Town's (0.0537 against 0.158), so a
-    // handler that skipped the call would leave the control offering a range this corpus has not
-    // got.
-    let nbMax = -Infinity;
-    for (const v of scores(nb, "depth_density_proxy")) if (v > nbMax) nbMax = v;
-    assert.equal(Number(floorSlider(untouched.host).max), nbMax,
-      "the slider kept the previous city's bounds");
+    // depth_density_proxy scores run 9.90e-6 to 0.0625 against Cape Town's 4.44e-7 to 0.138, so
+    // the same shipped floor sits at another place on its track (819 against 812), and a drag
+    // there means another floor.
+    const nbTr = track(nb, "depth_density_proxy");
+    const nbShipped = nb.floors.find((f) => f.metric === "depth_density_proxy")!.value;
+    assert.notEqual(nbTr.position(nbShipped), CT_DDP.position(nbShipped),
+      "precondition: the two tracks put Nairobi's shipped floor at different positions");
+    assert.equal(Number(floorSlider(untouched.host).value), nbTr.position(nbShipped),
+      "the slider kept the previous city's track");
+    dragFloor(untouched.host, 500);
+    assert.ok(Math.abs(untouched.store.get().floor! / nbTr.floor(500) - 1) < 1e-12,
+      `a drag on Nairobi read Cape Town's track: ${untouched.store.get().floor}`);
 
     const chosen = await mount();
-    setFloor(chosen.host, 0.02);
+    const dragged = setFloor(chosen.host, CT_DDP, 0.02);
     setCity(chosen.host, true);
-    assert.equal(chosen.store.get().floor, 0.02,
+    assert.equal(chosen.store.get().floor, dragged,
       "a floor the reader dragged to should carry to the new corpus, not be redefined by it");
-    assert.equal(chosen.loc.written.at(-1), "city=nairobi&floor=0.02",
+    assert.equal(Number(floorSlider(chosen.host).value), nbTr.position(dragged),
+      "the carried floor should sit where Nairobi's own track puts it");
+    assert.equal(chosen.loc.written.at(-1), `city=nairobi&floor=${Number(dragged.toPrecision(6))}`,
       "the emitted query should name both the city and the floor it carried");
   });
 
@@ -665,7 +710,8 @@ test("a city round trip returns an untouched floor to where it started", async (
   setCity(host, false);
 
   assert.equal(store.get().floor, null, "the round trip pinned a floor the reader never chose");
-  assert.equal(Number(floorSlider(host).value), poolSizeFloor(ct, "density"),
+  assert.equal(Number(floorSlider(host).value),
+    track(ct, "density").position(poolSizeFloor(ct, "density")),
     "the slider came home to a number that is not Cape Town's own");
   const shippedDefault = ct.floors.find((f) => f.metric === "depth_density_proxy")!;
   assert.equal(selectedPaths(cv).length, shippedDefault.n,
@@ -681,11 +727,11 @@ test("an out-of-range ?floor= is clamped AND stops being emitted at that value",
   // the value that produced it.
   const { host, cv, loc, store } = await mount(700, null, "floor=999");
   const s = scores(ct, "depth_density_proxy");
-  let max = -Infinity;
-  for (const v of s) if (v > max) max = v;
+  const max = CT_DDP.max;
 
   assert.equal(store.get().floor, max, "the state should land on the bundle's own ceiling");
-  assert.equal(floorSlider(host).value, String(max), "the slider should agree with it");
+  assert.equal(floorSlider(host).value, "1000",
+    "the slider should agree with it, at its right end");
   assert.equal(selectedPaths(cv).length,
     selectAt(ct, ranking(ct, "depth_density_proxy"), s, max).count,
     "the picture should draw the clamped floor's pool, not the empty one 999 selects");
@@ -734,7 +780,7 @@ test("a floor change's own frame draws the ring, rather than inheriting it from 
   // simply a floor inside Cape Town's depth_density_proxy range and different from the shipped
   // default, so the state change is real.
   const { host, cv } = await mount(700, null, "");
-  setFloor(host, 0.02);
+  setFloor(host, CT_DDP, 0.02);
   assert.equal(followRings(cv).length, 1);
 });
 
@@ -886,13 +932,57 @@ test("the score view re-ranks when the floor moves, and a switch back draws the 
   const { host, cv } = await mount(700, null, "colour=score");
   assert.equal(colourSelectEl(host).value, "score", "?colour=score did not reach the control");
   const before = lastFrame(cv as never).filter((c) => c.op === "fill").map((c) => c.fillStyle);
-  setFloor(host, 0.02);
+  const dragged = setFloor(host, CT_DDP, 0.02);
   const after = lastFrame(cv as never).filter((c) => c.op === "fill").map((c) => c.fillStyle);
   assert.notDeepEqual(after, before, "a floor move left every shade where it was");
   setColour(host, "selection");
   assert.ok(lastFrame(cv as never).some((c) => c.op === "drawImage"));
   assert.ok(legendOf(host).hidden);
   const sel = selectAt(ct, ranking(ct, "depth_density_proxy"), scores(ct, "depth_density_proxy"),
-                       0.02);
+                       dragged);
   assert.equal(selectedPaths(cv).length, sel.count);
+});
+
+test("the slider is a log track: the shipped floor sits four-fifths along, and is read aloud",
+  async () => {
+  // On the old linear track the shipped 0.0128 sat 9% along Cape Town's 4.44e-7 -- 0.138; on the
+  // log track, log10(0.0128 / 4.44e-7) / log10(0.138 / 4.44e-7) = 0.812 of it.
+  const { host, store } = await mount();
+  const shipped = ct.floors.find((f) => f.metric === "depth_density_proxy")!.value;
+  const slider = floorSlider(host);
+  assert.equal([slider.min, slider.max, slider.step].join(" "), "0 1000 1");
+  assert.equal(Number(slider.value), CT_DDP.position(shipped));
+  assert.ok(Number(slider.value) >= 800 && Number(slider.value) <= 825,
+    `the shipped floor sits at ${slider.value} of 1000`);
+  assert.equal(store.get().floor, null, "opening on the default chose no floor");
+  // A track position means nothing aloud, so the slider announces the floor.
+  assert.equal(slider.getAttribute("aria-valuetext"), `floor ${shipped.toFixed(4)}`);
+});
+
+test("a drag sets the floor its position stands for, 10^(lo + u/1000 (hi - lo))", async () => {
+  const { host, cv, store, loc } = await mount();
+  const lo = Math.log10(CT_DDP.min), hi = Math.log10(CT_DDP.max);
+  dragFloor(host, 500);
+  const floor = store.get().floor!;
+  assert.ok(Math.abs(floor / 10 ** (lo + 0.5 * (hi - lo)) - 1) < 1e-12,
+    `the middle of the track gave ${floor}, not the geometric mean of the ends`);
+  assert.equal(floorSlider(host).value, "500",
+    "the redraw moved the slider off the reader's place");
+  assert.equal(loc.written.at(-1), `floor=${Number(floor.toPrecision(6))}`,
+    "the URL should carry the floor, not the position");
+  const s = scores(ct, "depth_density_proxy");
+  assert.equal(selectedPaths(cv).length,
+    selectAt(ct, ranking(ct, "depth_density_proxy"), s, floor).count);
+  assert.equal(floorSlider(host).getAttribute("aria-valuetext"), `floor ${floor.toPrecision(3)}`);
+
+  // The left end is the lowest score exactly, so every block is selected.
+  dragFloor(host, 0);
+  assert.equal(store.get().floor, CT_DDP.min);
+  assert.equal(selectedPaths(cv).length, ct.n_blocks);
+
+  // After a metric switch the drag reads THAT metric's track, not the one it opened on.
+  setMetric(host, "density_compactness");
+  dragFloor(host, 500);
+  assert.ok(Math.abs(store.get().floor! / track(ct, "density_compactness").floor(500) - 1) < 1e-12,
+    `a drag after the metric switch read the previous metric's track: ${store.get().floor}`);
 });

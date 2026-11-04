@@ -11,7 +11,8 @@ import { runOrReport, showWidgetError } from "../dom/error.js";
 import { removeFallbackImage } from "../dom/fallback.js";
 import { observeSize } from "../dom/resize.js";
 import {
-  rankShades, ranking, scores, selectAt, type MetricName, type Selection,
+  FLOOR_STEPS, floorScale, rankShades, ranking, scores, selectAt, type FloorScale, type MetricName,
+  type Selection,
 } from "../model/screen.js";
 import { createLayer, paintScoreFrame, SCORE_GROUND, SCORE_RAMP } from "../render/city.js";
 import { sizeCanvas } from "../render/canvas.js";
@@ -190,7 +191,13 @@ function defaultFloorFor(bundle: CityBundle, metric: MetricName, sc: Float64Arra
       ?? floorAtShippedPoolSize(bundle, metric, sc);
 }
 
-/** The floor slider's live bounds and value for (bundle, metric). `preferred === null` means "reset
+/** What `syncFloor` resolved: the floor, and the log track the slider now shows it on. */
+interface FloorSync {
+  floor: number;
+  scale: FloorScale;
+}
+
+/** The floor slider's track and position for (bundle, metric). `preferred === null` means "reset
  * to this metric's own default", which `defaultFloorFor` just above resolves. Otherwise `preferred`
  * itself: the whole point of an ABSOLUTE floor (design §3.4) is that the same number carries over to
  * a corpus with no calibration at all, rather than being redefined on every switch the way a
@@ -198,26 +205,20 @@ function defaultFloorFor(bundle: CityBundle, metric: MetricName, sc: Float64Arra
  * `boot` for a URL-supplied `?floor=` or its absence, the toggle for a floor the reader set or one
  * they never touched -- the latter not an absolute floor to carry, but a request for whatever this
  * metric calibrates to. The metric handler always passes `null`. Either way the result is clamped
- * into the range just computed, written to the slider, and returned. */
+ * into the range of this metric's scores and returned, with the track it is shown on.
+ *
+ * The slider shows the track POSITION nearest the floor (model/screen.ts's `FloorScale`, log10 of
+ * the score linear along the track); the floor itself is what is returned and what state carries,
+ * so a `?floor=` between two steps keeps its exact value. The caller keeps the returned `scale`,
+ * which a drag reads its floor off without rescoring every block. */
 function syncFloor(floorSlider: HTMLInputElement, bundle: CityBundle, metric: MetricName,
-                   preferred: number | null): number {
+                   preferred: number | null): FloorSync {
   const sc = scores(bundle, metric);
-  let min = Infinity, max = -Infinity;
-  for (const v of sc) {
-    if (v < min) min = v;
-    if (v > max) max = v;
-  }
+  const scale = floorScale(sc);
   const target = preferred ?? defaultFloorFor(bundle, metric, sc);
-  const floor = Math.min(Math.max(target, min), max);
-  floorSlider.min = String(min);
-  floorSlider.max = String(max);
-  // No zero-width-range fallback: verified against both committed bundles that every one of the
-  // four metrics has a strictly positive, finite score range (min < max, min 0.0005627 on
-  // Nairobi's density_compactness, the narrowest of the eight city/metric pairs) -- a `|| 1e-9`
-  // here would be a silencer for a failure that has not happened and cannot happen from this data.
-  floorSlider.step = String((max - min) / 1000);
-  floorSlider.value = String(floor);
-  return floor;
+  const floor = Math.min(Math.max(target, scale.min), scale.max);
+  floorSlider.value = String(scale.toSlider(floor));
+  return { floor, scale };
 }
 
 /** The aria-live text: pool size always, and -- only where the bundle carries `informal` -- the
@@ -358,7 +359,12 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
   }
   const metricLabel = controlLabel("Metric ", metricSelect);
 
+  // A track of whole steps, the same for every (city, metric): `syncFloor` maps each one's scores
+  // onto it.
   const floorSlider = rangeInput();
+  floorSlider.min = "0";
+  floorSlider.max = String(FLOOR_STEPS);
+  floorSlider.step = "1";
   const floorLabel = controlLabel("Floor ", floorSlider);
 
   const cityToggle = checkboxInput();
@@ -410,29 +416,34 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
     city: "capetown", metric: "depth_density_proxy", floor: null, colour: "selection",
   });
   // A URL (piece E) may have set any of the three before this line, so all three controls are
-  // written from STATE rather than from the initials above -- and the slider's bounds and value are
-  // resolved against the state's OWN city and metric, with `state.floor` handed straight to
+  // written from STATE rather than from the initials above -- and the slider's track and position
+  // are resolved against the state's OWN city and metric, with `state.floor` handed straight to
   // `preferred`, since `null` there already means "this metric's own default" (design §1.6).
   const s0 = state.get();
   metricSelect.value = s0.metric;
   cityToggle.checked = s0.city === "nairobi";
   colourSelect.value = s0.colour;
-  const resolved = syncFloor(floorSlider, bundles[s0.city], s0.metric, s0.floor);
+  const synced = syncFloor(floorSlider, bundles[s0.city], s0.metric, s0.floor);
+  // The active (city, metric)'s track, replaced at every `syncFloor` below.
+  let scale = synced.scale;
   // `?floor=` is a bare finite number; where it falls in THIS metric's score range is a property of
-  // the fetched bundle, which no codec can know (design §2.3). `syncFloor` has already pinned the
-  // slider to the nearest usable value, so writing that value back is what keeps the control and
-  // the picture on one number -- and the write it triggers rewrites `?floor=` to the clamped value.
+  // the fetched bundle, which no codec can know (design §2.3). `syncFloor` has already clamped it
+  // into the score range, so writing that value back is what keeps the slider, the picture and the
+  // URL on one number -- and the write it triggers rewrites `?floor=` to the clamped value.
   // Only when the URL actually supplied one: resolving a `null` into state here would publish a
   // `?floor=` to a reader who never set one and -- being then indistinguishable from a number they
   // did set -- carry it across the next CITY switch and into any URL they copied. (A metric switch
   // would still clear it: the handler below writes `floor: null` unconditionally.)
-  if (s0.floor !== null && resolved !== s0.floor) state.set({ floor: resolved });
+  if (s0.floor !== null && synced.floor !== s0.floor) state.set({ floor: synced.floor });
 
-  floorSlider.addEventListener("input", () => state.set({ floor: Number(floorSlider.value) }));
+  // A drag, the one place a floor comes off the track: the floor its position stands for.
+  floorSlider.addEventListener("input", () => {
+    state.set({ floor: scale.fromSlider(Number(floorSlider.value)) });
+  });
   metricSelect.addEventListener("change", () => {
     const metric = asMetric(metricSelect.value);
-    syncFloor(floorSlider, bundles[state.get().city], metric, null);
-    // `null`, not the number `syncFloor` just wrote onto the slider: both sides resolve `null`
+    scale = syncFloor(floorSlider, bundles[state.get().city], metric, null).scale;
+    // `null`, not the floor `syncFloor` just put the slider at: both sides resolve `null`
     // through the same `defaultFloorFor`, and `null` additionally keeps `?floor=` out of the URL
     // for a reader who only switched metric.
     state.set({ metric, floor: null });
@@ -444,16 +455,17 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
     const city: ScreenState["city"] = cityToggle.checked ? "nairobi" : "capetown";
     const s = state.get();
     // Called for its side effect on the SLIDER whichever way the state below goes: the new bundle
-    // scores on its own range, so the control's bounds and displayed value have to track it even
+    // scores on its own range, so the control's track and position have to follow it even
     // when there is nothing to pin.
-    const resolved = syncFloor(floorSlider, bundles[city], s.metric, s.floor);
+    const synced = syncFloor(floorSlider, bundles[city], s.metric, s.floor);
+    scale = synced.scale;
     // Into STATE, though, only a floor the READER chose. `syncFloor`'s own docstring argues that an
     // ABSOLUTE floor carries across corpora rather than being redefined per city, and pinning the
     // number here is what carries it -- saying so in the URL is honest, because the reader chose to
     // carry it. A `null` floor is not an absolute floor: it says "whatever this metric calibrates
     // to", so pinning it would invent a choice nobody made, publish a `?floor=` nobody typed, and
     // leave a there-and-back city switch on the OTHER corpus's number (design §1.6).
-    state.set({ city, floor: s.floor === null ? null : resolved });
+    state.set({ city, floor: s.floor === null ? null : synced.floor });
   });
 
   // Assigned only from inside the first sized callback below, exactly like region-grow.ts's own
@@ -506,6 +518,9 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
         break;
     }
     legend.show(st.colour === "score", s[order[order.length - 1]!]!, floor, s[order[0]!]!);
+    // The slider's own value is a track position, which means nothing read aloud: a screen reader
+    // announces the floor instead, as the legend writes it.
+    floorSlider.setAttribute("aria-valuetext", `floor ${scoreText(floor)}`);
     // Every number the picture shows is also present as text, computed from the same `sel` the
     // picture was drawn from -- there is no second call to `selectAt` that could disagree with it.
     readout.textContent = describeSelection(st.city, bundle, sel);

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { CityBundle } from "../src/screen_map.js";
 import {
-  METRICS, rankShades, ranking, scores, selectAt, type MetricName,
+  FLOOR_STEPS, floorScale, METRICS, rankShades, ranking, scores, selectAt, type MetricName,
 } from "../src/model/screen.js";
 
 const ct = JSON.parse(
@@ -118,4 +118,62 @@ test("score shades on Cape Town: sides split at 1/2, ranks ordered, each side's 
   // 3/4. A count-weighted rank, or a rank over the whole city, misses both.
   assert.ok(Math.abs(mBelow / aBelow - 0.25) < 1e-9, `below: ${mBelow / aBelow}`);
   assert.ok(Math.abs(mAbove / aAbove - 0.75) < 1e-9, `above: ${mAbove / aAbove}`);
+});
+
+const ALL_METRICS = Object.keys(METRICS) as MetricName[];
+
+test("the floor track: ends exact, strictly increasing, every step round-trips, on every bundle",
+  () => {
+  for (const [city, b] of [["capetown", ct], ["nairobi", nb]] as const) {
+    for (const metric of ALL_METRICS) {
+      const s = scores(b, metric);
+      const sc = floorScale(s);
+      const at = `${city} ${metric}`;
+      let min = Infinity, max = -Infinity;
+      for (const v of s) { min = Math.min(min, v); max = Math.max(max, v); }
+      // Exactly the extreme scores, so the left end selects every block and the right end the top.
+      assert.equal(sc.fromSlider(0), min, `${at}: left end`);
+      assert.equal(sc.fromSlider(FLOOR_STEPS), max, `${at}: right end`);
+      assert.equal(selectAt(b, ranking(b, metric), s, sc.fromSlider(0)).count, b.n_blocks, at);
+      assert.equal(sc.toSlider(min), 0, `${at}: min's position`);
+      assert.equal(sc.toSlider(max), FLOOR_STEPS, `${at}: max's position`);
+      let prev = -Infinity;
+      for (let u = 0; u <= FLOOR_STEPS; u++) {
+        const f = sc.fromSlider(u);
+        assert.ok(f > prev, `${at}: the floor at ${u} (${f}) does not rise above ${prev}`);
+        assert.equal(sc.toSlider(f), u, `${at}: position ${u} came back as ${sc.toSlider(f)}`);
+        prev = f;
+      }
+      // Log-linear: each step multiplies the floor by the same ratio, (max/min)^(1/STEPS).
+      const ratio = (max / min) ** (1 / FLOOR_STEPS);
+      assert.ok(Math.abs(sc.fromSlider(501) / sc.fromSlider(500) / ratio - 1) < 1e-9, at);
+      assert.ok(Math.abs(Math.log10(sc.fromSlider(500)) - (Math.log10(min) + Math.log10(max)) / 2)
+        < 1e-12, `${at}: the middle of the track is not the geometric mean of the ends`);
+      // A floor between steps goes to the nearest one: within half a step of it in log10.
+      const half = (Math.log10(max) - Math.log10(min)) / FLOOR_STEPS / 2;
+      for (const v of s) {
+        const back = sc.fromSlider(sc.toSlider(v));
+        assert.ok(Math.abs(Math.log10(back) - Math.log10(v)) <= half * (1 + 1e-9),
+          `${at}: score ${v} shown at ${back}, more than half a step away`);
+      }
+    }
+  }
+});
+
+test("the shipped Cape Town floor sits about four-fifths along its track", () => {
+  const shipped = ct.floors.find((f) => f.metric === "depth_density_proxy")!;
+  const u = floorScale(scores(ct, "depth_density_proxy")).toSlider(shipped.value);
+  // log10(0.0128 / 4.44e-7) / log10(0.138 / 4.44e-7) = 0.812.
+  assert.ok(u >= 800 && u <= 825,
+    `the shipped floor ${shipped.value} sits at ${u} of ${FLOOR_STEPS}`);
+});
+
+test("a floor track refuses scores a log cannot lay out", () => {
+  for (const [bad, why] of [
+    [[0, 0.5, 1], "a zero score"],
+    [[-1, 0.5, 1], "a negative score"],
+    [[0.25, 0.25], "a zero-width range"],
+  ] as const) {
+    assert.throws(() => floorScale(Float64Array.from(bad)), /log floor track/, why);
+  }
 });
