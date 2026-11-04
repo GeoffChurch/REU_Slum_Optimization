@@ -194,13 +194,17 @@ def test_faithful_policy_matches_arterial_candidate_set():
 
 def test_lazy_dispatch_and_determinism():
     # A 2x2 grid, where a coin-flip heap tie-break (fault-injected 2026-11-04) lands on one of 4
-    # road sets, none above 0.3 of 60 draws: 10 runs agree by chance with probability ~1e-5 (7 is
+    # road sets, none above 0.3 of 60 draws: 10 runs agree by chance under 3e-5 of the time (7 is
     # the least for 1e-3). The 5x5 / 6-anchor / 4-road block it ran on before produced one road
     # set in 60 coin-flip runs: it could not fail.
     block = _grid_block(2)
     m = replace(ARTERIAL, objective=Directness(), n_anchors=3, max_roads=3,
                 engine=LazyEngine(policy=Grow(), rescore_every=0), workers=1)
-    runs = [[g.wkt for g in m.propose(block).roads.geometry] for _ in range(10)]
+    runs = []
+    for _ in range(10):
+        roads = m.propose(block).roads
+        assert roads is not None
+        runs.append([g.wkt for g in roads.geometry])
     assert runs[0], "no roads: nothing left to be deterministic about"
     assert all(r == runs[0] for r in runs[1:])   # deterministic
 
