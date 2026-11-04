@@ -2123,7 +2123,8 @@ def _demo_build_out() -> str:
         f"remove, 1 − P(roads) / P(no roads): what the rest of this site calls "
         '<a href="../methodology/permeability/">permeability</a>. The conductance the roads add '
         "gives a natural single number for a budget, but the page plots displacement and "
-        "road length. Run time is each method's since its start, on a log scale; the "
+        "road length. Run time is each method's since its start, on a log scale, and steps: "
+        "flat until the run has finished the next network. The "
         f"{html.escape(beside['method'])}'s, to a plate, is when its run had built every road "
         f'on it<sup><a href="#{_TIMED_NOTE}" aria-label="How this was timed">{_TIMED_K}</a>'
         f"</sup>.")
@@ -2281,7 +2282,8 @@ def _demo_compare() -> str:
         f"Drag the budget: both plates and the dots on every plot follow. Each home coloured by "
         f"its escape time on this block's scale ({bo['escape_scale']:,.0f} model units at the "
         f"99th-percentile home with no new road): {_plate_key(e)} Run time is each method's "
-        f"since its start, on a log scale.")
+        f"since its start, on a log scale, and steps: flat until the run has finished the next "
+        f"network.")
     figure = _build_out_figure(
         c["buildout"], "build-out-compare",
         f"Block {c['block_id']}'s homes coloured by escape time, with the roads {name} builds to "

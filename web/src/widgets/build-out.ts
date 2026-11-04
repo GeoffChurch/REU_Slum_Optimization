@@ -123,7 +123,27 @@ interface PlotSpec {
   readonly formatX: (t: number) => string;
   /** What the plot's heading says about a step after its permeability. */
   readonly at: (f: DemoStep) => string;
+  /** The curve through the steps' points, as the polyline's vertices. */
+  readonly trace: (xs: number[], ys: number[]) => Trace;
 }
+
+interface Trace { readonly xs: number[]; readonly ys: number[] }
+
+/** The points joined straight: between two networks a cost can sit anywhere. */
+const joined = (xs: number[], ys: number[]): Trace => ({ xs, ys });
+
+/** The points as a staircase, flat to the next point's x and then up: what a run stopped at any
+ * moment has is the last network it had finished, so nothing changes between two times, and
+ * networks finished at one time (a late road completing several budgets' at once) rise straight
+ * up at it. */
+const stairs = (xs: number[], ys: number[]): Trace => {
+  const sx: number[] = [], sy: number[] = [];
+  xs.forEach((x, i) => {
+    if (i > 0) { sx.push(x); sy.push(ys[i - 1]!); }
+    sx.push(x); sy.push(ys[i]!);
+  });
+  return { xs: sx, ys: sy };
+};
 
 type PlotKind = DemoBuildOut["plots"][number];
 
@@ -148,11 +168,13 @@ function plotOf(kind: PlotKind): PlotSpec {
     case "displacement":
       return { against: "displacement", xLabel: "displaced, share of floor area",
                has: () => true, x: (f) => f.displacement, axis: fromZero,
-               formatX: (t) => pct(t, 0), at: (f) => `${pct(f.displacement, 1)} displaced` };
+               formatX: (t) => pct(t, 0), at: (f) => `${pct(f.displacement, 1)} displaced`,
+               trace: joined };
     case "road":
       return { against: "new road", xLabel: "new road, km", has: () => true,
                x: (f) => f.road_km, axis: fromZero,
-               formatX: (t) => String(Number(t.toFixed(1))), at: (f) => km(f.road_km) };
+               formatX: (t) => String(Number(t.toFixed(1))), at: (f) => km(f.road_km),
+               trace: joined };
     case "time":
       // Log-scaled: the two methods' times differ by two orders of magnitude.
       return {
@@ -167,6 +189,7 @@ function plotOf(kind: PlotKind): PlotSpec {
         },
         formatX: (t) => TIME_TICKS.find(([s]) => Math.abs(Math.log10(s) - t) < 1e-9)![1],
         at: (f) => duration(f.seconds),
+        trace: stairs,
       };
   }
 }
@@ -497,7 +520,8 @@ function boot(host: HTMLElement, makeState: StateFactory<BuildOutState>, b: Demo
         const xs = steps.map(spec.x);
         const ys = steps.map((f) => f.permeability);
         const cls = `sbu-curve sbu-series-${i}`;
-        drawPolyline(svg, view, xs, ys, "currentColor", 1.5).setAttribute("class", cls);
+        const line = spec.trace(xs, ys);
+        drawPolyline(svg, view, line.xs, line.ys, "currentColor", 1.5).setAttribute("class", cls);
         for (const m of drawMarkers(svg, view, xs, ys, "currentColor", 2)) {
           m.setAttribute("class", cls);
         }
