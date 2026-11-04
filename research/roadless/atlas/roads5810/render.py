@@ -1,13 +1,13 @@
 """Plates from compute.py's rasters, drawn as flow5810/render.py draws the clearing's (its plate,
 colour maps, scales and colour bars, reused): per frame the network, the current |j|, the power
 per m^2, their gains over the baseline and each home's escape time over the baseline's (Time);
-then frames.json.
+and the colour bars (`index`).
 
     S=research/roadless/atlas/roads5810/render.py      # from the repo root
     PYTHONPATH=. uv run python $S plates baseline
-    PYTHONPATH=. uv run python $S plates <method> <pass> <data dir>  # PAGE.data, or a study's
-    PYTHONPATH=. uv run python $S index                   # frames.json, the colour bars
-    PYTHONPATH=. uv run python $S times <method> <pass> <data dir>  # the Time plates
+    PYTHONPATH=. uv run python $S plates <method> <run> <data dir>  # PAGE.networks, a study's
+    PYTHONPATH=. uv run python $S index                   # the colour bars
+    PYTHONPATH=. uv run python $S times <method> <run> <data dir>   # the Time plates
 
 Scales: |j| and the power density on flow5810's log scales relative to the PLAIN mesh's baseline
 (the shared D 0: the area-weighted medians of its open ground). Gains (owner 2026-10-22: "can it
@@ -25,7 +25,7 @@ The block's edge on every plate as gap_maps.draw_edge draws it (owner 2026-10-28
 is a railway): the street dark, a railway along it a line with cross-ticks, broken at its
 crossings, water blue; from the page metric's own barriers (`edge`).
 Each plate is written as lossy WebP into `plates` (PLATES, beside the page: every plate it
-names, local.py's check); a network's rasters are read from `data` (compute.PAGE.data, or a
+names, local.py's check); a network's rasters are read from `data` (compute.PAGE.networks, or a
 study's own folder), the plain baseline always the page's block's (compute.PAGE.data).
 """
 from __future__ import annotations
@@ -45,20 +45,14 @@ import compute as cp  # noqa: E402  (flow5810's modules, loaded once; rnd.WIDE s
 import geopandas as gpd  # noqa: E402
 import matplotlib.colors as mcolors  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
-import pandas as pd  # noqa: E402
 import shapely  # noqa: E402
 from PIL import Image  # noqa: E402
 
 rnd, gm = cp.rnd, cp.gm
 PLATES = HERE / "plates"         # beside the page, git-ignored (local.py keeps the same path)
-METHODS = ("cycle_native", "clearance_looped")
-PASSES = ("coarse", "fine")      # compute.PASSES
 SLIDER = tuple(round(0.01 * i, 2) for i in range(1, 16))     # the owner's slider, D 0.01 .. 0.15
 EXT = "webp"
 ROAD = "#475569"          # a corridor on the network plate (the streets are rnd.STREET)
-STORED = (cp.LINEUP / ("cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v34d40e8a+xB8c3Lo6214b562S10hliving_street-"
-                       "motorway-primary-residential-secondary-service-tertiary-trunk-"
-                       "unclassifiedva03a092b") / "cpu/area_D0.02-0.05-0.1-0.15-0.2")
 DESTROYED = mcolors.LinearSegmentedColormap.from_list("destroyed", [rnd.BUILDING, rnd.CLEARED])
 LIM = 1.0                 # the gains' log2 range: 1/2x to 2x
 DIV = mcolors.LinearSegmentedColormap.from_list(
@@ -303,19 +297,16 @@ def colorbar_with(cmap, norm, ticks, labels, text: str, path: Path) -> None:  # 
 
 
 def index(*, data: Path, plates: Path) -> None:
+    """The colour bars into `plates`: the current's and the power's flow5810's (refused unless
+    its scales are this baseline's), the gains', the Time plates' and the network's drawn here."""
     base = json.loads((data / "baseline.json").read_text())
     flow_stats = json.loads((cp.FLOW / "stats.json").read_text())
-    jn, pn = norms(base)
-    same = (np.isclose(base["median_j"], flow_stats["median_j_before"], rtol=1e-9)
-            and np.isclose(base["median_p"], flow_stats["median_p_before"], rtol=1e-9))
-    bars = {}
-    if same:          # the same norms: flow5810's bars are these
-        for n in ("current", "power"):
-            shutil.copy(cp.FLOW / f"{n}_colorbar.png", plates / f"{n}_colorbar.png")
-            bars[n] = f"copied from flow5810/{n}_colorbar.png (identical scale)"
-    else:
+    if not (np.isclose(base["median_j"], flow_stats["median_j_before"], rtol=1e-9)
+            and np.isclose(base["median_p"], flow_stats["median_p_before"], rtol=1e-9)):
         raise SystemExit(f"the baseline's medians {base['median_j']}, {base['median_p']} are not "
                          f"flow5810's: draw new bars")
+    for n in ("current", "power"):          # the same norms: flow5810's bars are these
+        shutil.copy(cp.FLOW / f"{n}_colorbar.png", plates / f"{n}_colorbar.png")
     colorbar_with(DIV, GAIN, [-1, -0.5, 0, 0.5, 1], ["1/2x", "0.71x", "1x", "1.41x", "2x+ or new"],
                   "after over before (log): red drawn away or faster, blue raised or slower",
                   plates / "gain_colorbar.png")
@@ -324,83 +315,10 @@ def index(*, data: Path, plates: Path) -> None:
     colorbar_with(rnd.RAMP, un, [0, un.vmax / 2, un.vmax], ["0", f"{un.vmax / 2:.0f}",
                   f"{un.vmax:.0f}+"], "a home's escape time with nothing built or cleared",
                   plates / "time_colorbar.png")
-    bars["gain"] = "new: log2 of the frame over its baseline, diverging, 1/2x to 2x"
-    bars["time"] = "new: the baseline's escape time per home, linear to its 99th percentile"
     colorbar_with(DESTROYED, mcolors.Normalize(0.0, 1.0), [0, 0.25, 0.5, 0.75, 1.0],
                   ["0", "0.25", "0.5", "0.75", "1"],
                   "a building's ramped destroyed share c_i (destroyed area / 0.10, at most 1)",
                   plates / "network_colorbar.png")
-    bars["network"] = "new"
-
-    def row(r: dict, method: str, DDD: str) -> dict:  # type: ignore[type-arg]
-        slider = any(t is not None and round(t, 2) in SLIDER for t in r["targets"])
-        return dict(frame=DDD, slider=slider, files={k: f"{method}_{DDD}_{k}.{EXT}" for k in
-                                      ("network", "current", "power", "current_gain",
-                                       "power_gain")},
-                    targets=r["targets"], prefix_m=r["m"], D_area=r["D_area"],
-                    n_roads=r["n_roads"], road_m=r["road_m"], P=r["P"], L_P=r["L_P"],
-                    L_Pq=r["L_Pq"], L_J2=r["L_J2"], L_P_vs_plain=1.0 - r["P"] / base["P"],
-                    top5_power_share=r["top5_power"], top5_current_share=r["top5_current"],
-                    n_enclosed=r["n_enclosed"], energy_rel_err=r["rel_err"],
-                    energy_rel_err_tri=r["rel_err_tri"], kirchhoff_max=r["kirchhoff_max"],
-                    unknowns=r["unknowns"], t_state=r["t"])
-
-    methods = {}
-    checks = {}
-    for method in METHODS:
-        infos = {run: json.loads((data / f"{method}_{run}.json").read_text()) for run in PASSES}
-        info = infos["coarse"]
-        frames, every = [], []
-        for run, i in infos.items():
-            names = frame_names(i)
-            for r in i["frames"]:
-                frames.append(dict(row(r, method, names[r["m"]]), run=run,
-                                   P0_run_mesh=i["base"]["P"]))
-                every.append(dict(r, base_P=i["base"]["P"]))
-        frames.sort(key=lambda f: f["D_area"])
-        stored = pd.read_parquet(STORED / f"{cp.PAGE.bid}__{method}.parquet")
-        cmp = []
-        for _, s in stored.iterrows():
-            hits = [r for r in every if r["m"] == int(s.m)]
-            if not hits:
-                continue
-            [r] = hits
-            cmp.append(dict(budget=None if s.full else float(s.budget), m=int(s.m),
-                            D_area_stored=float(s.D_area), D_area=r["D_area"],
-                            P_stored=float(s.P0 * (1.0 - s.L_P)), P0_stored=float(s.P0), P=r["P"],
-                            P0=r["base_P"], L_P_stored=float(s.L_P), L_P=r["L_P"],
-                            dL_P=r["L_P"] - float(s.L_P), L_Pq_stored=float(s.L_Pq),
-                            L_Pq=r["L_Pq"], L_J2_stored=float(s.L_J2), L_J2=r["L_J2"]))
-        methods[method] = dict(
-            D_full=info["D_full"], n_roads_full=frames[-1]["n_roads"],
-            slider=[f["frame"] for f in frames if f["slider"]],
-            extras=[f["frame"] for f in frames if not f["slider"]], frames=frames,
-            runs={run: dict(stops=[w["m"] for w in i["want"]], mesh_triangles=i["nt"],
-                            atoms=i["atoms"], P0_carved_mesh=i["base"]["P"],
-                            P0_carved_over_plain=i["base"]["P"] / base["P"],
-                            base_energy_rel_err=i["base"]["rel_err"], t_mesh=i["t_mesh"],
-                            t_model=i["t_model"], t_total=i["t_total"],
-                            peak_rss_gb=i["peak_rss_gb"]) for run, i in infos.items()})
-        checks[method] = cmp
-    out = dict(
-        block=cp.PAGE.bid, metric=base["metric"],
-        prefix_rule=("road_rescore.prefix_len under common.MEASURE (RampedDestroyed tau 0.10), "
-                     "area weights: the SHORTEST canonical prefix whose D_area reaches the target "
-                     "(the lineup's rule, so its rows check), the whole network where it never "
-                     "does; a frame is named by its target, the whole network by its own D"),
-        scales=dict(median_j=base["median_j"], median_p=base["median_p"],
-                    j_range=[rnd.J_LO, rnd.J_HI], p_range=[rnd.P_LO, rnd.P_HI],
-                    gain_log2_range=[-LIM, LIM], time_log2_range=[-LIM, LIM],
-                    note="log, relative to the plain baseline's area-weighted median open ground "
-                         "(flow5810's); gains log2 over each network's own carved-mesh baseline"),
-        colorbars=bars,
-        baseline=dict(frame="baseline", D_area=0.0, n_roads=0, road_m=0.0, P=base["P"],
-                      L_P=0.0, L_Pq=0.0, L_J2=0.0, top5_power_share=base["top5_power"],
-                      top5_current_share=base["top5_current"], energy_rel_err=base["rel_err"],
-                      files={k: f"baseline_{k}.{EXT}" for k in ("network", "current", "power")}),
-        methods=methods, stored_lineup_check=checks)
-    (data / "frames.json").write_text(json.dumps(out, indent=1))
-    print(json.dumps(checks, indent=1), flush=True)
 
 
 if __name__ == "__main__":

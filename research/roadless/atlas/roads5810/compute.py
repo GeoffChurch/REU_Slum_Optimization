@@ -5,20 +5,20 @@ conductance and the energy identity.
 
     S=research/roadless/atlas/roads5810/compute.py     # from the repo root
     PYTHONPATH=. uv run python $S baseline <block>    # its plain mesh's baseline (the shared D 0)
-    PYTHONPATH=. uv run python $S <method> <pass>     # cycle_native|clearance_looped coarse|fine
-                                                      # (the lineup's, on the page's block, PAGE)
+
+(A network's frames are drawn by networks.py's `frames`, or buildout.py's on another block.)
 
 A network (Network, a Strategy: Roads here, the lineup's and the studies' road networks; a grown
 region's steps and an optimizer's answer per budget in networks.py) is its prefixes in build
 order, each a paved ground and the buildings cleared beside it. Its frames are the canonical
 prefixes (Network.prefix_len under common.MEASURE, area weights: the SHORTEST prefix whose D
-reaches the target) at its pass's targets (PASSES) where the whole network reaches them, and
+reaches the target) at its Pass's targets where the whole network reaches them, and
 (`full`) the whole network. Its corridors are carved into one fixed mesh as
 road_rescore.network_rows carves the lineup's (built in `meshes`, kept for a rerun), each prefix
 a road state (Model.road_state, or Model.cleared_road_state beside a clearing: the corridor's
 atoms open, its triangles at the proposed road's boost), and the mesh's own baseline (no road)
-the gains' denominator. Writes into `data` (the block's Site.data, atlas/block_site.py, for the
-baseline and the lineup's two networks; its Site.networks for networks.py's):
+the gains' denominator. Writes into `data` (the block's Site.networks, atlas/block_site.py; its
+Site.data holds the baseline):
 <method>_<run>.npz (the rasters, the atoms and per atom the stop from which it is open, carved or
 its building cleared, the corridors, each building's ramped share), <method>_<run>.json,
 <method>_<run>_times.npz (each home's escape time, the Time plates') and <method>_<run>_sheet.json
@@ -67,11 +67,6 @@ class Pass(NamedTuple):
     full: bool
 
 
-# coarse: the first slider (5% steps to the whole network, its 0.20 and up kept as extras); fine:
-# the owner's slider of 2026-10-22, D 0.01 to 0.15 by 0.01, less coarse's 0.05, 0.10 and 0.15
-PASSES = {"coarse": Pass(targets=(0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35), full=True),
-          "fine": Pass(targets=tuple(round(0.01 * i, 2) for i in range(1, 16) if i % 5),
-                       full=False)}
 WIDE = 1200            # the plates' width in pixels (flow5810's 1600; the same extent)
 TOP = 0.05             # the open ground's densest share whose power is reported
 
@@ -232,16 +227,6 @@ def lineup_roads(b, name: str, *, networks: Path) -> Roads:  # type: ignore[no-u
     return Roads(b, ordered)
 
 
-def network(name: str, run: str, *, frames: Pass, networks: Path, data: Path,
-            meshes: Path) -> None:
-    """The frames of the network `name` stored in `networks` (lineup_roads), named <name>_<run>
-    in `data`."""
-    t0 = time.time()
-    [b] = common.build_blocks([PAGE.bid])
-    frames_of(name, run, b, lineup_roads(b, name, networks=networks), t0, frames=frames,
-              data=data, meshes=meshes)
-
-
 def opened(carved: NDArray[np.int64], parent: NDArray[np.int64],
            cleared: list[NDArray[np.bool_]]) -> NDArray[np.int64]:
     """Per atom the first stop (1 ..) from which it is open: carved by the stop's corridor
@@ -371,10 +356,5 @@ if __name__ == "__main__":
     if arg == "baseline" and len(rest) == 1:
         [blk] = common.build_blocks(rest)
         baseline(blk, data=Site.of(blk.block_id).data)
-    elif arg in ("cycle_native", "clearance_looped") and len(rest) == 1 and rest[0] in PASSES:
-        network(arg, rest[0], frames=PASSES[rest[0]],
-                networks=LINEUP_NETWORKS / PAGE.bid, data=PAGE.data,
-                meshes=PAGE.data / ".meshes")
     else:
-        raise SystemExit(f"{sys.argv[1:]}: baseline <block>, or cycle_native|clearance_looped "
-                         "coarse|fine")
+        raise SystemExit(f"{sys.argv[1:]}: baseline <block>")

@@ -123,6 +123,17 @@ def grown(plan: str) -> Callable[[Any, Params], list[Frames]]:
     return build
 
 
+def lineup(method: str) -> Callable[[Any, Params], list[Frames]]:
+    def build(b: Any, p: Params) -> list[Frames]:
+        src = nw.LineupSource(method, site=nw.PAGE)
+        net = cp.lineup_roads(b, method, networks=src.networks)
+        D_full = float((net.c(net.size) * net.W).sum() / net.W.sum())
+        at = {t: net.prefix_len(t) for t in p.targets}
+        return [Frames(net=net, frames=cp.Pass(targets=nw.SLIDER, full=D_full < max(nw.SLIDER)),
+                       meshes=nw.PAGE.networks / ".meshes", at=at)]
+    return build
+
+
 def answers(argv: tuple[str, ...]) -> Callable[[Any, Params], list[Frames]]:
     def build(b: Any, p: Params) -> list[Frames]:
         src = nw.family_of(list(argv)).source()
@@ -152,9 +163,7 @@ NETWORKS = {s.name: s for s in (
                         cp.Pass(targets=tuple(round(0.01 * i, 2) for i in range(1, 16)),
                                 full=False), FLOW / ".meshes")),
     Shown("k10", grown("gr.k10.att.greedy.N48.sep14.n2s0.1.B21m8k2.K0.D0.15.v2")),
-    Shown("clearance_looped", roads(
-        cp.LINEUP / "scratch/networks" / nw.PAGE.bid / "clearance_looped.ordered.parquet",
-        cp.PASSES["coarse"], nw.PAGE.data / ".meshes")),
+    Shown("clearance_looped", lineup("clearance_looped")),
 )}
 
 

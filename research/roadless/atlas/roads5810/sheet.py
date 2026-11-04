@@ -32,15 +32,12 @@ import metrics  # noqa: E402
 import render  # noqa: E402
 
 cp = render.cp
-PAGE = cp.PAGE                    # the page's block: its lineup's and networks.py's frames
+PAGE = cp.PAGE                    # the page's block: networks.py's frames, in PAGE.networks
 FLOW = ROOT / ".superpowers/sdd/2026-10-22-flow-roads"          # the flow-roads study's networks
 STUDIES = (FLOW, PAGE.networks)   # the page's study folders (networks.py's: PAGE.networks)
 STUDY_RUN = r"slider|dp|greedy|at[0-9]{3}"     # a study network's runs (networks.py's: at<DDD>)
 SCRATCH = ROOT / ".superpowers/sdd/2026-10-26-clearings5810"    # clear5810.SCRATCH
 CLEARINGS = ("simp", "j2", "ff", "greedy", "cheap")             # clear5810's keys
-# per page network its frames' runs (the lineup's page rows mix its two passes) and their folder
-RUNS = {"cycle_native": (PAGE.data, ("coarse", "fine")),
-        "clearance_looped": (PAGE.data, ("coarse", "fine"))}
 TOL = 1e-9        # relative: a frame two runs share, the same carving prefix's sheet
 
 
@@ -97,8 +94,7 @@ def page() -> None:
         rows = json.loads(re.search(rf"var {var} = (\{{.*?\}});\n", html)[1])  # type: ignore[index]
         for method, frames in rows.items():
             if var == "DATA":
-                data, runs = (RUNS[method] if method in RUNS
-                              else runs_of(method, studies=STUDIES))
+                data, runs = runs_of(method, studies=STUDIES)
                 c = added(method, data=data, runs=runs)
             else:
                 c = {f: v - cs["base"] for f, v in cs["methods"][method].items()}

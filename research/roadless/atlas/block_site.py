@@ -3,10 +3,9 @@ block, resolved once where a script meets its configuration (its command line, o
 block) and handed down; below that edge no code names a block.
 
 A block's frames are scratch (git-ignored, gigabytes; SCRATCH/<block id>/):
-  data      the plain mesh's baseline (baseline.npz, .json, _times.npz: compute.baseline), the
-            lineup's networks' frames, and the carved meshes (.meshes);
-  networks  networks.py's frames (compute.frames_of per run: <key>_<run>.npz, .json, _times.npz,
-            _sheet.json) and their meshes;
+  data      the plain mesh's baseline (baseline.npz, .json, _times.npz: compute.baseline);
+  networks  every network's frames (networks.py's and buildout.py's: compute.frames_of per run,
+            <key>_<run>.npz, .json, _times.npz, _sheet.json) and their carved meshes (.meshes);
 and what is small and kept is committed beside this file (atlas/blocks/<id>/: a build-out's per
 frame table, a topology run's roads and timing).
 """

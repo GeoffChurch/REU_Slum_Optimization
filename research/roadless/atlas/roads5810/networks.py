@@ -9,9 +9,9 @@ artifact (artifact.py).
 
 A family (Family, a Strategy, chosen on the command line) names the method, styles it and builds
 its source (Source, a Strategy):
-  Lineup: a shipped method's network from the lineup (compute.lineup_roads), as cycle_native's
-    and clearance_looped's are on the page but one run `slider` (compute's two passes, coarse and
-    fine, are those two's), its frames in PAGE.networks. A line on the chart.
+  Lineup: a shipped method's network from the lineup (compute.lineup_roads), its prefixes its
+    first roads in the lineup's canonical order, one run `slider` at the slider's targets (and the
+    whole network where it falls short), its frames in PAGE.networks. A line on the chart.
   Grown: a growth or ears run's steps (growth_rows/<block>/<plan>/: tri_step.parquet, per
     triangle of the eps world's mesh, the plain mesh, the step it was grown in; steps.parquet,
     a row per state). Prefix s is the triangles grown before step s, unioned and smoothed as the
@@ -86,6 +86,8 @@ On the page (2026-10-28), each one `add`:
       with spurs, dead ends on open ground 10 -- 30 and 10 -- 80 m from their start: Ears.SPUR_CLS)
   lineup clearance | cycle_native_betweenness_contrast | euclidean_grid
       | greedy_arterial_access_displacement | resistance_lp     (2026-11-03: Lineup.WORDS)
+  lineup cycle_native | clearance_looped     (2026-11-03: the page's first two, once compute.py's
+      two passes, coarse and fine; their keys, names and classes kept)
 `ready` lists the finished runs not on the page, each once, with the spec naming the most budgets
 (D{D} alone, or with {n}); each one `add`, its style in place.
 A combination with no style here (STYLES, the families' `entry`) is refused: give it a class in
@@ -854,6 +856,14 @@ class Lineup:
     """A lineup method's network (LineupSource), named as the lineup names it; its class, dot and
     words here (WORDS: the shipped methods' pages, docs/methodology/methods/<method>.md)."""
     WORDS = {
+        "cycle_native": ("cn", "cnd", "Builds loops. Each step lays a path from the street to a "
+                         "chosen home and a second path back that shares no edge with the first, "
+                         "and keeps the loop with the most permeability per displacement. No dead "
+                         "ends."),
+        "clearance_looped": ("cl", "cld", "Builds a tree, then closes it. Each road runs from the "
+                             "home farthest from any road to the network, along the gaps between "
+                             "buildings; a second pass adds short connectors that turn dead ends "
+                             "into loops."),
         "clearance": ("clr", "cld", "Builds a tree. Each road is the least-cost path from the home "
                       "deepest in the block to the network, on a grid whose costs rise near "
                       "buildings, until every home is within reach; its dead ends stay "
@@ -947,13 +957,19 @@ def page(fam: Family) -> None:
     else:
         tables["DOT"][e.key] = e.dot
         tables["POINTS"].pop(e.key, None)
-    item = [e.label, e.cls] + (["point"] if src.points else [])
-    keys = [k for k in tables["KEY"] if k[1] != e.cls]
-    tables["KEY"] = keys + [item]
+    tables["KEY"] = keyed(tables["KEY"], [e.label, e.cls] + (["point"] if src.points else []))
     for v, value in tables.items():
         html = local.with_js(html, v, value, lines=v != "DATA")
     path.write_text(html)
     print(f"{e.key}: rows and entries into the page", flush=True)
+
+
+def keyed(key: list[list[str]], item: list[str]) -> list[list[str]]:
+    """The page's KEY with `item` in its class's place (its own entry replaced), else last."""
+    at = [i for i, k in enumerate(key) if k[1] == item[1]]
+    out = [k for k in key if k[1] != item[1]]
+    out.insert(at[0] if at else len(out), item)
+    return out
 
 
 def drop(key: str) -> None:
