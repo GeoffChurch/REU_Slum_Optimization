@@ -3,12 +3,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+# The second method these end-to-end runs grade, at a toy scale: 6 anchors and 2 roads instead of
+# the preset's 32 x 15. What the runs check -- two methods through compose, region build, propose,
+# both lenses and the report -- does not depend on how many roads the greedy commits, and at the
+# shipped scale it was ~140 s of CPU per run, nearly all of the file.
+ARTERIAL_TOY = ["all_methods.greedy_arterial_buildable.n_anchors=6",
+                "all_methods.greedy_arterial_buildable.max_roads=2"]
+
 
 def test_compare_writes_frontier_and_curves(tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "reblock.compare",
          "data=dji", "eval=kcomplexity", "max_blocks=1",
-         "methods=[clearance,greedy_arterial_buildable]", f"hydra.run.dir={tmp_path}"],
+         "methods=[clearance,greedy_arterial_buildable]", *ARTERIAL_TOY,
+         f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=180,
     )
     assert result.returncode == 0, result.stderr
@@ -51,7 +59,7 @@ def test_compare_singleton_via_explicit_block_ids_matches_plain_single_block(
     result = subprocess.run(
         [sys.executable, "-m", "reblock.compare",
          "data=dji", "eval=kcomplexity", "methods=[clearance,greedy_arterial_buildable]",
-         "block_ids=[[DJI.1_2_602]]", f"hydra.run.dir={tmp_path}"],
+         *ARTERIAL_TOY, "block_ids=[[DJI.1_2_602]]", f"hydra.run.dir={tmp_path}"],
         capture_output=True, text=True, timeout=180,
     )
     assert result.returncode == 0, result.stderr
