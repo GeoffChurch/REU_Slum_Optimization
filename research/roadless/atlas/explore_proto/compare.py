@@ -5,8 +5,8 @@ slider budget, their names and blurbs in NETS and KEY) as build.py's escape-time
 sprite sheet per method (build.sheet_of), and the rows as JSON; for the comparison artifact
 (artifact.py beside this file).
 
-A method's frames are found as roads5810/sheet.py finds them (sheet.RUNS, else the one study
-folder holding its runs: sheet.runs_of), each stop's plate drawn from the stored corridor, damage
+A method's frames are found as roads5810/sheet.py finds them (the one study folder
+holding its runs: sheet.runs_of), each stop's plate drawn from the stored corridor, damage
 and escape times (build.stored_plates' reading, its frame checked against the baseline's).
 
     C=research/roadless/atlas/explore_proto/compare.py     # from the repo root, PYTHONPATH=.
@@ -60,7 +60,7 @@ def page() -> dict[str, Any]:
 
 def stops_of(key: str, frames: list[str]) -> dict[str, Stop]:
     """Per frame DDD of the method `key` its stored stop."""
-    data, runs = sh.RUNS[key] if key in sh.RUNS else sh.runs_of(key, studies=sh.STUDIES)
+    data, runs = sh.runs_of(key, studies=sh.STUDIES)
     out: dict[str, Stop] = {}
     for run in runs:
         info = json.loads((data / f"{key}_{run}.json").read_text())
