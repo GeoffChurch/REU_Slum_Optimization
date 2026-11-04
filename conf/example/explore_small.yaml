@@ -14,14 +14,16 @@
 #
 # Same block as `method_comparison` (263 parcels), and NOT that variant itself: it runs `topology`
 # at 377 s and `resistance_lp`, neither of which `explore` has, and topology alone would cost more
-# than everything this fixture does. MEASURED on this block, for exactly `explore`'s five:
+# than everything this fixture does.
 #
-#     region built 3.4 s | clearance_looped 1.1 | euclidean_grid 0.0 | cycle_native 2.0
-#     greedy_arterial_access_displacement 98.0 | osm_footpaths 0.0     => ~105 s
-#
-# against 2,861 s for the same five on the spine block. `greedy_arterial` is 93% of what remains
-# and is kept deliberately: dropping it would buy ~7 s and stop testing the slowest method's
-# proposal path, which is the one most likely to regress unnoticed.
+# `explore`'s methods less the two that cost: `greedy_arterial_access_displacement` and
+# `cycle_native_betweenness_contrast`. The parity test checks the curve math (street-first prefixes
+# and their permeability), which is the same whichever method drew the roads, and the three left
+# give it varied road sets (92, 40 and 9 roads, and the OSM footpaths) in about 3 s of proposing.
+# The test re-proposes from a cold cache, and on this block the arterial cost ~495 s of CPU through
+# its 16-worker pool and the betweenness field 54 s through its own. Both proposal paths are
+# checked in CI, where this test skips: the arterial's by tests/methods/test_arterial.py (shortlist
+# against the exact engine, the pinned 1808 WKT), and every configured method's by the width test.
 defaults:
   - override /metric: depth_density
   - override /screen: identity
@@ -39,9 +41,6 @@ example:
 
 block_ids: [["ZAF.9.3.1_1_40972"]]
 
-# Exactly `explore.yaml`'s list and order. The point of this fixture is that it differs from the
-# shipped variant ONLY in which block it pins, so a parity test passing here means the baker is
-# right about the pipeline rather than about one block's data.
-methods: [clearance_looped, euclidean_grid, cycle_native, cycle_native_betweenness_contrast,
-          greedy_arterial_access_displacement]
+# `explore.yaml`'s list and order less those two (above).
+methods: [clearance_looped, euclidean_grid, cycle_native]
 max_blocks: 1

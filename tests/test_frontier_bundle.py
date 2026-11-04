@@ -32,7 +32,7 @@ def small_bundle() -> dict[str, Any]:
     Separate from `bundle` because the two answer different questions. `bundle` is the SHIPPED
     artifact and the cheap checks below hold it against the example's own lens CSV and run log.
     This one is what the re-derivation test rebuilds from scratch -- the same staleness guard, on
-    a block where it costs ~115 s instead of 2,882 s."""
+    a block where it costs ~10 s instead of 2,882 s."""
     return cast(dict[str, Any], json.loads(FIXTURE.read_text(encoding="utf-8")))
 
 
@@ -176,7 +176,9 @@ def test_permeability_matches_the_solver_at_every_prefix(
     2026-09-21, the shipped block costs 2,882 s of a 2,895 s test -- and none of that is the
     comparison. `tests/conftest.py` points `REBLOCK_CACHE_DIR` at a fresh temp dir every session
     (deliberately: a hermetic suite must never read a developer's warm cache), so every method is
-    re-proposed from cold, and `greedy_arterial` alone is 2,011 s on that block against 98 s here.
+    re-proposed from cold, and `greedy_arterial` alone is 2,011 s on that block. The fixture runs
+    neither the arterial nor the betweenness-warped cycle_native (conf/example/explore_small.yaml
+    says why): what this test checks is the curve math, which does not depend on the method.
 
     What it still catches is exactly what it always caught: a curve-math change that is not
     re-baked makes the COMMITTED fixture stop matching. What it stops catching is the shipped
@@ -188,7 +190,7 @@ def test_permeability_matches_the_solver_at_every_prefix(
     a test guard, and saying so is better than implying otherwise.
 
     EVERY prefix, not a sample. A stride was tried while this ran on the shipped block and bought
-    7% -- the sweep was never the cost. Here the full sweep is ~8 s of a ~115 s test, so the
+    7% -- the sweep was never the cost. Here the full sweep is ~1 s of a ~10 s test, so the
     stronger check is also the affordable one.
 
     Developer-local by design: it needs ~/.cache/reblock's city data and CI must stay hermetic
