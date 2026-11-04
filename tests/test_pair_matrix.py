@@ -39,11 +39,12 @@ def _synthetic_matrix() -> pd.DataFrame:
 
 @pytest.fixture
 def few_bootstraps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The donor bootstrap at 40 resamples, not its 4,000: ~5 s of pandas refits per analysis on
+    """The donor bootstrap at 2 resamples, not its 4,000: ~5 s of pandas refits per analysis on
     six rows, for statistics neither test below reads -- they check what the analysis is computed
-    FROM and the shape of what it returns, which no resample count changes."""
+    FROM and the shape of what it returns, which no resample count changes. Both pass at 1, with
+    RuntimeWarnings raised as errors; 2 is the least that has a spread."""
     monkeypatch.setattr(pair_matrix, "donor_bootstrap",
-                        functools.partial(pair_matrix.donor_bootstrap, n_boot=40))
+                        functools.partial(pair_matrix.donor_bootstrap, n_boot=2))
 
 
 def test_analyze_does_no_pool_work(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
