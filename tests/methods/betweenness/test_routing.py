@@ -22,18 +22,25 @@ from reblock.methods.betweenness.routing import (
 
 
 def test_a_straight_route_costs_its_length_at_every_angle() -> None:
-    n, c0, R = 241, (120, 120), 100.0
+    # Fault-injected 2026-11-04: pricing a step at its Chebyshev length fails this at every radius
+    # from 10 m and every angle count from 3; averaging a knight move's cells over 2 instead of
+    # all it touches fails it from 4 angles (3 -- 0, 45 and 90 degrees -- take no knight move).
+    # Either bend weight alone catches both. Chosen: 15 m routes at 6 angles under one weight,
+    # where this first ran 100 m routes at 29 angles under 3 weights (each route builds and
+    # searches its own state graph); the 3 % tolerance holds at every radius tried.
+    n, R = 71, 15.0
+    c0 = (n // 2, n // 2)
     inside = np.ones((n, n), bool)
     cl = np.full((n, n), 1e6)
-    for lam in (5.0, 20.0, 50.0):
-        ratios = []
-        for a in np.linspace(0, 90, 29):
-            r = int(round(c0[0] + R * math.sin(math.radians(a))))
-            c = int(round(c0[1] + R * math.cos(math.radians(a))))
-            cost, _cells = route_cost(inside, cl, 1.0, 0.0, lam, c0, (r, c))
-            ratios.append(cost / math.hypot(r - c0[0], c - c0[1]))
-        ratios_a = np.array(ratios)
-        assert np.max(np.abs(ratios_a / ratios_a[0] - 1)) <= 0.03, (lam, ratios_a)
+    lam = 50.0
+    ratios = []
+    for a in np.linspace(0, 90, 6):
+        r = int(round(c0[0] + R * math.sin(math.radians(a))))
+        c = int(round(c0[1] + R * math.cos(math.radians(a))))
+        cost, _cells = route_cost(inside, cl, 1.0, 0.0, lam, c0, (r, c))
+        ratios.append(cost / math.hypot(r - c0[0], c - c0[1]))
+    ratios_a = np.array(ratios)
+    assert np.max(np.abs(ratios_a / ratios_a[0] - 1)) <= 0.03, ratios_a
 
 
 def _two_rooms() -> tuple[np.ndarray, np.ndarray, np.ndarray]:

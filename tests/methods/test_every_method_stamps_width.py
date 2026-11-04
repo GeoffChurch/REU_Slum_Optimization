@@ -69,6 +69,23 @@ def _footprint_block() -> Block:
     return replace(b, building_geometries=outlines, building_tier=Footprints)
 
 
+# The greedy-arterial family at a toy scale. Its cost is ~n_anchors^2 candidates per road times
+# max_roads roads, and at the shipped 32 anchors x 15-60 roads its twelve cases here were 1,108 s
+# of CPU, 41% of the whole suite's. The obligation this test checks -- `with_width` on the emitted
+# frame, and building geometry read at its tier -- is one code path per engine/realizer/objective/
+# cost combination, which these two knobs do not select. One road is all a stamp needs, and every
+# case still commits one from 2 anchors (bisected 2026-11-04; 3 is one past it). The shortlist
+# reading footprints as points still fails both shortlist presets' footprint cases.
+# Applied to every configured method that HAS the knob, so a new arterial preset is scaled down
+# without anyone listing it here.
+TOY_SCALE = {"n_anchors": 3, "max_roads": 1}
+
+# The betweenness desire fields' all-pairs pass forks one worker per core: 48 on a workstation, for
+# a 64-cell toy block, and the forking was most of each betweenness case's CPU. The worker count
+# cannot change the field (tests/methods/betweenness/test_routing.py pins forked == serial).
+SERIAL_FIELDS = ["betweenness.raw.workers=1", "betweenness.contrast.workers=1"]
+
+
 def _configured_methods() -> list[str]:
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
         cfg = compose(config_name="compare_config", overrides=["shapefile=x"])
@@ -80,8 +97,12 @@ def _configured_methods() -> list[str]:
 @pytest.mark.parametrize("name", _configured_methods())
 def test_method_emits_scorable_roads(name: str, make_block: Callable[[], Block]) -> None:
     with initialize_config_dir(version_base=None, config_dir=str(Path("conf").resolve())):
-        cfg = compose(config_name="compare_config", overrides=["shapefile=x"])
-    method = load_method(cfg.all_methods[name])
+        cfg = compose(config_name="compare_config", overrides=["shapefile=x", *SERIAL_FIELDS])
+    node = cfg.all_methods[name]
+    if "n_anchors" in node:
+        for key, value in TOY_SCALE.items():
+            node[key] = value
+    method = load_method(node)
 
     block = make_block()
     roads = method.propose(block).roads

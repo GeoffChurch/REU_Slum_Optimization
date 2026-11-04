@@ -188,20 +188,20 @@ def test_bundle_matches_permeability_graph_at_every_prefix(bundle: dict[str, Any
         pytest.skip("needs the capetown_full cache and the pinned block's footprint tile; run "
                     "`uv run python -m scripts.gen_web_bundle`")
 
-    from typing import cast
-
     from geopandas import GeoDataFrame
 
-    from reblock.budget import street_first_ordered
     from reblock.compare import load_permeability_config
-    from reblock.derive.access import STREET_TOL
     from reblock.perm_graph import permeability_graph
     from reblock.permeability import EgressContext
-    from scripts.gen_web_bundle import load_block_and_roads  # Task 1 exposes this
+    from scripts._example_block import load_example_region
 
-    block, roads = load_block_and_roads()
+    # The block alone, never its roads: the mesh compared below is the NO-roads graph (the baker's
+    # `ordered.iloc[:0]`), so proposing the pinned method here bought nothing and was ~90% of the
+    # test (clearance_looped on the 6,619-parcel block, cold, as tests/conftest.py makes every
+    # cache). `load_example_region` builds the block `load_block_and_roads` does -- the same
+    # variant's region, the method-specific snapshot config touching only `osm_footpaths`.
+    block = load_example_region()
     params = load_permeability_config().params
-    ordered = street_first_ordered(block, roads, STREET_TOL)
 
     # Parity on the MESH, which is what the bundle still carries. It used to sweep every prefix
     # and compare a full potential and current field per road; those fields are gone (see
@@ -209,7 +209,8 @@ def test_bundle_matches_permeability_graph_at_every_prefix(bundle: dict[str, Any
     # as `base`. The guard is unchanged in kind -- the committed artifact must equal what the
     # Python twin produces at the 6 significant digits the baker writes -- and it is now one solve
     # rather than 320.
-    base = permeability_graph(EgressContext.of(block, params), cast(GeoDataFrame, ordered.iloc[:0]))
+    no_roads = GeoDataFrame(geometry=[], crs=block.crs)
+    base = permeability_graph(EgressContext.of(block, params), no_roads)
     np.testing.assert_array_equal(bundle["edges"]["rows"], base.rows)
     np.testing.assert_array_equal(bundle["edges"]["cols"], base.cols)
     np.testing.assert_allclose(bundle["edges"]["footpath_g"], base.footpath_g, rtol=1e-5)

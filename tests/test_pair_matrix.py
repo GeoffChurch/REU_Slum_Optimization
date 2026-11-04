@@ -2,6 +2,7 @@
 the committed matrix's rows were."""
 from __future__ import annotations
 
+import functools
 import sys
 from pathlib import Path
 from typing import cast
@@ -36,7 +37,18 @@ def _synthetic_matrix() -> pd.DataFrame:
     )
 
 
-def test_analyze_does_no_pool_work(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture
+def few_bootstraps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The donor bootstrap at 2 resamples, not its 4,000: ~5 s of pandas refits per analysis on
+    six rows, for statistics neither test below reads -- they check what the analysis is computed
+    FROM and the shape of what it returns, which no resample count changes. Both pass at 1, with
+    RuntimeWarnings raised as errors; 2 is the least that has a spread."""
+    monkeypatch.setattr(pair_matrix, "donor_bootstrap",
+                        functools.partial(pair_matrix.donor_bootstrap, n_boot=2))
+
+
+def test_analyze_does_no_pool_work(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                   few_bootstraps: None) -> None:
     """`--analyze` re-derives the committed headline from the parquet alone: no pool, no GW, no
     OSM. Building a pool raises here, so reaching one fails the test."""
     def refuse(*_: object) -> None:
@@ -49,7 +61,7 @@ def test_analyze_does_no_pool_work(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     pair_matrix.main()
 
 
-def test_analyze_matches_direct_call_to_analyze_fidelity_vs_distance() -> None:
+def test_analyze_matches_direct_call_to_analyze_fidelity_vs_distance(few_bootstraps: None) -> None:
     result = pair_matrix.analyze_fidelity_vs_distance(_synthetic_matrix())
     assert result.n == 6
     assert result.n_recipients == 2

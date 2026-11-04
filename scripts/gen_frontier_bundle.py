@@ -113,7 +113,7 @@ def main() -> None:
     6,619-parcel one. MEASURED 2026-09-21: the shipped block costs 2,882 s of a 2,895 s test,
     because `tests/conftest.py` gives every session a cold `REBLOCK_CACHE_DIR` (deliberately, so
     the suite can never read a developer's warm cache) and every method is re-proposed from
-    scratch. The fixture costs ~105 s.
+    scratch. The fixture costs ~10 s.
 
     The fixture is baked by the SAME function as the shipped bundle, never by a second
     implementation in the test -- a test that re-implements the baker checks that two copies agree,

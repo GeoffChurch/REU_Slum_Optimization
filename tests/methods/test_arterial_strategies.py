@@ -43,10 +43,12 @@ def test_objectives_and_costs_satisfy_their_protocols() -> None:
 def test_every_objective_and_cost_pair_has_its_own_cache_key() -> None:
     """Nine configurations, nine identities and nine proposal ids. A strategy that answered with
     another's identity would share that one's cached proposal and eval depths."""
-    methods = [replace(ARTERIAL, objective=o, cost=c, n_anchors=4, max_roads=1)
+    # What is checked is the keys, not the roads, so one road on a 2x2 grid will do: leaving the
+    # cost out of the identity, or the cost and digest out of the proposal id, fails it.
+    methods = [replace(ARTERIAL, objective=o, cost=c, n_anchors=2, max_roads=1, workers=1)
                for o, c in product(OBJECTIVES, COSTS)]
     assert len({m.identity for m in methods}) == 9
-    block = dataclasses.replace(_grid_block(3), source_content_hash="nine-keys")
+    block = dataclasses.replace(_grid_block(2), source_content_hash="nine-keys")
     assert len({m.propose(block).proposal_id for m in methods}) == 9
 
 

@@ -65,11 +65,13 @@ def test_select_two_tier_drops_shallow(tmp_path: Path) -> None:
 
 
 def test_select_flags_flagship_on_real_fixture() -> None:
-    # DenseCompactScreen's default proxy_keep_n=1000 (the production default) clears the
-    # flagship's real proxy (~3.75 = sqrt(n*A)/P over the free columns -- comfortably inside the
-    # top 1000 of this fixture). Returned order is max-access-depth descending (not alphabetical),
-    # so assert membership, not sort.
-    s = DenseCompactScreen(Depth(), AbsoluteGate(1.3), proxy_keep_n=1000, min_buildings=10,
+    # The flagship ranks 18th by proxy among the fixture's 257 eligible blocks, so a pre-filter of
+    # 27 (1.5x that) keeps it only if the proxy ranks it near the top. The production 1000 this ran
+    # at kept all 257 and could not see the proxy at all: reversing the proxy order passed it.
+    # Here that fails, as does a fine pass that scores every survivor at depth 0, and 27
+    # survivors stay under the fork threshold (32), so the fine pass runs serially. Returned order
+    # is max-access-depth descending (not alphabetical), so assert membership, not sort.
+    s = DenseCompactScreen(Depth(), AbsoluteGate(1.3), proxy_keep_n=27, min_buildings=10,
                            counts=OpenBuildingsCount())
     src = KblockSource(CT_BLOCKS, CT_BLD, region_id="capetown", min_buildings=10, block_ids=None,
                        building_tier=SpacingDiscs, member_buildings=None)

@@ -133,7 +133,18 @@ def test_bundle_is_what_production_builds_today() -> None:
     ids = [b["block_id"] for b in bundle["blocks"]]
     assert neighbourhood(blocks, bundle["seed"], hops=HOPS) == ids, "stale neighbourhood"
 
-    for case in bundle["reference"]:
-        got = DenseClusterRegionBuilder(max_buildings=case["max_buildings"]).build(
-            blocks, [[case["seed"]]], depth_fn=None)[0]
-        assert got == case["order"], (case["seed"], case["max_buildings"])
+    # Each seed's smallest and largest budget, not all four: one build is ~1 s of fixed cost on
+    # the city frame. Growth commits one ordered sequence and a budget only says where it stops, so
+    # the largest case pins the whole sequence, the smallest pins the floor (the seed alone at
+    # `budget.min`, which the widget's caption states), and
+    # `test_reference_cases_are_prefixes_of_one_another` holds the cases between them to that
+    # sequence. Fault-injected 2026-11-04: growing into the shallowest frontier block, or stopping
+    # before a block that would overshoot the budget instead of after it, fails this as it failed
+    # all twelve.
+    for seed in sorted({c["seed"] for c in bundle["reference"]}):
+        cases = sorted((c for c in bundle["reference"] if c["seed"] == seed),
+                       key=lambda c: c["max_buildings"])
+        for case in (cases[0], cases[-1]):
+            got = DenseClusterRegionBuilder(max_buildings=case["max_buildings"]).build(
+                blocks, [[seed]], depth_fn=None)[0]
+            assert got == case["order"], (seed, case["max_buildings"])

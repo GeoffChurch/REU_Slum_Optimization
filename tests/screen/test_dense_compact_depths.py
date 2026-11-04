@@ -16,21 +16,30 @@ def _src() -> KblockSource:
 
 
 def test_depth_metric_selects_and_scores_by_true_depth() -> None:
-    # metric=Depth with a permissive absolute gate: select() returns ids, selection_scores maps them
-    # to the fine score (true max peel depth for Depth), and they agree on membership.
-    screen = DenseCompactScreen(Depth(), AbsoluteGate(1.0), proxy_keep_n=1000,
+    # metric=Depth with an absolute gate: select() returns ids, selection_scores maps them to the
+    # fine score (true max peel depth for Depth), and they agree on membership. The top 16 by
+    # proxy peel to depths 9 down to 4, so a gate at 5 keeps 9 and drops the rest: a gate that
+    # keeps everything fails the floor (the 1.0 gate over all 301 blocks it ran at before kept
+    # every one, depth 1 being the least there is, and passed that fault), and a fine pass that
+    # scores every survivor 0 leaves nothing. 16 survivors (10 is the least with a 4 among them)
+    # peel serially; the fork pool is crossed by the test below.
+    screen = DenseCompactScreen(Depth(), AbsoluteGate(5.0), proxy_keep_n=16,
                                 min_buildings=1, counts=OpenBuildingsCount())
     ids = screen.select(_src())
     scores = screen.selection_scores(_src())
     assert ids and set(scores) == set(ids)
-    assert all(s >= 1.0 for s in scores.values())      # gate floor
+    assert all(s >= 5.0 for s in scores.values())      # gate floor
 
 
 def test_a_survivor_the_fine_pass_cannot_build_is_never_flagged() -> None:
     """At `min_buildings=1` some of this sample's survivors are too small to tessellate, so the
     fine pass returns no depth for them. A stand-in depth of 0 used to take its place -- and a
     100th-percentile gate keeps every score it is given, so blocks that can never be reblocked were
-    flagged."""
+    flagged.
+
+    Its cost is inherent: the two unbuildable blocks rank 300th and 301st of 301 by proxy, so the
+    pre-filter has to keep all of them, which sends the fine pass through the fork pool (one
+    worker per core, up to 16, each reading the sample)."""
     import reblock.screen.dense_compact as dc
     seen: dict[str, set[str]] = {}
     real = dc._survivor_depths
