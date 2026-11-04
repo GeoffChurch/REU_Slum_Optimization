@@ -122,3 +122,52 @@ export function rankShades(b: CityBundle, order: Int32Array, s: Float64Array,
   }
   return out;
 }
+
+/** The floor slider's track length: positions 0 to `FLOOR_STEPS`, in whole steps. */
+export const FLOOR_STEPS = 1000;
+
+/** The floor slider's log track for one (city, metric): position 0 is the lowest block's score,
+ * `FLOOR_STEPS` the highest, and log10(floor) runs linearly between them, so every decade of
+ * score gets the same share of the track. The scores span up to five and a half decades (Cape
+ * Town's depth_density_proxy, 4.44e-7 to 0.138): a linear track put that metric's shipped floor
+ * 9% along, its whole calibrated neighbourhood in a few pixels of drag; the log track puts it 81%
+ * along. The full [min, max], not a percentile window: every block's score stays reachable,
+ * and a `?floor=` clamped into [min, max] (screen-map.ts's `syncFloor`) stays on the track.
+ *
+ * The position is only the control's; state, the URL and every readout carry the floor itself. */
+export interface FloorScale {
+  readonly min: number;
+  readonly max: number;
+  /** The track position nearest `floor`, a whole number of steps, for a floor in [min, max]. */
+  toSlider(floor: number): number;
+  /** The floor at track position `u`, a whole number of steps in [0, FLOOR_STEPS]. */
+  fromSlider(u: number): number;
+}
+
+/** `s`'s own log track. Throws unless every score is positive and they are not all equal: a log
+ * is undefined at or below zero, and a zero-width range has no track to lay out. Neither occurs in
+ * a committed bundle (the smallest minimum of the eight city/metric pairs is Cape Town's
+ * density_compactness, 7.43e-9), so this is a raise, not a fallback. */
+export function floorScale(s: Float64Array): FloorScale {
+  let min = Infinity, max = -Infinity;
+  for (const v of s) {
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  if (!(min > 0 && max > min)) {
+    throw new Error(`a log floor track needs positive scores that are not all equal; `
+                  + `these run from ${min} to ${max}`);
+  }
+  const lo = Math.log10(min), hi = Math.log10(max);
+  return {
+    min,
+    max,
+    toSlider: (floor) => Math.round((FLOOR_STEPS * (Math.log10(floor) - lo)) / (hi - lo)),
+    // The ends exactly, not through the log: 10 ** log10(min) can land an ulp above `min`, and the
+    // track's left end would then leave the lowest block unselected (`selectAt` keeps s >= floor);
+    // likewise an ulp above `max` at the right end would select nothing.
+    fromSlider: (u) => u === 0 ? min
+      : u === FLOOR_STEPS ? max
+      : 10 ** (lo + (u / FLOOR_STEPS) * (hi - lo)),
+  };
+}
