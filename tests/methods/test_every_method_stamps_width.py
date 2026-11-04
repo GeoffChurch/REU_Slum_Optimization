@@ -73,10 +73,12 @@ def _footprint_block() -> Block:
 # max_roads roads, and at the shipped 32 anchors x 15-60 roads its twelve cases here were 1,108 s
 # of CPU, 41% of the whole suite's. The obligation this test checks -- `with_width` on the emitted
 # frame, and building geometry read at its tier -- is one code path per engine/realizer/objective/
-# cost combination, which these two knobs do not select: 6 anchors and 2 roads run every one of
-# them (each case still commits roads) at ~1 s apiece. Applied to every configured method that
-# HAS the knob, so a new arterial preset is scaled down without anyone listing it here.
-TOY_SCALE = {"n_anchors": 6, "max_roads": 2}
+# cost combination, which these two knobs do not select. One road is all a stamp needs, and every
+# case still commits one from 2 anchors (bisected 2026-11-04; 3 is one past it). The shortlist
+# reading footprints as points still fails both shortlist presets' footprint cases.
+# Applied to every configured method that HAS the knob, so a new arterial preset is scaled down
+# without anyone listing it here.
+TOY_SCALE = {"n_anchors": 3, "max_roads": 1}
 
 # The betweenness desire fields' all-pairs pass forks one worker per core: 48 on a workstation, for
 # a 64-cell toy block, and the forking was most of each betweenness case's CPU. The worker count

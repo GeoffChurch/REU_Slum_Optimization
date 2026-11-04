@@ -3,12 +3,14 @@ import subprocess
 import sys
 from pathlib import Path
 
-# The second method these end-to-end runs grade, at a toy scale: 6 anchors and 2 roads instead of
+# The second method these end-to-end runs grade, at a toy scale: 3 anchors and 1 road instead of
 # the preset's 32 x 15. What the runs check -- two methods through compose, region build, propose,
-# both lenses and the report -- does not depend on how many roads the greedy commits, and at the
-# shipped scale it was ~140 s of CPU per run, nearly all of the file.
-ARTERIAL_TOY = ["all_methods.greedy_arterial_buildable.n_anchors=6",
-                "all_methods.greedy_arterial_buildable.max_roads=2"]
+# both lenses and the report -- does not depend on how many roads the greedy commits (one is the
+# least that has a curve to grade), and at the shipped scale it was ~140 s of CPU per run, nearly
+# all of the file. Grading only the first method still fails both runs that use it; labelling
+# every region by one fixed name fails the singleton run.
+ARTERIAL_TOY = ["all_methods.greedy_arterial_buildable.n_anchors=3",
+                "all_methods.greedy_arterial_buildable.max_roads=1"]
 
 
 def test_compare_writes_frontier_and_curves(tmp_path: Path) -> None:
