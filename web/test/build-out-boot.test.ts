@@ -22,8 +22,9 @@ installStubs();
 
 const read = (name: string): DemoBuildOut =>
   JSON.parse(readFileSync(`../examples/demo/${name}`, "utf8")) as DemoBuildOut;
-/** The two build-outs the page carries, as committed: the Demo's block (one series) and the
- * methods compared on another (two). */
+/** The two build-outs the page carries, as committed: the Demo's block (our method beside the
+ * shipped Loop Network) and the methods compared on another (ours beside topology); two series
+ * each. */
 const PAGE = read("buildout_ZAF.9.3.1_1_5810.json");
 const COMPARED = read("buildout_ZAF.9.3.1_1_41785.json");
 const DIR = "../assets/demo/";
@@ -91,41 +92,50 @@ const pct1 = (v: number): string => `${(v * 100).toFixed(1)}%`;
 const isTime = (svg: FakeElement): boolean =>
   (svg.getAttribute("aria-label") ?? "").includes("against run time");
 
-test("one series boots on its default budget and removes the fallback", async () => {
+test("the Demo's block boots on its default budget, both plates, and removes the fallback",
+     async () => {
   const { host } = await mount(PAGE);
   const d = PAGE.default_step;
-  const s = PAGE.series[0]!;
-  const f = s.cells[d]!.step;
-  assert.equal(host.findAll("img").length, 1, "the fallback image is still there");
-  assert.equal(plates(host)[0]!.getAttribute("src"), `${DIR}${s.sheet.file}`);
-  assert.equal(plates(host)[0]!.style.transform, shift(s, d));
+  assert.equal(PAGE.series.length, 2);
+  assert.equal(host.findAll("img").length, PAGE.series.length, "the fallback image is still there");
+  PAGE.series.forEach((s, i) => {
+    const f = s.cells[d]!.step;
+    assert.equal(plates(host)[i]!.getAttribute("src"), `${DIR}${s.sheet.file}`);
+    assert.equal(plates(host)[i]!.style.transform, shift(s, d));
+    assert.deepEqual(readouts(host)[i]!.slice(0, 3), [
+      pct1(f.displacement), `${f.road_km.toFixed(2)} km`, pct1(f.permeability),
+    ]);
+  });
   assert.equal(slider(host).value, String(d));
-  assert.deepEqual(readouts(host)[0]!.slice(0, 3), [
-    pct1(f.displacement), `${f.road_km.toFixed(2)} km`, pct1(f.permeability),
-  ]);
-  assert.deepEqual(byClass(host, "sbu-buildout__head"), [], "one series has no heading");
+  assert.deepEqual(byClass(host, "sbu-buildout__head"), PAGE.series.map((s) => s.label));
+  // The timed run's heading names how it was had.
+  assert.deepEqual(byClass(host, "sbu-buildout__sub").map((t) => t.split(",")[1]!.trim()),
+                   PAGE.series.map((s) => s.run.kind));
 });
 
 test("a slider step moves the plate, the readouts and every plot's dot to that budget",
      async () => {
   const { host } = await mount(PAGE);
-  const s = PAGE.series[0]!;
   const k = PAGE.budgets.length - 1;
-  const f = s.cells[k]!.step;
   step(host, k);
-  assert.equal(plates(host)[0]!.style.transform, shift(s, k));
-  assert.equal(readouts(host)[0]![2], pct1(f.permeability));
-  assert.equal(readouts(host)[0]![3], duration(f.seconds!));
   const svgs = host.findAll("svg");
   assert.equal(svgs.length, PAGE.plots.length, "a plot per kind the build-out names");
-  for (const svg of svgs) {
-    // Each of 5810's budgets is its own network, so its row-th marker is this budget's point.
-    const marker = circles(svg, "sbu-curve sbu-series-0")[f.row]!;
-    const [dot] = circles(svg, "sbu-cursor sbu-series-0");
-    assert.ok(dot !== undefined, "no cursor dot");
-    assert.equal(dot.getAttribute("cx"), marker.getAttribute("cx"));
-    assert.equal(dot.getAttribute("cy"), marker.getAttribute("cy"));
-  }
+  PAGE.series.forEach((s, i) => {
+    const f = s.cells[k]!.step;
+    assert.equal(plates(host)[i]!.style.transform, shift(s, k));
+    assert.equal(readouts(host)[i]![2], pct1(f.permeability));
+    assert.equal(readouts(host)[i]![3], duration(f.seconds));
+    for (const svg of svgs) {
+      // Each of 5810's budgets is its own network for both methods, and the run-time plot has
+      // no point for the block with no road, so the last budget's point is the last marker.
+      const markers = circles(svg, `sbu-curve sbu-series-${i}`);
+      const marker = markers[isTime(svg) ? markers.length - 1 : f.row]!;
+      const [dot] = circles(svg, `sbu-cursor sbu-series-${i}`);
+      assert.ok(dot !== undefined, "no cursor dot");
+      assert.equal(dot.getAttribute("cx"), marker.getAttribute("cx"));
+      assert.equal(dot.getAttribute("cy"), marker.getAttribute("cy"));
+    }
+  });
 });
 
 test("two series: a headed plate each, both moved by the one slider", async () => {
@@ -305,8 +315,12 @@ test("the face-off plots run time on a log scale, two series, dots following the
   });
 });
 
-test("the Demo's own build-out plots no run time", async () => {
+test("the Demo's own build-out plots run time too, both methods' (owner, 2026-11-04)", async () => {
   const { host } = await mount(PAGE);
-  assert.deepEqual(PAGE.plots, ["displacement", "road"]);
-  assert.ok(!host.findAll("svg").some(isTime));
+  assert.deepEqual(PAGE.plots, ["displacement", "road", "time"]);
+  const time = host.findAll("svg").find(isTime);
+  assert.ok(time !== undefined, "no run-time plot");
+  PAGE.series.forEach((_, i) => {
+    assert.equal(circles(time, `sbu-cursor sbu-series-${i}`).length, 1, `series ${i}`);
+  });
 });

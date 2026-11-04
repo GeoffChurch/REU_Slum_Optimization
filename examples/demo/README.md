@@ -4,14 +4,15 @@
 # The Demo page's bundle
 
 What the site's Demo page reads: Cape Town block `ZAF.9.3.1_1_5810`, followed from the city-wide screens to
-the roads one method builds through it, and that method beside the original topology algorithm
-on block `ZAF.9.3.1_1_41785`, where topology has run.
+the roads our method builds through it, beside the shipped Loop Network's, and our method beside
+the original topology algorithm on block `ZAF.9.3.1_1_41785`, where topology has run.
 
 - `demo.json`: the page's facts -- the block's place, the shipped screen's verdict on it (checked
   against `../screen-map/capetown.json`) and the two-stage depth_density screen's, the fires
   reported near it (each quoted from its report and checked against the article; none is placed
   inside the block, and the page draws none of them on a map), topology's run time on each block
-  (extrapolated on the first, measured on the second), and the encoding.
+  (extrapolated on the first, measured on the second), the shipped method set beside ours on the
+  first, and the encoding.
 - `buildout_ZAF.9.3.1_1_5810.json` and `buildout_ZAF.9.3.1_1_41785.json`: the two build-outs the page's slider widgets fetch -- budgets, and per
   method its escape-time sprite sheet (beside them) and what it shows at each budget.
 

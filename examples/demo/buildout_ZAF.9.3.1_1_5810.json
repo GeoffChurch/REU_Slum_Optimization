@@ -198,11 +198,192 @@
      }
     }
    ]
+  },
+  {
+   "method": "Loop Network",
+   "label": "Benchmark method: Loop Network",
+   "sheet": {
+    "file": "cycle_ZAF.9.3.1_1_5810.webp",
+    "width": 800,
+    "frame_height": 731,
+    "frames": 16,
+    "columns": 1
+   },
+   "run": {
+    "kind": "timed",
+    "seconds": 514.4214781569317,
+    "machine": "one process on a workstation CPU (Intel Xeon w7-3455)",
+    "load": 3.9,
+    "cores": 48
+   },
+   "cells": [
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0,
+      "road_km": 0.0,
+      "permeability": 0.0,
+      "seconds": 0.0,
+      "row": 0
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0102,
+      "road_km": 0.52,
+      "permeability": 0.146,
+      "seconds": 194.60521651012823,
+      "row": 1
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0217,
+      "road_km": 0.75,
+      "permeability": 0.184,
+      "seconds": 200.38234458095394,
+      "row": 2
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0301,
+      "road_km": 1.06,
+      "permeability": 0.247,
+      "seconds": 359.1019250820391,
+      "row": 3
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0401,
+      "road_km": 2.0,
+      "permeability": 0.342,
+      "seconds": 359.1019250820391,
+      "row": 4
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0501,
+      "road_km": 2.64,
+      "permeability": 0.392,
+      "seconds": 359.1019250820391,
+      "row": 5
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0611,
+      "road_km": 3.22,
+      "permeability": 0.429,
+      "seconds": 359.1019250820391,
+      "row": 6
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0704,
+      "road_km": 3.6,
+      "permeability": 0.437,
+      "seconds": 359.1019250820391,
+      "row": 7
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0821,
+      "road_km": 4.44,
+      "permeability": 0.462,
+      "seconds": 359.1019250820391,
+      "row": 8
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.0906,
+      "road_km": 4.97,
+      "permeability": 0.491,
+      "seconds": 359.1019250820391,
+      "row": 9
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1004,
+      "road_km": 5.51,
+      "permeability": 0.52,
+      "seconds": 470.98049129592255,
+      "row": 10
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1104,
+      "road_km": 6.16,
+      "permeability": 0.53,
+      "seconds": 470.98049129592255,
+      "row": 11
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1202,
+      "road_km": 6.61,
+      "permeability": 0.535,
+      "seconds": 470.98049129592255,
+      "row": 12
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1312,
+      "road_km": 7.11,
+      "permeability": 0.556,
+      "seconds": 470.98049129592255,
+      "row": 13
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1401,
+      "road_km": 7.64,
+      "permeability": 0.57,
+      "seconds": 498.8938509160653,
+      "row": 14
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1506,
+      "road_km": 8.32,
+      "permeability": 0.575,
+      "seconds": 498.8938509160653,
+      "row": 15
+     }
+    }
+   ]
   }
  ],
  "plots": [
   "displacement",
-  "road"
+  "road",
+  "time"
  ],
  "encoding": {
   "road": "#475569",

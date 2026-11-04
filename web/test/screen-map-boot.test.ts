@@ -2,8 +2,8 @@ import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import type { CityBundle } from "../src/screen_map.js";
-import { ranking, scores, selectAt, type MetricName } from "../src/model/screen.js";
-import { FOLLOW_RADIUS_PX } from "../src/render/city.js";
+import { rankShades, ranking, scores, selectAt, type MetricName } from "../src/model/screen.js";
+import { FOLLOW_RADIUS_PX, rampColour, SCORE_GROUND } from "../src/render/city.js";
 import type { StateSource } from "../src/state.js";
 import { urlStore } from "../src/url/store.js";
 import { fitBbox, toScreen, type Bbox, type View } from "../src/view/transform.js";
@@ -831,4 +831,68 @@ test("a city switch clears a description that named the other city's block", asy
   assert.equal(followNoteText(toggled.host), "",
     `switching to Nairobi left Cape Town's followed block described: `
     + `"${followNoteText(toggled.host)}"`);
+});
+
+function colourSelectEl(host: ReturnType<typeof mountPoint>): ReturnType<typeof mountPoint> {
+  const el = host.findAll("select")[1];
+  assert.ok(el !== undefined, "there is no colour selector (the second select)");
+  return el;
+}
+function setColour(host: ReturnType<typeof mountPoint>, colour: ScreenState["colour"]): void {
+  const el = colourSelectEl(host);
+  el.value = colour;
+  el.dispatch("change");
+  fireAnimationFrame();
+}
+function legendOf(host: ReturnType<typeof mountPoint>): FakeElement {
+  const el = host.descendants().find((c) => c.className === "sbu-screenmap__legend");
+  assert.ok(el !== undefined, "there is no score legend");
+  return el;
+}
+
+test("the selection view is the default: no ?colour=, the legend hidden, the blit drawn",
+  async () => {
+  const { host, cv, loc } = await mount();
+  assert.equal(colourSelectEl(host).value, "selection");
+  assert.ok(legendOf(host).hidden, "the score legend shows in the selection view");
+  assert.ok(lastFrame(cv as never).some((c) => c.op === "drawImage"));
+  assert.deepEqual(loc.written, []);
+});
+
+test("the score view shades every block by its rank on its side, on the dark ground", async () => {
+  const { host, cv, loc } = await mount();
+  setColour(host, "score");
+  assert.ok(loc.written.at(-1)!.includes("colour=score"), `URL: ${loc.written.at(-1)}`);
+  assert.ok(!legendOf(host).hidden, "the score legend is hidden in the score view");
+  const frame = lastFrame(cv as never);
+  assert.equal(frame[1]!.op, "fillRect", "the ground is not the frame's first paint");
+  assert.equal(frame[1]!.fillStyle, SCORE_GROUND);
+  assert.ok(!frame.some((c) => c.op === "drawImage"), "the score view blitted the base layer");
+  const fills = frame.filter((c) => c.op === "fill");
+  assert.equal(fills.length, ct.n_blocks, "not every block is painted in the score view");
+  // Each block's colour is its own shade: the model's, at the shipped floor, in bundle order.
+  const s = scores(ct, "depth_density_proxy");
+  const order = ranking(ct, "depth_density_proxy");
+  const floor = ct.floors.find((f) => f.metric === "depth_density_proxy")!.value;
+  const shades = rankShades(ct, order, s, floor);
+  fills.forEach((c, i) => assert.equal(c.fillStyle, rampColour(shades[i]!), `block ${i}`));
+  // The ring stays, over a white halo.
+  const rings = followRings(cv);
+  assert.deepEqual(rings.map((r) => r.strokeStyle), ["#ffffff", E.follow_color]);
+});
+
+test("the score view re-ranks when the floor moves, and a switch back draws the selection",
+  async () => {
+  const { host, cv } = await mount(700, null, "colour=score");
+  assert.equal(colourSelectEl(host).value, "score", "?colour=score did not reach the control");
+  const before = lastFrame(cv as never).filter((c) => c.op === "fill").map((c) => c.fillStyle);
+  setFloor(host, 0.02);
+  const after = lastFrame(cv as never).filter((c) => c.op === "fill").map((c) => c.fillStyle);
+  assert.notDeepEqual(after, before, "a floor move left every shade where it was");
+  setColour(host, "selection");
+  assert.ok(lastFrame(cv as never).some((c) => c.op === "drawImage"));
+  assert.ok(legendOf(host).hidden);
+  const sel = selectAt(ct, ranking(ct, "depth_density_proxy"), scores(ct, "depth_density_proxy"),
+                       0.02);
+  assert.equal(selectedPaths(cv).length, sel.count);
 });

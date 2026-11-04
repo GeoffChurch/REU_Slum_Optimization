@@ -319,7 +319,7 @@ test("the URL key list is pinned -- a key rename breaks published links silently
     assert.deepEqual(keysOf(FRONTIER_URL), ["disp", "method", "perm"]);
     assert.deepEqual(keysOf(FIELD_URL), ["road1", "road2", "road2on", "width"]);
     assert.deepEqual(keysOf(REGION_GROW_URL), ["budget", "seed"]);
-    assert.deepEqual(keysOf(SCREEN_MAP_URL), ["city", "floor", "metric"]);
+    assert.deepEqual(keysOf(SCREEN_MAP_URL), ["city", "colour", "floor", "metric"]);
     assert.deepEqual(keysOf(DRAW_ROAD_URL), ["road"]);
     assert.deepEqual(keysOf(BUILD_OUT_URL), ["buildout"]);
     assert.deepEqual(keysOf(BUILD_OUT_COMPARE_URL), ["compare"]);

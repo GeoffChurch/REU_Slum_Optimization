@@ -145,6 +145,13 @@ export interface DemoMethod {
   name: string;
   blurb: string;
 }
+/** The shipped method set beside it on the page's block: its key among the site's methods (its
+ * method page's), its reader-facing name and how it works. */
+export interface DemoBeside {
+  key: string;
+  name: string;
+  blurb: string;
+}
 /** The plates' colours and the quantities their legend states. `escape_ramp` maps escape time
  * from 0 to 100% of a block's `escape_scale`, short blue to long red, with an isochrone every
  * `iso_step` of it. `road` is a new road's corridor, `road_width_m` wide. A damaged building
@@ -189,13 +196,14 @@ export interface DemoPortSpeed {
   n_failed: number;
 }
 /** The Demo page's numbers: the block it follows, the methods compared on another, the
- * screens, the method, the plates' encoding, and how topology's times relate to the original
- * algorithm's (`topology_port`). */
+ * screens, the method, the shipped method beside it on the block (`beside`), the plates'
+ * encoding, and how topology's times relate to the original algorithm's (`topology_port`). */
 export interface DemoBundle {
   block: DemoBlock;
   comparison: DemoComparison;
   screen: DemoScreen;
   method: DemoMethod;
+  beside: DemoBeside;
   encoding: DemoEncoding;
   topology_port: DemoPortSpeed;
 }
@@ -215,6 +223,17 @@ export interface DemoRecorded {
   kind: "recorded";
   seconds: number;
   machine: string;
+}
+/** A method's whole run time, from a run made to time it (explore_proto/loop_time.py): one
+ * process on `machine`, its numerical libraries on one thread, the machine's one-minute load
+ * average at the run's start or end, whichever was higher (`load`), on its `cores`. Its steps'
+ * times are when the run had built every road of each step's network. */
+export interface DemoTimed {
+  kind: "timed";
+  seconds: number;
+  machine: string;
+  load: number;
+  cores: number;
 }
 /** A network the build-out shows: the share of the homes' floor area it displaces, its new
  * road, its L_P (`permeability`), the method's run
@@ -240,13 +259,14 @@ export interface DemoShort {
   why: string;
 }
 /** One method on the build-out: its name, the label the page heads it with, its plates, its
- * whole run time (recorded, or measured for topology), and what it shows at each of the
- * build-out's budgets, each cut in the order the method built its roads. */
+ * whole run time (recorded by its run, timed by a run made to time it, or measured for
+ * topology), and what it shows at each of the build-out's budgets: each cut in the order the
+ * method built its roads, or for a timed run its network's shortest street-first prefix. */
 export interface DemoSeries {
   method: string;
   label: string;
   sheet: DemoSheet;
-  run: DemoRecorded | DemoTopologyMeasured;
+  run: DemoRecorded | DemoTimed | DemoTopologyMeasured;
   cells: (DemoMet | DemoShort)[];
 }
 /** One block's build-out under one budget slider: its escape-time scale (the model's units at

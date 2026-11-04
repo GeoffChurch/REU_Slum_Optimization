@@ -91,3 +91,34 @@ export function selectAt(b: CityBundle, order: Int32Array, s: Float64Array,
     recall: total > 0 ? hits / total : 0,
   };
 }
+
+/** Each block's place on the score view's diverging ramp (render/city.ts `SCORE_RAMP`), 0 to 1,
+ * the floor at 1/2: its area-weighted mid-rank by score among the blocks on its own side of the
+ * floor, so each side spans half the ramp however few blocks it holds -- a block below the floor
+ * at the share of the below side's area scoring lower than it (counting half its own), mapped
+ * into [0, 1/2); a selected block the same over the selected side, into [1/2, 1]. Recomputed
+ * whenever the floor or the metric moves, since both move every rank.
+ *
+ * `order` and `s` as `selectAt` takes them: `ranking`'s descending permutation for the metric `s`
+ * was scored with. The selected side is `selectAt`'s, `s >= floor`. */
+export function rankShades(b: CityBundle, order: Int32Array, s: Float64Array,
+                           floor: number): Float64Array {
+  let below = 0, above = 0;
+  for (let i = 0; i < order.length; i++) {
+    const k = order[i]!;
+    if (s[k]! >= floor) above += b.area_m2[k]!;
+    else below += b.area_m2[k]!;
+  }
+  const out = new Float64Array(b.n_blocks);
+  // The area scoring lower than the block, lowest first. Every block below the floor comes before
+  // every selected one in this order, so on the selected side the area below is `run - below`.
+  let run = 0;
+  for (let i = order.length - 1; i >= 0; i--) {
+    const k = order[i]!;
+    const a = b.area_m2[k]!;
+    const up = s[k]! >= floor;
+    out[k] = up ? 0.5 + (0.5 * (run - below + a / 2)) / above : (0.5 * (run + a / 2)) / below;
+    run += a;
+  }
+  return out;
+}
