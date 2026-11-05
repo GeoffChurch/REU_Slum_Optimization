@@ -1,0 +1,129 @@
+ZAF.9.3.1_1_41785: soft frontage measures along each trajectory (soft.py docstring)
+homes = buildings, each in its own parcel; L_P over parcels; removed homes dropped from the access measures for Shock Reblock and the Loop Network only (REMOVES); *_all keep them
+D here vs the build-out rows (topology): max |diff| 0.0000 over 31 stops
+D here vs the build-out rows (shock): max |diff| 0.0002 over 14 stops
+
+== at the Demo budgets (shortest prefix with D >= target) ==
+target                                  0.05           0.05          0.05                      0.1            0.1           0.1                     0.15           0.15          0.15
+method               topology (kept, a10 s0)  Shock Reblock  Loop Network  topology (kept, a10 s0)  Shock Reblock  Loop Network  topology (kept, a10 s0)  Shock Reblock  Loop Network
+stop                                      24              1             9                       54              2            11                       86              3            15
+new_m                                118.446        162.204       114.504                  224.896        297.528       199.448                  340.721        364.768       367.292
+D                                      0.054          0.057          0.06                      0.1          0.124         0.104                    0.152          0.151         0.171
+homes                                    638            601           605                      638            563           581                      638            548           549
+line_P@1                               0.172          0.136         0.139                    0.223           0.14         0.146                    0.279          0.142         0.157
+corridor_P@1                           0.191          0.171         0.159                    0.257          0.201         0.181                    0.331          0.223         0.211
+line_P@1_all                           0.172          0.177          0.18                    0.223          0.218         0.216                    0.279          0.235         0.265
+corridor_P@1_all                       0.191          0.219         0.202                    0.257          0.295         0.254                    0.331          0.332         0.321
+line_depth_mean                        3.387          3.301         3.579                    2.685          2.829         2.967                    2.382          2.759         2.619
+corridor_depth_mean                    3.282          3.101         3.494                    2.577          2.583         2.845                    2.257          2.476         2.441
+line_P@2                               0.368          0.353         0.345                    0.473          0.421         0.406                    0.575          0.443         0.479
+line_P@3                               0.561          0.587         0.545                    0.715          0.703         0.664                     0.81          0.732         0.789
+line_P@4                               0.715          0.769         0.712                    0.908          0.909         0.855                    0.955          0.925          0.96
+line_burden                           9351.0         8122.0       10019.0                   5633.0         5295.0        6170.0                   4492.0         4892.0        4400.0
+line_depth_max                           8.0            8.0           9.0                      6.0            6.0           7.0                      6.0            6.0           6.0
+corridor_depth_max                       8.0            8.0           9.0                      6.0            5.0           6.0                      6.0            5.0           6.0
+line_m_mean                           16.902         16.549        18.812                   11.886         13.059        13.688                    9.797         12.457        11.114
+line_m_p90                            35.172         33.278        41.549                   24.603         25.074        27.415                   22.389         24.363        21.325
+corridor_m_mean                       16.209         15.353        18.102                   11.203         11.236        12.674                    9.002         10.459         9.714
+corridor_m_p90                        34.426         32.313        41.126                   24.065         23.054          26.5                   21.206         22.272        19.434
+L_P@0.01                               0.399          0.569         0.345                    0.747            0.8         0.685                    0.815          0.827         0.841
+L_P@0.1                                0.363          0.537         0.335                    0.678          0.768         0.647                    0.746          0.797         0.814
+L_P@1                                  0.204          0.341          0.26                    0.385          0.547         0.446                    0.457          0.588         0.625
+L_P@2                                   0.14          0.237         0.207                    0.265          0.408         0.339                    0.338          0.453         0.495
+
+== end states ==
+method               topology (kept, a10 s0)  topology (kept, a10 s0)  topology (best, a100 s0)  topology (best, a100 s0)  group Steiner floor  group Steiner floor  Shock Reblock  Loop Network
+state                              build end            +6 bisections                 build end             +6 bisections            build end        +6 bisections      build end     build end
+stop                                     546                        6                       546                         6                  509                    6             34            44
+new_m                               1917.575                 1981.194                  1841.714                  1900.898             1630.726             1714.603       2203.829      1138.009
+D                                      0.907                    0.907                      0.89                     0.891                0.849                 0.86          0.714         0.368
+homes                                    638                      638                       638                       638                  638                  638            198           437
+line_P@1                                 1.0                      1.0                       1.0                       1.0                  1.0                  1.0          0.288         0.208
+corridor_P@1                             1.0                      1.0                       1.0                       1.0                  1.0                  1.0          0.682         0.355
+line_P@1_all                             1.0                      1.0                       1.0                       1.0                  1.0                  1.0          0.663          0.44
+corridor_P@1_all                         1.0                      1.0                       1.0                       1.0                  1.0                  1.0          0.901         0.558
+line_depth_mean                          1.0                      1.0                       1.0                       1.0                  1.0                  1.0          1.747         2.053
+corridor_depth_mean                      1.0                      1.0                       1.0                       1.0                  1.0                  1.0          1.318         1.783
+line_P@2                                 1.0                      1.0                       1.0                       1.0                  1.0                  1.0          0.965         0.751
+line_P@3                                 1.0                      1.0                       1.0                       1.0                  1.0                  1.0            1.0         0.989
+line_P@4                                 1.0                      1.0                       1.0                       1.0                  1.0                  1.0            1.0           1.0
+line_burden                            638.0                    638.0                     638.0                     638.0                638.0                638.0          656.0        2055.0
+line_depth_max                           1.0                      1.0                       1.0                       1.0                  1.0                  1.0            3.0           4.0
+corridor_depth_max                       1.0                      1.0                       1.0                       1.0                  1.0                  1.0            2.0           3.0
+line_m_mean                              0.0                      0.0                       0.0                       0.0                  0.0                  0.0          4.364         6.854
+line_m_p90                               0.0                      0.0                       0.0                       0.0                  0.0                  0.0          7.292        12.978
+corridor_m_mean                          0.0                      0.0                       0.0                       0.0                  0.0                  0.0          1.758         4.919
+corridor_m_p90                           0.0                      0.0                       0.0                       0.0                  0.0                  0.0           6.15        10.852
+L_P@0.01                               0.999                    0.999                     0.998                     0.998                0.997                0.997          0.997         0.968
+L_P@0.1                                0.988                    0.988                     0.984                     0.986                0.978                0.979          0.988         0.944
+L_P@1                                  0.896                    0.897                     0.883                     0.888                0.847                0.852          0.901         0.776
+L_P@2                                  0.812                    0.814                     0.797                     0.804                 0.75                0.756          0.815         0.652
+
+== who is best, topology (kept) vs Shock Reblock vs the Loop Network, at matched budgets ==
+-- axis new_m: a method's last state at or below the budget; * where that state is more than 60 m below it (past its end, or a gap) --
+                    100  200  300  400  500  600  700  800  900 1000 1100 1200 1300 1400 1500 1600 1700 1800 1900 2000 2100 2200
+line_P@1              T    T    T    T   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T   T*   T*   T*
+corridor_P@1          T    T    T    T   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T   T*   T*   T*
+line_P@2              T    T    T    T   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T   T*   T*   T*
+line_P@3              L    L    T    L   T*    T    T    T    T    T    T  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie
+line_P@4              L    L    T    L   T*    T    T    T  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie
+line_depth_mean       T    L    T    T   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T   T*   T*   T*
+corridor_depth_mean   T    L    T    T   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T   T*   T*   T*
+line_burden           T    L    T    L   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T   T*   T*   T*
+line_depth_max        T  tie  tie    L  tie  tie    T    T  tie    T    T  tie  tie  tie  tie  tie  tie    T    T   T*   T*   T*
+corridor_depth_max    T    L    S  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie    T    T   T*   T*   T*
+line_m_mean           T    L    T    T   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T   T*   T*   T*
+line_m_p90            T    L    T    L   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T   T*   T*   T*
+corridor_m_mean       T    L    T    T   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T   T*   T*   T*
+corridor_m_p90        T    L    T    L   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T   T*   T*   T*
+L_P@0.01              L    L    S    L   T*    L    T    T    T    T    T    T    T    T    T    T    T    T    T   T*   T*   T*
+L_P@0.1               L    L    S    L    L    L    S    S    S    S    S    T    T    T    T    T    T    T    T   T*   T*   T*
+L_P@1                 L    L    S    L    L    L    L    S    S    S    S    S    S    S   S*    S    S    T    T   T*   T*    S
+L_P@2                 L    L    L    L    L    L    L    S    S    S    S    T    T    S    T    T    T    T    T   T*   T*   T*
+topology vs Shock Reblock: the better one changes at line_P@1: never; corridor_P@1: never; line_P@2: never; line_P@3: never; line_P@4: never; line_depth_mean: never; corridor_depth_mean: never; line_burden: never; line_depth_max: never; corridor_depth_max: 300; line_m_mean: never; line_m_p90: never; corridor_m_mean: never; corridor_m_p90: never; L_P@0.01: 300, 500; L_P@0.1: 300, 1200; L_P@1: 300, 1800, 2200; L_P@2: 300, 1200, 1400, 1500
+-- axis D: a method's last state at or below the budget; * where that state is more than 0.03 below it (past its end, or a gap) --
+                    0.02 0.04 0.06 0.08  0.1 0.12 0.14 0.16 0.18  0.2 0.22 0.24 0.26 0.28  0.3 0.32 0.34 0.36 0.38  0.4 0.42 0.44 0.46 0.48  0.5 0.52 0.54 0.56 0.58  0.6 0.62 0.64 0.66 0.68  0.7
+line_P@1               T    T    T    T    T    T    T    T    T    T    T   T*    T    T   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T
+corridor_P@1           T    T    T    T    T    T    T    T    T    T    T   T*    T    T   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T
+line_P@2               L    T    T    T    T    T    T    T    T    T    T   T*    T    T   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T
+line_P@3               L    T    S    T    T    T    T    T    T    T    T   T*    T    T    S    T    T    T    T    T    T    S  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie
+line_P@4               L    L    S    T    T    T    T    T    L    T    T   T*    T    L    L    T  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie
+line_depth_mean        L    T    S    T    T    T    T    T    T    T    T   T*    T    T   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T
+corridor_depth_mean    L    T    S    T    T    T    T    T    T    T    T   T*    T    T   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T
+line_burden            L    T    S    T    T    T    T    T    S    T    T    L    T    S    S    T    T    T    T    T    S    S    S    S    S    S    T    S    S    S    S    S    S    S    S
+line_depth_max       tie    T  tie    T    T    T  tie  tie    S  tie  tie  tie  tie  tie  tie    T  tie  tie  tie  tie  tie    S  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie
+corridor_depth_max   tie    T  tie    T  tie  tie    S    S    S  tie  tie  tie    S    S    S  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie  tie    S    S    S
+line_m_mean            L    T    S    T    T    T    T    T    T    T    T   T*    T    T   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T
+line_m_p90             L    T    S    T    T    T    T    T    L    T    T    L    T    T   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T
+corridor_m_mean        L    T    S    T    T    T    T    T    T    T    T   T*    T    T   T*    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T
+corridor_m_p90         T    T    S    T    T    T    T    T    L    T    T    L    T    S    S    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T    T
+L_P@0.01               L    L    S    T    T    T    S    S    S    L    T    L    S    S    S    S    S    S    S    S    S    S    S    S    S    S    T    S    S    S    S    S    S    S    S
+L_P@0.1                L    L    S    S    T    T    S    S    S    L    L    L    S    S    S    S    L    S    S    S    S    S    S    S    S    S   S*    S    S    S    S    S    S    S    S
+L_P@1                  L    L    S    S    L    L    S    S    S    L    L    L    L    S    S    L    L    S    S    S    S    S    S    S    S    S   S*    S    S    S    S    S    S    S    S
+L_P@2                  L    L    S    T    L    L    L    S    S    L    L    L    L    S    S    L    L    S    S    S    S    S    S    S    S    S   S*    S    S    S    S    S    S    S    S
+topology vs Shock Reblock: the better one changes at line_P@1: never; corridor_P@1: never; line_P@2: never; line_P@3: 0.08, 0.3, 0.32, 0.44; line_P@4: 0.08, 0.28, 0.32; line_depth_mean: 0.08; corridor_depth_mean: 0.08; line_burden: 0.08, 0.18, 0.2, 0.28, 0.32, 0.42, 0.54, 0.56; line_depth_max: never; corridor_depth_max: 0.14; line_m_mean: 0.08; line_m_p90: 0.08; corridor_m_mean: 0.08; corridor_m_p90: 0.08, 0.18, 0.2, 0.28, 0.32; L_P@0.01: 0.08, 0.14, 0.2, 0.26, 0.54, 0.56; L_P@0.1: 0.1, 0.14; L_P@1: 0.1, 0.14; L_P@2: 0.08, 0.14
+
+== non-monotone steps (a measure getting worse as a road is added) ==
+Shock Reblock             line_P@1                4 of  33 steps; worst 0.007807 at build 27
+Shock Reblock             corridor_P@1            1 of  33 steps; worst 0.002911 at build 34
+Shock Reblock             line_P@2                1 of  33 steps; worst 0.0067 at build 23
+Shock Reblock             line_P@3                4 of  33 steps; worst 0.0004786 at build 11
+Shock Reblock             line_P@4                1 of  33 steps; worst 0.0001487 at build 8
+Shock Reblock             line_depth_mean         3 of  33 steps; worst 0.002112 at build 23
+Shock Reblock             corridor_depth_mean     1 of  33 steps; worst 0.002911 at build 34
+Shock Reblock             line_m_mean             1 of  33 steps; worst 0.00937 at build 23
+Shock Reblock             line_m_p90              1 of  33 steps; worst 0.1433 at build 23
+Shock Reblock             corridor_m_p90          3 of  33 steps; worst 0.07278 at build 29
+Shock Reblock             L_P@0.01                1 of  33 steps; worst 0.0003387 at build 34
+Shock Reblock             L_P@0.1                 1 of  33 steps; worst 1.411e-05 at build 34
+Loop Network              line_P@1                6 of  43 steps; worst 0.003109 at build 34
+Loop Network              corridor_P@1            3 of  43 steps; worst 0.002281 at build 34
+Loop Network              line_P@2                4 of  43 steps; worst 0.0006195 at build 5
+Loop Network              line_P@3               10 of  43 steps; worst 0.001669 at build 5
+Loop Network              line_P@4               11 of  43 steps; worst 0.001152 at build 5
+Loop Network              line_depth_mean         6 of  43 steps; worst 0.004449 at build 5
+Loop Network              corridor_depth_mean     2 of  43 steps; worst 0.004583 at build 3
+Loop Network              line_m_mean             4 of  43 steps; worst 0.01945 at build 18
+Loop Network              line_m_p90             12 of  43 steps; worst 0.1834 at build 7
+Loop Network              corridor_m_mean         3 of  43 steps; worst 0.03364 at build 3
+Loop Network              corridor_m_p90          9 of  43 steps; worst 0.05427 at build 35
