@@ -1,0 +1,16 @@
+{
+ "theirs_mean": 281.3889808699294,
+ "theirs_mean_finite": 281.3889808699295,
+ "theirs_unreached": 0,
+ "theirs_s": 444.3989944458008,
+ "mine_T": 280.6432507896701,
+ "mine_unreached": 0,
+ "mine_over_theirs": 0.9973498248653737,
+ "pair_rel_median": -0.003633779394434487,
+ "pair_rel_p05": -0.008345637680279875,
+ "pair_rel_p95": -0.0004226920970023351,
+ "pair_abs_median_m": 1.0474153788838407,
+ "pairs_within_1pct": 0.9748871817837335,
+ "corr": 0.9974431773936275,
+ "mine_T_no_culdesac": 282.0216177878593
+}

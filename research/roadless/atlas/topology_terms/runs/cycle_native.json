@@ -1,0 +1,12 @@
+{
+ "block": "ZAF.9.3.1_1_41785",
+ "wall_s": 60.04061031341553,
+ "cpu_s": 59.69189126199999,
+ "peak_rss_gb": 0.6432876586914062,
+ "host": "rtx6000",
+ "n_roads": 44,
+ "road_m": 1138.008956266405,
+ "finished": "2026-11-04T23:14:18-0500",
+ "identity": "('CycleNativeReblocker', (('substrate', ('chord_diag',)), ('max_displacement', 0.2), ('max_cycles', 400), ('shortlist', 8), ('params', ('PermeabilityParams', (('g_walk', 0.1), ('g_road_per_m', 6.666666666666667), ('g_street', 20.0), ('road_margin_m', 1.0), ('min_road_width_m', 7.0), ('radius_frac', 1.0)))), ('road_width_m', 7.0), ('price', ('Opaque', ())), ('free_first', ('FreeEnclosed', '7509385bac05cb49730106dec0258c6c512dd1b64061e15223e41724bcd19f44', 'af7623063121b7474479c2495dc24a47e517054ae866522e16f06fa10f98215a', '3d887b32914f2ce81f715ba0ba2819bfad83eca3177879b7a39f5b0de0fbe30e', ('FreeEnclosed', (('budget', 0.05), ('metric', 'cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066+xB8c3Lo6214b562S10spavedhliving_street-motorway-primary-residential-secondary-service-tertiary-trunk-unclassifiedv65531d75'), ('population', ('AreaPopulation', (('name', 'area'),))), ('target_margin_m', 0.05), ('length_tie', 1e-12), ('measure', RampedDestroyed(tau=0.1))))))))",
+ "road_width_m": 7.0
+}
