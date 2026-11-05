@@ -372,7 +372,8 @@ def check_cpu(ids: list[str], items: list[str]) -> None:
             argv = ["submit", "cpu", "guard", "--dry", *pin, "--gpus", str(at_once), *common]
             args, plan, arrays = _plan(argv, tmp / "work", sha=SHA)
             [a] = arrays
-            text = script(PROJECT, "guard", SHA, a, plan.resources, plan.prelude, args.gpus, env)
+            text = script(PROJECT, "guard", SHA, a, plan.resources, plan.prelude, args.gpus, env,
+                          named="guard")
             head = [ln for ln in text.splitlines() if ln.startswith("#SBATCH")]
             want = {"#SBATCH --cpus-per-task=1", "#SBATCH --mem=4G",
                     f"#SBATCH --array=0-{len(ids) * len(items) - 1}%{at_once}"}
@@ -489,7 +490,7 @@ def _record(name: str, kind: str, job: str, *, gpus: int, finished: bool,
                      gpus=gpus, cpus=4 if blocks else 1, mem_gb=64 if blocks else 540,
                      time="2:00:00",
                      placement=cs.Placed(among=None) if blocks else cs.Pinned(node="orion"),
-                     expected=None, admitted_at=stamp, last_sync=stamp,
+                     admitted_at=stamp, last_sync=stamp,
                      gone_at=stamp if finished else None, finished_at=stamp if finished else None,
                      cancelled_at=stamp if cancelled else None, unpulled=(), unstarted=(),
                      continues=None, continued_by=None, settled=False)
@@ -963,7 +964,7 @@ def _run(name: str, kind: str, args: Sequence[str], *, commit: str, width: int,
     return RunRecord(name=name, kind=kind, commit=commit, argv=("submit", kind, name, *args),
                      overrides=NO_OVERRIDES, submitted_at=stamp, attempt=f"guard:{name}",
                      arrays=(ArrayRecord("500", 0, ("t",) * width, node),), gpus=4, cpus=2,
-                     mem_gb=4, time="2:00:00", placement=cs.Pinned(node=node), expected=None,
+                     mem_gb=4, time="2:00:00", placement=cs.Pinned(node=node),
                      admitted_at=stamp, last_sync=stamp, gone_at=GONE_AT if finished else None,
                      finished_at=GONE_AT if finished else None, cancelled_at=None, unpulled=(),
                      unstarted=(), continues=None, continued_by=None, settled=settled)
@@ -1045,23 +1046,23 @@ def check_kinds() -> list[str]:
         work = "python -u research/roadless/pool.py"
         want = {   # kind, run, args: card GB of its array, its node, resources, task GB, line
             ("pool", "w-quadro2-m12-s1", cpu_pool): (0, cs.Resources(
-                cpus=2, mem_gb=12, time="2:00:00", placement=cs.Pinned(node="quadro2"),
-                expected=None), 0.0, f"{work} work --wave w --node quadro2 --class m12"),
+                cpus=2, mem_gb=12, time="2:00:00", placement=cs.Pinned(node="quadro2")),
+                0.0, f"{work} work --wave w --node quadro2 --class m12"),
             ("pool", "w-tesla1-m12-s1", cpu_tesla): (0, cs.Resources(
-                cpus=2, mem_gb=12, time="2:00:00", placement=cs.Pinned(node="tesla1"),
-                expected=None), 0.0, f"{work} work --wave w --node tesla1 --class m12"),
+                cpus=2, mem_gb=12, time="2:00:00", placement=cs.Pinned(node="tesla1")),
+                0.0, f"{work} work --wave w --node tesla1 --class m12"),
             ("pool", "w-tesla1-g32-s1", gpu_pool): (32, cs.Resources(
-                cpus=4, mem_gb=32, time="2:00:00", placement=cs.Pinned(node="tesla1"),
-                expected=None), cluster.CARD_GB,
+                cpus=4, mem_gb=32, time="2:00:00", placement=cs.Pinned(node="tesla1")),
+                cluster.CARD_GB,
                 f"{work} work --wave w --node tesla1 --class g32"),
             ("steward", "w-steward", steward): (0, cs.Resources(
-                cpus=2, mem_gb=3, time="2:00:00", placement=cs.Pinned(node="orion"),
-                expected=None), 0.0,
+                cpus=2, mem_gb=3, time="2:00:00", placement=cs.Pinned(node="orion")),
+                0.0,
                 f"{work} steward --wave w --board cluster_submit/market "
                 "--stale-after-minutes 30"),
             ("long", "w-long-7", long): (0, cs.Resources(
-                cpus=2, mem_gb=90, time="2-02:00:00", placement=cs.Pinned(node="orion"),
-                expected=None), 0.0, f"{work} work --wave w --job 7 --mem 90")}
+                cpus=2, mem_gb=90, time="2-02:00:00", placement=cs.Pinned(node="orion")),
+                0.0, f"{work} work --wave w --job 7 --mem 90")}
         leases = {"w-quadro2-m12-s1": cs.Lease("reblock", "quadro2", Bundle(0, 2, 12)),
                   "w-tesla1-m12-s1": cs.Lease("reblock", "tesla1", Bundle(0, 2, 12)),
                   "w-tesla1-g32-s1": cs.Lease("reblock", "tesla1", Bundle(1, 4, 32))}
@@ -1074,7 +1075,7 @@ def check_kinds() -> list[str]:
                 bad.append(f"{kind} {run}: planned {got}")
             env = cluster.ENV.at(SubprocessRunner(), PROJECT.repo, SHA, root=PROJECT.root())
             head = {ln for ln in script(PROJECT, run, SHA, arrays[0], plan.resources,
-                                        plan.prelude, sub.gpus, env).splitlines()
+                                        plan.prelude, sub.gpus, env, named=run).splitlines()
                     if ln.startswith("#SBATCH")}
             sbatch = {f"#SBATCH --nodelist={res.placement.pinned}",
                       f"#SBATCH --cpus-per-task={res.cpus}",
@@ -1649,7 +1650,7 @@ def _main_wave(got: _Waved, *, work: Path, scratch: str) -> list[str]:
         bad.append(f"planned {[p.argv for p in got.planned]}, want {[steward, run]}")
     elif got.planned[1].plan.resources != cs.Resources(
             cpus=2, mem_gb=int(mem), time=cluster.slurm_time(minutes),
-            placement=cs.Pinned(node=long.node), expected=None):
+            placement=cs.Pinned(node=long.node)):
         bad.append(f"the long run's resources {got.planned[1].plan.resources}")
     return bad
 

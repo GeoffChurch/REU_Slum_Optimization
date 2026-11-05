@@ -269,9 +269,10 @@ class Blocks:
         return cs.RunPlan(
             tasks=tasks,
             resources=cs.Resources(cpus=4, mem_gb=64, time=args.time,
-                                   placement=_placement(args.node), expected=None),
+                                   placement=_placement(args.node)),
             inputs=(workdir / "bank.pkl", *args.extra, *unpack.values()),
-            prelude=PRELUDE, describe=(f"{len(ids)} blocks: {line}",))
+            prelude=PRELUDE, describe=(f"{len(ids)} blocks: {line}",),
+            dispatch=())
 
     def more(self, ctx: cs.Context, rec: cs.RunRecord, *,
              killed: tuple[str, ...]) -> cs.Continue | cs.Done:
@@ -332,10 +333,11 @@ class Cpu:
         return cs.RunPlan(
             tasks=tasks,
             resources=cs.Resources(cpus=args.cpus, mem_gb=args.mem, time=args.time,
-                                   placement=_placement(args.node), expected=None),
+                                   placement=_placement(args.node)),
             inputs=(workdir / "bank.pkl", *unpack.values()), prelude=PRELUDE,
             describe=(f"{len(ids)} blocks x {len(items)} items, "
-                      f"{_placement(args.node).text()}: {line}",))
+                      f"{_placement(args.node).text()}: {line}",),
+            dispatch=())
 
     def more(self, ctx: cs.Context, rec: cs.RunRecord, *,
              killed: tuple[str, ...]) -> cs.Continue | cs.Done:
@@ -459,10 +461,11 @@ class Pool:
             # expected None: a lease's walltime is its length, its workers claiming jobs to its end
             resources=cs.Resources(cpus=ladder.cpus, mem_gb=args.mem,
                                    time=slurm_time(ladder.lease_minutes),
-                                   placement=cs.Pinned(node=args.node), expected=None),
+                                   placement=cs.Pinned(node=args.node)),
             inputs=(), prelude=(TASK_ENV,),
             describe=(f"a lease of wave {wave}'s pool of {cls} ({ladder.name}) on {args.node}: "
-                      f"{line}",))
+                      f"{line}",),
+            dispatch=())
 
     def more(self, ctx: cs.Context, rec: cs.RunRecord, *,
              killed: tuple[str, ...]) -> cs.Continue | cs.Done:
@@ -517,9 +520,10 @@ class Steward:
             # its walltime is its lease (it retires before its end)
             resources=cs.Resources(cpus=STEWARD.cpus, mem_gb=math.ceil(STEWARD.mem_gb),
                                    time=slurm_time(STEWARD_LEASE_MINUTES),
-                                   placement=cs.Pinned(node=STEWARD_NODE), expected=None),
+                                   placement=cs.Pinned(node=STEWARD_NODE)),
             inputs=(), prelude=(TASK_ENV,),
-            describe=(f"wave {wave}'s steward on {STEWARD_NODE}: {line}",))
+            describe=(f"wave {wave}'s steward on {STEWARD_NODE}: {line}",),
+            dispatch=())
 
     def more(self, ctx: cs.Context, rec: cs.RunRecord, *,
              killed: tuple[str, ...]) -> cs.Continue | cs.Done:
@@ -568,9 +572,10 @@ class Long:
             # LONG_TIME times the job's estimate, capped), not the estimate itself
             resources=cs.Resources(cpus=ladder.cpus, mem_gb=args.mem,
                                    time=slurm_time(args.minutes),
-                                   placement=cs.Pinned(node=args.node), expected=None),
+                                   placement=cs.Pinned(node=args.node)),
             inputs=(), prelude=(TASK_ENV,),
-            describe=(f"wave {wave}'s job {args.job} on {args.node}, alone: {line}",))
+            describe=(f"wave {wave}'s job {args.job} on {args.node}, alone: {line}",),
+            dispatch=())
 
     def more(self, ctx: cs.Context, rec: cs.RunRecord, *,
              killed: tuple[str, ...]) -> cs.Continue | cs.Done:
@@ -976,7 +981,7 @@ class Waves:
 # at GeoffChurch/mycooc's asking): reblock states its campaign's demand there, its pool leases
 # (cluster_demand, after the verbs of STATES_DEMAND), and cluster_submit's sync its hand account's,
 # every other run, so the keeper attributes what its tasks hold and charges it. harm: the keeper's
-# published harm (harm.json, prices.json on ai's board), which every launch is admitted by
+# published harm (harm.json on ai's board), which every launch is admitted by
 # (cluster_submit's README, "Admission"). hand_weight: the weight of reblock's hand account (its
 # runs no campaign claims: `blocks`, `cpu`, stewards, long runs; room.hand_demand names and states
 # them, so cluster_demand must not: a run two demands name is refused in both) beside its one
