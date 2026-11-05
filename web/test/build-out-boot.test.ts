@@ -315,6 +315,36 @@ test("the face-off plots run time on a log scale, two series, dots following the
   });
 });
 
+test("run time is a staircase, flat until a network is finished and then up; the others join",
+     async () => {
+  // A run stopped at any moment has the last network it finished, so the run-time curve holds
+  // each point's value until the next point's time and rises there; a straight join would read
+  // as improvement between two finishes. Displacement and road join their points straight.
+  for (const { host } of [await mount(PAGE), await compared()]) {
+    for (const svg of host.findAll("svg")) {
+      const series = svg.findAll("polyline").filter((l) =>
+        (l.getAttribute("class") ?? "").startsWith("sbu-curve "));
+      assert.ok(series.length > 0, "no curves");
+      for (const line of series) {
+        const pts = (line.getAttribute("points") ?? "").split(" ").map((q) => q.split(",")
+          .map(Number) as [number, number]);
+        const dots = circles(svg, line.getAttribute("class")!).map((c) =>
+          [Number(c.getAttribute("cx")), Number(c.getAttribute("cy"))] as const);
+        if (!isTime(svg)) {
+          assert.deepEqual(pts, dots.map(([x, y]) => [x, y]));
+          continue;
+        }
+        assert.equal(pts.length, 2 * dots.length - 1);
+        dots.forEach(([x, y], i) => {
+          assert.deepEqual(pts[2 * i], [x, y], `dot ${i}`);
+          // The corner before it: this dot's time, the previous dot's value.
+          if (i > 0) assert.deepEqual(pts[2 * i - 1], [x, dots[i - 1]![1]], `corner ${i}`);
+        });
+      }
+    }
+  }
+});
+
 test("the Demo's own build-out plots run time too, both methods' (owner, 2026-11-04)", async () => {
   const { host } = await mount(PAGE);
   assert.deepEqual(PAGE.plots, ["displacement", "road", "time"]);
