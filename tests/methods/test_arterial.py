@@ -77,20 +77,17 @@ def _grid_block(n: int) -> Block:
 
 def test_anchor_points_sample_the_network_and_include_vertices() -> None:
     net = [LineString([(0.0, 0.0), (4.0, 0.0)])]
-    pts = _anchor_points(net, n=4)
+    pts = _anchor_points(net, n=4, max_anchors=0)
     assert (0.0, 0.0) in pts and (4.0, 0.0) in pts        # endpoints/vertices kept
     assert len(pts) >= 4 and pts == sorted(pts)           # sampled + deterministic order
 
 
-def test_anchor_points_max_anchors_caps_and_default_matches_uncapped() -> None:
+def test_anchor_points_max_anchors_caps() -> None:
     # A network with many vertices (mimics a large block's boundary graph, e.g. block 5810's ~229
     # vertices) so max_anchors actually bounds the count instead of coincidentally landing on it.
     coords = [(float(i), 0.0 if i % 2 == 0 else 1.0) for i in range(40)]
     net = [LineString(coords)]
-    uncapped = _anchor_points(net, n=8)
-    # max_anchors=0 (default) must be byte-identical to today's behavior (every vertex + samples).
-    assert _anchor_points(net, n=8, max_anchors=0) == uncapped
-    assert _anchor_points(net, n=8) == uncapped
+    uncapped = _anchor_points(net, n=8, max_anchors=0)
     capped = _anchor_points(net, n=8, max_anchors=8)
     assert len(capped) <= 15
     assert len(capped) < len(uncapped)
@@ -287,7 +284,7 @@ def test_greedy_first_arterial_cuts_the_deep_block() -> None:
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(), max_roads=3,
-                              n_anchors=12, workers=1)
+                              n_anchors=12, workers=1, top_k=8, max_anchors=0)
     assert len(roads) >= 1
     # The property is a SPANNING arterial, and the network is what has to span -- not any single
     # emitted row. Max-row-length was a valid proxy only while rows were never split; since
@@ -320,7 +317,7 @@ def test_greedy_is_deterministic() -> None:
     runs = [[g.wkt for g in _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(), max_roads=3,
-        n_anchors=3, workers=1).geometry] for _ in range(16)]
+        n_anchors=3, workers=1, top_k=8, max_anchors=0).geometry] for _ in range(16)]
     assert runs[0], "no roads: nothing left to be deterministic about"
     assert all(r == runs[0] for r in runs[1:])
 
@@ -335,7 +332,7 @@ def test_greedy_roads_carry_drainage_and_slice_into_a_curve() -> None:
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(),
-        max_roads=3, n_anchors=3, workers=1)
+        max_roads=3, n_anchors=3, workers=1, top_k=8, max_anchors=0)
     assert len(roads) >= 1
     assert list(roads["drain"]) == road_drainage(block, roads)   # drain IS the actual drainage
     # integrates w/ budget machinery
@@ -385,7 +382,7 @@ def test_aspirational_planarizes_crossings_into_true_intersections() -> None:
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=IdealChord(), objective=Directness(), cost=Length(), max_roads=4,
-        n_anchors=3, workers=1)
+        n_anchors=3, workers=1, top_k=8, max_anchors=0)
     # Build the road+street graph as a CSR (the nx-free scoring path's own builders) and read
     # node degree off the CSR's per-row nnz -- a real crossroads noded by `_planarize` shows up
     # as one shared node where >= 4 segments meet, vs two overlapping lines that never node.
@@ -634,7 +631,7 @@ def test_greedy_handles_multilinestring_streets() -> None:
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(),
-                              max_roads=1, n_anchors=2, workers=1)
+                              max_roads=1, n_anchors=2, workers=1, top_k=8, max_anchors=0)
     assert len(roads) >= 1
 
 
@@ -687,10 +684,10 @@ def test_cost_displacement_avoids_the_denser_corridor() -> None:
 
     roads_length = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), max_roads=1,
                                      n_anchors=8, top_k=2, half_width_m=1.0, cost=Length(),
-                                     workers=1)
+                                     workers=1, max_anchors=0)
     roads_disp = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), max_roads=1,
                                    n_anchors=8, top_k=2, half_width_m=1.0, cost=Displacement(),
-                                   workers=1)
+                                   workers=1, max_anchors=0)
 
     assert len(roads_length) == 1 and len(roads_disp) == 1
     # the cost switch changed WHICH road is proposed:
@@ -737,10 +734,10 @@ def test_cost_displacement_finite_ranking_prefers_the_sparser_corridor() -> None
 
     roads_length = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), max_roads=1,
                                      n_anchors=10, top_k=4, half_width_m=1.0, cost=Length(),
-                                     workers=1)
+                                     workers=1, max_anchors=0)
     roads_disp = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), max_roads=1,
                                    n_anchors=10, top_k=4, half_width_m=1.0, cost=Displacement(),
-                                   workers=1)
+                                   workers=1, max_anchors=0)
     radii = SpacingDiscs(pts).radii
     d_length = displacement(Discs(pts, radii), roads_length)
     d_disp = displacement(Discs(pts, radii), roads_disp)
@@ -756,9 +753,11 @@ def test_cost_displacement_is_deterministic() -> None:
     pts = gpd.GeoDataFrame(geometry=left_pts + right_pts, crs=UTM)
     block = _two_arm_block(pts)
     r1 = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), cost=Displacement(),
-                           max_roads=1, n_anchors=8, top_k=2, half_width_m=1.0, workers=1)
+                           max_roads=1, n_anchors=8, top_k=2, half_width_m=1.0, workers=1,
+                           max_anchors=0)
     r2 = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), cost=Displacement(),
-                           max_roads=1, n_anchors=8, top_k=2, half_width_m=1.0, workers=1)
+                           max_roads=1, n_anchors=8, top_k=2, half_width_m=1.0, workers=1,
+                           max_anchors=0)
     assert [g.wkt for g in r1.geometry] == [g.wkt for g in r2.geometry]
 
 
@@ -776,7 +775,8 @@ def test_cost_displacement_commits_a_zero_displacement_beneficial_road() -> None
                  parcels=plain.parcels, streets=plain.streets, building_geometries=far_points,
                  source_content_hash=None, building_tier=SpacingDiscs)
     roads = _greedy_arterials(block, realizer=IdealChord(), objective=Access(), cost=Displacement(),
-                              max_roads=1, n_anchors=12, half_width_m=1.0, workers=1)
+                              max_roads=1, n_anchors=12, half_width_m=1.0, workers=1, top_k=8,
+                              max_anchors=0)
     assert len(roads) == 1
     assert roads.geometry.iloc[0].length > 1.0                 # a real, non-degenerate candidate
     far_radii = SpacingDiscs(far_points).radii
@@ -821,7 +821,7 @@ def test_cost_repulsion_identity_and_valid_proposal() -> None:
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=IdealChord(), objective=Access(), cost=Repulsion(),
-                              max_roads=1, n_anchors=8, top_k=4, workers=1)
+                              max_roads=1, n_anchors=8, top_k=4, workers=1, max_anchors=0)
     assert len(roads) == 1
     assert roads.geometry.iloc[0].length > 0.0             # a real, non-degenerate committed road
 
@@ -856,7 +856,7 @@ def test_cost_repulsion_buildable_reaches_the_interior_not_degenerate() -> None:
     roads = _greedy_arterials(
         block, half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0,
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Repulsion(),
-        max_roads=1, n_anchors=2, workers=1)
+        max_roads=1, n_anchors=2, workers=1, top_k=8, max_anchors=0)
     # (i) non-degeneracy: repulsion commits real, access-improving road(s) -- it reaches the
     # interior rather than building zero-benefit gap roads (a zero-benefit road has raw=0 -> gain=0
     # under the always-positive repulsion denominator, so it can never win).

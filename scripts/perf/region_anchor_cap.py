@@ -55,6 +55,8 @@ from scripts.perf.snap_vs_peel import region_block_cached
 
 SHORTLIST = 512        # matches region_shortlist.py, so the uncapped arm IS the 79.6-min baseline
 MAX_ROADS = 15
+N_ANCHORS = 32
+TOP_K = 8
 THREADS = 8
 WORKERS = 16
 DISP = 0.10
@@ -105,7 +107,8 @@ def main() -> None:
         roads = _greedy_shortlist(block, realizer=SnapToBoundary(lam=2.0), objective=Access(),
                                   cost=Displacement(),
                                   half_width_m=half_w, workers=WORKERS, max_roads=MAX_ROADS,
-                                  max_anchors=cap, selector=FirstOrder(SHORTLIST, threads=THREADS),
+                                  max_anchors=cap, n_anchors=N_ANCHORS, top_k=TOP_K,
+                                  selector=FirstOrder(k=SHORTLIST, threads=THREADS),
                                   on_step=tick)
         dt = time.perf_counter() - t0
         if roads is None or len(roads) == 0:

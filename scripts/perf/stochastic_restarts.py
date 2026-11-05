@@ -62,6 +62,9 @@ POOLS = (256, 1024)
 R = 4
 N_BLOCKS = 8
 MAX_ROADS = 8
+N_ANCHORS = 32
+TOP_K = 8
+MAX_ANCHORS = 0        # uncapped
 OUT = Path("scripts/perf/stochastic_restarts.json")
 
 
@@ -72,7 +75,7 @@ def main() -> None:
     sel = [i for i in pools_.recipients if len(blocks[i].parcels) <= 110]
 
     arms: list[tuple[str, CandidateSelector]] = [("exact", ScoreAll()),
-                                                 (f"fo-{K}", FirstOrder(K, threads=1))]
+                                                 (f"fo-{K}", FirstOrder(k=K, threads=1))]
     for pool in POOLS:
         arms += [(f"sfo-{pool}-r{r}", StochasticFirstOrder(K, pool, r)) for r in range(R)]
 
@@ -89,7 +92,9 @@ def main() -> None:
             roads = _greedy_shortlist(b, realizer=SnapToBoundary(lam=2.0), objective=Access(),
                                       cost=Displacement(),
                                       half_width_m=DEFAULT_ROAD_WIDTH_M / 2.0, workers=8,
-                                      max_roads=MAX_ROADS, selector=selector)
+                                      max_roads=MAX_ROADS,
+                                      n_anchors=N_ANCHORS, top_k=TOP_K, max_anchors=MAX_ANCHORS,
+                                      selector=selector)
             dt = time.perf_counter() - t0
             if roads is None or len(roads) == 0:
                 continue

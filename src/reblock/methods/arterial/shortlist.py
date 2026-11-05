@@ -50,8 +50,8 @@ RANK_RADIUS = 0.5             # == STREET_TOL: "fronts" means what the peel's se
 CHUNK = 20_000                # chords per bulk query -- bounds the pair array, not the total work
 
 
-def first_order_score(chords: list[LineString], ctx: RankContext,
-                      threads: int = 1) -> NDArray[np.float64]:
+def first_order_score(chords: list[LineString], ctx: RankContext, *,
+                      threads: int) -> NDArray[np.float64]:
     """First-order gain per building displaced, for every chord, in two bulk queries per chunk.
 
     `STRtree.query` over an ARRAY returns the flat (chord_index, tree_index) hit list, so
@@ -93,7 +93,7 @@ def first_order_score(chords: list[LineString], ctx: RankContext,
     return out
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class FirstOrder:
     k: int
     threads: int              # >1 only matters at region scale; see `first_order_score`
@@ -101,7 +101,7 @@ class FirstOrder:
     def select(self, chords: list[LineString], ctx: RankContext) -> list[LineString]:
         if self.k <= 0 or len(chords) <= self.k:
             return chords
-        score = first_order_score(chords, ctx, self.threads)
+        score = first_order_score(chords, ctx, threads=self.threads)
         keep = np.argpartition(-score, self.k)[:self.k]
         # back into candidate order: `_best_candidate`'s tie-break is order-independent, but a
         # stable order keeps an exact/shortlist diff readable

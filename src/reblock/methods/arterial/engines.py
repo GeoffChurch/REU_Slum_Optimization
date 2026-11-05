@@ -70,9 +70,10 @@ def _step_network(committed: list[LineString], block: Block,
 
 
 def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: ArterialObjective,
-                      n_anchors: int = 32, top_k: int = 8, max_roads: int = 15,
-                      cost: ArterialCost, half_width_m: float,
-                      workers: int = 16, max_anchors: int = 0) -> GeoDataFrame:
+                      n_anchors: int, top_k: int, max_roads: int,
+                      cost: ArterialCost, half_width_m: float, max_anchors: int,
+                      workers: int = 16,   # exempt default: cannot change the roads, see below
+                      ) -> GeoDataFrame:
     """Greedily commit the straight arterial with the best objective gain per unit cost until
     `max_roads` are placed or no candidate improves. `realizer` turns each candidate chord into the
     road that is actually scored and committed (see `ChordRealizer`); `objective` says what a road
@@ -84,7 +85,11 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: Arter
     `workers` parallelizes each step's candidate scoring across a fork process pool (byte-identical
     to serial). `workers <= 1`, a step with `< _PARALLEL_THRESHOLD` candidates, or a platform
     without `fork` all take the literal serial path (a true no-op vs the pool, not a 1-worker
-    pool).
+    pool). It is the only parameter of the three engines with a default, the one exempt from being
+    required: it cannot change the roads, which tests/methods/test_arterial.py's
+    test_arterial_parallel_identical_to_serial (exact) and test_engines.py's
+    test_pool_matches_serial_on_every_engine (exact, lazy, shortlist) pin. Every other parameter
+    is required, so a caller states what it runs rather than inheriting a value from here.
 
     `max_anchors` is a CAP, not a mode switch: 0 means uncapped (byte-identical to every network
     vertex + arc-length samples); a positive value only ever REDUCES the anchor count below that
@@ -103,10 +108,10 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: Arter
     committed: list[LineString] = []                        # realized geometry, in commit order
     while len(committed) < max_roads:
         network: list[BaseGeometry] = [*streets, *committed]
-        anchors = _anchor_points(network, n_anchors, max_anchors)
+        anchors = _anchor_points(network, n=n_anchors, max_anchors=max_anchors)
         net = _step_network(committed, block, half_width_m)
         curr_roads = net.roads if len(committed) else None
-        targets = _deep_targets(adjacency, curr_roads, top_k)
+        targets = _deep_targets(adjacency, curr_roads, k=top_k)
 
         # Evaluate every candidate against the frozen per-step state, via the module-level holder
         # (COW-inheritable by the fork pool). Both the serial and pool paths funnel through the SAME
@@ -178,11 +183,13 @@ def _iter_live(heap: list[tuple[float, str, str, LineString, int]], live: set[st
 
 
 def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer,
-                           objective: ArterialObjective, n_anchors: int = 32,
-                           top_k: int = 8, max_roads: int = 15,
+                           objective: ArterialObjective, n_anchors: int,
+                           top_k: int, max_roads: int,
                            cost: ArterialCost, half_width_m: float,
-                           workers: int = 16, policy_spec: CandidatePolicySpec,
-                           rescore_every: int = 0, max_anchors: int = 0) -> GeoDataFrame:
+                           policy_spec: CandidatePolicySpec,
+                           rescore_every: int, max_anchors: int,
+                           workers: int = 16,  # exempt: see `_greedy_arterials`' docstring
+                           ) -> GeoDataFrame:
     """CELF lazy-greedy driver: commit the best gain-per-cost arterial one at a time, but instead of
     re-scoring every candidate every step (the exact `_greedy_arterials`), drive selection with a
     max-heap and pop-re-score only the heap top until it is fresh under the current committed set.
@@ -193,7 +200,8 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer,
     sg = _snap_graph(_boundary_graph(block.parcels))
     streets = list(block.streets.geometry)
     scorer = objective.for_block(adjacency)
-    policy = policy_spec.build(adjacency, streets, n_anchors, top_k, max_anchors)
+    policy = policy_spec.build(adjacency, streets, n_anchors=n_anchors, top_k=top_k,
+                               max_anchors=max_anchors)
 
     committed: list[LineString] = []
     real_of: dict[str, BaseGeometry] = {}          # wkt(chord) -> realized geometry (snap-stable)
@@ -270,10 +278,10 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer,
 
 
 def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: ArterialObjective,
-                      selector: CandidateSelector, n_anchors: int = 32,
-                      top_k: int = 8, max_roads: int = 15,
-                      cost: ArterialCost, half_width_m: float,
-                      workers: int = 16, max_anchors: int = 0,
+                      selector: CandidateSelector, n_anchors: int,
+                      top_k: int, max_roads: int,
+                      cost: ArterialCost, half_width_m: float, max_anchors: int,
+                      workers: int = 16,   # exempt: see `_greedy_arterials`' docstring
                       on_step: Callable[[int, int, int], None] | None = None) -> GeoDataFrame:
     """`_greedy_arterials` with the step's candidate list reduced by an injected `selector` --
     tier 2. Mirrors `_greedy_arterials` step for step and changes exactly one thing: which
@@ -304,10 +312,10 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: Arter
     committed: list[LineString] = []
     while len(committed) < max_roads:
         network: list[BaseGeometry] = [*streets, *committed]
-        anchors = _anchor_points(network, n_anchors, max_anchors)
+        anchors = _anchor_points(network, n=n_anchors, max_anchors=max_anchors)
         net = _step_network(committed, block, half_width_m)
         curr_roads = net.roads if len(committed) else None
-        targets = _deep_targets(adjacency, curr_roads, top_k)
+        targets = _deep_targets(adjacency, curr_roads, k=top_k)
 
         # --- the one difference from `_greedy_arterials`: reduce the candidate list ---
         candidates = _candidate_chords(anchors, targets)
@@ -387,7 +395,7 @@ class ExactEngine:
             max_anchors=max_anchors)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class LazyEngine:
     """CELF lazy-greedy: drive selection with a max-heap of stale upper bounds.
 
@@ -416,7 +424,7 @@ class LazyEngine:
             policy_spec=self.policy, rescore_every=self.rescore_every, max_anchors=max_anchors)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ShortlistEngine:
     """Tier 2: rank every candidate by a cheap first-order estimate, score only the top `k` exactly.
 
@@ -445,10 +453,10 @@ class ShortlistEngine:
         return _greedy_shortlist(
             block, objective=objective, cost=cost, realizer=realizer, n_anchors=n_anchors,
             top_k=top_k, max_roads=max_roads, half_width_m=half_width_m, workers=workers,
-            max_anchors=max_anchors, selector=FirstOrder(self.k, threads=self.threads))
+            max_anchors=max_anchors, selector=FirstOrder(k=self.k, threads=self.threads))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class ShortlistIdentity:
     """ShortlistEngine's proposal-affecting part. `threads` is excluded deliberately."""
 

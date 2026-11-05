@@ -107,8 +107,8 @@ def main() -> None:
 
     # --- step 0 exactly as `_greedy_arterials` sets it up (committed empty) ---
     t0 = time.perf_counter()
-    anchors = _anchor_points(list(block.streets.geometry), 32, 0)
-    targets = _deep_targets(adjacency, None, 8)
+    anchors = _anchor_points(list(block.streets.geometry), n=32, max_anchors=0)
+    targets = _deep_targets(adjacency, None, k=8)
     candidates = _candidate_chords(anchors, targets)
     t_cand = time.perf_counter() - t0
     print(f"  STEP 0              {len(anchors):,} anchors -> {len(candidates):,} candidates "

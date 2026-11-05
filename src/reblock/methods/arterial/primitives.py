@@ -62,8 +62,8 @@ def _vertices_and_samples(lines: Sequence[BaseGeometry], total: float,
     return sorted(pts)
 
 
-def _anchor_points(network: Sequence[BaseGeometry], n: int,
-                    max_anchors: int = 0) -> list[tuple[float, float]]:
+def _anchor_points(network: Sequence[BaseGeometry], *, n: int,
+                   max_anchors: int) -> list[tuple[float, float]]:
     """Anchors for candidate generation: every network vertex plus `n` arc-length samples.
 
     `max_anchors > 0` is a CAP, not a mode switch. If the uncapped family already fits, it is
@@ -84,7 +84,7 @@ def _anchor_points(network: Sequence[BaseGeometry], n: int,
     return sampled if len(sampled) < len(full) else full
 
 
-def _deep_targets(adjacency: ParcelAdjacency, roads: GeoDataFrame | None,
+def _deep_targets(adjacency: ParcelAdjacency, roads: GeoDataFrame | None, *,
                   k: int) -> list[tuple[float, float]]:
     """Representative points of the k deepest-access parcels (spur targets), _rnd-snapped."""
     block = adjacency.block
