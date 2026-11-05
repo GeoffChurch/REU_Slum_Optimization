@@ -83,7 +83,6 @@ from typing import Any, Protocol
 
 import numpy as np
 import pandas as pd
-import row_marker
 import shapely
 from numpy.typing import NDArray
 from shapely.geometry.base import BaseGeometry
@@ -462,15 +461,29 @@ def cleared_positions(run: str, block: BlockLike, *, step: int) -> NDArray[np.in
 
 # ------------------------------------------------------------------ the runs' rows, written once
 
+#: The flags that say what a run does with a row that stands (`standing_of`): a person naming a
+#: deliberate replacement of the rows it would write (`Replace`), and a row that stands taken as
+#: that identity done (`Keep`).
+REPLACE = "--replace"
+KEEP_STANDING = "--keep-standing"
+#: What a run prints, the row's path after it, once a row it writes stands (write_once, under Refuse
+#: and Keep, and Replace's write after its os.replace); a row kept or refused is not written, so not
+#: printed.
+ROW_WRITTEN = "[row] wrote "
+#: What a run under Keep prints, the row's path after it, for a row it found standing and so did
+#: not make (at its check, a reuse, or its write): it ran less than its whole work.
+KEPT = "[row] kept "
+
+
 class Standing(Protocol):
     """What a run does with a row that stands under its identity: the optimizers' no-overwrite
     guard (BACKLOG, "The stored clearings made durable"; NOTES, "The consolidated pass") and the
-    pool's keeping of what stands (the lease pool's spec, 3.3: a job run again after a partial
-    write keeps what stands and writes the rest). A row's path is its identity: the block, the
+    keeping of what stands (a task run again after a partial write keeps what stands and writes
+    the rest). A row's path is its identity: the block, the
     preset or method, the metric's name, the budget and the seed (each optimizer's rows directory
     spells them: relax.rows_of, polish_greedy.rows_of, clear.rows_dir, ...). Resolved once per
     script by `standing_of`, from its command line, and passed down: `Refuse` (a person's run),
-    `Replace` (`--replace`), `Keep` (`--keep-standing`; the flags' one spelling is row_marker's).
+    `Replace` (`--replace`), `Keep` (`--keep-standing`; the flags' one spelling is REPLACE and KEEP_STANDING).
     The guard: clearings_check.py `overwrite`."""
 
     def todo(self, path: Path) -> bool:
@@ -498,7 +511,7 @@ class Refuse:
         if path.exists():
             raise Exists(f"{path}: a row stands under this identity (block, preset or method, "
                          "metric, budget, seed); a replacement is named, never taken "
-                         f"({row_marker.REPLACE})")
+                         f"({REPLACE})")
         return True
 
     def reuse(self, path: Path) -> bool:
@@ -511,7 +524,7 @@ class Refuse:
 @dataclass(frozen=True, kw_only=True)
 class Replace:
     """A replacement named (`--replace`): every identity is run, and its row put in place of any
-    that stands (os.replace); row_marker.ROW_WRITTEN is printed once it does."""
+    that stands (os.replace); ROW_WRITTEN is printed once it does."""
 
     def todo(self, path: Path) -> bool:
         return True
@@ -521,28 +534,27 @@ class Replace:
 
     def write(self, df: pd.DataFrame, path: Path) -> None:
         place(df, path, os.replace)
-        print(f"{row_marker.ROW_WRITTEN}{path}", flush=True)
+        print(f"{ROW_WRITTEN}{path}", flush=True)
 
 
 @dataclass(frozen=True, kw_only=True)
 class Keep:
-    """A pool's job (`--keep-standing`): a row that stands is that identity done, at the check
-    (not run) and at the write, where the `Exists` of a row written meanwhile (a double claim's
-    other run) means the same: the first row stays, `[row] kept <path>` is printed and nothing
-    is raised. A kept row is not written, so prints no row_marker.ROW_WRITTEN: a job that keeps
-    rows and then fails is a strike, never progress (the lease pool's plan, Ruling 6). Every row
-    it finds standing, at its check, a reuse or its write, it prints as row_marker.KEPT: the run
-    did less than its whole work, so no earlier wave's measure of the job is taken from it."""
+    """A task run again (`--keep-standing`): a row that stands is that identity done, at the
+    check (not run) and at the write, where the `Exists` of a row written meanwhile (another run
+    of the identity) means the same: the first row stays, KEPT and its path are printed and
+    nothing is raised. A kept row is not written, so prints no ROW_WRITTEN; every row it finds
+    standing, at its check, a reuse or its write, it prints as KEPT: the run did less than its
+    whole work."""
 
     def todo(self, path: Path) -> bool:
         if path.exists():
-            print(f"{row_marker.KEPT}{path}", flush=True)
+            print(f"{KEPT}{path}", flush=True)
             return False
         return True
 
     def reuse(self, path: Path) -> bool:
         if path.exists():
-            print(f"{row_marker.KEPT}{path}", flush=True)
+            print(f"{KEPT}{path}", flush=True)
             return True
         return False
 
@@ -550,14 +562,14 @@ class Keep:
         try:
             write_once(df, path)
         except Exists:
-            print(f"{row_marker.KEPT}{path}", flush=True)
+            print(f"{KEPT}{path}", flush=True)
 
 
 def standing_of(argv: list[str]) -> tuple[list[str], Standing]:
     """A command line less its `--replace` and `--keep-standing`, and the `Standing` they name:
     neither, `Refuse`; `--replace`, `Replace`; `--keep-standing`, `Keep`; both, a SystemExit."""
-    flags = (row_marker.REPLACE, row_marker.KEEP_STANDING)
-    replace, keep = row_marker.REPLACE in argv, row_marker.KEEP_STANDING in argv
+    flags = (REPLACE, KEEP_STANDING)
+    replace, keep = REPLACE in argv, KEEP_STANDING in argv
     if replace and keep:
         raise SystemExit(f"{' and '.join(flags)} answer a row that stands oppositely: give one")
     standing: Standing = Replace() if replace else Keep() if keep else Refuse()
@@ -571,7 +583,7 @@ def _exclusive(tmp: Path, path: Path) -> None:
         os.link(tmp, path)
     except FileExistsError:
         raise Exists(f"{path}: a row stands under this identity; not replaced "
-                     f"({row_marker.REPLACE} names a replacement)") from None
+                     f"({REPLACE} names a replacement)") from None
 
 
 def place(df: pd.DataFrame, path: Path, put: Callable[[Path, Path], None]) -> None:
@@ -592,7 +604,6 @@ def place(df: pd.DataFrame, path: Path, put: Callable[[Path, Path], None]) -> No
 def write_once(df: pd.DataFrame, path: Path) -> None:
     """A run's rows to `path` whole and only if no row stands there: a second write of one
     identity raises `Exists` and leaves the first (`Refuse` raises it, `Keep` keeps the first).
-    Once the row stands, row_marker.ROW_WRITTEN and its path are printed (flushed), for a pool's
-    worker to count. The guard: clearings_check.py `overwrite` (fault `no-check`)."""
+    Once the row stands, ROW_WRITTEN and its path are printed (flushed). The guard: clearings_check.py `overwrite` (fault `no-check`)."""
     place(df, path, _exclusive)
-    print(f"{row_marker.ROW_WRITTEN}{path}", flush=True)
+    print(f"{ROW_WRITTEN}{path}", flush=True)

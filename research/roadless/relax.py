@@ -22,7 +22,7 @@ metric: the gap complex's name (gap_clear.ComplexMetric; cpu or gpu, its factori
 resolved here (metrics.metric_of) and handed down. A block whose rows stand under the run's
 identity refuses the run (clearings.Refuse: the no-overwrite guard) unless `--replace` is
 given anywhere on the line (clearings.Replace), or is kept and not run again under
-`--keep-standing` (clearings.Keep: a pool's job). one: SIMP at one budget (default D_LENS, 0.05;
+`--keep-standing` (clearings.Keep: a task run again). one: SIMP at one budget (default D_LENS, 0.05;
 plus the Frank-Wolfe relaxation and bound if fw > 0), rows in relax_rows/<metric>/<plan>/D<budget>/.
 path: nested budgets D 0.01 .. 0.15, rows in the greedy's format (clear.rows_dir, picker
 SIMP<plan>).

@@ -22,7 +22,7 @@ polish_greedy.py, search.py, road_rescore.py), keyed by the metric's name.
 
 [K] is `--replace` or `--keep-standing` (clearings.standing_of): a row that stands under its
 identity refuses a run (before any work) unless `--replace` names a replacement, and under
-`--keep-standing` (a pool's job) is that identity done, the rest run; a command with nothing left
+`--keep-standing` (a task run again) is that identity done, the rest run; a command with nothing left
 returns before building its block.
 
 `features`: per block (the store's 303: clearings.Store's blocks), its OSM features (attrs["osm"])
@@ -276,8 +276,7 @@ def items_of(bid: str, device: str) -> dict[str, Item]:
 
 def onecard_dir(device: str) -> Path:
     """The one-card timings on `device` of runs of every preset their commands named (`presets`):
-    each the lineup's time with its setup, read as such by lineup-report's time per block and the
-    pool's estimates (pool_plan.Onecard)."""
+    each the lineup's time with its setup, read as such by lineup-report's time per block."""
     return ROWS / "onecard" / metrics.RUNTIME / device
 
 
@@ -287,7 +286,7 @@ def onecard_path(bid: str, device: str) -> Path:
 
 def onecard_partial_dir(device: str) -> Path:
     """The one-card timings on `device` of runs that kept some of the presets they named
-    (`presets` under clearings.Keep: a pool's job run again after a kill): each timed the rest,
+    (`presets` under clearings.Keep: a task run again after a kill): each timed the rest,
     with a setup of its own, so it is no lineup's time and is kept apart from onecard_dir's,
     where nothing reading the lineup's time reads it (lineup-report counts the blocks it leaves
     out)."""

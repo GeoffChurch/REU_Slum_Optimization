@@ -35,7 +35,7 @@ and checked against SIMP's own score of it, so a swing from it finishes SIMP's a
 
 A block whose rows stand under the run's identity refuses the run (clearings.Refuse: the
 no-overwrite guard) unless `--replace` names the replacement (clearings.Replace), or is done and
-not run again under `--keep-standing` (clearings.Keep: a pool's job).
+not run again under `--keep-standing` (clearings.Keep: a task run again).
 
 metric: the complex's name (gap_clear.ComplexMetric; cpu or gpu, its factorization's):
 metrics.metric_of, resolved here and handed down.

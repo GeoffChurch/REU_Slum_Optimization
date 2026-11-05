@@ -47,8 +47,8 @@ hit) and to check the cached roads against a recomputation. Rows: <rows>/proposa
 weightings, and the shipped permeability). A proposal (its row and its network) and a scored
 network are written through the run's clearings.Standing: a second `propose` of a (block,
 method) is refused unless --replace, as every optimizer's second run is (propose-all proposes
-only the pairs without a row), and under --keep-standing (a pool's job) a row that stands is that
-identity done. Every process single-threaded.
+only the pairs without a row), and under --keep-standing (a task run again) a row that stands is
+that identity done. Every process single-threaded.
 """
 from __future__ import annotations
 
@@ -134,9 +134,8 @@ def write_parquet(df: pd.DataFrame, path: Path) -> None:
     matches (cluster.py's pulls take `*.parquet`, while a task runs too, and never replace a local
     file) and no other process's (the host and the pid: clearings.place), then renamed. A
     GeoDataFrame writes its own way (its to_parquet). What it writes is a working file a run makes
-    again (an ordered network, its prefixes, a step log), so it prints no row_marker.ROW_WRITTEN:
-    no progress of a pool's job (the lease pool's plan, Ruling 6); a run's rows go through its
-    clearings.Standing."""
+    again (an ordered network, its prefixes, a step log), so it prints no clearings.ROW_WRITTEN; a
+    run's rows go through its clearings.Standing."""
     clearings.place(df, path, os.replace)
 
 
@@ -770,9 +769,9 @@ def _cut_and_score(scratch: Path, b: Block, name: str, *, metric: gcl.ComplexMet
 
 
 def lineup_one(scratch: Path, bid: str, name: str, *, standing: clearings.Standing) -> None:
-    """One (block, method) of the research lineup end to end in this process (a cluster task, or
-    a pool's job): its network proposed by lineup_arms' method (propose, through the derive
-    cache, under `standing`: a proposal that stands is done under Keep), then cut and scored
+    """One (block, method) of the research lineup end to end in this process (a cluster task): its
+    network proposed by lineup_arms' method (propose, through the derive cache, under `standing`:
+    a proposal that stands is done under Keep), then cut and scored
     (_cut_and_score). Its scored row is asked first (clearings.Standing): standing, the job is
     done (Keep) or refused (Refuse) before any work."""
     _check_single_threaded()

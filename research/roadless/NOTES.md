@@ -9774,6 +9774,11 @@ process-hours (`acceptance` 43 minutes, the others 51).
 
 ### The lease pool (2026-10-22)
 
+**Deleted 2026-11-05** (owner: "Delete it"), with cluster_submit's leases (its allocation-vectors
+switch, 36ac2dd): the `wave` verbs, the `pool`, `steward` and `long` kinds, cluster_wave.py,
+cluster_demand.py and the pool_*.py modules are gone, and every run reblock launches is its hand
+account's. Work that fans out goes as plain array runs. What follows is the record of how it ran.
+
 **What a wave is now** (spec docs/superpowers/specs/2026-10-21-lease-pool-design.md, plan Tasks
 1-10). `cluster.py wave submit <w> --preset <p> --family <f> --nodes <n,...> [--items ...] <ids> --
 <script> {id} {item}` plans one job per (block, item) and seeds a SQLite queue on ai's home

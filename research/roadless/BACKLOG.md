@@ -1132,7 +1132,7 @@ Not pursued, with what would change that:
   (floating search, grow-then-prune, swings, the exchange polish) and SIMP's default with the
   undecided-set polish, which beat floating search (-0.011 at 10x) and swings under T (above);
   under W SIMP's default ends grey and GxLr10 beat it (+0.016 [+0.009, +0.025] on the pilot), so
-  the ranking may differ by metric. Screened by epistemetry on the cluster through the lease pool,
+  the ranking may differ by metric. Screened by epistemetry on the cluster as plain array runs,
   each wave a screen's next units. The outcomes (owner 2026-10-22): P, P_{1/2} and runtime, at
   one displacement budget or as curves over several; not the people left walled in ("its
   definition is somewhat arbitrary ... nobody is actually walled in"). Waits on epistemetry
