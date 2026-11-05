@@ -50,7 +50,7 @@ def access_after(block: Block, proposal: Proposal) -> pd.Series:
 
 
 def _geometric_after_impl(block: Block, proposal: Proposal) -> pd.Series:
-    return geometric_access_distances(block, proposal.roads)
+    return geometric_access_distances(block, proposal.roads, tol=STREET_TOL)
 
 
 def geometric_after(block: Block, proposal: Proposal) -> pd.Series:

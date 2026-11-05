@@ -140,7 +140,7 @@ def metrics_for(block: Block, roads: gpd.GeoDataFrame) -> dict[str, float]:
     # parcel-adjacency graph to the nearest road or street, so a parcel behind three others pays
     # for crossing them. StructureEval already exposes its p95 as "B equity" -- this measurement
     # exists to ask whether that retired metric is the one that separates real from synthetic.
-    legs = geometric_access_distances(block, roads).to_numpy().astype(float)
+    legs = geometric_access_distances(block, roads, tol=STREET_TOL).to_numpy().astype(float)
 
     degree: dict[tuple[int, int], int] = {}
     for geom in _noded(roads):
