@@ -769,16 +769,16 @@ def report(bid: str) -> None:
         rec = json.loads(next(ln for ln in p_.read_text().splitlines() if ln.startswith("{")))
         runs_m[f"a{rec['alpha']:g} s{rec['seed']}"] = rec["road_m"]
     floor = json.loads((RUNS / "steiner.json").read_text())
-    lb = max(floor["lb"], floor.get("milp_bound") or 0.0)
+    lb = floor["lb"]                      # quota.solve's: the LP's or the MILP's, the larger
     summary["objective1"] = dict(runs=runs_m, best=min(runs_m.values()),
                                  floor_tree=floor["tree_m"], floor_lower_bound=lb,
-                                 floor_proven=floor["opt"] is not None)
+                                 floor_proven=floor["proven"])
     print("objective 1, new road to universal access (m):")
     for k_, v_ in runs_m.items():
         print(f"  topology {k_:<14}{v_:8.1f}  {v_ / floor['tree_m'] - 1:+.1%} over the floor tree, "
               f"{v_ / lb - 1:+.1%} over its lower bound")
     print(f"  group Steiner tree  {floor['tree_m']:8.1f}  (lower bound {lb:.1f}, gap "
-          f"{floor['tree_m'] / lb - 1:.1%})")
+          f"{floor['tree_m'] / lb - 1:.1%}{', proven optimal' if floor['proven'] else ''})")
     print(f"\n{'method':<28}{'conv':<10}{'first universal':>18}{'new m':>9}{'T':>8}  "
           "final: served / peel / new m")
     curves: dict[str, pd.DataFrame] = {}

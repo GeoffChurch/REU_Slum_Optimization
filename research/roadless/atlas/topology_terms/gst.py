@@ -730,15 +730,17 @@ def _quota_matrix(f: Formulation, cuts: list[QuotaCut], q: int
     return a, np.r_[b_static, np.zeros(r), -float(q)]
 
 
-def quota_lp_bound(inst: Instance, q: int, *, time_limit: float, max_rounds: int,
-                   purge_after: int) -> tuple[float, np.ndarray, Formulation, list[QuotaCut], dict]:
-    """The quota LP by cut loop (lp_bound's, with demands y). Returns (best LB, x per undirected
-    edge at the best round, formulation, the cuts in force, stats)."""
+def quota_lp_bound(inst: Instance, q: int, *, seed: list[QuotaCut], time_limit: float,
+                   max_rounds: int, purge_after: int
+                   ) -> tuple[float, np.ndarray, Formulation, list[QuotaCut], dict]:
+    """The quota LP by cut loop (lp_bound's, with demands y), starting from the cuts `seed` (valid
+    at every q: e.g. another q's converged set). Returns (best LB, x per undirected edge at the
+    best round, formulation, the cuts in force, stats)."""
     f = formulation(inst)
     na, ng = len(f.tail), len(f.terminals)
     cost = np.r_[f.cost, np.zeros(ng)]
-    cuts: list[QuotaCut] = []
-    slack: list[int] = []
+    cuts: list[QuotaCut] = list(seed)
+    slack: list[int] = [0] * len(cuts)
     t0 = time.time()
     lb, best_x, x, rounds, exact_ = 0.0, None, np.zeros(na), 0, False
     while rounds < max_rounds and time.time() - t0 < time_limit:
@@ -763,7 +765,7 @@ def quota_lp_bound(inst: Instance, q: int, *, time_limit: float, max_rounds: int
         cuts.extend(QuotaCut(arcs, g) for arcs, g in new)
         slack.extend([0] * len(new))
     x_edge = _edge_x(inst, f, best_x if best_x is not None else x)
-    return lb, x_edge, f, cuts, {"lp_rounds": rounds, "lp_cuts": len(cuts),
+    return lb, x_edge, f, cuts, {"lp_rounds": rounds, "lp_cuts": len(cuts), "lp_seed": len(seed),
                                  "lp_converged": exact_, "lp_s": time.time() - t0}
 
 

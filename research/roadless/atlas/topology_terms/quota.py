@@ -17,7 +17,8 @@ groups is q - n_free.
     Q=research/roadless/atlas/topology_terms/quota.py   # from the repo root, PYTHONPATH=.
     OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMBA_NUM_THREADS=1 \\
         PYTHONDONTWRITEBYTECODE=1 uv run python $Q grid <block>                 # the q list
-    ... $Q one <block> <q> <lp seconds> <milp seconds>   # runs/quota/q<q>.json, .parquet
+    ... $Q one <block> <q> <lp s> <milp s> <seed cuts .npz>  # runs/quota/q<q>.json, .parquet
+    (floor.py solves q = every parcel and writes the seed: runs/steiner.cuts.npz)
     ... $Q polish <block>             # every q's ub from the larger q's trees, trimmed
 """
 from __future__ import annotations
@@ -27,6 +28,7 @@ import math
 import sys
 import time
 from pathlib import Path
+from typing import Any, NamedTuple
 
 import numpy as np
 import shapely
@@ -85,26 +87,47 @@ def edges_of(inst: gst.Instance, lines) -> set[tuple[int, int]]:
     return out
 
 
-def one(bid: str, q: int, *, lp_s: float, milp_s: float) -> None:
-    [b] = common.build_blocks([bid])
+def save_cuts(path: Path, cuts: list[gst.QuotaCut]) -> None:
+    np.savez_compressed(path, arcs=np.concatenate([c.arcs for c in cuts]),
+                        ends=np.cumsum([len(c.arcs) for c in cuts]),
+                        groups=np.array([c.group for c in cuts], dtype=np.int64))
+
+
+def load_cuts(path: Path) -> list[gst.QuotaCut]:
+    z = np.load(path)
+    starts = np.r_[0, z["ends"][:-1]]
+    return [gst.QuotaCut(z["arcs"][s_:e], int(g))
+            for s_, e, g in zip(starts, z["ends"], z["groups"], strict=True)]
+
+
+class Solved(NamedTuple):
+    rec: dict
+    roads: Any                       # the best tree (gst.roads_gdf); None at q <= free
+    cuts: list[gst.QuotaCut]         # the LP's cuts in force at its end
+
+
+def solve(b, q: int, *, lp_s: float, milp_s: float, seed: list[gst.QuotaCut],
+          starts: list[set[tuple[int, int]]] | None) -> Solved:
+    """The quota LP from `seed`, the heuristic (from `starts` too: None = the floor tree's edges
+    from runs/steiner.parquet), then the MILP on the LP's cuts."""
     t0 = time.time()
     inst, n_free = instance(b)
     qg = q - n_free
-    rec: dict = dict(block=bid, q=q, parcels=len(b.parcels), free=n_free, q_groups=qg,
+    rec: dict = dict(block=b.block_id, q=q, parcels=len(b.parcels), free=n_free, q_groups=qg,
                      groups=len(inst.groups), lp_cap_s=lp_s, milp_cap_s=milp_s)
     if qg <= 0:
         rec.update(lb=0.0, ub=0.0, proven=True, tree_m=0.0)
-        (OUT / f"q{q}.json").write_text(json.dumps(rec, indent=1) + "\n")
-        return
-    lb, xe, f, cuts, st = gst.quota_lp_bound(inst, qg, time_limit=lp_s, max_rounds=MAX_ROUNDS,
-                                             purge_after=PURGE_AFTER)
+        return Solved(rec, None, [])
+    lb, xe, f, cuts, st = gst.quota_lp_bound(inst, qg, seed=seed, time_limit=lp_s,
+                                             max_rounds=MAX_ROUNDS, purge_after=PURGE_AFTER)
     rec.update(lp_lb=lb, **st)
     print(rec, flush=True)
-    import geopandas as gpd  # noqa: PLC0415
-    floor_tree = edges_of(inst, gpd.read_parquet(HERE / "runs" / "steiner.parquet").geometry)
+    if starts is None:
+        import geopandas as gpd  # noqa: PLC0415
+        starts = [edges_of(inst, gpd.read_parquet(HERE / "runs" / "steiner.parquet").geometry)]
     t = time.time()
     tree, ub = gst.quota_upper_bound(inst, qg, x_edge=xe, restarts=RESTARTS, seed=SEED,
-                                     starts=[floor_tree])
+                                     starts=starts)
     rec.update(heur_ub=ub, heur_s=time.time() - t)
     milp_tree, bound, st = gst.quota_exact(inst, f, cuts, qg, time_limit=milp_s)
     rec.update(milp_bound=bound, milp_ub=(gst.tree_cost(inst, milp_tree) if milp_tree else None),
@@ -117,15 +140,23 @@ def one(bid: str, q: int, *, lp_s: float, milp_s: float) -> None:
     roads = gst.roads_gdf(inst, tree, b)
     rec["tree_m"] = float(roads.geometry.length.sum())
     rec["total_s"] = time.time() - t0
-    roads.to_parquet(OUT / f"q{q}.parquet")
-    (OUT / f"q{q}.json").write_text(json.dumps(rec, indent=1) + "\n")
-    print(json.dumps(rec), flush=True)
+    return Solved(rec, roads, cuts)
+
+
+def one(bid: str, q: int, *, lp_s: float, milp_s: float, seed: Path) -> None:
+    [b] = common.build_blocks([bid])
+    s_ = solve(b, q, lp_s=lp_s, milp_s=milp_s, seed=load_cuts(seed), starts=None)
+    s_.rec["seed_file"] = seed.name
+    if s_.roads is not None:
+        s_.roads.to_parquet(OUT / f"q{q}.parquet")
+    (OUT / f"q{q}.json").write_text(json.dumps(s_.rec, indent=1) + "\n")
+    print(json.dumps(s_.rec), flush=True)
 
 
 def polish(bid: str) -> None:
     """Upper bounds from every LARGER q's tree trimmed to q (gst.quota_improve): a tree serving
-    q' >= q is a start the per-q runs did not have (they started from the 1630.7 m floor tree
-    only). Rewrites q<q>.json's ub (polish_ub records it) and .parquet where that improves."""
+    q' >= q is a start the per-q runs did not have (they start from the floor tree only).
+    Rewrites q<q>.json's ub (polish_ub records it) and .parquet where that improves."""
     [b] = common.build_blocks([bid])
     inst, n_free = instance(b)
     import geopandas as gpd  # noqa: PLC0415
@@ -160,7 +191,7 @@ if __name__ == "__main__":
             print(" ".join(map(str, grid(len(b.parcels)))))
         case ["polish", bid]:
             polish(bid)
-        case ["one", bid, q, lp_s, milp_s]:
-            one(bid, int(q), lp_s=float(lp_s), milp_s=float(milp_s))
+        case ["one", bid, q, lp_s, milp_s, seed]:
+            one(bid, int(q), lp_s=float(lp_s), milp_s=float(milp_s), seed=Path(seed))
         case _:
             raise SystemExit(__doc__)

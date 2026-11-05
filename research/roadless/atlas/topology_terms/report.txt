@@ -1,20 +1,20 @@
 topology samples, new road m: {'topology.a10.s1': 1884.1, 'topology.a100.s0': 1841.7}
 objective 1, new road to universal access (m):
-  topology a10 s0 (kept)   1917.6  +17.6% over the floor tree, +21.6% over its lower bound
-  topology a10 s1          1884.1  +15.5% over the floor tree, +19.4% over its lower bound
-  topology a10 s2          1912.2  +17.3% over the floor tree, +21.2% over its lower bound
-  topology a10 s3          1842.3  +13.0% over the floor tree, +16.8% over its lower bound
-  topology a100 s0         1841.7  +12.9% over the floor tree, +16.8% over its lower bound
-  topology a100 s1         1864.6  +14.3% over the floor tree, +18.2% over its lower bound
-  group Steiner tree    1630.7  (lower bound 1577.4, gap 3.4%)
+  topology a10 s0 (kept)   1917.6  +21.3% over the floor tree, +21.3% over its lower bound
+  topology a10 s1          1884.1  +19.2% over the floor tree, +19.2% over its lower bound
+  topology a10 s2          1912.2  +21.0% over the floor tree, +21.0% over its lower bound
+  topology a10 s3          1842.3  +16.6% over the floor tree, +16.6% over its lower bound
+  topology a100 s0         1841.7  +16.5% over the floor tree, +16.5% over its lower bound
+  topology a100 s1         1864.6  +18.0% over the floor tree, +18.0% over its lower bound
+  group Steiner tree    1580.4  (lower bound 1580.4, gap 0.0%, proven optimal)
 
 method                      conv         first universal    new m       T  final: served / peel / new m
 topology (kept run, a10 s0) line                stop 546     1918   280.6  1.000 / 1 / 1918
 topology (kept run, a10 s0) corridor            stop 546     1918   267.8  1.000 / 1 / 1918
 topology (best sample)      line                stop 546     1842   250.2  1.000 / 1 / 1842
 topology (best sample)      corridor            stop 546     1842   237.4  1.000 / 1 / 1842
-group Steiner floor         line                stop 509     1631   280.3  1.000 / 1 / 1631
-group Steiner floor         corridor            stop 509     1631   267.4  1.000 / 1 / 1631
+group Steiner floor         line                stop 504     1580   283.4  1.000 / 1 / 1580
+group Steiner floor         corridor            stop 504     1580   270.7  1.000 / 1 / 1580
 Shock Reblock               line                       -        -       -  0.663 / 3 / 2204
 Shock Reblock               corridor                   -        -       -  0.871 / 2 / 2204
 Loop Network                line                       -        -       -  0.440 / 4 / 1138
@@ -22,8 +22,8 @@ Loop Network                corridor                   -        -       -  0.558
 {
  "topology|line": {
   "1138.0": null,
-  "1630.7": null,
-  "1714.6": null,
+  "1580.4": null,
+  "1675.2": null,
   "1841.7": null,
   "1900.9": null,
   "1917.6": 280.6432507896701,
@@ -32,8 +32,8 @@ Loop Network                corridor                   -        -       -  0.558
  },
  "topology best|line": {
   "1138.0": null,
-  "1630.7": null,
-  "1714.6": null,
+  "1580.4": null,
+  "1675.2": null,
   "1841.7": 250.18855164869177,
   "1900.9": 150.87409981658018,
   "1917.6": 150.87409981658018,
@@ -42,18 +42,18 @@ Loop Network                corridor                   -        -       -  0.558
  },
  "steiner|line": {
   "1138.0": null,
-  "1630.7": 280.2618063074587,
-  "1714.6": 175.30141759110282,
-  "1841.7": 175.30141759110282,
-  "1900.9": 175.30141759110282,
-  "1917.6": 175.30141759110282,
-  "1981.2": 175.30141759110282,
-  "2203.8": 175.30141759110282
+  "1580.4": 283.4298634278487,
+  "1675.2": 170.12074398801383,
+  "1841.7": 170.12074398801383,
+  "1900.9": 170.12074398801383,
+  "1917.6": 170.12074398801383,
+  "1981.2": 170.12074398801383,
+  "2203.8": 170.12074398801383
  },
  "shock|line": {
   "1138.0": null,
-  "1630.7": null,
-  "1714.6": null,
+  "1580.4": null,
+  "1675.2": null,
   "1841.7": null,
   "1900.9": null,
   "1917.6": null,
@@ -62,8 +62,8 @@ Loop Network                corridor                   -        -       -  0.558
  },
  "cycle_native|line": {
   "1138.0": null,
-  "1630.7": null,
-  "1714.6": null,
+  "1580.4": null,
+  "1675.2": null,
   "1841.7": null,
   "1900.9": null,
   "1917.6": null,
@@ -72,8 +72,8 @@ Loop Network                corridor                   -        -       -  0.558
  },
  "topology|corridor": {
   "1138.0": null,
-  "1630.7": null,
-  "1714.6": null,
+  "1580.4": null,
+  "1675.2": null,
   "1841.7": null,
   "1900.9": null,
   "1917.6": 267.8348922687383,
@@ -82,8 +82,8 @@ Loop Network                corridor                   -        -       -  0.558
  },
  "topology best|corridor": {
   "1138.0": null,
-  "1630.7": null,
-  "1714.6": null,
+  "1580.4": null,
+  "1675.2": null,
   "1841.7": 237.38794591028434,
   "1900.9": 141.88661280133982,
   "1917.6": 141.88661280133982,
@@ -92,18 +92,18 @@ Loop Network                corridor                   -        -       -  0.558
  },
  "steiner|corridor": {
   "1138.0": null,
-  "1630.7": 267.3813154248377,
-  "1714.6": 165.97814672439154,
-  "1841.7": 165.97814672439154,
-  "1900.9": 165.97814672439154,
-  "1917.6": 165.97814672439154,
-  "1981.2": 165.97814672439154,
-  "2203.8": 165.97814672439154
+  "1580.4": 270.6645457521536,
+  "1675.2": 161.24840931021882,
+  "1841.7": 161.24840931021882,
+  "1900.9": 161.24840931021882,
+  "1917.6": 161.24840931021882,
+  "1981.2": 161.24840931021882,
+  "2203.8": 161.24840931021882
  },
  "shock|corridor": {
   "1138.0": null,
-  "1630.7": null,
-  "1714.6": null,
+  "1580.4": null,
+  "1675.2": null,
   "1841.7": null,
   "1900.9": null,
   "1917.6": null,
@@ -112,8 +112,8 @@ Loop Network                corridor                   -        -       -  0.558
  },
  "cycle_native|corridor": {
   "1138.0": null,
-  "1630.7": null,
-  "1714.6": null,
+  "1580.4": null,
+  "1675.2": null,
   "1841.7": null,
   "1900.9": null,
   "1917.6": null,
@@ -122,8 +122,8 @@ Loop Network                corridor                   -        -       -  0.558
  },
  "topology|line+walk": {
   "1138.0": 241.33840626938604,
-  "1630.7": 207.56305685921362,
-  "1714.6": 204.73382624944074,
+  "1580.4": 209.27006105897394,
+  "1675.2": 206.20813401186865,
   "1841.7": 199.14542775880795,
   "1900.9": 197.49412149869357,
   "1917.6": 196.29085452091232,
@@ -132,8 +132,8 @@ Loop Network                corridor                   -        -       -  0.558
  },
  "topology best|line+walk": {
   "1138.0": null,
-  "1630.7": null,
-  "1714.6": null,
+  "1580.4": null,
+  "1675.2": null,
   "1841.7": 185.20939500296478,
   "1900.9": 146.5037322469974,
   "1917.6": 146.5037322469974,
@@ -142,18 +142,18 @@ Loop Network                corridor                   -        -       -  0.558
  },
  "steiner|line+walk": {
   "1138.0": null,
-  "1630.7": 209.2727885797384,
-  "1714.6": 167.89433100353364,
-  "1841.7": 167.89433100353364,
-  "1900.9": 167.89433100353364,
-  "1917.6": 167.89433100353364,
-  "1981.2": 167.89433100353364,
-  "2203.8": 167.89433100353364
+  "1580.4": 205.167220493776,
+  "1675.2": 163.28620562633677,
+  "1841.7": 163.28620562633677,
+  "1900.9": 163.28620562633677,
+  "1917.6": 163.28620562633677,
+  "1981.2": 163.28620562633677,
+  "2203.8": 163.28620562633677
  },
  "shock|line+walk": {
   "1138.0": 216.00656457087896,
-  "1630.7": 184.57606012009424,
-  "1714.6": 184.57606012009424,
+  "1580.4": 188.39845546575788,
+  "1675.2": 184.57606012009424,
   "1841.7": 184.57606012009424,
   "1900.9": 170.9221110080653,
   "1917.6": 170.9221110080653,
@@ -162,8 +162,8 @@ Loop Network                corridor                   -        -       -  0.558
  },
  "cycle_native|line+walk": {
   "1138.0": 243.2798024679633,
-  "1630.7": 243.2798024679633,
-  "1714.6": 243.2798024679633,
+  "1580.4": 243.2798024679633,
+  "1675.2": 243.2798024679633,
   "1841.7": 243.2798024679633,
   "1900.9": 243.2798024679633,
   "1917.6": 243.2798024679633,
