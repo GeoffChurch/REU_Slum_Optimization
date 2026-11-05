@@ -135,7 +135,6 @@ def region_map(source: Source, regions: list[list[str]],
                seed_groups: list[list[str]], out_dir: Path, *,
                selection: list[str] | None = None,
                depths: dict[str, float] | None = None,
-               metric_name: str = "score",
                metric: BlockMetric | None = None,
                counts: BuildingCount | None) -> Path | None:
     """Two maps for a region build. `screen.png`: the metro coloured by the configured metric's
@@ -149,9 +148,7 @@ def region_map(source: Source, regions: list[list[str]],
     Neither map has a colorbar or title (`region.png`'s member-count/seed-count title is gone too,
     matching the bare `screen.png`); `screen.png` also has no per-member outline -- just the
     coloured fills and the thick black bounding-box locator -- so the metric colours read
-    unoccluded; `metric_name`
-    is kept for signature compatibility with callers (default "score", the generic fallback for a
-    screen without a metric) but is no longer rendered onto either map. `metric` (the same
+    unoccluded. `metric` (the same
     BlockMetric) scores any member the screen didn't flag
     (region growth reaching beyond the flagged set) by its own `fine`, so the region map is one
     metric end to end; without it those members fall back to true peel depth. Writes both; returns
@@ -449,7 +446,7 @@ def _render_block_group(group: list[Result], out_dir: Path, source: Source) -> N
     fig_before = render_before(
         block, access_before, vmax=vmax, frame=frame,
         context_outlines=context_outlines, context_points=context_points,
-        own_buildings=own_buildings,
+        own_buildings=own_buildings, field="depth",
     )
     save_render(fig_before, out_dir / f"{short_label(block.block_id)}_before.png")
     plt.close(fig_before)
@@ -462,7 +459,7 @@ def _render_block_group(group: list[Result], out_dir: Path, source: Source) -> N
             block, r.proposal, kc.fields["access_after"], vmax=vmax, metrics=kc, frame=frame,
             context_outlines=context_outlines, context_points=context_points,
             own_buildings=own_buildings,
-            displaced_buildings=_displaced_buildings(block, r.proposal),
+            displaced_buildings=_displaced_buildings(block, r.proposal), field="depth",
         )
         save_render(fig_after,
                     out_dir / f"{short_label(block.block_id)}_{r.proposal.proposal_id}_after.png")

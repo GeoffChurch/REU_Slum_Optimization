@@ -114,7 +114,7 @@ def main() -> None:
         if roads is None or len(roads) == 0:
             print("    no roads -- skipped", flush=True)
             continue
-        pre = prefix_to_displacement(block, roads, DISP)
+        pre = prefix_to_displacement(block, roads, DISP, tol=STREET_TOL)
         if len(pre) == 0:
             print("    empty displacement prefix -- skipped", flush=True)
             continue

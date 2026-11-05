@@ -334,9 +334,10 @@ def test_greedy_roads_carry_drainage_and_slice_into_a_curve() -> None:
         realizer=SnapToBoundary(lam=2.0), objective=Directness(), cost=Length(),
         max_roads=3, n_anchors=3, workers=1, top_k=8, max_anchors=0)
     assert len(roads) >= 1
-    assert list(roads["drain"]) == road_drainage(block, roads)   # drain IS the actual drainage
+    assert list(roads["drain"]) == road_drainage(block, roads,
+                                                 tol=STREET_TOL)   # drain IS the actual drainage
     # integrates w/ budget machinery
-    curve = permeability_curve(EgressContext.of(block, SHIPPED), roads)
+    curve = permeability_curve(EgressContext.of(block, SHIPPED), roads, tol=STREET_TOL, n_points=20)
     assert len(curve.cost) >= 2                                  # multiple budget points, not stub
     assert curve.benefit[-1] >= curve.benefit[0]                 # benefit doesn't regress w/ budget
 

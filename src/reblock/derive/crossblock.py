@@ -11,13 +11,12 @@ from shapely.geometry import LineString, MultiLineString, Point
 from shapely.geometry.base import BaseGeometry
 
 from reblock.contracts import Block, Proposal, Region
-from reblock.derive.access import STREET_TOL
 from reblock.derive.network_metrics import _crosses_boundary, _road_lines
 from reblock.methods.peel import PeelReblocker
 from reblock.permeability import DEFAULT_ROAD_WIDTH_M
 
 
-def reconciled_baseline(region: Region, merged: Block, tol: float = STREET_TOL) -> Proposal:
+def reconciled_baseline(region: Region, merged: Block, *, tol: float) -> Proposal:
     # Probe proposals are scored directly and never cached: their ids do not encode `tol`.
     blocks = sorted(region.blocks, key=lambda b: b.block_id)
     segments: list[BaseGeometry] = []
@@ -47,7 +46,7 @@ def _midline(a: LineString, b: LineString) -> LineString:
 
 
 def spine_merge_reference(
-    merged: Block, baseline: Proposal, tol: float = STREET_TOL, band: float = 20.0) -> Proposal:
+    merged: Block, baseline: Proposal, *, tol: float, band: float) -> Proposal:
     interior = merged.attrs.get("interior_boundaries")
     if not isinstance(interior, MultiLineString) or interior.is_empty:
         return baseline

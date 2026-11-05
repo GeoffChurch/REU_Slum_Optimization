@@ -59,10 +59,13 @@ EPS_M = 30.0            # neighbourhood radius: two shacks within 30 m are the s
 MIN_SAMPLES = 10
 BUFFER_M = 20.0         # buffered union per cluster -> a settlement polygon, not a point cloud
 MIN_STRUCTURES = 20     # below this a cluster is a hamlet or a digitising stray, not a settlement
+# The block label's cover threshold, which every caller of `label_blocks` passes (see there).
+COVER_FRAC = 0.30
 _KNOWN = {"capetown"}
 
 
-def ensure_informal_structures(city: str = "capetown",
+def ensure_informal_structures(city: str,
+                               # exempt default: where the download is kept, not what it holds
                                *, cache_dir: Path = DEFAULT_CACHE) -> Path:
     """Path to the informal-structure shapefile, downloading and extracting once if needed."""
     if city not in _KNOWN:
@@ -86,14 +89,15 @@ def ensure_informal_structures(city: str = "capetown",
     return shp
 
 
-def settlement_extents(city: str = "capetown", *, epsg: int = 32734,
+def settlement_extents(city: str, *, epsg: int,
+                       # exempt default: where the parquet is kept, not what it holds
                        cache_dir: Path = DEFAULT_CACHE) -> gpd.GeoDataFrame:
     """Settlement polygons clustered from the structure survey, with a `n_structures` column.
 
-    Cached as a parquet keyed on the clustering parameters, so changing any of them produces a new
-    file rather than silently reusing extents built under different settings.
+    Cached as a parquet keyed on the clustering parameters and `epsg`, so changing any of them
+    produces a new file rather than silently reusing extents built under different settings.
     """
-    key = f"{city}_eps{EPS_M:g}_ms{MIN_SAMPLES}_buf{BUFFER_M:g}_min{MIN_STRUCTURES}"
+    key = f"{city}_epsg{epsg}_eps{EPS_M:g}_ms{MIN_SAMPLES}_buf{BUFFER_M:g}_min{MIN_STRUCTURES}"
     cached = cache_dir / f"informal_extents_{key}.parquet"
     if cached.exists():
         return gpd.read_parquet(cached)
@@ -164,13 +168,13 @@ def _dbscan(xy: NDArray[np.float64]) -> NDArray[np.int64]:
 
 
 def label_blocks(blocks: gpd.GeoDataFrame, extents: gpd.GeoDataFrame,
-                 *, cover_frac: float = 0.30,
+                 *, cover_frac: float,
                  ) -> tuple[NDArray[np.float64], NDArray[np.bool_]]:
     """Per-block share of area inside a settlement extent, and the boolean label at `cover_frac`.
 
-    Returns `(cover, label)`. `cover_frac` is 0.30 because that is what C13 measured against; the
-    metric ORDERING was verified stable for every threshold from 0.10 to 0.90, so the exact value is
-    not load-bearing (`notes/2026-08-08-c13-...`).
+    Returns `(cover, label)`. Callers pass `COVER_FRAC`, 0.30, because that is what C13 measured
+    against; the metric ORDERING was verified stable for every threshold from 0.10 to 0.90, so the
+    exact value is not load-bearing (`notes/2026-08-08-c13-...`).
     """
     from shapely import STRtree
 

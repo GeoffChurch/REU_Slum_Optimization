@@ -418,7 +418,10 @@ class DonorSkip(StrEnum):
     EMPTY_INTERIOR = "empty_interior"   # fetched, but nothing is left once streets are subtracted
 
 
-def fetch_donor_lines(source: FootpathSource, block: Block, *, max_tries: int = 4,
+def fetch_donor_lines(source: FootpathSource, block: Block, *,
+                      # exempt defaults: the retry policy decides only whether a fetch succeeds,
+                      # never what a successful one returns
+                      max_tries: int = 4,
                       base_backoff_s: float = 2.0) -> gpd.GeoDataFrame | DonorSkip:
     """The block's real interior footpaths, as `osm_footpaths.block_footpaths` reads them -- but
     widthless: this is material (an alignment), and whoever builds a road on it stamps the width.

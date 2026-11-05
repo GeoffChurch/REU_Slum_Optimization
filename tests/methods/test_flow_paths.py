@@ -44,7 +44,8 @@ def test_flow_concentrates_more_sharply_as_the_block_grows() -> None:
     ratios = []
     for n in (5, 8, 12):
         block = _slab(n, n)
-        flow = accumulate_flow(block, ChordSubstrate().build(block), destination="gateway")
+        flow = accumulate_flow(block, ChordSubstrate().build(block), destination="gateway",
+                               iterations=3, reinforcement=0.5, max_sources=400, seed=0)
         used = flow[flow > 0]
         assert len(used) > 0
         ratios.append(float(used.max() / np.median(used)))
@@ -95,8 +96,10 @@ def test_reinforcement_changes_the_field() -> None:
     where later trips go, or the iteration is decoration."""
     block = _slab(6, 6)
     graph = ChordSubstrate().build(block)
-    plain = accumulate_flow(block, graph, iterations=1, reinforcement=0.0)
-    fed = accumulate_flow(block, graph, iterations=3, reinforcement=0.5)
+    plain = accumulate_flow(block, graph, iterations=1, reinforcement=0.0, destination="gateway",
+                            max_sources=400, seed=0)
+    fed = accumulate_flow(block, graph, iterations=3, reinforcement=0.5, destination="gateway",
+                          max_sources=400, seed=0)
 
     assert plain.shape == fed.shape
     assert not np.allclose(plain, fed), "reinforcement left the flow field unchanged"

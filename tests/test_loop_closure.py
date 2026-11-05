@@ -101,14 +101,16 @@ def _candidates() -> list[tuple[LineString, tuple[float, float], tuple[float, fl
 
 def test_greedy_close_loops_result_is_superset_of_base_roads() -> None:
     base = _teeth_roads()
-    out = greedy_close_loops(base, _streets(), _candidates(), budget_m=None, max_loops=2)
+    out = greedy_close_loops(base, _streets(), _candidates(), budget_m=None, max_loops=2,
+                             min_bridges_per_m=0.0)
     out_wkt = {ls.wkt for ls in out}
     assert {g.wkt for g in base.geometry}.issubset(out_wkt)
 
 
 def test_greedy_close_loops_tiny_budget_adds_only_the_best_scoring_loop() -> None:
     base = _teeth_roads()
-    out = greedy_close_loops(base, _streets(), _candidates(), budget_m=2.5, max_loops=20)
+    out = greedy_close_loops(base, _streets(), _candidates(), budget_m=2.5, max_loops=20,
+                             min_bridges_per_m=0.0)
     added = [ls for ls in out if ls.wkt not in {g.wkt for g in base.geometry}]
     assert len(added) == 1
     assert added[0].equals(LineString([(10, 40), (12, 40)]))   # cand1: highest score (1.5)
@@ -116,7 +118,8 @@ def test_greedy_close_loops_tiny_budget_adds_only_the_best_scoring_loop() -> Non
 
 def test_greedy_close_loops_budget_caps_total_added_length() -> None:
     base = _teeth_roads()
-    out = greedy_close_loops(base, _streets(), _candidates(), budget_m=6.0, max_loops=20)
+    out = greedy_close_loops(base, _streets(), _candidates(), budget_m=6.0, max_loops=20,
+                             min_bridges_per_m=0.0)
     added = [ls for ls in out if ls.wkt not in {g.wkt for g in base.geometry}]
     assert sum(ls.length for ls in added) <= 6.0
     # cand1 (len 2) + cand2 (len 4) fit exactly; cand3 (len 38) would blow the budget.
@@ -125,10 +128,12 @@ def test_greedy_close_loops_budget_caps_total_added_length() -> None:
 
 def test_greedy_close_loops_max_loops_caps_the_count() -> None:
     base = _teeth_roads()
-    out = greedy_close_loops(base, _streets(), _candidates(), budget_m=None, max_loops=1)
+    out = greedy_close_loops(base, _streets(), _candidates(), budget_m=None, max_loops=1,
+                             min_bridges_per_m=0.0)
     added = [ls for ls in out if ls.wkt not in {g.wkt for g in base.geometry}]
     assert len(added) == 1
-    out2 = greedy_close_loops(base, _streets(), _candidates(), budget_m=None, max_loops=2)
+    out2 = greedy_close_loops(base, _streets(), _candidates(), budget_m=None, max_loops=2,
+                              min_bridges_per_m=0.0)
     added2 = [ls for ls in out2 if ls.wkt not in {g.wkt for g in base.geometry}]
     assert len(added2) == 2
 
@@ -138,7 +143,8 @@ def test_greedy_close_loops_min_bridges_per_m_forces_early_stop() -> None:
     # (score 1.5) and cand2 (score 0.75) both clear it. budget_m=None/max_loops=20 so nothing but
     # the efficiency floor itself can stop the greedy early.
     base = _teeth_roads()
-    baseline = greedy_close_loops(base, _streets(), _candidates(), budget_m=None, max_loops=20)
+    baseline = greedy_close_loops(base, _streets(), _candidates(), budget_m=None, max_loops=20,
+                                  min_bridges_per_m=0.0)
     added_baseline = [ls for ls in baseline if ls.wkt not in {g.wkt for g in base.geometry}]
     assert len(added_baseline) == 3   # sanity: all three candidates go in with no floor
 
@@ -190,7 +196,8 @@ def test_loop_candidates_returns_gap_closing_connectors_meeting_the_perimeter_fl
     block = _gap_block()
     base = _gap_roads()
     min_len = 5.0
-    cands = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=min_len, snap_lam=2.0)
+    cands = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=min_len, snap_lam=2.0,
+                            max_candidates=None)
     assert cands != []
     g = _weighted_road_graph(base, block.streets)
     node_set = set(g.nodes())
@@ -203,14 +210,16 @@ def test_loop_candidates_returns_gap_closing_connectors_meeting_the_perimeter_fl
 def test_loop_candidates_min_loop_len_past_block_size_returns_empty() -> None:
     block = _gap_block()
     base = _gap_roads()
-    cands = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=1000.0, snap_lam=2.0)
+    cands = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=1000.0, snap_lam=2.0,
+                            max_candidates=None)
     assert cands == []
 
 
 def test_loop_candidates_no_pair_within_radius_returns_empty() -> None:
     block = _gap_block()
     base = _gap_roads()
-    cands = loop_candidates(base, block, search_radius_m=0.05, min_loop_len_m=1.0, snap_lam=2.0)
+    cands = loop_candidates(base, block, search_radius_m=0.05, min_loop_len_m=1.0, snap_lam=2.0,
+                            max_candidates=None)
     assert cands == []
 
 
@@ -241,11 +250,13 @@ def test_loop_candidates_closed_loop_rejected_by_perimeter_floor_not_radius() ->
     assert nx.number_connected_components(g) == 1
     # Tiny floor: query_pairs finds pairs and _snap succeeds -> non-empty. This pins down that the
     # radius/snap path is working, so the empty result below can only come from the floor check.
-    tiny = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0)
+    tiny = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0,
+                           max_candidates=None)
     assert tiny != []
     # Raised floor, same radius and base: every candidate found above is rejected because its own
     # perimeter falls short of min_loop_len_m -- not because no pairs were found.
-    raised = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=6.5, snap_lam=2.0)
+    raised = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=6.5, snap_lam=2.0,
+                             max_candidates=None)
     assert raised == []
 
 
@@ -288,7 +299,8 @@ def test_subsample_pairs_nonpositive_cap_clamps_to_one_no_crash() -> None:
 def test_loop_candidates_max_candidates_caps_pairs_and_stays_valid() -> None:
     block = _gap_block()
     base = _gap_roads()
-    uncapped = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0)
+    uncapped = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0,
+                               max_candidates=None)
     capped = loop_candidates(
         base, block, search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0, max_candidates=4)
     assert len(capped) <= len(uncapped)
@@ -299,15 +311,6 @@ def test_loop_candidates_max_candidates_caps_pairs_and_stays_valid() -> None:
         assert u in node_set and v in node_set
         gap_len = nx.shortest_path_length(g, u, v, weight="len")
         assert connector.length + gap_len >= 1.0 - 1e-9
-
-
-def test_loop_candidates_max_candidates_none_is_unbounded_default() -> None:
-    block = _gap_block()
-    base = _gap_roads()
-    explicit_none = loop_candidates(
-        base, block, search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0, max_candidates=None)
-    default = loop_candidates(base, block, search_radius_m=2.5, min_loop_len_m=1.0, snap_lam=2.0)
-    assert {c.wkt for c, _u, _v in explicit_none} == {c.wkt for c, _u, _v in default}
 
 
 # --- LoopClosureRefiner ------------------------------------------------------------------------

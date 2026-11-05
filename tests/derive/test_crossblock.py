@@ -4,7 +4,9 @@ from shapely.geometry import LineString, MultiLineString, Polygon, box
 
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal, Region
+from reblock.derive.access import STREET_TOL
 from reblock.derive.crossblock import reconciled_baseline, spine_merge_reference
+from reblock.derive.network_metrics import BOUNDARY_BAND_M
 from tests.block_fixtures import no_buildings
 
 UTM = CRS.from_epsg(32734)
@@ -33,7 +35,7 @@ def test_reconciled_baseline_unions_per_block_roads() -> None:
     b = _block("b", box(4, 0, 8, 3), [4, 5, 6, 7])
     region = Region(region_id="t", crs=UTM, blocks=[a, b], roads=None)
     merged = merge_cluster(region)
-    prop = reconciled_baseline(region, merged)
+    prop = reconciled_baseline(region, merged, tol=STREET_TOL)
     # peel produced roads for both blocks
     assert prop.roads is not None and not prop.roads.empty
     assert prop.block_id == merged.block_id
@@ -53,7 +55,7 @@ def test_spine_merge_adds_a_crossing_trunk() -> None:
     base = Proposal(block_id="a+b", crs=UTM, method="peel", roads=gpd.GeoDataFrame(
         geometry=[LineString([(3.0, 0.5), (3.0, 2.5)]), LineString([(5.0, 0.5), (5.0, 2.5)])],
         crs=UTM), edges=None, proposal_id="peel", params={})
-    assert n_cross_block_streets(base.roads, interior) == 0
-    ref = spine_merge_reference(merged, base)
+    assert n_cross_block_streets(base.roads, interior, tol=STREET_TOL) == 0
+    ref = spine_merge_reference(merged, base, tol=STREET_TOL, band=BOUNDARY_BAND_M)
     # a through-trunk now crosses x=4
-    assert n_cross_block_streets(ref.roads, interior) >= 1
+    assert n_cross_block_streets(ref.roads, interior, tol=STREET_TOL) >= 1

@@ -86,7 +86,7 @@ def main() -> int:
             d = dmax * f
             row: dict[str, dict[str, float]] = {}
             for a in ARMS:
-                pre = prefix_to_displacement(block, roads[a], d)
+                pre = prefix_to_displacement(block, roads[a], d, tol=STREET_TOL)
                 if len(pre) == 0:
                     continue
                 b1 = burden(parcel_access_layers(adjacency, pre, unreached=past_every_parcel))

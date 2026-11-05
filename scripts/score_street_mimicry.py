@@ -32,7 +32,7 @@ from reblock.contracts import Block, Method
 from reblock.data.osm_extract import NEAR_MISS_TAGS, PbfDesireLines
 from reblock.data.pools import pbf_path
 from reblock.emit import pct_displaced
-from reblock.eval.agreement import buffered_iou, directional_chamfer
+from reblock.eval.agreement import CHAMFER_STEP_M, buffered_iou, directional_chamfer
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.demand_greedy import DemandGreedyReblocker
 from reblock.methods.desire_lines import NoDesire
@@ -123,7 +123,7 @@ def main() -> None:
             roads = cast(gpd.GeoDataFrame, roads[cum <= target] if target > 0 else roads.iloc[:0])
             if roads.empty:
                 continue
-            prec, rec = directional_chamfer(roads, ref)
+            prec, rec = directional_chamfer(roads, ref, step=CHAMFER_STEP_M)
             rows.append({
                 "region": blk.block_id[:60], "method": name, "n_blocks": len(region),
                 "ref_len_m": target, "road_len_m": float(roads.geometry.length.sum()),

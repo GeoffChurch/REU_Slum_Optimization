@@ -76,14 +76,14 @@ def greedy_close_loops(base_roads: GeoDataFrame, streets: GeoDataFrame,
                        candidates: list[tuple[LineString, tuple[float, float],
                                               tuple[float, float]]],
                        *, budget_m: float | None, max_loops: int,
-                       min_bridges_per_m: float = 0.0) -> list[LineString]:
+                       min_bridges_per_m: float) -> list[LineString]:
     """Greedily add the candidate connector with the highest bridges-removed-per-metre, one at a
     time, stopping at `budget_m` cumulative added length, `max_loops` additions, or once the best
     remaining marginal gain (bridges removed per metre) drops below `max(min_bridges_per_m, 1e-9)`
-    -- whichever comes first. `min_bridges_per_m=0.0` (the default) preserves the original
-    stop-when-nothing-left-to-gain behavior; a positive value is a diminishing-returns early stop
-    that bails out once the best remaining loop is inefficient (e.g. removes fewer than 1 bridge
-    per 100 m -> gain < 0.01), even with budget left. Each step recomputes the bridge-tree ONCE
+    -- whichever comes first. `min_bridges_per_m=0.0` stops only when nothing is left to gain; a
+    positive value is a diminishing-returns early stop that bails out once the best remaining loop
+    is inefficient (e.g. removes fewer than 1 bridge per 100 m -> gain < 0.01), even with budget
+    left. Each step recomputes the bridge-tree ONCE
     (over the current `base_roads` + already-added connectors, noded against `streets`), then
     scores every remaining candidate with a single `bridges_removed` lookup apiece; candidate
     endpoints are snapped to the nearest road-graph node within `STREET_TOL`. Returns the full road
@@ -151,7 +151,7 @@ def _subsample_pairs(pairs: list[tuple[int, int]], max_candidates: int
 
 
 def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: float,
-                    min_loop_len_m: float, snap_lam: float, max_candidates: int | None = None
+                    min_loop_len_m: float, snap_lam: float, max_candidates: int | None
                     ) -> list[tuple[LineString, Node, Node]]:
     """Candidate loop-closing connectors: for every pair of `base_roads`' OWN node coords
     (`_explode_segments(base_roads)`'s unique endpoints -- the few-hundred base-road nodes, NOT the
@@ -176,9 +176,8 @@ def loop_candidates(base_roads: GeoDataFrame, block: Block, *, search_radius_m: 
     be capped, before either runs. On a dense clearance mesh `query_pairs(search_radius_m)` can
     return tens of thousands of pairs; past `max_candidates`, `_subsample_pairs` takes a uniform
     stride over the index-sorted pairs, preserving the distance distribution so real
-    (floor-clearing) loop-closers survive the cap (see `_subsample_pairs`). `None` (the default)
-    leaves `query_pairs`' own radius cutoff as the only bound -- unchanged behavior for callers
-    that don't opt in."""
+    (floor-clearing) loop-closers survive the cap (see `_subsample_pairs`). `None` leaves
+    `query_pairs`' own radius cutoff as the only bound."""
     g = _noded_graph(base_roads, block.streets)
     for u, v in g.edges():
         g[u][v]["len"] = math.hypot(u[0] - v[0], u[1] - v[1])

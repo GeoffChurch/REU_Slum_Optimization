@@ -134,7 +134,7 @@ def main() -> None:
 
         at: dict[str, BudgetMetrics] = {}
         for d in BUDGETS:
-            pre = prefix_to_displacement(block, roads, d)
+            pre = prefix_to_displacement(block, roads, d, tol=STREET_TOL)
             if len(pre) == 0:
                 continue
             b1 = burden(parcel_access_layers(adjacency, pre, unreached=past_every_parcel))

@@ -114,7 +114,7 @@ def test_pinned_capetown_block_morphology() -> None:
                        building_tier=SpacingDiscs, member_buildings=None)
     block = next(b for b in src.region().blocks if b.block_id == "ZAF.9.3.1_1_44882")
     layers = _layers(block, None)
-    geo = geometric_access_distances(block, None)
+    geo = geometric_access_distances(block, None, tol=STREET_TOL)
     # Pinned by running this test once against the committed fixture and reading the
     # values off the (deterministic) assertion failure -- not invented.
     assert int(layers.max()) == 7

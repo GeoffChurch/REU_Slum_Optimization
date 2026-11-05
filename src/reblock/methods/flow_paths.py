@@ -64,9 +64,8 @@ def _gateway_nodes(block: Block, graph: RoutingGraph) -> list[int]:
 
 
 def accumulate_flow(
-    block: Block, graph: RoutingGraph, *, destination: Destination = "gateway",
-    iterations: int = 3, reinforcement: float = 0.5, max_sources: int = 400,
-    seed: int = 0,
+    block: Block, graph: RoutingGraph, *, destination: Destination,
+    iterations: int, reinforcement: float, max_sources: int, seed: int,
 ) -> NDArray[np.float64]:
     """Traffic per undirected edge, from routing every parcel's trip and counting.
 

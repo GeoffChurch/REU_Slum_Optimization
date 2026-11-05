@@ -17,8 +17,10 @@ from shapely import STRtree, make_valid
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block, Proposal, Region
 from reblock.data.kblock import KblockSource
+from reblock.derive.access import STREET_TOL
 from reblock.derive.cluster import merge_cluster
 from reblock.derive.crossblock import reconciled_baseline, spine_merge_reference
+from reblock.derive.network_metrics import BOUNDARY_BAND_M
 from reblock.eval.kcomplexity import KComplexityEval
 from reblock.eval.structure import StructureEval
 
@@ -59,8 +61,8 @@ def probe_cluster(
     region = Region(region_id=region.region_id, crs=region.crs,
                      blocks=list(region.blocks), roads=region.roads, attrs=region.attrs)
     merged = merge_cluster(region)
-    base = reconciled_baseline(region, merged)
-    ref = spine_merge_reference(merged, base)
+    base = reconciled_baseline(region, merged, tol=STREET_TOL)
+    ref = spine_merge_reference(merged, base, tol=STREET_TOL, band=BOUNDARY_BAND_M)
     row: dict[str, float | str] = {
         "block_ids": "+".join(block_ids), "n_parcels": float(len(merged.parcels))}
     row.update(_score(merged, base, "base"))

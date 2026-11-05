@@ -11,6 +11,7 @@ import pytest
 
 import scripts.real_vs_synthetic as study
 from reblock import budget
+from reblock.derive.access import STREET_TOL
 from reblock.emit import pct_displaced
 from tests.test_consensus_matrix import BLOCK, _arms
 
@@ -35,8 +36,10 @@ def test_every_network_is_scored_through_the_one_truncation_and_nothing_else(
     every = {"real": real, **synthetic}
     seen: list[str] = []
 
-    def sentinel(block: object, roads: gpd.GeoDataFrame, d_frac: float) -> gpd.GeoDataFrame:
+    def sentinel(block: object, roads: gpd.GeoDataFrame, d_frac: float, *,
+                 tol: float) -> gpd.GeoDataFrame:
         del block
+        assert tol == STREET_TOL
         seen.append(next(name for name, r in every.items() if r is roads))
         assert d_frac == pct_displaced(real, BLOCK.buildings)
         return cast(gpd.GeoDataFrame, roads.iloc[:2])
@@ -62,7 +65,7 @@ def test_the_truncation_is_the_one_the_lenses_use() -> None:
     real, synthetic = arms["own"], {"clearance": arms["clearance"], "repelled": arms["repelled"]}
     target = pct_displaced(real, BLOCK.buildings)
     rows = {cast(str, r["network"]): r for r in study.score_block(BLOCK, real, synthetic)}
-    cut = {name: budget.prefix_to_displacement(BLOCK, roads, target)
+    cut = {name: budget.prefix_to_displacement(BLOCK, roads, target, tol=STREET_TOL)
            for name, roads in {"real": real, **synthetic}.items()}
     assert any(len(cut[n]) < len(r) for n, r in synthetic.items()), "nothing was truncated"
     for name, prefix in cut.items():

@@ -72,7 +72,8 @@ def _frame_png(task: tuple[int, float]) -> tuple[int, bytes]:
                         method="street_first_prefix", params={"cutoff_m": cutoff})
     layers = parcel_access_layers(adjacency, prefix if k else None, unreached=one_past_deepest)
     fig = render_after(block, proposal, layers, vmax=_CTX["vmax"], frame=_CTX["frame"],
-                       displaced_buildings=_displaced_buildings(block, proposal) if k else None)
+                       displaced_buildings=_displaced_buildings(block, proposal) if k else None,
+                       field="depth")
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=_CTX["dpi"])   # fixed frame => fixed pixel size (GIF-safe)
     plt.close(fig)
@@ -80,8 +81,10 @@ def _frame_png(task: tuple[int, float]) -> tuple[int, bytes]:
 
 
 def reblock_gif(block: Block, roads: GeoDataFrame, out_path: Path, *, vmax: int,
-                frame: tuple[float, float, float, float], frames: int = 16,
-                tol: float = STREET_TOL, dpi: int = 68, hold_last: int = 4) -> None:
+                frame: tuple[float, float, float, float], frames: int, tol: float,
+                # exempt defaults: presentation only -- pixel size and how long the last frame
+                # holds; neither changes which roads a frame shows
+                dpi: int = 68, hold_last: int = 4) -> None:
     """Write a GIF of `roads` added to `block` in `street_first_ordered` order over `frames`
     cumulative-length budgets, on the shared access-depth scale `vmax` and fixed `frame` extent.
     No-op for empty roads. Frames render across a fork pool."""

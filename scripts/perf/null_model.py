@@ -62,7 +62,7 @@ def arms() -> list[tuple[str, CandidateSelector]]:
     out: list[tuple[str, CandidateSelector]] = [("exact", ScoreAll())]
     for k in KS:
         out.append((f"fo-{k}", FirstOrder(k=k, threads=1)))
-        out += [(f"rand-{k}-s{s}", RandomSample(k, s)) for s in SEEDS]
+        out += [(f"rand-{k}-s{s}", RandomSample(k=k, seed=s)) for s in SEEDS]
     return out
 
 
@@ -92,7 +92,7 @@ def main() -> None:
             dt = time.perf_counter() - t0
             if r is None or len(r) == 0:
                 continue
-            pre = prefix_to_displacement(b, r, 0.10)
+            pre = prefix_to_displacement(b, r, 0.10, tol=STREET_TOL)
             if len(pre) == 0:
                 continue
             b1 = burden(parcel_access_layers(adjacency, pre, unreached=past_every_parcel))

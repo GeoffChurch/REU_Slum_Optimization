@@ -23,6 +23,7 @@ import numpy as np
 
 from reblock.budget import prefix_to_permeability
 from reblock.compare import load_permeability_config
+from reblock.derive.access import STREET_TOL
 from reblock.perm_graph import GRAPH_LAYERS, permeability_graph
 from reblock.permeability import EgressContext, permeability
 from reblock.render import frame_bbox, render_graph, save_render
@@ -42,7 +43,7 @@ def main() -> None:
     block, roads_by_method = load_example_block(PINNED_METHOD)
     roads = roads_by_method[PINNED_METHOD]
     ctx = EgressContext.of(block, params)
-    prefix, reached = prefix_to_permeability(ctx, roads, pcfg.matched_permeability)
+    prefix, reached = prefix_to_permeability(ctx, roads, pcfg.matched_permeability, tol=STREET_TOL)
     if not reached:
         raise SystemExit(
             f"{PINNED_METHOD} never reached P*={pcfg.matched_permeability} on {block.block_id}; "

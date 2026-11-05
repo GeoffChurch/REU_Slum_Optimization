@@ -14,12 +14,12 @@ import pandas as pd
 from geopandas import GeoDataFrame
 
 from reblock.contracts import Block
-from reblock.derive.access import STREET_TOL, street_connectivity
+from reblock.derive.access import street_connectivity
 from reblock.derive.adjacency import parcel_adjacency
 
 
 def geometric_access_distances(
-    block: Block, roads: GeoDataFrame | None = None, *, tol: float = STREET_TOL
+    block: Block, roads: GeoDataFrame | None = None, *, tol: float
 ) -> pd.Series:
     ids = list(block.parcels["parcel_id"])
     geoms = list(block.parcels.geometry)

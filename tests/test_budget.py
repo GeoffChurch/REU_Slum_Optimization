@@ -9,6 +9,7 @@ from shapely.geometry import LineString, MultiLineString, Point, Polygon
 from shapely.ops import unary_union
 
 from reblock.budget import (
+    EFFICIENCY_SOURCES,
     _rnd,
     access_burden,
     road_drainage,
@@ -64,7 +65,7 @@ def test_road_drainage_trunks_exceed_leaves() -> None:
                                max_roads=400,
                                road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
     assert roads is not None
-    drain = road_drainage(block, roads)
+    drain = road_drainage(block, roads, tol=STREET_TOL)
     assert len(drain) == len(roads) and max(drain) > min(drain) and max(drain) >= 2
 
 
@@ -75,7 +76,7 @@ def test_road_drainage_floating_roads_get_zero() -> None:
     floating = with_width(
         gpd.GeoDataFrame(geometry=[LineString([(1.2, 1.2), (1.8, 1.8)])], crs=UTM),
         DEFAULT_ROAD_WIDTH_M)
-    assert road_drainage(block, floating) == [0]
+    assert road_drainage(block, floating, tol=STREET_TOL) == [0]
 
 
 def test_efficiency_and_directness_rise_with_roads() -> None:
@@ -85,8 +86,9 @@ def test_efficiency_and_directness_rise_with_roads() -> None:
                                max_roads=400,
                                road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
     assert roads is not None
-    e_none, d_none = network_efficiency(block, cast(gpd.GeoDataFrame, roads.iloc[:0]))   # no roads
-    e_full, d_full = network_efficiency(block, roads)
+    e_none, d_none = network_efficiency(block, cast(gpd.GeoDataFrame, roads.iloc[:0]),
+                                        tol=STREET_TOL, k=EFFICIENCY_SOURCES)   # no roads
+    e_full, d_full = network_efficiency(block, roads, tol=STREET_TOL, k=EFFICIENCY_SOURCES)
     assert e_full > e_none and d_full > d_none
 
 
@@ -108,8 +110,9 @@ def test_line_proximity_scores_a_sparse_straight_chord() -> None:
                   building_tier=SpacingDiscs)
     chord = with_width(gpd.GeoDataFrame(geometry=[LineString([(1.5, 0.0), (1.5, 7.0)])], crs=UTM),
                        DEFAULT_ROAD_WIDTH_M)  # spine
-    _, d_none = network_efficiency(block, cast(gpd.GeoDataFrame, chord.iloc[:0]))
-    _, d_chord = network_efficiency(block, chord)
+    _, d_none = network_efficiency(block, cast(gpd.GeoDataFrame, chord.iloc[:0]), tol=STREET_TOL,
+                                   k=EFFICIENCY_SOURCES)
+    _, d_chord = network_efficiency(block, chord, tol=STREET_TOL, k=EFFICIENCY_SOURCES)
     assert d_chord > d_none            # the chord helps
     assert d_chord > 0.05              # ... non-trivially -- the 2-point chord IS counted, not ~0
 
@@ -126,10 +129,10 @@ def test_directness_is_a_bounded_circuity_ratio() -> None:
                                max_roads=400,
                                road_width_m=DEFAULT_ROAD_WIDTH_M).propose(block).roads
     assert roads is not None
-    _, d_roads = network_efficiency(block, roads)
+    _, d_roads = network_efficiency(block, roads, tol=STREET_TOL, k=EFFICIENCY_SOURCES)
     chord = with_width(gpd.GeoDataFrame(geometry=[LineString([(2.5, 0.0), (2.5, 5.0)])], crs=UTM),
                        DEFAULT_ROAD_WIDTH_M)
-    _, d_chord = network_efficiency(block, chord)
+    _, d_chord = network_efficiency(block, chord, tol=STREET_TOL, k=EFFICIENCY_SOURCES)
     assert 0.0 <= d_roads <= 1.0
     assert 0.0 <= d_chord <= 1.0
 
@@ -411,7 +414,7 @@ def test_prefix_to_permeability_returns_minimal_prefix_that_reaches_target() -> 
     p1 = permeability(ctx, cast(gpd.GeoDataFrame, roads.iloc[:1]))
     p2 = permeability(ctx, roads)
     assert 0.0 < p1 < p2                       # spur alone helps but the pair does strictly more
-    prefix, reached = prefix_to_permeability(ctx, roads, p1)
+    prefix, reached = prefix_to_permeability(ctx, roads, p1, tol=STREET_TOL)
     assert reached
     assert len(prefix) == 1                    # the MINIMAL prefix, not both roads
     assert prefix.geometry.iloc[0].equals(roads.geometry.iloc[0])   # the spur (the drainage trunk)
@@ -424,7 +427,7 @@ def test_prefix_to_permeability_reaches_a_higher_target_only_with_all_roads() ->
     p1 = permeability(ctx, cast(gpd.GeoDataFrame, roads.iloc[:1]))
     p2 = permeability(ctx, roads)
     target = (p1 + p2) / 2.0                   # strictly between: needs both roads
-    prefix, reached = prefix_to_permeability(ctx, roads, target)
+    prefix, reached = prefix_to_permeability(ctx, roads, target, tol=STREET_TOL)
     assert reached
     assert len(prefix) == 2
 
@@ -433,7 +436,8 @@ def test_prefix_to_permeability_reports_unreached_when_target_unreachable() -> N
     from reblock.budget import prefix_to_permeability
     block, roads = _permeability_grid_block_and_roads()
     ctx = EgressContext.of(block, SHIPPED)
-    prefix, reached = prefix_to_permeability(ctx, roads, 1.5)   # 1.5 exceeds max (permeability<1)
+    prefix, reached = prefix_to_permeability(ctx, roads, 1.5,
+                                             tol=STREET_TOL)   # 1.5 exceeds max (permeability<1)
     assert not reached
     assert len(prefix) == len(roads)           # best effort = all roads in drainage order
     assert prefix.geometry.iloc[0].equals(roads.geometry.iloc[0])
@@ -445,7 +449,7 @@ def test_prefix_to_permeability_empty_roads_returns_empty_unreached() -> None:
     block, _roads = _permeability_grid_block_and_roads()
     empty_roads = gpd.GeoDataFrame(geometry=[], crs=UTM)
     prefix, reached = prefix_to_permeability(EgressContext.of(block, SHIPPED),
-                                             empty_roads, 0.1)
+                                             empty_roads, 0.1, tol=STREET_TOL)
     assert len(prefix) == 0
     assert not reached
 
@@ -454,7 +458,7 @@ def test_displacement_curve_is_monotonic_and_ends_at_full():
 
     from reblock.budget import displacement, displacement_curve
     block, roads = _straight_block_with_two_roads()
-    curve = displacement_curve(block, roads)
+    curve = displacement_curve(block, roads, tol=STREET_TOL, n_points=20)
     n = len(block.building_geometries)
     assert curve.cost[0] == 0.0 and curve.benefit[0] == 0.0
     assert curve.benefit == sorted(curve.benefit)     # non-decreasing displacement
@@ -471,7 +475,7 @@ def test_displacement_curve_is_monotonic_and_ends_at_full():
 def test_displacement_curve_is_home_fraction() -> None:
     from reblock.budget import displacement, displacement_curve
     block, roads = _straight_block_with_two_roads()   # existing helper with building_geometries
-    curve = displacement_curve(block, roads)
+    curve = displacement_curve(block, roads, tol=STREET_TOL, n_points=20)
     n = len(block.building_geometries)
     assert all(0.0 <= b <= 1.0 for b in curve.benefit)          # fraction, not a count
     # terminal fraction == displacement(full roads)/n_buildings
@@ -487,7 +491,7 @@ def test_prefix_to_displacement_returns_minimal_prefix_that_reaches_fraction() -
     frac1 = displacement(block.buildings, cast(gpd.GeoDataFrame, roads.iloc[:1])) / n
     frac2 = displacement(block.buildings, roads) / n
     assert 0.0 < frac1 < frac2                  # road 0 alone displaces only its own building
-    prefix = prefix_to_displacement(block, roads, frac1)
+    prefix = prefix_to_displacement(block, roads, frac1, tol=STREET_TOL)
     assert len(prefix) == 1                     # the MINIMAL prefix, not both roads
     assert prefix.geometry.iloc[0].equals(roads.geometry.iloc[0])
 
@@ -500,7 +504,7 @@ def test_prefix_to_displacement_needs_all_roads_for_a_higher_fraction() -> None:
     frac1 = displacement(block.buildings, cast(gpd.GeoDataFrame, roads.iloc[:1])) / n
     frac2 = displacement(block.buildings, roads) / n
     target = (frac1 + frac2) / 2.0              # strictly between: needs both roads
-    prefix = prefix_to_displacement(block, roads, target)
+    prefix = prefix_to_displacement(block, roads, target, tol=STREET_TOL)
     assert len(prefix) == 2
 
 
@@ -508,7 +512,7 @@ def test_prefix_to_displacement_returns_all_roads_when_fraction_unreachable() ->
 
     from reblock.budget import prefix_to_displacement
     block, roads = _straight_block_with_two_roads()
-    prefix = prefix_to_displacement(block, roads, 1.5)   # > 1.0, impossible
+    prefix = prefix_to_displacement(block, roads, 1.5, tol=STREET_TOL)   # > 1.0, impossible
     assert len(prefix) == len(roads)            # best effort = all roads in drainage order
 
 
@@ -517,7 +521,7 @@ def test_prefix_to_displacement_empty_roads_returns_empty() -> None:
     from reblock.budget import prefix_to_displacement
     block, _roads = _straight_block_with_two_roads()
     empty_roads = gpd.GeoDataFrame(geometry=[], crs=UTM)
-    prefix = prefix_to_displacement(block, empty_roads, 0.5)
+    prefix = prefix_to_displacement(block, empty_roads, 0.5, tol=STREET_TOL)
     assert len(prefix) == 0
 
 
@@ -530,8 +534,8 @@ def test_permeability_and_displacement_curves_share_cost_samples():
     from reblock.budget import displacement_curve
     from reblock.permeability import permeability_curve
     block, roads = _straight_block_with_two_roads()
-    perm = permeability_curve(EgressContext.of(block, SHIPPED), roads)
-    disp = displacement_curve(block, roads)
+    perm = permeability_curve(EgressContext.of(block, SHIPPED), roads, tol=STREET_TOL, n_points=20)
+    disp = displacement_curve(block, roads, tol=STREET_TOL, n_points=20)
     assert list(perm.cost) == list(disp.cost)
 
 
@@ -577,7 +581,7 @@ def test_every_scored_prefix_reaches_the_street() -> None:
             geometry=[Point(x, 25) for x in xs], crs=UTM),
         source_content_hash=None, building_tier=SpacingDiscs)
 
-    drain = road_drainage(block, roads)
+    drain = road_drainage(block, roads, tol=STREET_TOL)
     assert drain[0] > max(drain[1], drain[2]), (
         f"fixture is vacuous: the far bar must out-drain both branches, got {drain}")
 
@@ -638,7 +642,7 @@ def test_ordering_reduces_to_plain_drainage_when_that_is_already_buildable() -> 
             geometry=[Point(25, 25), Point(85, 25), Point(75, 25)], crs=UTM),
         source_content_hash=None, building_tier=SpacingDiscs)
 
-    drain = road_drainage(block, roads)
+    drain = road_drainage(block, roads, tol=STREET_TOL)
     plain = sorted(range(len(roads)), key=lambda i: (-drain[i], i))
     # Only meaningful if the busy branch outranks the quiet one -- i.e. if drainage and street
     # distance disagree. Distance puts A (index 0) first; drainage puts B (index 2).
@@ -680,9 +684,9 @@ def test_drainage_counts_parcels_not_segment_traversals() -> None:
     plain = LineString([(20.0, 0.0), (20.0, 40.0)])
     subdivided = LineString([(20.0, 0.0), (20.0, 10.0), (20.0, 20.0), (20.0, 30.0), (20.0, 40.0)])
     d_plain = road_drainage(block_with(plain, (20.0, 40.0)),
-                            gpd.GeoDataFrame(geometry=[plain], crs=UTM))
+                            gpd.GeoDataFrame(geometry=[plain], crs=UTM), tol=STREET_TOL)
     d_sub = road_drainage(block_with(subdivided, (20.0, 40.0)),
-                          gpd.GeoDataFrame(geometry=[subdivided], crs=UTM))
+                          gpd.GeoDataFrame(geometry=[subdivided], crs=UTM), tol=STREET_TOL)
     assert d_plain == [1], f"one parcel on one road must read 1, got {d_plain}"
     assert d_sub == d_plain, (
         f"subdividing a road changed drainage {d_plain} -> {d_sub}: counting segments, not parcels")
@@ -729,7 +733,7 @@ def test_road_drainage_routes_through_an_unnoded_crossing() -> None:
     assert not {(50.0, 40.0)} & set(stem.coords) | {(50.0, 40.0)} & set(crossbar.coords), (
         "fixture is vacuous: the crossing must not be a vertex of either road")
 
-    drain = road_drainage(block, roads)
+    drain = road_drainage(block, roads, tol=STREET_TOL)
     assert drain == [4, 4], (
         f"every parcel should route crossbar -> crossing -> stem -> street, got {drain}")
 
@@ -771,8 +775,8 @@ def test_network_efficiency_ignores_whether_a_crossing_is_drawn_as_a_vertex() ->
     assert bare.geometry[0].equals(noded.geometry[0]), "the two spellings must be the same geometry"
     assert bare.geometry[1].equals(noded.geometry[1]), "the two spellings must be the same geometry"
 
-    e_bare, d_bare = network_efficiency(block, bare)
-    e_noded, d_noded = network_efficiency(block, noded)
+    e_bare, d_bare = network_efficiency(block, bare, tol=STREET_TOL, k=EFFICIENCY_SOURCES)
+    e_noded, d_noded = network_efficiency(block, noded, tol=STREET_TOL, k=EFFICIENCY_SOURCES)
     assert (e_bare, d_bare) == pytest.approx((e_noded, d_noded)), (
         f"the crossing is a junction either way: bare {e_bare:.6f}/{d_bare:.6f} vs "
         f"noded {e_noded:.6f}/{d_noded:.6f}")

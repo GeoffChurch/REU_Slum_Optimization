@@ -28,7 +28,9 @@ _BBOX = {"capetown": CT_BBOX, "nairobi": NAIROBI_BBOX}
 _BLOCK_COLS = ["block_id", "k_complexity", "building_count", "block_area_m2", "geometry"]
 
 
-def ensure_city_data(city: str, *, cache_dir: Path = DEFAULT_CACHE) -> tuple[Path, Path]:
+def ensure_city_data(city: str, *,
+                     # exempt default: where the data is kept, not what it holds
+                     cache_dir: Path = DEFAULT_CACHE) -> tuple[Path, Path]:
     if city not in _ISO3:
         raise ValueError(f"unknown city {city!r}; known: {sorted(_ISO3)}")
     cache_dir.mkdir(parents=True, exist_ok=True)

@@ -35,7 +35,7 @@ class ScoreAll:
         return chords
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class StochasticFirstOrder:
     """Rank, then draw k at random from the top `pool` rather than taking the top k outright.
 
@@ -46,7 +46,7 @@ class StochasticFirstOrder:
 
     Drawing k from the top `pool` keeps the ranking's signal -- every candidate considered is
     already in the best `pool` by score -- while making runs genuinely independent, so best-of-R
-    becomes available. `pool = k` degenerates to `FirstOrder(k)`; larger `pool` trades per-run
+    becomes available. `pool = k` degenerates to `FirstOrder(k=k)`; larger `pool` trades per-run
     quality for diversity across runs.
     """
     k: int
@@ -64,7 +64,7 @@ class StochasticFirstOrder:
         return [chords[i] for i in sorted(keep.tolist())]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class RandomSample:
     """The null model: k candidates chosen uniformly, ignoring every geometric signal.
 

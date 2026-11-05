@@ -101,7 +101,7 @@ def interior_desire_lines(
     streets: BaseGeometry,
     crs: CRS,
     *,
-    tol: float = STREET_TOL,
+    tol: float,
 ) -> gpd.GeoDataFrame:
     """Clip `lines` to `boundary`, subtract the `streets` corridor (a `tol` buffer), and keep the
     interior LineString remainder longer than `tol` -- the added intervention, excluding the
@@ -148,7 +148,8 @@ def block_bbox_wgs84(block: Block) -> tuple[float, float, float, float]:
 def interior_footpaths(lines: gpd.GeoDataFrame, block: Block) -> gpd.GeoDataFrame:
     """`interior_desire_lines` against the block's own boundary and streets."""
     return interior_desire_lines(
-        lines, block.boundary, unary_union(list(block.streets.geometry)), block.crs)
+        lines, block.boundary, unary_union(list(block.streets.geometry)), block.crs,
+        tol=STREET_TOL)
 
 
 def block_footpaths(source: FootpathSource, block: Block) -> gpd.GeoDataFrame:

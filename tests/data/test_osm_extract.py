@@ -30,7 +30,8 @@ def _lines(*geoms: LineString) -> gpd.GeoDataFrame:
 
 def test_interiority_row_reports_count_and_length_at_every_tolerance() -> None:
     row = interiority_row(
-        "b1", BOUNDARY, _lines(LineString([(10, 50), (90, 50)])), _lines(), CRS_M)
+        "b1", BOUNDARY, _lines(LineString([(10, 50), (90, 50)])), _lines(), CRS_M,
+        tolerances=TOLERANCES)
     assert row["block_id"] == "b1"
     for tol in TOLERANCES:
         assert row[f"n_interior_segments_{tol}"] == 1
@@ -49,7 +50,8 @@ def test_interiority_row_count_gate_is_robust_where_length_is_not() -> None:
     `test_a_path_reaching_the_edge_keeps_its_full_length_at_every_tolerance`.
     """
     row = interiority_row(
-        "b2", BOUNDARY, _lines(LineString([(10, 2), (60, 2), (60, 90)])), _lines(), CRS_M)
+        "b2", BOUNDARY, _lines(LineString([(10, 2), (60, 2), (60, 90)])), _lines(), CRS_M,
+        tolerances=TOLERANCES)
     assert row["n_interior_segments_0.5"] == row["n_interior_segments_5.0"] == 1
     len_low: float = row["interior_length_m_0.5"]  # type: ignore[assignment]
     len_high: float = row["interior_length_m_5.0"]  # type: ignore[assignment]
@@ -68,7 +70,8 @@ def test_a_path_reaching_the_edge_keeps_its_full_length_at_every_tolerance() -> 
     89.5 / 88.0 / 85.0 across the three tolerances instead of a flat 90.0.
     """
     row = interiority_row(
-        "b5", BOUNDARY, _lines(LineString([(0, 50), (90, 50)])), _lines(), CRS_M)
+        "b5", BOUNDARY, _lines(LineString([(0, 50), (90, 50)])), _lines(), CRS_M,
+        tolerances=TOLERANCES)
     for tol in TOLERANCES:
         assert row[f"n_interior_segments_{tol}"] == 1
         assert row[f"interior_length_m_{tol}"] == pytest.approx(90.0), f"trimmed at tol={tol}"
@@ -79,14 +82,14 @@ def test_interiority_row_keeps_near_miss_separate() -> None:
         "b3", BOUNDARY,
         _lines(LineString([(10, 50), (90, 50)])),
         _lines(LineString([(10, 20), (90, 20)])),
-        CRS_M)
+        CRS_M, tolerances=TOLERANCES)
     assert row["n_interior_segments_0.5"] == 1
     assert row["n_near_miss_segments_0.5"] == 1
     assert row["interior_length_m_0.5"] == pytest.approx(80.0)
 
 
 def test_interiority_row_uncovered_block_is_all_zero() -> None:
-    row = interiority_row("b4", BOUNDARY, _lines(), _lines(), CRS_M)
+    row = interiority_row("b4", BOUNDARY, _lines(), _lines(), CRS_M, tolerances=TOLERANCES)
     assert row["n_interior_segments_0.5"] == 0
     assert row["interior_length_m_0.5"] == 0.0
 
@@ -234,7 +237,7 @@ def test_census_rows_emits_one_row_per_block() -> None:
         ],
         crs=CRS.from_epsg(4326))
     empty = gpd.GeoDataFrame(geometry=[], crs=CRS.from_epsg(4326))
-    rows = census_rows(blocks, empty, empty, 32734)
+    rows = census_rows(blocks, empty, empty, 32734, tolerances=TOLERANCES)
     assert [r["block_id"] for r in rows] == ["a", "b"]
     assert all(r["n_interior_segments_0.5"] == 0 for r in rows)
     for r in rows:
@@ -278,7 +281,7 @@ def test_census_rows_matches_each_block_to_its_own_nearby_line_by_tree_position(
         index=[1, 0],
         crs=CRS.from_epsg(4326))
 
-    rows = census_rows(blocks, footpaths, near_miss, 32734)
+    rows = census_rows(blocks, footpaths, near_miss, 32734, tolerances=TOLERANCES)
     row_a, row_b = rows
     assert row_a["block_id"] == "a"
     assert row_b["block_id"] == "b"
@@ -332,7 +335,7 @@ def test_census_rows_repairs_an_invalid_polygon_instead_of_dying() -> None:
         crs=CRS.from_epsg(4326))
     empty = gpd.GeoDataFrame(geometry=[], crs=CRS.from_epsg(4326))
 
-    rows = census_rows(blocks, lines, empty, 32734)
+    rows = census_rows(blocks, lines, empty, 32734, tolerances=TOLERANCES)
 
     assert len(rows) == 1
     assert rows[0]["census_failed"] is False

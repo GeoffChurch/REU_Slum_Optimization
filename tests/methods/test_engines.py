@@ -7,6 +7,7 @@ import geopandas as gpd
 import pytest
 from shapely.geometry import LineString, Point
 
+from reblock.budget import EFFICIENCY_SOURCES
 from reblock.derive.access import STREET_TOL, ParcelAdjacency
 from reblock.methods.arterial import (
     Access,
@@ -321,6 +322,6 @@ def test_lazy_quality_within_tolerance():
     lazy = replace(ARTERIAL, n_anchors=4, max_roads=3, workers=1,
                              engine=LazyEngine(policy=Grow(),
                                                rescore_every=0)).propose(block).roads
-    _e0, d_exact = network_efficiency(block, exact)
-    _e1, d_lazy = network_efficiency(block, lazy)
+    _e0, d_exact = network_efficiency(block, exact, tol=STREET_TOL, k=EFFICIENCY_SOURCES)
+    _e1, d_lazy = network_efficiency(block, lazy, tol=STREET_TOL, k=EFFICIENCY_SOURCES)
     assert d_lazy >= d_exact - 0.02, (d_lazy, d_exact)  # comparable-or-better (beats exact)

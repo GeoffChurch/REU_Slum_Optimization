@@ -6,7 +6,7 @@ The measurements were already on disk, so this re-derives the summary without re
 minutes of greedies -- and keeps the analysis independent of the run, which is where it belongs.
 
 The comparison that matters is per block: where does `FirstOrder(k)` sit inside the spread of
-`RandomSample(k)` over seeds? Pooling all draws into one median hides exactly that.
+`RandomSample(k=k)` over seeds? Pooling all draws into one median hides exactly that.
 """
 from __future__ import annotations
 

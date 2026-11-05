@@ -138,7 +138,7 @@ def test_interior_desire_lines_needs_no_block() -> None:
         ],
         crs=crs,
     )
-    out = interior_desire_lines(lines, boundary, boundary.boundary, crs)
+    out = interior_desire_lines(lines, boundary, boundary.boundary, crs, tol=STREET_TOL)
     assert len(out) == 1
     assert out.geometry.iloc[0].length == pytest.approx(80.0)
 
@@ -176,7 +176,7 @@ def test_a_footpath_meeting_the_street_still_reaches_it_after_the_subtraction() 
     """
     crs = CRS.from_epsg(32734)
     lines = gpd.GeoDataFrame(geometry=[LineString([(50, 0), (50, 60)])], crs=crs)
-    out = interior_desire_lines(lines, _BOUNDARY, _STREET, crs)
+    out = interior_desire_lines(lines, _BOUNDARY, _STREET, crs, tol=STREET_TOL)
     assert len(out) == 1
     assert out.geometry.iloc[0].distance(_STREET) == pytest.approx(0.0, abs=1e-9)
     # and it reads as street-connected however tight the access seam is drawn
@@ -192,7 +192,7 @@ def test_a_footpath_running_along_the_street_still_loses_that_length() -> None:
     crs = CRS.from_epsg(32734)
     lines = gpd.GeoDataFrame(
         geometry=[LineString([(10, 0), (50, 0), (50, 60)])], crs=crs)
-    out = interior_desire_lines(lines, _BOUNDARY, _STREET, crs)
+    out = interior_desire_lines(lines, _BOUNDARY, _STREET, crs, tol=STREET_TOL)
     assert len(out) == 1
     kept = out.geometry.iloc[0]
     assert kept.length == pytest.approx(60.0, abs=STREET_TOL)   # the 40 m along the street: gone
@@ -206,6 +206,6 @@ def test_a_purely_interior_footpath_is_not_snapped_to_anything() -> None:
     crs = CRS.from_epsg(32734)
     interior = LineString([(20, 40), (80, 40)])
     lines = gpd.GeoDataFrame(geometry=[interior], crs=crs)
-    out = interior_desire_lines(lines, _BOUNDARY, _STREET, crs)
+    out = interior_desire_lines(lines, _BOUNDARY, _STREET, crs, tol=STREET_TOL)
     assert len(out) == 1
     assert out.geometry.iloc[0].equals_exact(interior, 0.0)

@@ -88,12 +88,13 @@ def parcel_radii(block: Block, params: PermeabilityParams) -> NDArray[np.float64
     return params.radius_frac * out
 
 
-def _footpath_conductance(dist: NDArray[np.float64], r_sum: NDArray[np.float64], g_walk: float,
-                          eps: float = FOOTPATH_EPS) -> NDArray[np.float64]:
+def _footpath_conductance(dist: NDArray[np.float64], r_sum: NDArray[np.float64],
+                          g_walk: float) -> NDArray[np.float64]:
     """Footpath conductance from the CLEARANCE between the two footprints an edge runs between:
-    `g_walk * max(eps, (dist - r_i - r_j) / dist)`, fair-normalized (see module docstring) so its
-    median over `dist` equals g_walk * median(1/dist) -- the median the plain g_walk/dist baseline
-    would give at the same g_walk.
+    `g_walk * max(FOOTPATH_EPS, (dist - r_i - r_j) / dist)`, fair-normalized (see module
+    docstring) so its median over `dist` equals g_walk * median(1/dist) -- the median the plain
+    g_walk/dist baseline would give at the same g_walk. `FOOTPATH_EPS` is part of the metric's
+    definition, not a parameter: nothing configures it.
 
     `(dist - r_i - r_j)/dist` is the fraction of the centroid-to-centroid line that is not inside
     either building: the gap at the point where the two disks come closest. The previous form used
@@ -107,7 +108,7 @@ def _footpath_conductance(dist: NDArray[np.float64], r_sum: NDArray[np.float64],
     """
     if dist.size == 0:
         return np.zeros(0, dtype=np.float64)
-    shape = np.maximum(eps, (dist - r_sum) / dist)
+    shape = np.maximum(FOOTPATH_EPS, (dist - r_sum) / dist)
     shape_median = float(np.median(shape))
     if shape_median <= 0.0:
         return np.zeros_like(dist)

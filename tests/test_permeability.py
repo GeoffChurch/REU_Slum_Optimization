@@ -9,7 +9,7 @@ from shapely.geometry import LineString, Point, Polygon
 
 from reblock.buildings import SpacingDiscs
 from reblock.contracts import Block
-from reblock.derive.access import ParcelAdjacency
+from reblock.derive.access import STREET_TOL, ParcelAdjacency
 from reblock.permeability import (
     DEFAULT_ROAD_WIDTH_M,
     EgressContext,
@@ -143,20 +143,20 @@ def test_permeability_curve_terminal_matches_full_permeability():
     b = _grid_block(15, cell=10.0)
     roads = _roads([LineString([(15, 0), (15, 135)]), LineString([(0, 115), (30, 115)])])
     ctx = EgressContext.of(b, PARAMS)
-    curve = permeability_curve(ctx, roads, n_points=10)
+    curve = permeability_curve(ctx, roads, n_points=10, tol=STREET_TOL)
     assert abs(curve.benefit[-1] - permeability(ctx, roads)) < 1e-9
 
 def test_permeability_curve_starts_at_zero_and_is_bounded():
     b = _grid_block(15, cell=10.0)
     roads = _roads([LineString([(15, 0), (15, 135)]), LineString([(0, 115), (30, 115)])])
-    curve = permeability_curve(EgressContext.of(b, PARAMS), roads, n_points=10)
+    curve = permeability_curve(EgressContext.of(b, PARAMS), roads, n_points=10, tol=STREET_TOL)
     assert curve.cost[0] == 0.0 and curve.benefit[0] == 0.0
     assert all(0.0 <= v < 1.0 for v in curve.benefit)
 
 def test_permeability_curve_is_monotone_non_decreasing():
     b = _grid_block(15, cell=10.0)
     roads = _roads([LineString([(15, 0), (15, 135)]), LineString([(0, 115), (30, 115)])])
-    curve = permeability_curve(EgressContext.of(b, PARAMS), roads, n_points=10)
+    curve = permeability_curve(EgressContext.of(b, PARAMS), roads, n_points=10, tol=STREET_TOL)
     assert curve.benefit == sorted(curve.benefit)
 
 def test_permeability_curve_scores_against_the_contexts_own_baseline():
@@ -165,7 +165,7 @@ def test_permeability_curve_scores_against_the_contexts_own_baseline():
     b = _grid_block(15, cell=10.0)
     roads = _roads([LineString([(15, 0), (15, 135)])])
     ctx = EgressContext.of(b, PARAMS)
-    curve = permeability_curve(ctx, roads, n_points=4)
+    curve = permeability_curve(ctx, roads, n_points=4, tol=STREET_TOL)
     p1, _ = egress_power(ctx, roads)
     assert abs(curve.benefit[-1] - (1.0 - p1 / ctx.baseline.p)) < 1e-9
 

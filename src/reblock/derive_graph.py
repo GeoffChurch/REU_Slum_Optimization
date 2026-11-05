@@ -290,7 +290,10 @@ class _Uncacheable:
 _UNCACHEABLE = _Uncacheable()
 
 
-def config_identity(config: object, *, exempt: frozenset[str] = frozenset()) -> Hashable | None:
+def config_identity(config: object, *,
+                    # exempt default: the empty set keys on EVERY field -- an omitted exemption
+                    # can only cost a cache miss, never return another configuration's result
+                    exempt: frozenset[str] = frozenset()) -> Hashable | None:
     """The cache key of a configured object (a Method, and anything it is configured with): its
     class, then EVERY dataclass field by name except those in `exempt`.
 

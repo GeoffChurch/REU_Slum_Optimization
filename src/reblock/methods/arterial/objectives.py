@@ -20,8 +20,13 @@ from pyproj import CRS
 from shapely.geometry import LineString
 from shapely.geometry.base import BaseGeometry
 
-from reblock.budget import _BlockScoringContext, _StepContext, access_burden
-from reblock.derive.access import ParcelAdjacency, parcel_access_layers, past_every_parcel
+from reblock.budget import EFFICIENCY_SOURCES, _BlockScoringContext, _StepContext, access_burden
+from reblock.derive.access import (
+    STREET_TOL,
+    ParcelAdjacency,
+    parcel_access_layers,
+    past_every_parcel,
+)
 from reblock.methods.arterial.primitives import _explode, _planarize, _union_with
 from reblock.methods.arterial.realize import ChordRealizer
 
@@ -178,7 +183,8 @@ class Efficiency:
         return self
 
     def for_block(self, adjacency: ParcelAdjacency) -> BlockObjective:
-        return _MetricBlock(_BlockScoringContext(adjacency.block), _efficiency)
+        return _MetricBlock(_BlockScoringContext(adjacency.block, tol=STREET_TOL,
+                                                 k=EFFICIENCY_SOURCES), _efficiency)
 
 
 @dataclass(frozen=True)
@@ -190,7 +196,8 @@ class Directness:
         return self
 
     def for_block(self, adjacency: ParcelAdjacency) -> BlockObjective:
-        return _MetricBlock(_BlockScoringContext(adjacency.block), _directness)
+        return _MetricBlock(_BlockScoringContext(adjacency.block, tol=STREET_TOL,
+                                                 k=EFFICIENCY_SOURCES), _directness)
 
 
 ObjectiveIdentity: TypeAlias = Access | Efficiency | Directness

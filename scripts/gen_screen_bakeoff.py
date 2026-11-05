@@ -39,7 +39,12 @@ from scipy.stats import rankdata
 
 from reblock.buildings import SpacingDiscs
 from reblock.data.counts import COUNTERS, BuildingCount, resolved
-from reblock.data.informal import ensure_informal_structures, label_blocks, settlement_extents
+from reblock.data.informal import (
+    COVER_FRAC,
+    ensure_informal_structures,
+    label_blocks,
+    settlement_extents,
+)
 from reblock.data.provision import DEFAULT_CACHE, cached_kblock_source
 from reblock.metric import DENSITY_COMPACTNESS_FLOOR, DEPTH_DENSITY_PROXY_FLOOR
 
@@ -78,7 +83,7 @@ def load(counter: BuildingCount) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
     `reblock.data.counts.resolved`, so after the pipeline switched to Open Buildings the bake-off
     went on grading Ecopia-ranked screens and republished its old table byte-identical.
     """
-    ext = settlement_extents(epsg=UTM)
+    ext = settlement_extents("capetown", epsg=UTM)
     src = cached_kblock_source("capetown", min_buildings=MIN_COUNT, block_ids=None,
                                cache_dir=DEFAULT_CACHE, building_tier=SpacingDiscs,
                                member_buildings=None)
@@ -102,7 +107,7 @@ def load(counter: BuildingCount) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
     b["dens_compact"] = b["density"] * b["compact"]
     b["depth_proxy"] = np.sqrt(b["building_count"] * b["a_m2"]) / b["p_m"]
     b["dd_proxy"] = b["depth_proxy"] * b["density"]
-    cover, label = label_blocks(b, ext)
+    cover, label = label_blocks(b, ext, cover_frac=COVER_FRAC)
     b["cover"], b["informal"] = cover, label.astype(int)
     return b, ext
 
