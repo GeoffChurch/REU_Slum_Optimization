@@ -33,7 +33,7 @@ from reblock.contracts import Method
 from reblock.data.osm_extract import FOOTPATH_TAGS, NEAR_MISS_TAGS, PbfDesireLines
 from reblock.data.pools import evenly_spaced, iso_of, pbf_path
 from reblock.emit import pct_displaced
-from reblock.eval.agreement import buffered_iou, directional_chamfer
+from reblock.eval.agreement import CHAMFER_STEP_M, buffered_iou, directional_chamfer
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.demand_greedy import DemandGreedyReblocker
 from reblock.methods.desire_lines import NoDesire
@@ -49,7 +49,7 @@ def agreement(proposal: gpd.GeoDataFrame, reference: gpd.GeoDataFrame) -> dict[s
     if proposal.empty or reference.empty:
         return {"iou_3m": 0.0, "iou_10m": 0.0, "chamfer_precision_m": float("nan"),
                 "chamfer_recall_m": float("nan")}
-    prec, rec = directional_chamfer(proposal, reference)
+    prec, rec = directional_chamfer(proposal, reference, step=CHAMFER_STEP_M)
     return {"iou_3m": buffered_iou(proposal, reference, r=3.0),
             "iou_10m": buffered_iou(proposal, reference, r=10.0),
             "chamfer_precision_m": prec, "chamfer_recall_m": rec}

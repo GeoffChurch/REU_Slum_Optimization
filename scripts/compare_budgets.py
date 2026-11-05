@@ -62,6 +62,7 @@ from hydra import compose, initialize_config_dir
 from reblock.animate import reblock_gif
 from reblock.budget import displacement, displacement_curve
 from reblock.compare import (
+    CURVE_POINTS,
     MethodCurve,
     PermeabilityConfig,
     lens_prefixes,
@@ -69,7 +70,7 @@ from reblock.compare import (
 )
 from reblock.contracts import Block, Method, Proposal
 from reblock.derivations import propose
-from reblock.derive.access import parcel_access_layers, past_every_parcel
+from reblock.derive.access import STREET_TOL, parcel_access_layers, past_every_parcel
 from reblock.emit import _displaced_buildings, compare_report, pct_displaced, pct_paved
 from reblock.eval.access_burden import burden
 from reblock.eval.kcomplexity import KComplexityEval
@@ -85,6 +86,8 @@ from reblock.region import region_reblock
 from reblock.render import frame_bbox, render_after, render_before, save_render, short_label
 
 log = logging.getLogger(__name__)
+
+GIF_FRAMES = 16   # cumulative-length budgets per reblock GIF
 
 
 @dataclass(frozen=True)
@@ -179,10 +182,12 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     for name, roads in roads_by_method.items():
         pp, pd_ = pct_paved(roads, block_area), pct_displaced(roads, block.buildings)
         curves.append(MethodCurve(name, curve_label, "permeability",
-                                  permeability_curve(ctx, roads),
+                                  permeability_curve(ctx, roads, n_points=CURVE_POINTS,
+                                                     tol=STREET_TOL),
                                   pct_paved=pp, pct_displaced=pd_))
         curves.append(MethodCurve(name, curve_label, "displacement",
-                                  displacement_curve(block, roads),
+                                  displacement_curve(block, roads, n_points=CURVE_POINTS,
+                                                     tol=STREET_TOL),
                                   pct_paved=pp, pct_displaced=pd_))
     compare_report(curves, out_dir, method_order=list(methods),
                    matched_displacement=matched_displacement,
@@ -296,7 +301,7 @@ def run_permeability_lenses(region: list[Block], methods: dict[str, Method], out
     # terminal -- the same convention, and the same flag, the Lens B table already reports.
     for name in roads_by_method:
         reblock_gif(block, prefix_b[name], out_dir / f"reblock_{name}.gif", vmax=depth_vmax,
-                    frame=frame)
+                    frame=frame, frames=GIF_FRAMES, tol=STREET_TOL)
 
     _write_csv(out_dir / "lens_displacement.csv",
               ["method", "road_m", "displacement", "permeability", "access_burden_reduction",

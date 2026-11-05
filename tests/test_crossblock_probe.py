@@ -4,6 +4,7 @@ import geopandas as gpd
 from shapely.geometry import MultiLineString
 
 from reblock.buildings import SpacingDiscs
+from reblock.derive.access import STREET_TOL
 from scripts.crossblock_probe import enumerate_adjacent_pairs, probe_cluster
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,11 +49,11 @@ def test_baseline_never_crosses_an_interior_boundary_on_real_cluster() -> None:
     region = Region(region_id=region.region_id, crs=region.crs, blocks=list(region.blocks),
                     roads=region.roads, attrs=region.attrs)
     merged = merge_cluster(region)
-    base = reconciled_baseline(region, merged)
+    base = reconciled_baseline(region, merged, tol=STREET_TOL)
     interior = merged.attrs["interior_boundaries"]
     assert isinstance(interior, MultiLineString)
     assert base.roads is not None and not base.roads.empty          # baseline has roads
-    assert n_cross_block_streets(base.roads, interior) == 0
+    assert n_cross_block_streets(base.roads, interior, tol=STREET_TOL) == 0
 
 
 def test_baseline_never_crosses_the_worst_jagged_frontage_pair() -> None:
@@ -74,8 +75,8 @@ def test_baseline_never_crosses_the_worst_jagged_frontage_pair() -> None:
     region = Region(region_id=region.region_id, crs=region.crs, blocks=list(region.blocks),
                     roads=region.roads, attrs=region.attrs)
     merged = merge_cluster(region)
-    base = reconciled_baseline(region, merged)
+    base = reconciled_baseline(region, merged, tol=STREET_TOL)
     interior = merged.attrs["interior_boundaries"]
     assert isinstance(interior, MultiLineString)
     assert base.roads is not None and not base.roads.empty          # baseline has roads
-    assert n_cross_block_streets(base.roads, interior) == 0
+    assert n_cross_block_streets(base.roads, interior, tol=STREET_TOL) == 0

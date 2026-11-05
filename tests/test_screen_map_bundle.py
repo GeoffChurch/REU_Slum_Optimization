@@ -267,10 +267,10 @@ def test_bundle_matches_a_fresh_reload(capetown: dict[str, Any], nairobi: dict[s
         pytest.skip("needs the informal-structures shapefile (an 18 MB fetch no other test "
                     "performs); run `uv run python -m scripts.gen_screen_bakeoff` once")
 
-    from reblock.data.informal import label_blocks, settlement_extents
+    from reblock.data.informal import COVER_FRAC, label_blocks, settlement_extents
 
     extents = settlement_extents("capetown", epsg=CITIES["capetown"])
-    _, label = label_blocks(fresh_capetown, extents)
+    _, label = label_blocks(fresh_capetown, extents, cover_frac=COVER_FRAC)
     assert [int(x) for x in label] == capetown["informal"], "capetown: informal is stale"
 
 

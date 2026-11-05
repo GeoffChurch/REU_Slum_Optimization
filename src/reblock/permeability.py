@@ -426,8 +426,8 @@ def permeability_curve(
     ctx: EgressContext,
     roads: GeoDataFrame,
     *,
-    n_points: int = 20,
-    tol: float = STREET_TOL,
+    n_points: int,
+    tol: float,
     progress: Callable[[int, int], None] | None = None,
 ) -> Curve:
     """A Curve whose x is cumulative added road length (m) and whose y is `permeability` per

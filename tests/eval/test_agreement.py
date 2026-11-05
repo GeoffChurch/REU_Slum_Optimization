@@ -6,7 +6,7 @@ from pyproj import CRS
 from shapely import affinity
 from shapely.geometry import LineString
 
-from reblock.eval.agreement import _sample, buffered_iou, directional_chamfer
+from reblock.eval.agreement import CHAMFER_STEP_M, _sample, buffered_iou, directional_chamfer
 
 CRS_M = CRS.from_epsg(32734)
 
@@ -17,8 +17,8 @@ def _net(*geoms: LineString) -> gpd.GeoDataFrame:
 
 def test_identical_networks_score_perfectly() -> None:
     net = _net(LineString([(0, 0), (100, 0)]), LineString([(50, -50), (50, 50)]))
-    assert buffered_iou(net, net) == pytest.approx(1.0)
-    precision, recall = directional_chamfer(net, net)
+    assert buffered_iou(net, net, r=3.0) == pytest.approx(1.0)
+    precision, recall = directional_chamfer(net, net, step=CHAMFER_STEP_M)
     assert precision == pytest.approx(0.0, abs=1e-6)
     assert recall == pytest.approx(0.0, abs=1e-6)
 
@@ -26,7 +26,7 @@ def test_identical_networks_score_perfectly() -> None:
 def test_disjoint_networks_score_zero_iou() -> None:
     a = _net(LineString([(0, 0), (100, 0)]))
     b = _net(LineString([(0, 10_000), (100, 10_000)]))
-    assert buffered_iou(a, b) == pytest.approx(0.0)
+    assert buffered_iou(a, b, r=3.0) == pytest.approx(0.0)
 
 
 def test_iou_decays_monotonically_with_offset() -> None:
@@ -60,11 +60,11 @@ def test_chamfer_is_asymmetric_for_a_strict_subset() -> None:
     reference = _net(LineString([(0, 0), (100, 0)]))
     proposal = _net(LineString([(0, 0), (50, 0)]))
 
-    precision, recall = directional_chamfer(proposal, reference)
+    precision, recall = directional_chamfer(proposal, reference, step=CHAMFER_STEP_M)
     assert precision == pytest.approx(0.0, abs=0.5)
     assert recall > 5.0
 
-    precision_t, recall_t = directional_chamfer(reference, proposal)
+    precision_t, recall_t = directional_chamfer(reference, proposal, step=CHAMFER_STEP_M)
     assert recall_t == pytest.approx(0.0, abs=0.5)
     assert precision_t > 5.0
 
@@ -87,7 +87,7 @@ def test_chamfer_densification_step_is_a_quantization_floor() -> None:
 
 
 def test_empty_proposal_scores_zero_iou() -> None:
-    assert buffered_iou(_net(), _net(LineString([(0, 0), (100, 0)]))) == pytest.approx(0.0)
+    assert buffered_iou(_net(), _net(LineString([(0, 0), (100, 0)])), r=3.0) == pytest.approx(0.0)
 
 
 def test_sample_includes_true_endpoint_for_non_multiple_length() -> None:

@@ -154,7 +154,7 @@ def _greedy_arterials(block: Block, *, realizer: ChordRealizer, objective: Arter
         committed.append(best_real)
 
     roads = _planarize(committed, block.crs, 2.0 * half_width_m)
-    roads["drain"] = road_drainage(block, roads) if len(roads) else []
+    roads["drain"] = road_drainage(block, roads, tol=STREET_TOL) if len(roads) else []
     return roads
 
 
@@ -273,7 +273,7 @@ def _greedy_arterials_lazy(block: Block, *, realizer: ChordRealizer,
         pending = added
 
     roads = _planarize(committed, block.crs, 2.0 * half_width_m)
-    roads["drain"] = road_drainage(block, roads) if len(roads) else []
+    roads["drain"] = road_drainage(block, roads, tol=STREET_TOL) if len(roads) else []
     return roads
 
 
@@ -357,7 +357,7 @@ def _greedy_shortlist(block: Block, *, realizer: ChordRealizer, objective: Arter
             on_step(len(committed), n_cand, len(committed))
 
     roads = _planarize(committed, block.crs, 2.0 * half_width_m)
-    roads["drain"] = road_drainage(block, roads) if len(roads) else []
+    roads["drain"] = road_drainage(block, roads, tol=STREET_TOL) if len(roads) else []
     return roads
 
 

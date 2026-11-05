@@ -47,12 +47,12 @@ def interiority_row(
     near_miss: gpd.GeoDataFrame,
     crs: CRS,
     *,
-    tolerances: Sequence[float] = TOLERANCES,
+    tolerances: Sequence[float],
 ) -> dict[str, object]:
     """One census row: interior segment count and length at each requested tolerance, for the
     primary footpath tags and (separately) the near-miss tags.
 
-    `tolerances` defaults to the full diagnostic sweep. A corpus-wide run passes a single value:
+    `tolerances` is the full diagnostic sweep (`TOLERANCES`) or, for a corpus-wide run, one value:
     the 400-block spike found 0.5 -> 5 m moves the coverage gate by only 2.6 points while total
     interior length drops 17.8%, so the sweep informs donor-quality ranking, not the census, and
     paying for it 1.8M times over buys nothing.
@@ -78,7 +78,7 @@ def _file_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def read_pbf_lines(pbf_path: Path, tags: Sequence[str] = FOOTPATH_TAGS) -> gpd.GeoDataFrame:
+def read_pbf_lines(pbf_path: Path, tags: Sequence[str]) -> gpd.GeoDataFrame:
     """Every `highway` way of the given tag classes in a .osm.pbf, as EPSG:4326 LineStrings.
 
     Filters OGR-side via `where` so a country extract does not materialize every South African
@@ -218,7 +218,7 @@ def census_rows(
     near_miss: gpd.GeoDataFrame,
     epsg: int,
     *,
-    tolerances: Sequence[float] = TOLERANCES,
+    tolerances: Sequence[float],
 ) -> list[dict[str, object]]:
     """Census rows for one UTM batch. `blocks` is in EPSG:4326; everything is reprojected to
     `epsg` once, then each block queries an STRtree rather than re-reading the layer.

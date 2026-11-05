@@ -38,7 +38,7 @@ def _require_metric_crs(blocks: gpd.GeoDataFrame, fn_name: str) -> None:
         )
 
 
-def settlement_labels(blocks: gpd.GeoDataFrame, *, tol_m: float = 100.0) -> list[int]:
+def settlement_labels(blocks: gpd.GeoDataFrame, *, tol_m: float) -> list[int]:
     """Connected-component label per block under `tol_m` boundary proximity.
 
     REPORTING ONLY -- not a fold definition. Chains transitively, so the label depends on the

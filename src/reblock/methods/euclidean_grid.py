@@ -317,10 +317,14 @@ def _density_raster(block: Block, res: float) -> _DensityRaster:
     return _DensityRaster(minx=minx, miny=miny, res=res, cells=cells, counts=counts)
 
 
-def _is_multiple(offset: float, base: float, rel_tol: float = 1e-9) -> bool:
-    """Is `offset` an integer multiple of `base` (within a relative tolerance)?"""
+# Float round-off allowance for `_is_multiple`: k * spacing need not land exactly on a multiple.
+_MULTIPLE_REL_TOL = 1e-9
+
+
+def _is_multiple(offset: float, base: float) -> bool:
+    """Is `offset` an integer multiple of `base` (within `_MULTIPLE_REL_TOL`, relative)?"""
     rem = math.remainder(offset, base)   # signed distance to the nearest multiple
-    return abs(rem) <= rel_tol * max(abs(base), abs(offset), 1.0)
+    return abs(rem) <= _MULTIPLE_REL_TOL * max(abs(base), abs(offset), 1.0)
 
 
 def _grid_lines(

@@ -19,8 +19,9 @@ from reblock.buildings import SpacingDiscs
 from reblock.compare import LensPrefixes, lens_prefixes, load_permeability_config
 from reblock.contracts import Block
 from reblock.data.pools import PoolFootpaths, ScreenedPool
+from reblock.derive.access import STREET_TOL
 from reblock.emit import pct_displaced
-from reblock.eval.agreement import buffered_iou, directional_chamfer
+from reblock.eval.agreement import CHAMFER_STEP_M, buffered_iou, directional_chamfer
 from reblock.methods.clearance import ClearanceReblocker
 from reblock.methods.demand_greedy import DemandGreedyReblocker
 from reblock.methods.osm_footpaths import OsmFootpathsReblocker
@@ -116,7 +117,7 @@ def test_every_arm_is_scored_through_the_one_truncation_and_nothing_else(
         assert (row["iou_3m"], row["iou_10m"]) == (
             buffered_iou(p, truth, r=3.0), buffered_iou(p, truth, r=10.0)), row["arm"]
         assert (row["chamfer_precision_m"], row["chamfer_recall_m"]) == directional_chamfer(
-            p, truth), row["arm"]
+            p, truth, step=CHAMFER_STEP_M), row["arm"]
 
 
 def test_the_one_truncation_is_the_lenses_compare_budgets_reports_at() -> None:
@@ -133,7 +134,8 @@ def test_the_one_truncation_is_the_lenses_compare_budgets_reports_at() -> None:
         want = lens_prefixes(ctx, roads, PCFG)
         for mine, theirs in ((got.lenses.displacement, want.displacement),
                              (got.lenses.permeability, want.permeability),
-                             (got.prediction, prefix_to_displacement(BLOCK, roads, target))):
+                             (got.prediction, prefix_to_displacement(BLOCK, roads, target,
+                                                                     tol=STREET_TOL))):
             assert [g.wkb for g in mine.geometry] == [g.wkb for g in theirs.geometry]
         assert got.lenses.reached == want.reached
 

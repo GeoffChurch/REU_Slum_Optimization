@@ -9,10 +9,12 @@ from scoring_fixtures import _block_1808, _grid_block, _region_deep, _roads, sam
 from shapely.geometry import LineString
 
 from reblock.budget import (
+    EFFICIENCY_SOURCES,
     _BlockScoringContext,
     _StepContext,
     network_efficiency,
 )
+from reblock.derive.access import STREET_TOL
 from reblock.methods.arterial import Directness, Length
 from reblock.methods.arterial.engines import _greedy_arterials
 from reblock.methods.arterial.primitives import _planarize
@@ -26,7 +28,7 @@ def _close(a: float, b: float, tol: float = 1e-9) -> bool:
 
 def test_network_efficiency_matches_reference() -> None:
     for name, block, roads, exp in sampled_fixtures():
-        e, d = network_efficiency(block, roads)
+        e, d = network_efficiency(block, roads, tol=STREET_TOL, k=EFFICIENCY_SOURCES)
         assert _close(e, exp["E"]), (name, "E", e, exp["E"])
         assert _close(d, exp["directness"]), (name, "directness", d, exp["directness"])
 
@@ -35,9 +37,9 @@ def test_context_score_matches_network_efficiency() -> None:
     # `_BlockScoringContext(block).score(roads)` is the migration target of `network_efficiency`;
     # they must agree bit-for-bit on every fixture (and hence both match the pinned reference).
     for name, block, roads, _exp in sampled_fixtures():
-        ctx = _BlockScoringContext(block)
+        ctx = _BlockScoringContext(block, tol=STREET_TOL, k=EFFICIENCY_SOURCES)
         e_ctx, d_ctx = ctx.score(roads)
-        e_ref, d_ref = network_efficiency(block, roads)
+        e_ref, d_ref = network_efficiency(block, roads, tol=STREET_TOL, k=EFFICIENCY_SOURCES)
         assert _close(e_ctx, e_ref), (name, "E", e_ctx, e_ref)
         assert _close(d_ctx, d_ref), (name, "directness", d_ctx, d_ref)
 
@@ -49,7 +51,7 @@ def test_one_context_scores_many_road_sets() -> None:
     block = _block_1808()
     ref = json.loads((Path(__file__).resolve().parent
                       / "data/scoring/ref_values_1808.json").read_text())
-    ctx = _BlockScoringContext(block)
+    ctx = _BlockScoringContext(block, tol=STREET_TOL, k=EFFICIENCY_SOURCES)
     for key in ("no_roads", "least_cost", "arterial_buildable"):
         roads = _roads(block, ref, key)
         e, d = ctx.score(roads)
@@ -126,11 +128,12 @@ def test_incremental_scorer_matches_full_rederivation() -> None:
         ("region_cross", region, region_cross_committed, trials_region_cross),
     ]
     for name, block, committed, trials in cases:
-        ctx = _BlockScoringContext(block)
+        ctx = _BlockScoringContext(block, tol=STREET_TOL, k=EFFICIENCY_SOURCES)
         step = ctx.step(_planarize(committed, block.crs, 6.0))
         for real in trials:
             got = step.score_candidate(real)
-            want = network_efficiency(block, _planarize(committed + [real], block.crs, 6.0))
+            want = network_efficiency(block, _planarize(committed + [real], block.crs, 6.0),
+                                      tol=STREET_TOL, k=EFFICIENCY_SOURCES)
             assert _close(got[0], want[0]), (name, real.wkt, "E", got, want)
             assert _close(got[1], want[1]), (name, real.wkt, "directness", got, want)
 

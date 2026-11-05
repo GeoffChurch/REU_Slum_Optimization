@@ -84,7 +84,7 @@ def main() -> None:
             dt = time.perf_counter() - t0
             if r is None or len(r) == 0:
                 continue
-            pre = prefix_to_displacement(b, r, 0.10)
+            pre = prefix_to_displacement(b, r, 0.10, tol=STREET_TOL)
             if len(pre) == 0:
                 continue
             b1 = burden(parcel_access_layers(adjacency, pre, unreached=past_every_parcel))

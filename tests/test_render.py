@@ -117,7 +117,7 @@ def test_render_before_returns_figure_with_axes() -> None:
     block = _grid_block(3)
     layers = _layers(block, None)
 
-    fig = render_before(block, layers, vmax=2)
+    fig = render_before(block, layers, vmax=2, field="depth")
 
     assert isinstance(fig, Figure)
     assert len(fig.axes) == 1
@@ -128,7 +128,7 @@ def test_render_after_returns_figure_with_axes() -> None:
     proposal = _connector_proposal(block)
     layers = _layers(block, proposal.roads)
 
-    fig = render_after(block, proposal, layers, vmax=2)
+    fig = render_after(block, proposal, layers, vmax=2, field="depth")
 
     assert isinstance(fig, Figure)
     assert len(fig.axes) == 1
@@ -143,8 +143,8 @@ def test_render_after_adds_a_roads_artist_over_render_before() -> None:
     layers_before = _layers(block, None)
     layers_after = _layers(block, proposal.roads)
 
-    fig_before = render_before(block, layers_before, vmax=2)
-    fig_after = render_after(block, proposal, layers_after, vmax=2)
+    fig_before = render_before(block, layers_before, vmax=2, field="depth")
+    fig_after = render_after(block, proposal, layers_after, vmax=2, field="depth")
 
     assert len(fig_after.axes[0].collections) > len(fig_before.axes[0].collections)
 
@@ -157,8 +157,8 @@ def test_render_after_with_no_roads_adds_no_extra_artist() -> None:
                         edges=None, proposal_id="topology", params={})
     layers = _layers(block, None)
 
-    fig_before = render_before(block, layers, vmax=2)
-    fig_after = render_after(block, proposal, layers, vmax=2)
+    fig_before = render_before(block, layers, vmax=2, field="depth")
+    fig_after = render_after(block, proposal, layers, vmax=2, field="depth")
 
     assert len(fig_after.axes[0].collections) == len(fig_before.axes[0].collections)
 
@@ -171,8 +171,8 @@ def test_render_before_and_after_share_the_passed_vmax() -> None:
     layers_before = _layers(block, None)
     layers_after = _layers(block, proposal.roads)
 
-    fig_before = render_before(block, layers_before, vmax=2)
-    fig_after = render_after(block, proposal, layers_after, vmax=2)
+    fig_before = render_before(block, layers_before, vmax=2, field="depth")
+    fig_after = render_after(block, proposal, layers_after, vmax=2, field="depth")
 
     before_fill = cast(PatchCollection, fig_before.axes[0].collections[0])
     after_fill = cast(PatchCollection, fig_after.axes[0].collections[0])
@@ -190,7 +190,7 @@ def test_render_after_accepts_optional_metrics() -> None:
         fields={},
     )
 
-    fig = render_after(block, proposal, layers, vmax=2, metrics=metrics)
+    fig = render_after(block, proposal, layers, vmax=2, metrics=metrics, field="depth")
 
     assert isinstance(fig, Figure)
 
@@ -209,7 +209,7 @@ def test_render_before_defaults_to_depth_field() -> None:
     block = _grid_block(3)
     layers = _layers(block, None)
 
-    fig = render_before(block, layers, vmax=2)
+    fig = render_before(block, layers, vmax=2, field="depth")
 
     fill = cast(PatchCollection, fig.axes[0].collections[0])
     assert fill.get_clim() == (1, 2)
@@ -248,8 +248,8 @@ def test_render_before_and_after_have_no_title() -> None:
     proposal = _connector_proposal(block)
     layers = _layers(block, proposal.roads)
 
-    fig_before = render_before(block, layers, vmax=2)
-    fig_after = render_after(block, proposal, layers, vmax=2)
+    fig_before = render_before(block, layers, vmax=2, field="depth")
+    fig_after = render_after(block, proposal, layers, vmax=2, field="depth")
 
     assert fig_before.axes[0].get_title() == ""
     assert fig_after.axes[0].get_title() == ""
@@ -262,7 +262,7 @@ def test_draw_heatmap_uses_poster_figsize() -> None:
     block = _grid_block(3)
     layers = _layers(block, None)
 
-    fig = render_before(block, layers, vmax=2)
+    fig = render_before(block, layers, vmax=2, field="depth")
 
     assert tuple(fig.get_size_inches()) == (16.0, 16.0)
 
@@ -270,7 +270,7 @@ def test_draw_heatmap_uses_poster_figsize() -> None:
 def test_save_render_writes_a_nonempty_file(tmp_path: Path) -> None:
     block = _grid_block(3)
     layers = _layers(block, None)
-    fig = render_before(block, layers, vmax=2)
+    fig = render_before(block, layers, vmax=2, field="depth")
     out = tmp_path / "b.png"
 
     save_render(fig, out)
@@ -316,7 +316,7 @@ def test_draw_heatmap_with_context_and_own_buildings_renders_without_error(
     fig = render_before(
         block, layers, vmax=2,
         context_outlines=context_outlines, context_points=context_points,
-        own_buildings=own_buildings,
+        own_buildings=own_buildings, field="depth",
     )
     out = tmp_path / "with_context.png"
     save_render(fig, out)
@@ -332,7 +332,8 @@ def test_render_after_marks_displaced_buildings_and_writes_a_file(tmp_path: Path
     # sits on the connector: an OUTLINE carrying c, which is what _displaced_buildings produces.
     displaced = gpd.GeoDataFrame({"c": [0.8]}, geometry=[Point(1.0, 0.5).buffer(1.0)], crs=UTM)
 
-    fig_after = render_after(block, proposal, layers, vmax=2, displaced_buildings=displaced)
+    fig_after = render_after(block, proposal, layers, vmax=2, displaced_buildings=displaced,
+                             field="depth")
     out = tmp_path / "displaced.png"
     save_render(fig_after, out)
 
@@ -348,10 +349,11 @@ def test_render_after_displaced_buildings_add_an_artist_over_own_buildings_alone
     own_buildings = gpd.GeoSeries([Point(0.5, 0.5), Point(1.0, 0.5)], crs=UTM)
     displaced = gpd.GeoDataFrame({"c": [0.8]}, geometry=[Point(1.0, 0.5).buffer(1.0)], crs=UTM)
 
-    fig_own_only = render_after(block, proposal, layers, vmax=2, own_buildings=own_buildings)
+    fig_own_only = render_after(block, proposal, layers, vmax=2, own_buildings=own_buildings,
+                                field="depth")
     fig_with_displaced = render_after(
         block, proposal, layers, vmax=2, own_buildings=own_buildings,
-        displaced_buildings=displaced)
+        displaced_buildings=displaced, field="depth")
 
     assert len(fig_with_displaced.axes[0].collections) > len(fig_own_only.axes[0].collections)
 
@@ -375,9 +377,9 @@ def test_render_after_with_no_displaced_buildings_adds_no_extra_artist() -> None
     layers = _layers(block, proposal.roads)
     empty_displaced = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=UTM)
 
-    fig_without = render_after(block, proposal, layers, vmax=2)
+    fig_without = render_after(block, proposal, layers, vmax=2, field="depth")
     fig_with_empty = render_after(block, proposal, layers, vmax=2,
-                                  displaced_buildings=empty_displaced)
+                                  displaced_buildings=empty_displaced, field="depth")
 
     assert len(fig_with_empty.axes[0].collections) == len(fig_without.axes[0].collections)
 
@@ -390,7 +392,7 @@ def test_render_before_uses_the_passed_frame_verbatim() -> None:
     layers = _layers(block, None)
     frame = (-100.0, -100.0, 200.0, 200.0)
 
-    fig = render_before(block, layers, vmax=2, frame=frame)
+    fig = render_before(block, layers, vmax=2, frame=frame, field="depth")
 
     ax = fig.axes[0]
     assert ax.get_xlim() == pytest.approx((frame[0], frame[2]))

@@ -3,6 +3,7 @@ from pyproj import CRS
 from shapely.geometry import LineString, MultiLineString
 
 from reblock.buildings import SpacingDiscs
+from reblock.derive.access import STREET_TOL
 from reblock.derive.network_metrics import (
     boundary_redundant_road_fraction,
     circuity,
@@ -26,7 +27,7 @@ def test_plus_is_one_crossing() -> None:
     # a "+" of two lines crossing at the origin -> one degree-4 node, 4 dead-end tips
     roads = _lines([(-1, 0), (1, 0)], [(0, -1), (0, 1)])
     empty = gpd.GeoDataFrame(geometry=[], crs=UTM)
-    g = node_network(roads, empty)
+    g = node_network(roads, empty, tol=STREET_TOL)
     cc = crossing_counts(g)
     assert cc["n_crossings"] == 1
     assert cc["n_dead_ends"] == 4
@@ -38,7 +39,7 @@ def test_near_miss_nodes_via_set_precision() -> None:
     # snaps them so the crossing is a single degree-4 node, not a missed near-miss.
     roads = _lines([(-1, 0), (-0.2, 0)], [(0.2, 0), (1, 0)], [(0, -1), (0, 1)])
     empty = gpd.GeoDataFrame(geometry=[], crs=UTM)
-    g = node_network(roads, empty)
+    g = node_network(roads, empty, tol=STREET_TOL)
     assert crossing_counts(g)["n_crossings"] == 1
 
 
@@ -46,9 +47,9 @@ def test_tree_has_zero_meshedness_grid_positive() -> None:
     # a path (tree) has no cycles; a 2x2 grid of squares has cycles
     tree = _lines([(0, 0), (1, 0)], [(1, 0), (2, 0)], [(1, 0), (1, 1)])
     empty = gpd.GeoDataFrame(geometry=[], crs=UTM)
-    assert meshedness(node_network(tree, empty)) == 0.0
+    assert meshedness(node_network(tree, empty, tol=STREET_TOL)) == 0.0
     grid = _lines([(0, 0), (1, 0), (1, 1), (0, 1), (0, 0)])   # one closed loop
-    assert meshedness(node_network(grid, empty)) > 0.0
+    assert meshedness(node_network(grid, empty, tol=STREET_TOL)) > 0.0
 
 
 VBOUND = MultiLineString([[(0, -5), (0, 5)]])   # the interior boundary line x=0
@@ -58,10 +59,10 @@ def test_cross_block_counts_both_sides_only() -> None:
     crossing = _lines([(-2, 0), (2, 0)])          # vertices strictly on both sides of x=0
     along = _lines([(0, -3), (0, 3)])             # runs ALONG the boundary -> not a crossing
     kiss = _lines([(-2, 1), (0, 0), (-2, -1)])    # touches x=0 but stays on the left -> not
-    assert n_cross_block_streets(crossing, VBOUND) == 1
-    assert n_cross_block_streets(along, VBOUND) == 0
-    assert n_cross_block_streets(kiss, VBOUND) == 0
-    assert cross_block_trunk_length_m(crossing, VBOUND) == 4.0
+    assert n_cross_block_streets(crossing, VBOUND, tol=STREET_TOL) == 1
+    assert n_cross_block_streets(along, VBOUND, tol=STREET_TOL) == 0
+    assert n_cross_block_streets(kiss, VBOUND, tol=STREET_TOL) == 0
+    assert cross_block_trunk_length_m(crossing, VBOUND, tol=STREET_TOL) == 4.0
 
 
 def test_boundary_redundant_road_fraction_parallel_vs_crossing() -> None:
@@ -69,12 +70,13 @@ def test_boundary_redundant_road_fraction_parallel_vs_crossing() -> None:
     # a road parallel to and within `band` of the interior boundary, that never crosses it,
     # is entirely "redundant" (the spine a shared through-trunk would merge) -> fraction ~1.0
     parallel = _lines([(2, -3), (2, 3)])
-    assert boundary_redundant_road_fraction(parallel, VBOUND, band=20.0) == pytest.approx(1.0)
+    assert boundary_redundant_road_fraction(parallel, VBOUND, band=20.0,
+                                            tol=STREET_TOL) == pytest.approx(1.0)
 
     # a road that crosses the boundary is excluded from the "redundant" numerator entirely
     # (even though it also runs within band) -> fraction 0.0
     crossing = _lines([(-2, 0), (2, 0)])
-    assert boundary_redundant_road_fraction(crossing, VBOUND, band=20.0) == 0.0
+    assert boundary_redundant_road_fraction(crossing, VBOUND, band=20.0, tol=STREET_TOL) == 0.0
 
 
 def test_circuity_straight_is_one_detour_is_more() -> None:
@@ -91,7 +93,7 @@ def test_circuity_straight_is_one_detour_is_more() -> None:
                   parcels=parcels, streets=streets,
                   source_content_hash=None, building_geometries=no_buildings(UTM),
                   building_tier=SpacingDiscs)
-    c = circuity(block, None)
+    c = circuity(block, None, tol=STREET_TOL)
     assert c >= 1.0 and c < 1.5
 
 
@@ -117,8 +119,10 @@ def test_throughput_bottleneck_single_vs_branched() -> None:
 
     single = _lines([(7, 2), (0, 2)])                        # one corridor to the perimeter
     branched = _lines([(7, 2), (0, 1)], [(7, 2), (0, 3)])    # two edge-disjoint corridors
-    t_single = throughput_ratio(node_network(single, streets), block)
-    t_branched = throughput_ratio(node_network(branched, streets), block)
+    t_single = throughput_ratio(node_network(single, streets, tol=STREET_TOL), block,
+                                tol=STREET_TOL)
+    t_branched = throughput_ratio(node_network(branched, streets, tol=STREET_TOL), block,
+                                  tol=STREET_TOL)
 
     assert t_single == pytest.approx(1 / 3)
     assert t_branched == pytest.approx(2 / 3)

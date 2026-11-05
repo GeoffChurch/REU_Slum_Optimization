@@ -18,6 +18,11 @@ from reblock.derive.geometric_access import geometric_access_distances
 
 _Node = tuple[float, float]
 
+# The corridor either side of an interior block boundary within which a road that does not cross
+# it counts as a boundary-parallel spine: `boundary_redundant_road_fraction` measures that share,
+# and `crossblock.spine_merge_reference` merges those spines. Every caller passes it as `band`.
+BOUNDARY_BAND_M = 20.0
+
 
 def _snap(x: float, y: float, tol: float) -> _Node:
     return (round(x / tol) * tol, round(y / tol) * tol)
@@ -32,7 +37,7 @@ def _iter_lines(geom: BaseGeometry) -> list[LineString]:
 
 
 def node_network(
-    roads: gpd.GeoDataFrame | None, streets: gpd.GeoDataFrame, tol: float = STREET_TOL,
+    roads: gpd.GeoDataFrame | None, streets: gpd.GeoDataFrame, *, tol: float,
 ) -> nx.Graph:
     road_lines = list(roads.geometry) if roads is not None and not roads.empty else []
     street_lines = list(streets.geometry) if not streets.empty else []
@@ -156,14 +161,14 @@ def _crosses_boundary(line: LineString, interior: MultiLineString, tol: float) -
 
 
 def n_cross_block_streets(
-    roads: gpd.GeoDataFrame | None, interior: MultiLineString, tol: float = STREET_TOL) -> int:
+    roads: gpd.GeoDataFrame | None, interior: MultiLineString, *, tol: float) -> int:
     if interior.is_empty:
         return 0
     return sum(_crosses_boundary(ls, interior, tol) for ls in _road_lines(roads))
 
 
 def cross_block_trunk_length_m(
-    roads: gpd.GeoDataFrame | None, interior: MultiLineString, tol: float = STREET_TOL) -> float:
+    roads: gpd.GeoDataFrame | None, interior: MultiLineString, *, tol: float) -> float:
     if interior.is_empty:
         return 0.0
     return float(sum(ls.length for ls in _road_lines(roads)
@@ -171,8 +176,8 @@ def cross_block_trunk_length_m(
 
 
 def boundary_redundant_road_fraction(
-    roads: gpd.GeoDataFrame | None, interior: MultiLineString, tol: float = STREET_TOL,
-    band: float = 20.0) -> float:
+    roads: gpd.GeoDataFrame | None, interior: MultiLineString, *, tol: float,
+    band: float) -> float:
     """Fraction of road length running within `band` of an interior boundary WITHOUT
     crossing it — the boundary-parallel spine road a shared through-trunk would merge."""
     lines = _road_lines(roads)
@@ -185,7 +190,7 @@ def boundary_redundant_road_fraction(
     return float(redundant / total)
 
 
-def circuity(block: Block, roads: gpd.GeoDataFrame | None, tol: float = STREET_TOL) -> float:
+def circuity(block: Block, roads: gpd.GeoDataFrame | None, *, tol: float) -> float:
     """mean(network distance / straight-line distance) from each off-street parcel to the
     nearest street-frontage parcel, on the parcel-adjacency graph. Numerator and
     denominator share endpoints (parcel centroid -> frontage-parcel centroid), so the
@@ -213,7 +218,7 @@ def circuity(block: Block, roads: gpd.GeoDataFrame | None, tol: float = STREET_T
     return float(pd.Series(ratios).mean()) if ratios else 1.0
 
 
-def throughput_ratio(graph: nx.Graph, block: Block, tol: float = STREET_TOL) -> float:
+def throughput_ratio(graph: nx.Graph, block: Block, *, tol: float) -> float:
     """Max-flow from a unit-demand super-source over parcel access-nodes to a
     super-sink at the perimeter, normalized by parcel count: 1.0 = no bottleneck,
     lower = the network chokes. Each undirected graph edge becomes two directed

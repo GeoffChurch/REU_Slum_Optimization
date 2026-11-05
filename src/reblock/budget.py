@@ -29,7 +29,6 @@ from shapely.ops import unary_union
 from reblock.buildings import Extents
 from reblock.contracts import Block
 from reblock.derive.access import (
-    STREET_TOL,
     ParcelAdjacency,
     one_past_deepest,
     parcel_access_layers,
@@ -207,7 +206,7 @@ def _road_net(block: Block, roads: GeoDataFrame, tol: float) -> _RoadNet:
     return _RoadNet(graph=g, edge_row=edge_row, road_nodes=road_nodes, street_nodes=snodes)
 
 
-def road_drainage(block: Block, roads: GeoDataFrame, *, tol: float = STREET_TOL) -> list[int]:
+def road_drainage(block: Block, roads: GeoDataFrame, *, tol: float) -> list[int]:
     """Per-road PARCEL count: build a graph from the road segments, route each parcel to the street
     through it, and count how many parcels' routes use each road. Uniform across methods.
 
@@ -500,6 +499,12 @@ def _reproject_hits(geoms_arr: np.ndarray, reps_arr: np.ndarray, lines: np.ndarr
     return pidx, eidx, dist, proj, foot_xy
 
 
+# K, the sampled efficiency estimator's source-parcel count: the one value every caller of
+# `network_efficiency` / `_BlockScoringContext` passes as `k` (the arterial Efficiency and
+# Directness objectives, and the tests that hold the two equal). Not a default: `k` is required.
+EFFICIENCY_SOURCES = 40
+
+
 class _BlockScoringContext:
     """Per-block scoring constants frozen ONCE, shared by `network_efficiency` and the greedy
     arterial loop. Freezing lifts the representative points, sampled sources, the K*N euclidean
@@ -507,7 +512,7 @@ class _BlockScoringContext:
     rebuilt for all ~7k candidates). `.score(roads)` re-derives entries against streets + `roads`
     and matches `network_efficiency` exactly."""
 
-    def __init__(self, block: Block, *, k: int = 40, tol: float = STREET_TOL) -> None:
+    def __init__(self, block: Block, *, k: int, tol: float) -> None:
         self.block = block
         self.tol = tol
         self.geoms: list[BaseGeometry] = list(block.parcels.geometry)
@@ -693,18 +698,18 @@ class _StepContext:
                                         ctx.src_euclid)
 
 
-def network_efficiency(block: Block, roads: GeoDataFrame | None, *, k: int = 40,
-                       tol: float = STREET_TOL) -> tuple[float, float]:
+def network_efficiency(block: Block, roads: GeoDataFrame | None, *, k: int,
+                       tol: float) -> tuple[float, float]:
     """Sampled (E, directness) of the network `roads` + block.streets. A parcel maps to the graph
     by line-proximity -- the nearest POINT on a road/street edge within `tol`, injected as a
     colinear split node (`_line_entries` + `_build_csr`), which counts sparse straight chords the
     old nearest-vertex rule undercounted. From K seeded source parcels to ALL parcels; (0, 0) if the
     graph is empty. Deterministic: sources are evenly spaced over the parcel row order.
 
-    Delegates to `_BlockScoringContext(block).score(roads)` -- the context freezes the per-block
-    constants once, though a bare `network_efficiency` call (as here) still builds one context per
-    call. The arterial greedy loop instead builds the context ONCE per block and calls `.score`
-    per candidate.
+    Delegates to `_BlockScoringContext(block, k=k, tol=tol).score(roads)` -- the context freezes
+    the per-block constants once, though a bare `network_efficiency` call (as here) still builds
+    one context per call. The arterial greedy loop instead builds the context ONCE per block and
+    calls `.score` per candidate.
 
     Note this function alone is NOT guaranteed monotone as `roads` grows across separate calls,
     because each call re-derives entries against its own `roads` and entries can churn."""
@@ -874,7 +879,7 @@ def prefix_to_depth(adjacency: ParcelAdjacency, roads: GeoDataFrame,
 
 
 def prefix_to_displacement(block: Block, roads: GeoDataFrame, d_frac: float, *,
-                           tol: float = STREET_TOL) -> GeoDataFrame:
+                           tol: float) -> GeoDataFrame:
     """The minimal drainage-ordered prefix of `roads` whose displacement FRACTION
     (`displacement(block.buildings, prefix) / n_buildings`) is >= `d_frac`. Displacement is
     monotone non-decreasing as drainage-ordered roads are added (a growing prefix's corridor union
@@ -913,7 +918,7 @@ def prefix_to_permeability(
     roads: GeoDataFrame,
     p_star: float,
     *,
-    tol: float = STREET_TOL,
+    tol: float,
 ) -> tuple[GeoDataFrame, bool]:
     """The minimal drainage-ordered prefix of `roads` whose `permeability` is >= `p_star`, paired
     with whether that target was reached. Permeability is monotone non-decreasing as
@@ -948,8 +953,8 @@ def prefix_to_permeability(
 
 
 def displacement_curve(block: Block, roads: GeoDataFrame, *,
-                       n_points: int = 20,
-                       tol: float = STREET_TOL) -> Curve:
+                       n_points: int,
+                       tol: float) -> Curve:
     """A Curve whose x is cumulative added road length (m) and whose y is the FRACTION of homes
     displaced, Σcᵢ / n_buildings (a rising COST in [0, 1]). Reuses the drainage-ordered _sweep.
     n_buildings = len(block.building_geometries) (buildings, not parcels)."""

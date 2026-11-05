@@ -153,7 +153,7 @@ def metrics_for(block: Block, roads: gpd.GeoDataFrame) -> dict[str, float]:
     straight = [g.length and Point(g.coords[0]).distance(Point(g.coords[-1])) / g.length
                 for g in roads.geometry]
     total_len = float(roads.geometry.length.sum())
-    graph = node_network(roads, block.streets)
+    graph = node_network(roads, block.streets, tol=STREET_TOL)
     return {
         "cycle_ratio": cycles / n_edges if n_edges else 0.0,
         "meshedness": float(meshedness(graph)),
@@ -185,7 +185,7 @@ def score_block(block: Block, real: gpd.GeoDataFrame,
     """
     target = pct_displaced(real, block.buildings)
     return [{"block": block.block_id, "network": name,
-             **metrics_for(block, prefix_to_displacement(block, roads, target))}
+             **metrics_for(block, prefix_to_displacement(block, roads, target, tol=STREET_TOL))}
             for name, roads in {"real": real, **synthetic}.items()]
 
 

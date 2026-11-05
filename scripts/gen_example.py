@@ -168,8 +168,7 @@ def main() -> None:
 
         if scoring is not None:
             region_map(source, [members], [[seed]], out,
-                       selection=selection, depths=scores, metric_name=metric_name,
-                       metric=scoring.metric,
+                       selection=selection, depths=scores, metric=scoring.metric,
                        # The SAME counter the screen ranked on, so the map grades blocks on the
                        # number the pipeline used rather than the source's vendor column.
                        counts=scoring.counts)

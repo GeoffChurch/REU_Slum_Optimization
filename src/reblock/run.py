@@ -69,7 +69,7 @@ def main(cfg: DictConfig) -> None:
         region_map(spec.source, output.regions, output.seed_groups, out_dir,
                    selection=output.selection,
                    depths=scoring.selection_scores(spec.source) if scoring is not None else None,
-                   metric_name=m.name if m is not None else "score", metric=m,
+                   metric=m,
                    counts=spec.screen.counts if isinstance(spec.screen, CountingScreen) else None)
 
 

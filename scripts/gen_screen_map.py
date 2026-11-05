@@ -44,7 +44,7 @@ from matplotlib.figure import Figure
 
 from reblock.buildings import SpacingDiscs
 from reblock.data.counts import COUNTERS, BuildingCount, resolved
-from reblock.data.informal import label_blocks, settlement_extents
+from reblock.data.informal import COVER_FRAC, label_blocks, settlement_extents
 from reblock.data.provision import DEFAULT_CACHE, cached_kblock_source
 from reblock.render import _CONTEXT_OUTLINE, _DISPLACED_PT, _PARCEL_LW, _ROAD_COLOR, save_render
 from scripts._bundle_io import cm, polygon_rings, sigfig
@@ -369,7 +369,7 @@ def build_bundle(city: str, epsg: int, blocks: gpd.GeoDataFrame, simplified: lis
         floors=floors, encoding=ENCODING_DICT)
     if city == "capetown":
         extents = settlement_extents(city, epsg=epsg)
-        _, label = label_blocks(blocks, extents)
+        _, label = label_blocks(blocks, extents, cover_frac=COVER_FRAC)
         bundle["informal"] = [int(x) for x in label]
     if follow is not None:
         bundle["follow"] = follow

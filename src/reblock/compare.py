@@ -23,6 +23,7 @@ from reblock.budget import (
 )
 from reblock.contracts import Block, Method
 from reblock.derivations import propose
+from reblock.derive.access import STREET_TOL
 from reblock.emit import compare_report as compare_report
 from reblock.emit import pct_displaced, pct_paved
 from reblock.permeability import EgressContext, PermeabilityParams, permeability_curve
@@ -32,6 +33,10 @@ from reblock.region import region_reblock
 from reblock.render import google_maps_url, short_label
 
 log = logging.getLogger(__name__)
+
+# Samples per permeability / displacement curve: the edge's one value for `n_points`, which the
+# curve functions take as required. scripts/compare_budgets.py imports it, so the two agree.
+CURVE_POINTS = 20
 
 # The two-metric basis every method is graded on: permeability (collective-egress benefit, a
 # grounded electrical flow -- see reblock.permeability) and displacement (a rising cost, never
@@ -52,7 +57,11 @@ class PermeabilityConfig:
     frontier_xmax: float          # frontier plot x-limit; see `compare_report`
 
 
-def load_permeability_config(config_dir: Path = Path("conf")) -> PermeabilityConfig:
+def load_permeability_config(
+    # exempt default: this IS the configuration edge -- the path names the repo's one config tree,
+    # whose file supplies every value (scripts that run from elsewhere pass their own)
+    config_dir: Path = Path("conf"),
+) -> PermeabilityConfig:
     """`conf/permeability.yaml` -> `PermeabilityConfig`. The ONE reader of that file.
 
     `params` is built by the typed loader from the file's own `_target_` node -- the same node every
@@ -85,9 +94,11 @@ def lens_prefixes(ctx: EgressContext, roads: GeoDataFrame,
     """THE truncation: what `scripts/compare_budgets` reports every method at, and what every arm
     of a study scored at matched budget must go through. A network that cannot reach a lens's
     target comes back whole, in canonical order (`prefix_to_*`'s best effort)."""
-    permeability_prefix, reached = prefix_to_permeability(ctx, roads, pcfg.matched_permeability)
+    permeability_prefix, reached = prefix_to_permeability(ctx, roads, pcfg.matched_permeability,
+                                                          tol=STREET_TOL)
     return LensPrefixes(
-        displacement=prefix_to_displacement(ctx.block, roads, pcfg.matched_displacement),
+        displacement=prefix_to_displacement(ctx.block, roads, pcfg.matched_displacement,
+                                            tol=STREET_TOL),
         permeability=permeability_prefix, reached=reached)
 
 
@@ -178,8 +189,9 @@ def compare(cfg: DictConfig) -> list[MethodCurve]:
             block_area = float(block.parcels.geometry.union_all().area)
             pp = pct_paved(roads, block_area)
             pd_ = pct_displaced(roads, block.buildings)
-            perm = permeability_curve(EgressContext.of(block, params), roads)
-            disp = displacement_curve(block, roads)
+            perm = permeability_curve(EgressContext.of(block, params), roads, tol=STREET_TOL,
+                                      n_points=CURVE_POINTS)
+            disp = displacement_curve(block, roads, tol=STREET_TOL, n_points=CURVE_POINTS)
             raw.append((name, label, "permeability", perm, pp, pd_))
             raw.append((name, label, "displacement", disp, pp, pd_))
     # No cross-method normalization: the frontier is reported as raw (road length, benefit)

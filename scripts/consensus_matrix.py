@@ -81,8 +81,9 @@ from reblock.compare import (
 from reblock.contracts import Block, Method
 from reblock.data.pools import DonorPool, ScreenedPool, evenly_spaced
 from reblock.derivations import propose
+from reblock.derive.access import STREET_TOL
 from reblock.emit import pct_displaced
-from reblock.eval.agreement import buffered_iou, directional_chamfer
+from reblock.eval.agreement import CHAMFER_STEP_M, buffered_iou, directional_chamfer
 from reblock.permeability import EgressContext, permeability
 from reblock.presets import load_method, load_research
 from reblock.transplant.donors import TooFewDonors
@@ -138,7 +139,8 @@ def truncate(ctx: EgressContext, roads: GeoDataFrame, target_displacement: float
              pcfg: PermeabilityConfig) -> Truncations:
     """THE truncation every arm is scored through, and the only one."""
     return Truncations(lenses=lens_prefixes(ctx, roads, pcfg),
-                       prediction=prefix_to_displacement(ctx.block, roads, target_displacement))
+                       prediction=prefix_to_displacement(ctx.block, roads, target_displacement,
+                                                         tol=STREET_TOL))
 
 
 def _road_m(roads: GeoDataFrame) -> float:
@@ -159,7 +161,7 @@ def score_recipient(block: Block, roads: Mapping[str, GeoDataFrame],
         t = truncate(ctx, arm_roads, target, pcfg)
         a, b, p = t.lenses.displacement, t.lenses.permeability, t.prediction
         a_disp = pct_displaced(a, block.buildings)
-        precision_m, recall_m = directional_chamfer(p, truth)
+        precision_m, recall_m = directional_chamfer(p, truth, step=CHAMFER_STEP_M)
         rows.append(StudyRow(
             recipient=block.block_id, arm=arm, parcels=len(block.parcels),
             params=json.dumps(dict(params[arm]), default=str, sort_keys=True),

@@ -5,7 +5,7 @@ post-intervention heatmap plus the proposed new roads. Both take the caller's al
 `layers` (a `pd.Series` indexed by `parcel_id`) rather than recomputing them, and both take an
 explicit `vmax` so a before/after pair for the same block can be put on one shared colour scale.
 
-Two colorings (`field=`): `"depth"` (default) is the access-depth layers from
+Two colorings (`field=`, required): `"depth"` is the access-depth layers from
 `reblock.derive.access.parcel_access_layers` -- an integer count of parcels-from-a-street, `_CMAP`,
 `vmin=1`. `"perm"` is the continuous per-parcel egress potential from
 `reblock.permeability.parcel_potentials` -- a HIGHER potential means a HARDER escape, `_PERM_CMAP`,
@@ -64,7 +64,9 @@ _CORRIDOR_ALPHA = 0.25    # the road corridor's fill, drawn under everything els
 _OUTLINE_LW = 0.5        # an untouched building, drawn as its outline rather than a fill
 
 
-def short_label(label: str, limit: int = 80) -> str:
+def short_label(label: str,
+                limit: int = 80,   # exempt default: bounds a filename's length, no number
+                ) -> str:
     """A filesystem-safe shortening of a (possibly huge) block/region label: kept verbatim when
     short, else truncated to `limit-ish` chars with a stable hash suffix for uniqueness. A region's
     block_id is `region:` + `+`.join(member ids), which for a big region is thousands of chars and
@@ -86,7 +88,9 @@ def google_maps_url(geom: BaseGeometry, crs: CRS) -> str:
     return f"https://www.google.com/maps/@{lat:.5f},{lon:.5f},{zoom}z"
 
 
-def frame_bbox(geoms: gpd.GeoDataFrame | gpd.GeoSeries, pad_frac: float = 0.3) -> BBox:
+def frame_bbox(geoms: gpd.GeoDataFrame | gpd.GeoSeries,
+               pad_frac: float = 0.3,   # exempt default: a figure's margin, no number
+               ) -> BBox:
     """A padded square bbox centred on `geoms`' total_bounds -- the render view, and the bbox
     the context query is windowed to. Square + padded so the selection dominates with a context
     margin. Public (not `_`-prefixed): the caller (emit.py) computes this ONCE per render and
@@ -183,7 +187,7 @@ def _draw_corridor(ax: Axes, roads: gpd.GeoDataFrame | None, crs: CRS) -> None:
 
 def _draw_heatmap(
     block: Block, layers: pd.Series, vmax: float, *,
-    field: Literal["depth", "perm"] = "depth",
+    field: Literal["depth", "perm"],
     context_outlines: gpd.GeoDataFrame | None = None,
     context_points: gpd.GeoDataFrame | None = None,
     own_buildings: gpd.GeoSeries | None = None,
@@ -235,14 +239,14 @@ def _draw_heatmap(
 
 def render_before(
     block: Block, layers: pd.Series, *, vmax: float,
-    field: Literal["depth", "perm"] = "depth",
+    field: Literal["depth", "perm"],
     context_outlines: gpd.GeoDataFrame | None = None,
     context_points: gpd.GeoDataFrame | None = None,
     own_buildings: gpd.GeoSeries | None = None,
     frame: BBox | None = None,
 ) -> Figure:
     """Status-quo heatmap for `block` (method-independent). `field` selects the coloring:
-    `"depth"` (default) colors by the access-depth `layers`; `"perm"` colors by per-parcel egress
+    `"depth"` colors by the access-depth `layers`; `"perm"` colors by per-parcel egress
     potential (see the module docstring). `own_buildings` is the block's own building geometry,
     drawn as it is -- footprints where the block has them (see `_building_marks`)."""
     fig = _draw_heatmap(
@@ -255,7 +259,7 @@ def render_before(
 
 def render_after(
     block: Block, proposal: Proposal, layers: pd.Series, *, vmax: float,
-    field: Literal["depth", "perm"] = "depth",
+    field: Literal["depth", "perm"],
     metrics: Metrics | None = None,
     context_outlines: gpd.GeoDataFrame | None = None,
     context_points: gpd.GeoDataFrame | None = None,

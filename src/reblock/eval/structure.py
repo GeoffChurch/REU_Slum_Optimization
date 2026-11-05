@@ -10,7 +10,9 @@ from shapely.geometry import MultiLineString
 
 from reblock.contracts import Block, Metrics, Proposal
 from reblock.derivations import geometric_after
+from reblock.derive.access import STREET_TOL
 from reblock.derive.network_metrics import (
+    BOUNDARY_BAND_M,
     boundary_redundant_road_fraction,
     circuity,
     cross_block_trunk_length_m,
@@ -30,7 +32,7 @@ class StructureEval:
         if not isinstance(interior, MultiLineString):
             interior = MultiLineString([])
 
-        graph = node_network(roads, block.streets)
+        graph = node_network(roads, block.streets, tol=STREET_TOL)
         geo = geometric_after(block, proposal)   # derive()-cached (was geometric_access_distances)
         n_parcels = max(len(block.parcels), 1)
         road_len = (float(roads.geometry.length.sum())
@@ -42,17 +44,19 @@ class StructureEval:
             # B equity
             "geometric_access_p95_m": float(geo.quantile(0.95)) if len(geo) else 0.0,
             # C directness
-            "circuity": circuity(block, roads),
+            "circuity": circuity(block, roads, tol=STREET_TOL),
             # D throughput
-            "throughput_ratio": throughput_ratio(graph, block),
+            "throughput_ratio": throughput_ratio(graph, block, tol=STREET_TOL),
             # E redundancy
             "meshedness": meshedness(graph),
             # G cost
             "added_road_length_per_parcel": road_len / n_parcels,
             # H cross-block
-            "n_cross_block_streets": float(n_cross_block_streets(roads, interior)),
-            "cross_block_trunk_length_m": cross_block_trunk_length_m(roads, interior),
-            "boundary_redundant_road_fraction": boundary_redundant_road_fraction(roads, interior),
+            "n_cross_block_streets": float(n_cross_block_streets(roads, interior, tol=STREET_TOL)),
+            "cross_block_trunk_length_m": cross_block_trunk_length_m(
+                roads, interior, tol=STREET_TOL),
+            "boundary_redundant_road_fraction": boundary_redundant_road_fraction(
+                roads, interior, tol=STREET_TOL, band=BOUNDARY_BAND_M),
         }
         values.update({k: float(v) for k, v in degree_fractions(graph).items()})  # F permeability
         values.update({k: float(v) for k, v in crossing_counts(graph).items()})  # F crossings/T

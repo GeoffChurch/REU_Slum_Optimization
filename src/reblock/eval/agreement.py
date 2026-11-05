@@ -16,20 +16,21 @@ import numpy as np
 from geopandas import GeoDataFrame
 from shapely.ops import unary_union
 
-# Matches the permeability corridor, so "agrees" here means the same thing it means there.
-DEFAULT_RADIUS_M = 3.0
-DEFAULT_STEP_M = 2.0
+# The chamfer sampling step every caller passes as `step`: the consensus matrix and the mimicry
+# scorers report at it, so their chamfer figures compare.
+CHAMFER_STEP_M = 2.0
 
 
 def buffered_iou(
-    proposal: GeoDataFrame, reference: GeoDataFrame, *, r: float = DEFAULT_RADIUS_M
+    proposal: GeoDataFrame, reference: GeoDataFrame, *, r: float
 ) -> float:
     """Intersection-over-union of the two networks buffered by `r` metres.
 
     Note the implied scale: buffers stop overlapping once the offset exceeds `2r`, so this reads 0
-    for anything more than 6 m apart at the default radius. That is a real property, not a bug --
-    but it means a single large-offset test case proves nothing, and callers comparing networks
-    that may be far apart should sweep `r`.
+    for anything more than 6 m apart at r = 3 m (the permeability corridor, so "agrees" means the
+    same thing it means there). That is a real property, not a bug -- but it means a single
+    large-offset test case proves nothing, and callers comparing networks that may be far apart
+    should sweep `r`.
     """
     if proposal.empty or reference.empty:
         return 0.0
@@ -53,7 +54,7 @@ def _sample(net: GeoDataFrame, step: float) -> np.ndarray:
 
 
 def directional_chamfer(
-    proposal: GeoDataFrame, reference: GeoDataFrame, *, step: float = DEFAULT_STEP_M
+    proposal: GeoDataFrame, reference: GeoDataFrame, *, step: float
 ) -> tuple[float, float]:
     """`(precision_m, recall_m)` — mean nearest-neighbour distance proposal→reference, then
     reference→proposal.

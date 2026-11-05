@@ -5,10 +5,10 @@ the top of the uniform-random spread, not in the middle), and this greedy's outc
 and *bidirectionally* between arbitrary choices. Deterministic top-k banks the first and throws away
 the second: every restart is the same network.
 
-`StochasticFirstOrder(k, pool, seed)` draws k from the top `pool` by score, so each run keeps the
-ranking's signal but is genuinely independent of the others -- which is what makes best-of-R
-possible at all. Tier 2 already made one run ~5x cheaper than exact at block scale, so several runs
-fit inside one exact run's wall clock.
+`StochasticFirstOrder(k=k, pool=pool, seed=seed)` draws k from the top `pool` by score, so each run
+keeps the ranking's signal but is genuinely independent of the others -- which is what makes
+best-of-R possible at all. Tier 2 already made one run ~5x cheaper than exact at block scale, so
+several runs fit inside one exact run's wall clock.
 
 ## Reading the result
 
@@ -77,7 +77,8 @@ def main() -> None:
     arms: list[tuple[str, CandidateSelector]] = [("exact", ScoreAll()),
                                                  (f"fo-{K}", FirstOrder(k=K, threads=1))]
     for pool in POOLS:
-        arms += [(f"sfo-{pool}-r{r}", StochasticFirstOrder(K, pool, r)) for r in range(R)]
+        arms += [(f"sfo-{pool}-r{r}", StochasticFirstOrder(k=K, pool=pool,
+                                                           seed=r)) for r in range(R)]
 
     rows: dict[str, dict[str, dict[str, float]]] = {}
     for i in evenly_spaced(sorted(sel), counts, N_BLOCKS):
@@ -98,7 +99,7 @@ def main() -> None:
             dt = time.perf_counter() - t0
             if roads is None or len(roads) == 0:
                 continue
-            pre = prefix_to_displacement(b, roads, 0.10)
+            pre = prefix_to_displacement(b, roads, 0.10, tol=STREET_TOL)
             if len(pre) == 0:
                 continue
             b1 = burden(parcel_access_layers(adjacency, pre, unreached=past_every_parcel))
