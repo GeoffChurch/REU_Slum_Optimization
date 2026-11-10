@@ -372,7 +372,7 @@ wheels = [
 [[package]]
 name = "epistemetry"
 version = "0.1.0"
-source = { git = "https://github.com/GeoffChurch/epistemetry.git?rev=165f98b31c7114ab9fc3b902c9dfc79a67623d99#165f98b31c7114ab9fc3b902c9dfc79a67623d99" }
+source = { git = "https://github.com/GeoffChurch/epistemetry.git?rev=3718f91a602ee6c88b7bbdf0a4538493e92b33bd#3718f91a602ee6c88b7bbdf0a4538493e92b33bd" }
 dependencies = [
     { name = "numpy" },
     { name = "scipy" },
@@ -1578,7 +1578,7 @@ gpu = [
     { name = "pyamg", specifier = "==5.3.0" },
 ]
 research = [
-    { name = "epistemetry", git = "https://github.com/GeoffChurch/epistemetry.git?rev=165f98b31c7114ab9fc3b902c9dfc79a67623d99" },
+    { name = "epistemetry", git = "https://github.com/GeoffChurch/epistemetry.git?rev=3718f91a602ee6c88b7bbdf0a4538493e92b33bd" },
     { name = "pot" },
     { name = "scikit-image" },
     { name = "statsmodels" },
