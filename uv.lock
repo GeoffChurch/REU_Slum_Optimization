@@ -98,7 +98,7 @@ wheels = [
 [[package]]
 name = "cluster-submit"
 version = "0.1.0"
-source = { git = "https://github.com/GeoffChurch/cluster_submit.git?rev=36ac2ddf0e546d387e82bb6ee8cb3cab51b86c98#36ac2ddf0e546d387e82bb6ee8cb3cab51b86c98" }
+source = { git = "https://github.com/GeoffChurch/cluster_submit.git?rev=f82abe6f39e80df81b003ee30a6d263f33763be4#f82abe6f39e80df81b003ee30a6d263f33763be4" }
 
 [[package]]
 name = "contourpy"
@@ -1602,7 +1602,7 @@ runtime = [
     { name = "shapely" },
     { name = "topology", editable = "ext/topology" },
 ]
-submit = [{ name = "cluster-submit", git = "https://github.com/GeoffChurch/cluster_submit.git?rev=36ac2ddf0e546d387e82bb6ee8cb3cab51b86c98" }]
+submit = [{ name = "cluster-submit", git = "https://github.com/GeoffChurch/cluster_submit.git?rev=f82abe6f39e80df81b003ee30a6d263f33763be4" }]
 
 [[package]]
 name = "ruff"

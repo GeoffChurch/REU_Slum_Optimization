@@ -131,7 +131,7 @@ build-constraint-dependencies = ["hatchling==1.32.0"]
 
 [tool.uv.sources]
 topology = { path = "ext/topology", editable = true }
-cluster_submit = { git = "https://github.com/GeoffChurch/cluster_submit.git", rev = "36ac2ddf0e546d387e82bb6ee8cb3cab51b86c98" }
+cluster_submit = { git = "https://github.com/GeoffChurch/cluster_submit.git", rev = "f82abe6f39e80df81b003ee30a6d263f33763be4" }
 epistemetry = { git = "https://github.com/GeoffChurch/epistemetry.git", rev = "3718f91a602ee6c88b7bbdf0a4538493e92b33bd" }
 
 # ---------------------------------------------------------------------------
