@@ -1243,13 +1243,16 @@ Not pursued, with what would change that:
   on quadro2; the 13 tuning blocks' 481 networks and their prefixes took 28 task-h, each
   network identical to its twin computed here, where one was (NOTES); the 46 held-out blocks'
   782, 22.7 task-h.
-- **At the next cluster_submit bump** (pinned at b9dc6f0): since GeoffChurch/cluster_submit
-  6b718fc, `Kind.more` takes a required keyword-only `killed` (the ids of a lease's tasks killed at
-  their walltime; owner 2026-10-16: a lease killed mid-job is continued, one killed while idle is
-  not, each kind deciding through `more`). cluster.py's two kinds (`more`, both returning False)
-  must accept `*, killed`; answering no keeps today's behaviour, a killed lease ending its chain.
-  Its `Source.argv` -> `Source.args` (e33d540) does not touch reblock (clearings_export's `Source`
-  is its own class).
+- **Debt and short jobs** (**owner's call**: the switch window; branch `debt-switch`, cluster_submit
+  pinned at ed67471, not merged): cluster_submit keeps no room free for other users and adds the
+  account's harm to its use as debt; a launch on a node with cards takes the node's length L* as
+  its walltime only for a kind cut `Resumable`. Both of cluster.py's kinds are cut whole
+  (`cs.Whole`, cluster.py's CUT: a job is one task, and a task killed at its walltime loses all
+  its work), so a run keeps its own `--time` everywhere, where the spec's bullet for reblock said
+  "L* for a restart of the task's length" (the declaration its amendment, ed67471, retired).
+  Guard: cluster_check.py `cut` (fault `resumable`). Merged in the window with the keeper's
+  install, with the owner's OK. (The bump item it replaces, `Kind.more`'s `killed` for leases, is
+  done: both kinds' `more` take it, and the leases went at 36ac2dd.)
 - **GPU sizing recalibrated**: closed, the raster's sizing (GB_PER_MILLION) went with it; `--gb`
   sizes every card (wiki `pages/reblock/raster-escape-time-metric-retired.md`).
 - **A carved atom has no width floor** (2026-10-25; parked by the owner behind the safeguard,
