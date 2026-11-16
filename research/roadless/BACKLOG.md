@@ -1244,15 +1244,16 @@ Not pursued, with what would change that:
   network identical to its twin computed here, where one was (NOTES); the 46 held-out blocks'
   782, 22.7 task-h.
 - **Debt and short jobs** (**owner's call**: the switch window; branch `debt-switch`, cluster_submit
-  pinned at ed67471, not merged): cluster_submit keeps no room free for other users and adds the
-  account's harm to its use as debt; a launch on a node with cards takes the node's length L* as
-  its walltime only for a kind cut `Resumable`. Both of cluster.py's kinds are cut whole
-  (`cs.Whole`, cluster.py's CUT: a job is one task, and a task killed at its walltime loses all
-  its work), so a run keeps its own `--time` everywhere, where the spec's bullet for reblock said
-  "L* for a restart of the task's length" (the declaration its amendment, ed67471, retired).
-  Guard: cluster_check.py `cut` (fault `resumable`). Merged in the window with the keeper's
-  install, with the owner's OK. (The bump item it replaces, `Kind.more`'s `killed` for leases, is
-  done: both kinds' `more` take it, and the leases went at 36ac2dd.)
+  pinned at ab43032, not merged): cluster_submit keeps no room free for other users and adds the
+  account's harm to its use as debt; a launch on a node with cards takes the node's length L* for
+  its kind's `restart_hours` as its walltime where that is shorter than its own, and a run without
+  `--node` goes to the node of least expected cost with room. Both of cluster.py's kinds declare
+  `restart_hours = math.inf` (cluster.py's RESTART_HOURS: a job is one task, and a task killed at
+  its walltime loses all its work), so L* is infinite and a run keeps its own `--time` everywhere,
+  where the spec's first bullet for reblock said "L* for a restart of the task's length" (the
+  declaration it retired). Guard: cluster_check.py `cut` (fault `resumable`). Merged in the window
+  with the keeper's install, with the owner's OK. (The bump item it replaces, `Kind.more`'s
+  `killed` for leases, is done: both kinds' `more` take it, and the leases went at 36ac2dd.)
 - **GPU sizing recalibrated**: closed, the raster's sizing (GB_PER_MILLION) went with it; `--gb`
   sizes every card (wiki `pages/reblock/raster-escape-time-metric-retired.md`).
 - **A carved atom has no width floor** (2026-10-25; parked by the owner behind the safeguard,

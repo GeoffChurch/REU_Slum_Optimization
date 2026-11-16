@@ -39,15 +39,16 @@ commit) is refused naming the commit; one the commit holds and the working tree 
 the commit before the one that deleted it) plans. Fault `no-script-check`: cluster._script_at a
 no-op: the absent script plans.
 
-`cut` (cluster_submit's Kind.cut, its debt spec's section 3): every kind is cut whole
-(cs.Whole), so a run's walltime is its own `--time` on every node, however short the node's length
-L* is: for each kind as admission reads it (room.TestedGate: Kind.cut by the kind's name), at
-each --time of TIMES, on each node at the spec's seeded length (SEEDED_LENGTHS), the walltime the
-cut gives is the run's own. A reblock job is one task (one array element runs one line), and a
-task killed at its walltime loses all its work: no later job continues it, so a length shorter
-than the task would kill it again at every resubmit. Fault `resumable`: every kind cs.Resumable
-at the records' median task (MEDIAN_TASK_HOURS, the spec's "a restart of the task's length"):
-L* cuts the runs, and the guard sees it.
+`cut` (cluster_submit's Kind.restart_hours, its debt spec's section 3): every kind's work is lost
+whole when cut (restart_hours math.inf), so a run's walltime is its own `--time` on every node,
+however short the node's length L* is: for each kind's restart as admission reads it
+(room.TestedGate: Kind.restart_hours by the kind's name), at each --time of TIMES, on each node
+at the spec's seeded length (SEEDED_LENGTHS) and on one where nothing bounds a job, the walltime
+harm.json gives (harm.Published.walltime) is the run's own. A reblock job is one task (one array
+element runs one line), and a task killed at its walltime loses all its work: no later job
+continues it, so a length shorter than the task would kill it again at every resubmit. Fault
+`resumable`: every kind's restart the records' median task (MEDIAN_TASK_HOURS, the spec's "a
+restart of the task's length"): L* cuts the runs, and the guard sees it.
 
 (`gpu`, the retired raster's sizing checked against its scorer's measured peaks, went with it:
 NOTES, "The complex as the runtime: the raster retired".)
@@ -75,6 +76,7 @@ import cluster_submit as cs  # noqa: E402
 from cluster_submit import RunPlan  # noqa: E402
 from cluster_submit.arrays import Array, route, script  # noqa: E402
 from cluster_submit.cli import parser  # noqa: E402
+from cluster_submit.harm import NO_BOOK, VICTIMS, Length, Published, Standing  # noqa: E402
 from cluster_submit.remote import SubprocessRunner  # noqa: E402
 from cluster_submit.slurm import time_seconds  # noqa: E402
 from cluster_submit.submit import throttle_checked  # noqa: E402
@@ -263,33 +265,54 @@ def check_script() -> list[str]:
     return bad
 
 
+# `cut`: a node of harm.json where nothing bounds a job (no arrival there: Length.hours None).
+UNBOUNDED = "unbounded"
+
+
+def _seeded() -> Published:
+    """harm.json in active mode with each node's seeded length (SEEDED_LENGTHS, at a restart of
+    1 h) and UNBOUNDED's none; nothing else in it is read by a walltime."""
+    at = "2026-11-14T20:40:00Z"
+    lengths = {n: Length(None, None, x / math.sqrt(SEEDED_RESTART_HOURS), 0.0, 0.0)
+               for n, x in SEEDED_LENGTHS.items()}
+    lengths[UNBOUNDED] = Length(None, None, None, 0.0, 0.0)
+    return Published(at=at, mode="active", trust_hours=6.0, stale_after_minutes=30.0,
+                     user="reblock", usable={}, usage={}, debt={}, debt_weight=1.0,
+                     lengths=lengths, budget_days=28.0,
+                     standings=tuple(Standing(victims=v, limit=1.0, at=at, accounts={},
+                                              projects={}, over=None, short={})
+                                     for v in VICTIMS),
+                     book=NO_BOOK)
+
+
 def check_cut() -> list[str]:
     """`cut` (the module's docstring): the problems found."""
-    cuts = {k.name: k.cut for k in PROJECT.kinds}   # as admission reads them (room.TestedGate)
+    # as admission reads them (room.TestedGate: Kind.restart_hours by the kind's name)
+    restarts = {k.name: k.restart_hours for k in PROJECT.kinds}
+    published = _seeded()
     bad: list[str] = []
-    for kind, cut in cuts.items():
+    for kind, s in restarts.items():
         for t in TIMES:
             own = timedelta(seconds=time_seconds(t))
-            for node, length in SEEDED_LENGTHS.items():
-                got = cut.walltime(length / math.sqrt(SEEDED_RESTART_HOURS), maximum=own)
+            for node in (*SEEDED_LENGTHS, UNBOUNDED):
+                got = published.walltime(node, restart_hours=s, maximum=own)
                 if got != own:
                     bad.append(f"{kind} at --time {t} on {node}: walltime {got}, short of its own")
-            if cut.walltime(None, maximum=own) != own:
-                bad.append(f"{kind} at --time {t} where nothing bounds it: not its own")
-    print(f"cut: {', '.join(sorted(cuts))} keep their own --time on every node "
-          f"({', '.join(SEEDED_LENGTHS)}) -> {'ok' if not bad else 'FAILS'}", flush=True)
+    print(f"cut: {', '.join(sorted(restarts))} keep their own --time on every node "
+          f"({', '.join(SEEDED_LENGTHS)}, {UNBOUNDED}) -> {'ok' if not bad else 'FAILS'}",
+          flush=True)
     return bad
 
 
 @contextlib.contextmanager
 def _resumable() -> Iterator[None]:
-    """Every kind cs.Resumable at the records' median task (fault `resumable`)."""
+    """Every kind's restart the records' median task (fault `resumable`)."""
     global PROJECT
     old = PROJECT
 
     def resumable(k: cs.Kind) -> cs.Kind:
         assert dataclasses.is_dataclass(k) and not isinstance(k, type), k   # cluster.py's kinds
-        return dataclasses.replace(k, cut=cs.Resumable(MEDIAN_TASK_HOURS))
+        return dataclasses.replace(k, restart_hours=MEDIAN_TASK_HOURS)
 
     PROJECT = dataclasses.replace(old, kinds=tuple(resumable(k) for k in old.kinds))
     try:
