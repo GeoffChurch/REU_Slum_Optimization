@@ -51,6 +51,13 @@ cluster_submit's sync states (room.hand_demand: every unfinished run), and admis
 by the hand account's allocation on its node (gpu.covered). reblock states no campaign of its own:
 work that fans out goes as plain array runs.
 
+No room is kept free for other users (cluster_submit's debt and short jobs, its README
+"Admission"): a run takes what is free, and harm to other users' jobs waiting on its holdings is
+added to the account's use as debt, repaid through smaller allocations later. A launch on a node
+with cards takes the node's length L* as its walltime where its kind's work continues after a
+cut; reblock's kinds are cut whole (CUT: a task killed at its walltime loses all its work), so a
+run's walltime is its own --time on every node, and a long task costs its debt, not a cut.
+
 Before a CPU run, the node's load: `ssh ai sinfo -N -p defq -o '%N %c %T %C'` (cores allocated,
 idle, other, total) and `scontrol show node <node>` (AllocMem of RealMemory).
 """
@@ -76,6 +83,23 @@ MAX_GPUS = 4
 # pyproject's default-groups are every group, cupy and pyamg (`gpu`) among them, so it names none
 # beside them.
 ENV = cs.Uv(extras=(), groups=())
+# How a kind's work may be cut at its walltime (cluster_submit's Kind.cut; its debt spec,
+# docs/superpowers/specs/2026-11-15-debt-and-short-jobs.md, section 3): both kinds are cut whole
+# (cs.Whole), so a run's walltime is its own --time on every node, never the node's length L*.
+# A reblock job is one task: one array element runs one (block, item) line (cluster_submit's
+# arrays.script), and a task killed at its walltime loses all its work. Nothing continues it: a
+# resubmit (`resubmit <run>`) runs its failed tasks again from their start, so a walltime shorter
+# than a task would kill it at every attempt. Resumable(s) is for jobs whose cut loses only part of
+# their work; here the part is the whole. The spec's bullet for reblock ("L* for a restart of the
+# task's length") is the declaration its own amendment (cluster_submit ed67471) retired: one s per
+# kind cannot be every task's length. In reblock's run records
+# (.cluster_submit/runs/*/sacct.txt, the 401 blocks and cpu runs submitted 2026-10-03 to
+# 2026-10-28: 12381 completed tasks, median 2.3 min, 98.7% at most 2 h, p99 of cpu 4.4 h, longest
+# 55 h), Resumable at the median task would give walltimes of 22 min on h100 to 73 min on quadro2
+# at the spec's seeded lengths, killing at every attempt the 7.8% to 1.7% of tasks longer than
+# that. Short tasks end on their own, and a long one costs the account its debt (charged for what
+# it holds while others wait, never for its limit).
+CUT = cs.Whole()
 # Every task's prelude: its environment, single-threaded, unbuffered, no bytecode (cluster_env.sh),
 # and the run's shipped bank (common.build_blocks).
 PRELUDE = ("source research/roadless/cluster_env.sh",
@@ -146,10 +170,12 @@ class Blocks:
     pull: cs.IntoTree = cs.IntoTree("research/roadless", ("*.parquet",))
     routine_exits: frozenset[int] = frozenset()     # every non-zero exit is a failure
     reaper: cs.NoClaims = cs.NoClaims()             # a task holds nothing past its end
+    cut: cs.Cut = CUT                               # a task cut loses all its work (CUT)
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("ids", help="block ids, comma-separated, or @file of ids")
-        parser.add_argument("--time", help="sbatch --time (default: the cluster's)")
+        parser.add_argument("--time", help="sbatch --time, its walltime on every node (the "
+                                           "kind is cut whole: CUT; default: the cluster's)")
         parser.add_argument("--gb", type=float, required=True,
                             help="the GPU memory each task needs, in GB: its card's size")
         parser.add_argument("--node", help="the node every task runs on (--nodelist; its card "
@@ -210,6 +236,7 @@ class Cpu:
     pull: cs.IntoTree = cs.IntoTree("research/roadless", ("*.parquet",))
     routine_exits: frozenset[int] = frozenset()     # every non-zero exit is a failure
     reaper: cs.NoClaims = cs.NoClaims()             # a task holds nothing past its end
+    cut: cs.Cut = CUT                               # a task cut loses all its work (CUT)
 
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
         parser.add_argument("ids", help="block ids, comma-separated, or @file of ids")
@@ -225,7 +252,8 @@ class Cpu:
         parser.add_argument("--items", required=True,
                             help="items, comma-separated, or @file: one task per (block, item), "
                                  "the item in the command's {item}")
-        parser.add_argument("--time", help="sbatch --time (default: the cluster's)")
+        parser.add_argument("--time", help="sbatch --time, its walltime on every node (the "
+                                           "kind is cut whole: CUT; default: the cluster's)")
         _unpack_argument(parser)
         parser.add_argument("command", nargs=argparse.REMAINDER,
                             help="-- <script> <args with {id} and {item}>")
@@ -279,7 +307,9 @@ class Cpu:
 # cluster_submit's sync states there (room.hand_demand: every unfinished run), so the keeper
 # attributes what its tasks hold and charges it, and admission covers each run by the hand
 # account's allocation on its node (gpu.covered). harm: the keeper's published harm (harm.json on
-# ai's board), which every launch is admitted by (cluster_submit's README, "Admission").
+# ai's board), which every launch is admitted by (cluster_submit's README, "Admission"), and whose
+# per-node length L* bounds a launch's walltime only for a kind cut Resumable (reblock's are Whole:
+# CUT).
 # hand_weight: the weight of reblock's hand account in the market weights' scale (reblock states no
 # campaign of its own); 1.0 is the owner's call to change. From
 # fair-reference admission (13e9544) on, `keeper install` from here is how the keeper is installed;

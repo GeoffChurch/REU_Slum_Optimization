@@ -6,6 +6,7 @@ stages), and checks what a task would get.
     uv run python $C cpu <ids,> <items,>    # a print, checked by eye
     uv run python $C ids [fault]            # fault: no-check
     uv run python $C script [fault]         # fault: no-script-check
+    uv run python $C cut [fault]            # fault: resumable
     uv run python $C both-ways <guards,>    # each guard, then under each of its faults
 
 Each guard but `cpu` has its faults (FAULTS: a patch in this process, no file edited, as
@@ -38,6 +39,16 @@ commit) is refused naming the commit; one the commit holds and the working tree 
 the commit before the one that deleted it) plans. Fault `no-script-check`: cluster._script_at a
 no-op: the absent script plans.
 
+`cut` (cluster_submit's Kind.cut, its debt spec's section 3): every kind is cut whole
+(cs.Whole), so a run's walltime is its own `--time` on every node, however short the node's length
+L* is: for each kind as admission reads it (room.TestedGate: Kind.cut by the kind's name), at
+each --time of TIMES, on each node at the spec's seeded length (SEEDED_LENGTHS), the walltime the
+cut gives is the run's own. A reblock job is one task (one array element runs one line), and a
+task killed at its walltime loses all its work: no later job continues it, so a length shorter
+than the task would kill it again at every resubmit. Fault `resumable`: every kind cs.Resumable
+at the records' median task (MEDIAN_TASK_HOURS, the spec's "a restart of the task's length"):
+L* cuts the runs, and the guard sees it.
+
 (`gpu`, the retired raster's sizing checked against its scorer's measured peaks, went with it:
 NOTES, "The complex as the runtime: the raster retired".)
 """
@@ -45,22 +56,27 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import dataclasses
 import io
+import math
 import os
 import subprocess
 import sys
 import tarfile
 import tempfile
 from collections.abc import Callable, Iterator
+from datetime import timedelta
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parent.parent)]
 import cluster  # noqa: E402
+import cluster_submit as cs  # noqa: E402
 from cluster_submit import RunPlan  # noqa: E402
 from cluster_submit.arrays import Array, route, script  # noqa: E402
 from cluster_submit.cli import parser  # noqa: E402
 from cluster_submit.remote import SubprocessRunner  # noqa: E402
+from cluster_submit.slurm import time_seconds  # noqa: E402
 from cluster_submit.submit import throttle_checked  # noqa: E402
 
 PROJECT = cluster.PROJECT
@@ -76,6 +92,18 @@ def _rev(rev: str) -> str:
 SHA = _rev("HEAD")
 # `script`: a script the history deleted, and the commit that deleted it.
 GONE, GONE_BY = "research/roadless/fft_homog/bench.py", "2c4f57d007a89269fc63c220be68fa423a5b7223"
+# `cut`: each node's L* at a 6-minute restart as GeoffChurch/cluster_submit's debt spec seeded it
+# (docs/superpowers/specs/2026-11-15-debt-and-short-jobs.md, section 3, "Illustrative": decayed to
+# 2026-11-14T20:40Z), in hours; at a restart of s hours it is that times sqrt(s / 0.1).
+SEEDED_LENGTHS = {"h100": 0.6, "tesla1": 1.1, "tesla2": 1.3, "quadro1": 1.6, "quadro2": 2.0}
+SEEDED_RESTART_HOURS = 0.1
+# `cut`: the run's own --time, from a short one to the longest the records ask (cp-roads4-desire-
+# g3a's 7 days); 23:30:00 is the site's default (ai.toml's default_time) and the commonest asked.
+TIMES = ("2:00:00", "23:30:00", "7-00:00:00")
+# `cut`'s fault: the median completed task of the `blocks` and `cpu` runs in reblock's run records
+# (.cluster_submit/runs/*/sacct.txt, 401 runs submitted 2026-10-03 to 2026-10-28: 12381 tasks,
+# median 2.27 minutes), as the restart a cut costs.
+MEDIAN_TASK_HOURS = 2.27 / 60
 
 
 def _parsed(argv: list[str]) -> argparse.Namespace:
@@ -235,6 +263,41 @@ def check_script() -> list[str]:
     return bad
 
 
+def check_cut() -> list[str]:
+    """`cut` (the module's docstring): the problems found."""
+    cuts = {k.name: k.cut for k in PROJECT.kinds}   # as admission reads them (room.TestedGate)
+    bad: list[str] = []
+    for kind, cut in cuts.items():
+        for t in TIMES:
+            own = timedelta(seconds=time_seconds(t))
+            for node, length in SEEDED_LENGTHS.items():
+                got = cut.walltime(length / math.sqrt(SEEDED_RESTART_HOURS), maximum=own)
+                if got != own:
+                    bad.append(f"{kind} at --time {t} on {node}: walltime {got}, short of its own")
+            if cut.walltime(None, maximum=own) != own:
+                bad.append(f"{kind} at --time {t} where nothing bounds it: not its own")
+    print(f"cut: {', '.join(sorted(cuts))} keep their own --time on every node "
+          f"({', '.join(SEEDED_LENGTHS)}) -> {'ok' if not bad else 'FAILS'}", flush=True)
+    return bad
+
+
+@contextlib.contextmanager
+def _resumable() -> Iterator[None]:
+    """Every kind cs.Resumable at the records' median task (fault `resumable`)."""
+    global PROJECT
+    old = PROJECT
+
+    def resumable(k: cs.Kind) -> cs.Kind:
+        assert dataclasses.is_dataclass(k) and not isinstance(k, type), k   # cluster.py's kinds
+        return dataclasses.replace(k, cut=cs.Resumable(MEDIAN_TASK_HOURS))
+
+    PROJECT = dataclasses.replace(old, kinds=tuple(resumable(k) for k in old.kinds))
+    try:
+        yield
+    finally:
+        PROJECT = old
+
+
 @contextlib.contextmanager
 def _no_script_check() -> Iterator[None]:
     """cluster._script_at a no-op (fault `no-script-check`)."""
@@ -258,10 +321,12 @@ def _no_check() -> Iterator[None]:
         common._known = old
 
 
-GUARDS: dict[str, Callable[[], list[str]]] = {"ids": check_ids, "script": check_script}
+GUARDS: dict[str, Callable[[], list[str]]] = {"ids": check_ids, "script": check_script,
+                                               "cut": check_cut}
 FAULTS: dict[str, dict[str, Callable[[], contextlib.AbstractContextManager[None]]]] = {
     "ids": {"no-check": _no_check},
-    "script": {"no-script-check": _no_script_check}}
+    "script": {"no-script-check": _no_script_check},
+    "cut": {"resumable": _resumable}}
 
 
 # ---- the command line -----------------------------------------------------------------------
