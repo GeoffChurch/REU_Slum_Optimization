@@ -81,8 +81,10 @@ first: on that state, for the top ears (their open triangles only, kt0 >= OPEN_K
   opening's term is nil) the exact drop at a small leak (h FIRST_H: dP linear in it) against the
   first order (sum over the corridor of u_c^2 l_t), within TOL_FIRST relative. Fault `abs-u`
   (|u| in place of u^2) fails it.
-ends: the top candidate ears each split their face (its faces of FACE_M2 and more rise). Fault
-  `spur` (an ear's last third dropped: a dead end) fails it.
+ends: every router's top candidate ears, at b0 and b20, each split their face (its faces of
+  FACE_M2 and more rise). Faults `spur` (an ear's last third dropped: a dead end) and
+  `vertex-sites` (a mutation: a corridor's patches at its line's vertices only, which for an
+  any-angle line leaves gaps) fail it.
 spur: the spur check plan's top SPUR_EARS candidate spurs each a corridor in one piece, touching
   the network, that splits nothing (its end on open ground). Fault `both-ends` (a spur's
   corridor extended at its end too, as a loop's is) fails it.
@@ -121,6 +123,7 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 import shapely
+import shapely.ops
 from numba import njit
 from numpy.typing import NDArray
 from scipy.sparse.csgraph import connected_components, dijkstra
@@ -1476,6 +1479,21 @@ def _pix_of(ra: Raster, xy: F64) -> I64:
     return _pix_of_lo(ra.lo, ra.shape, xy)
 
 
+SITE_M = PIX * np.sqrt(2.0)   # m: a corridor's patch sites at most this far apart (`sites`)
+
+
+def sites(line: F64) -> F64:
+    """The polyline's points with each segment longer than SITE_M cut evenly into pieces no
+    longer (EarWorld.corridor's patch sites: an any-angle line's vertices can lie a road's length
+    apart, and a ROAD_W band needs its patches overlapping). A grid path's segments are no longer
+    than SITE_M, so its points come back as they were."""
+    out = [line[:1]]
+    for p, q in zip(line[:-1], line[1:], strict=True):
+        n = max(1, int(np.ceil(np.hypot(*(q - p)) / SITE_M - 1e-9)))
+        out.append(p + (np.arange(1, n + 1) / n)[:, None] * (q - p))
+    return np.vstack(out)
+
+
 def line_pixels(lo: F64, shape: tuple[int, int], line: F64) -> I64:
     """The pixels (flat) the polyline `line` (m) crosses, in order, each run of one pixel once:
     each segment sampled at (k + 1/2) / m of its length, m one per PIX / 4 (a grid path's line,
@@ -1601,10 +1619,11 @@ class EarWorld:
     def corridor(self, pts: F64, *, spur: bool) -> I64:
         """An ear's corridor along the polyline `pts`, extended at both ends to the nearest
         bounding triangle (the road or street it joins; a spur's at its start only, its end on
-        open ground): the ungrown triangles within growth.PATCH_R of its points, and every
-        triangle its centreline crosses (sampled every STEP_M): on 5810's open ground a triangle
-        can be larger than a road, and one whose centroid lies off the corridor but which
-        straddles it joins the two halves (the first runs' ears split nothing)."""
+        open ground): the ungrown triangles within growth.PATCH_R of its points (`sites`: at most
+        a diagonal pixel apart, as a grid path's are), and every triangle its centreline crosses
+        (sampled every STEP_M): on 5810's open ground a triangle can be larger than a road, and
+        one whose centroid lies off the corridor but which straddles it joins the two halves (the
+        first runs' ears split nothing)."""
         g = self.g
         att = np.flatnonzero(self.bounding())
         _, k = cKDTree(g.cen[att]).query(pts[[0, -1]], k=1)
@@ -1615,7 +1634,7 @@ class EarWorld:
         for p0, d, n in zip(line[:-1], seg, np.ceil(L / STEP_M).astype(int), strict=True):
             dense.append(p0 + np.linspace(0.0, 1.0, max(n, 1) + 1)[1:, None] * d)
         P = np.vstack(dense)
-        lists = g.tree.query_ball_point(pts, r=gr.PATCH_R)
+        lists = g.tree.query_ball_point(sites(pts), r=gr.PATCH_R)
         t = np.unique(np.concatenate([np.asarray(x, dtype=np.int64) for x in lists]
                                      + [self.locate(P)]))
         return t[(t >= 0) & (g.step[t] < 0)]
@@ -1908,6 +1927,8 @@ MUTATIONS: dict[str, tuple[str, str]] = {
                    "_stencil(r, nx, ny, T, A, Lg, known, 1.0, gp[r])"),
     "gain-from-s": ("                            bacc = acc[p] + gn\n",
                     "                            bacc = acc[s] + gn\n"),
+    "vertex-sites": ("query_ball_point(sites(pts), r=gr.PATCH_R)",
+                     "query_ball_point(pts, r=gr.PATCH_R)"),
     "gain-per-pixel": ("                bestA = (w0 * V[0] + w1 * V[1] + cr * gr_ / PIX) / ws\n",
                        "                bestA = (w0 * V[0] + w1 * V[1]) / ws + gr_\n"),
 }
@@ -2219,28 +2240,39 @@ def check(verb: str, bid: str, fault: str | None) -> None:
         print(f"first {bid} {fault or 'none'}: worst rel {worst:.2e} (tol {TOL_FIRST:g}) -> "
               f"{'PASS' if ok else 'FAIL'}")
     elif verb == "ends":
+        if fault == "vertex-sites":
+            print(f"ends {bid}: mutant {fault}")
+            _mutant(fault).check(verb, bid, None)
+            return
         if fault not in (None, "spur"):
-            raise SystemExit("ends' fault: spur")
+            raise SystemExit("ends' fault: spur|vertex-sites")
         e = _short(bid, 0.25, 0, spec=CHECK_PLAN)
         g = e.g
         st = g.state(g.step >= 0)
         u, _ = g.solve(st)
         fc = e.faces()
-        cands = Paths(router=Grid8(), bld=20.0, pairs=4, face_m2=2000.0, ear_m=30.0, ends=Loop(),
-                      attract=NoDetour()).ears(
-            e, fc, g.contrast.gains(g, st, u), cost=gr.Cost(nu=2.0, price=0.1), scale=0.0)
-        ok = bool(cands)
-        for q in cands[:4]:
-            line = q.line[: max(1, 2 * len(q.line) // 3)] if fault == "spur" else q.line
-            tris = e.corridor(line, spur=False)
-            n0 = fc.n
-            g.step[tris] = 0
-            n1 = e.faces().n
-            g.step[tris] = -1
-            split = n1 > n0
-            ok &= split
-            print(f"  ear of {len(line)} points: faces {n0} -> {n1}: "
-                  f"{'splits' if split else 'a dead end'}")
+        ok = True
+        for b in (0.0, 20.0):
+            for r in ROUTERS:
+                cands = Paths(router=r, bld=b, pairs=4, face_m2=2000.0, ear_m=30.0, ends=Loop(),
+                              attract=NoDetour()).ears(
+                    e, fc, g.contrast.gains(g, st, u), cost=gr.Cost(nu=2.0, price=0.1), scale=0.0)
+                ok &= bool(cands)
+                for q in cands[:4]:
+                    line = q.line
+                    if fault == "spur":           # its last third dropped
+                        ls = shapely.LineString(line)
+                        line = np.asarray(shapely.get_coordinates(
+                            shapely.ops.substring(ls, 0.0, 2 * ls.length / 3)))
+                    tris = e.corridor(line, spur=False)
+                    n0 = fc.n
+                    g.step[tris] = 0
+                    n1 = e.faces().n
+                    g.step[tris] = -1
+                    split = n1 > n0
+                    ok &= split
+                    print(f"  b{b:g} {r.name}: ear of {len(line)} points: faces {n0} -> {n1}: "
+                          f"{'splits' if split else 'a dead end'}")
         print(f"ends {bid} {fault or 'none'}: -> {'PASS' if ok else 'FAIL'}")
     elif verb == "spur":
         if fault not in (None, "both-ends"):
