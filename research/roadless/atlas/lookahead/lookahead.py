@@ -449,7 +449,7 @@ def check_greedy(bid: str, fault: str | None) -> None:
     (greedy taking each step's second-best rescored ear) fails it."""
     if fault not in (None, "second"):
         raise SystemExit("greedy's fault: second")
-    plan = ears.Plan.of("ears.paths.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D1")
+    plan = ears.Plan.of("ears.paths.grid8.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D1")
     e = ears.world_of(bid, plan.contrast.h)
     out = ROWS / "check" / bid
     ears.build(e, plan, out=out, log=lambda s: None, steps=CHECK_STEPS)
