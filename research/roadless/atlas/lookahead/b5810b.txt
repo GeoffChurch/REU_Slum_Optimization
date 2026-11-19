@@ -1,0 +1,2 @@
+ZAF.9.3.1_1_5810 la2all ears.paths.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
+ZAF.9.3.1_1_5810 greedy ears.paths.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
