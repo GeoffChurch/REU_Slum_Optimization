@@ -1,0 +1,77 @@
+# tilt b0
+fabric:ZAF.9.3.1_1_5618:tilt:0 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_5618:tilt:1 ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_5618:tilt:1 ears.paths.eikonal.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_5618:tilt:1 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_21634:tilt:0 ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_21634:tilt:0 ears.paths.eikonal.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_21634:tilt:0 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_21634:tilt:1 ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_21634:tilt:1 ears.paths.eikonal.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_21634:tilt:1 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_23743:tilt:0 ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_23743:tilt:0 ears.paths.eikonal.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_23743:tilt:0 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_23743:tilt:1 ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_23743:tilt:1 ears.paths.eikonal.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_23743:tilt:1 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+# real b20
+block:ZAF.9.3.1_1_5618 ears.paths.theta.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_5618 ears.paths.eikonal.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_5618 ears.paths.pulled.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_20269 ears.paths.theta.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_20269 ears.paths.eikonal.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_20269 ears.paths.pulled.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_18895 ears.paths.theta.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_18895 ears.paths.eikonal.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_18895 ears.paths.pulled.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_6310 ears.paths.theta.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_6310 ears.paths.eikonal.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_6310 ears.paths.pulled.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+# rect b0
+fabric:ZAF.9.3.1_1_5618:rect:0 ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_5618:rect:0 ears.paths.eikonal.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_5618:rect:0 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_21634:rect:0 ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_21634:rect:0 ears.paths.eikonal.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_21634:rect:0 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_23743:rect:0 ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_23743:rect:0 ears.paths.eikonal.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_23743:rect:0 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+# 5810 b20
+block:ZAF.9.3.1_1_5810 ears.paths.theta.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
+block:ZAF.9.3.1_1_5810 ears.paths.eikonal.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
+block:ZAF.9.3.1_1_5810 ears.paths.pulled.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
+# real b0
+block:ZAF.9.3.1_1_5618 ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_5618 ears.paths.eikonal.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_5618 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_20269 ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_20269 ears.paths.eikonal.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_20269 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_18895 ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_18895 ears.paths.eikonal.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_18895 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_6310 ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_6310 ears.paths.eikonal.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+block:ZAF.9.3.1_1_6310 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+# tilt b20
+fabric:ZAF.9.3.1_1_5618:tilt:0 ears.paths.theta.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_5618:tilt:0 ears.paths.eikonal.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_5618:tilt:0 ears.paths.pulled.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_21634:tilt:0 ears.paths.theta.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_21634:tilt:0 ears.paths.eikonal.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_21634:tilt:0 ears.paths.pulled.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_23743:tilt:0 ears.paths.theta.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_23743:tilt:0 ears.paths.eikonal.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_23743:tilt:0 ears.paths.pulled.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+# rect b0, seed 1
+fabric:ZAF.9.3.1_1_5618:rect:1 ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_5618:rect:1 ears.paths.eikonal.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_5618:rect:1 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_21634:rect:1 ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_21634:rect:1 ears.paths.eikonal.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_21634:rect:1 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_23743:rect:1 ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_23743:rect:1 ears.paths.eikonal.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
+fabric:ZAF.9.3.1_1_23743:rect:1 ears.paths.pulled.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
