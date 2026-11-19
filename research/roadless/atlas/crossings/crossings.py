@@ -3,11 +3,12 @@ they are promoted as a side-effect of an otherwise agnostic mechanism").
 
 Runs ears.py's `build` unchanged on a world (a World Strategy: the real block, or synthetic fabric
 on it) and records what the crossings analysis (analyze.py) needs and the picks rows lack: every
-step's costed candidates with their paths (the built ear is the one whose ends the step's pick
-row names), and per state the raster's face labels, sink pixels, the road each sink pixel's
-nearest bounding triangle belongs to (its tri_step; -1 the street) and the potential u. The
-recorder is a Candidates wrapper (Recording), so ears.py's loop and plan are untouched; the
-plan's name is the wrapped one's.
+step's costed candidates with their centrelines (ears.Ear.line; the built ear is the one whose
+ends the step's pick row names; `bld` per pixel its line crosses, ears.line_pixels), and per
+state the raster's face labels, sink pixels, the road each sink pixel's nearest bounding triangle
+belongs to (its tri_step; -1 the street) and the potential u. The recorder is a Candidates
+wrapper (Recording), so ears.py's loop and plan are untouched; the plan's name is the wrapped
+one's.
 
 Worlds:
   block:<bid>                      the block as it is
@@ -269,10 +270,10 @@ class Recording:
         self.states.append(dict(pf=pf, sink=sink, road=road, u=e.u_pix.astype(np.float32)))
         out = self.inner.ears(e, faces, gain, cost=cost, scale=scale)
         for r, q in enumerate(out):
-            xy = ra.xy[q.path]
+            xy = q.line
             self.cands.append(dict(step=step, rank=r, face=q.face, cost=q.cost, first=q.first,
                                    path_x=xy[:, 0].tolist(), path_y=xy[:, 1].tolist(),
-                                   bld=ra.bld[q.path].tolist()))
+                                   bld=ra.bld[ears.line_pixels(ra.lo, ra.shape, xy)].tolist()))
         return out
 
 

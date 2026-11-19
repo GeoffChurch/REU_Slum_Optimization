@@ -60,10 +60,12 @@ over exact gain where the first order stands in for the exact gain (build).
     uv run python $E run <block> <plan>
     uv run python $E check decouple|first|ends|spur|detour|offer <block> [fault]
     uv run python $E check horseshoe|names [fault]
+    uv run python $E check router cost|straight|building|gain [fault]
 
-plan: ears.<paths.b<bld>.f<face_m2>.e<ear_m>.<loop|spur<min_m>-<max_m>>.<nodt|dt<lam>>
+plan: ears.<paths.<router>.b<bld>.f<face_m2>.e<ear_m>.<loop|spur<min_m>-<max_m>>.<nodt|dt<lam>>
 |divides.p<tau>.f<face_m2>.e<ear_m>>.gl<h>Croad.n<nu>s<price>.M<pairs>.K<exact>.D<D> (a face under
 face_m2 not split, an ear's ends at least ear_m apart, a spur's end min_m to max_m from its start,
+<router> grid8|pulled|theta|eikonal (Router),
 `.nodt` NoDetour, `.dt<lam>` Detour; a divides name carries neither ends nor attraction, its ears
 loops with no credit by construction), its name adding the code's
 revision (.v<REV>); rows in growth_rows/<block>/<name>/ in growth.py's layout (steps.parquet,
@@ -93,9 +95,12 @@ horseshoe: synthetic horseshoes (no block; Experiment 1 of the owner's doc): the
   saving rises strictly with the arms at a fixed gap, and its saving per metre of link strictly as
   the gap closes at fixed arms. Fault `crow` (straight-line distances for the road distances: no
   link shortens a trip) fails it.
-names: every check plan's name round-trips (Plan.of(name).name), and each paths one with its
-  attraction token dropped (the old grammar's NoDetour) is refused. Fault `keep` (the token kept:
-  the name parses) fails it.
+names: every check plan's name round-trips (Plan.of(name).name), every router's too, and each
+  paths one with its attraction token dropped (the old grammar's NoDetour) or its router token
+  dropped (the grammar before 2026-11-19, Grid8 implied) is refused. Fault `keep` (the tokens
+  kept: the name parses) fails it.
+router: the routers on synthetic rasters, each fault a mutation of a router's code (`router_check`:
+  cost, straight, building, gain).
 offer: after OFFER_EARS ears of the divides check plan (faces of very different sizes), the
   `pairs` divides Divides costs hold a splitting one within TOL_OFFER of the best first order
   per cost among every face's divides. Fault `persistence` (rev 1's order, the most persistent
@@ -103,9 +108,11 @@ offer: after OFFER_EARS ears of the divides check plan (faces of very different 
 """
 from __future__ import annotations
 
+import heapq
 import re
 import sys
 import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol, TypeAlias
@@ -183,14 +190,15 @@ class Face(NamedTuple):
 
 
 class Ear(NamedTuple):
-    """A candidate: its face, its path's pixels, whether it is a spur (its path ends on the face's
-    open ground, not at a sink: its corridor joins the network at its start only, and it need not
-    split its face), its corridor's new triangles, dD, dC, its cost, first-order gain, its detour
-    saving (m: Detour; 0 without one, and for a spur, which shortens no trip) and the credit it
-    earns in P (added to its first-order and exact gains wherever an ear is scored), exact gain
-    (nan unless rescored)."""
+    """A candidate: its face, its path's pixels and centreline (Route), whether it is a spur (its
+    path ends on the face's open ground, not at a sink: its corridor joins the network at its
+    start only, and it need not split its face), its corridor's new triangles, dD, dC, its cost,
+    first-order gain, its detour saving (m: Detour; 0 without one, and for a spur, which shortens
+    no trip) and the credit it earns in P (added to its first-order and exact gains wherever an
+    ear is scored), exact gain (nan unless rescored)."""
     face: int
     path: I64
+    line: F64
     spur: bool
     tris: I64
     dD: float
@@ -255,6 +263,603 @@ def _tree_sum(pred: NDArray[np.int32], order: I64, w: F64) -> F64:
         p = pred[v]
         acc[v] = w[v] + (acc[p] if p >= 0 else 0.0)
     return acc
+
+
+# ---------------------------------------------------------------- routers (owner 2026-11-19)
+
+
+class Terrain(NamedTuple):
+    """A state's routing field on the PIX raster (Paths.ears): per pixel its face where a path may
+    run (-1 elsewhere: grown ground, off the block, a face under face_m2), its building share and
+    first-order gain, `bld` the extra cost of a metre through a building (a metre in a pixel's
+    cell costs 1 + bld * share), the raster's shape, lower corner, centres and 8-neighbour edges.
+    A path stays in its source's face."""
+    shape: tuple[int, int]
+    lo: F64
+    xy: F64
+    face: I64
+    share: F64
+    gain: F64
+    bld: float
+    ea: I64
+    eb: I64
+    el: F64
+
+    def per_m(self) -> F64:
+        """Per pixel the cost of a metre through its cell."""
+        return np.asarray(1.0 + self.bld * self.share)
+
+
+class Route(NamedTuple):
+    """A path from a source pixel to a target: `path` the pixels its centreline turns at (every
+    pixel of a grid path; the vertices of an any-angle one; the pixels a descent visits, Eikonal),
+    its first the source and its last the target; `line` the centreline (m), from the source's
+    centre to the target's."""
+    path: I64
+    line: F64
+
+
+class Reach(Protocol):
+    """One source's search (Router.reaches): its source pixel, per pixel its path's cost and the
+    first-order gain summed along it (inf / 0 where unreached), the path's length on demand
+    (Detour), and the path to a pixel."""
+    @property
+    def src(self) -> int: ...
+
+    @property
+    def cost(self) -> F64: ...
+
+    @property
+    def gain(self) -> F64: ...
+
+    def length(self) -> F64: ...
+
+    def route(self, t: int) -> Route: ...
+
+
+class Router(Protocol):
+    """How a source's cheapest paths are searched and drawn (owner 2026-11-19: "why do we need to
+    discretize the directions at all?"), a required plan token after `paths`: Grid8 (`grid8`),
+    the 8-neighbour grid; Pulled (`pulled`), its paths string-pulled once chosen; Theta
+    (`theta`), any-angle search; Eikonal (`eikonal`), fast marching."""
+    @property
+    def name(self) -> str: ...
+
+    def reaches(self, ter: Terrain, src: I64) -> Iterator[Reach]:
+        """Per source pixel of `src`, in order, its search."""
+        ...
+
+
+@njit(cache=True)
+def _seg(p0: int, p1: int, ny: int, face: I64, f: int, c: F64, gp: F64) -> tuple[bool, float,
+                                                                                    float]:
+    """The straight segment between the centres of pixels p0 and p1 (flat, ny columns):
+    (whether every cell it crosses for a positive length is of face f, the cost field c (per
+    metre) integrated along it, the gain gp (per pixel) integrated along it per PIX of length).
+    Its cells by a DDA in integers (crossings of the cells' edges at t = (2k + 1) / (2 |d|)), so
+    a segment through a corner crosses into the diagonal cell, its two side cells touched at a
+    point only (the 8-neighbour grid's diagonal move)."""
+    i0, j0 = p0 // ny, p0 % ny
+    i1, j1 = p1 // ny, p1 % ny
+    dx, dy = i1 - i0, j1 - j0
+    ax, ay = abs(dx), abs(dy)
+    sx = 1 if dx > 0 else -1
+    sy = 1 if dy > 0 else -1
+    L = PIX * np.sqrt(float(dx * dx + dy * dy))
+    i, j, kx, ky = i0, j0, 0, 0
+    t0 = 0.0
+    cost = 0.0
+    gain = 0.0
+    while True:
+        xo, yo = kx < ax, ky < ay
+        if not xo and not yo:
+            t1, step = 1.0, 0
+        elif xo and (not yo or (2 * kx + 1) * ay < (2 * ky + 1) * ax):
+            t1, step = (2 * kx + 1) / (2.0 * ax), 1
+        elif yo and (not xo or (2 * ky + 1) * ax < (2 * kx + 1) * ay):
+            t1, step = (2 * ky + 1) / (2.0 * ay), 2
+        else:
+            t1, step = (2 * kx + 1) / (2.0 * ax), 3
+        q = i * ny + j
+        s = (t1 - t0) * L
+        if s > 0.0:
+            if face[q] != f:
+                return False, cost, gain
+            cost += c[q] * s
+            gain += gp[q] * s / PIX
+        if step == 0:
+            break
+        if step & 1:
+            i += sx
+            kx += 1
+        if step & 2:
+            j += sy
+            ky += 1
+        t0 = t1
+    return True, cost, gain
+
+
+@njit(cache=True)
+def _pull(path: I64, ny: int, face: I64, c: F64, gp: F64) -> I64:
+    """`path` (a grid path's pixels) string-pulled (Pulled): from each kept vertex the farthest
+    later pixel the straight segment to which stays in the face and costs (the cost field
+    integrated along it) no more than the path between them; its vertices."""
+    n = len(path)
+    f = face[path[0]]
+    cum = np.zeros(n)
+    for k in range(1, n):
+        cum[k] = cum[k - 1] + _seg(path[k - 1], path[k], ny, face, f, c, gp)[1]
+    out = [path[0]]
+    i = 0
+    while i < n - 1:
+        nxt = i + 1
+        for j in range(n - 1, i + 1, -1):
+            ok, cs, _ = _seg(path[i], path[j], ny, face, f, c, gp)
+            if ok and cs <= (cum[j] - cum[i]) * (1.0 + 1e-12):
+                nxt = j
+                break
+        out.append(path[nxt])
+        i = nxt
+    return np.asarray(out, dtype=np.int64)
+
+
+@njit(cache=True)
+def _theta(a: int, nx: int, ny: int, face: I64, c: F64, gp: F64) -> tuple[F64, F64, F64, I64]:
+    """Theta* from pixel a over its face, weighted (Theta): Dijkstra on the 8-neighbour grid,
+    but a pixel s2 reached from s may take s's parent as its own when the straight segment from
+    it stays in the face and is cheaper (the cost field integrated along it, `_seg`) than through
+    s. Per pixel (cost, gain summed along its path, the path's length, its parent; -1 unreached,
+    a its own). A parent is settled before its children, so each child's gain and length add its
+    segment's to its parent's: one pass, as `_tree_sum` down a grid tree."""
+    n = nx * ny
+    f = face[a]
+    g = np.full(n, np.inf)
+    acc = np.zeros(n)
+    ln = np.zeros(n)
+    par = -np.ones(n, dtype=np.int64)
+    done = np.zeros(n, dtype=np.bool_)
+    g[a] = 0.0
+    par[a] = a
+    heap = [(0.0, a)]
+    while len(heap):
+        gs, s = heapq.heappop(heap)
+        if done[s] or gs > g[s]:
+            continue
+        done[s] = True
+        p = par[s]
+        si, sj = s // ny, s % ny
+        pi, pj = p // ny, p % ny
+        for di in range(-1, 2):
+            for dj in range(-1, 2):
+                if di == 0 and dj == 0:
+                    continue
+                i2, j2 = si + di, sj + dj
+                if i2 < 0 or i2 >= nx or j2 < 0 or j2 >= ny:
+                    continue
+                s2 = i2 * ny + j2
+                if done[s2] or face[s2] != f:
+                    continue
+                ok, cs, gn = _seg(s, s2, ny, face, f, c, gp)
+                best = g[s] + cs
+                bp = s
+                bacc = acc[s] + gn
+                bln = ln[s] + PIX * np.sqrt(float(di * di + dj * dj))
+                if p != s:
+                    d = PIX * np.sqrt(float((i2 - pi) ** 2 + (j2 - pj) ** 2))
+                    if g[p] + d < min(best, g[s2]):    # a metre costs at least 1
+                        ok, cs, gn = _seg(p, s2, ny, face, f, c, gp)
+                        if ok and g[p] + cs < best:
+                            best = g[p] + cs
+                            bp = p
+                            bacc = acc[p] + gn
+                            bln = ln[p] + d
+                if best < g[s2]:
+                    g[s2] = best
+                    par[s2] = bp
+                    acc[s2] = bacc
+                    ln[s2] = bln
+                    heapq.heappush(heap, (best, s2))
+    return g, acc, ln, par
+
+
+FMM_INIT_PX = 6        # Eikonal: pixels within this many of the source, the straight segment to
+                       # which runs on open ground only, start (and stay) at its cost: exact there,
+                       # where an upwind stencil smears the point source's kink (an open 161 x 161
+                       # raster: T / straight line - 1 in [-0.034, +0.002] without, [-0.004,
+                       # +0.002] with)
+DESCENT_STEP = 0.5     # Eikonal: the descent's step, in pixels
+SIMPLIFY_M = 0.1       # m: Eikonal: the descent's line simplified to this tolerance
+
+
+@njit(cache=True)
+def _stencil(r: int, nx: int, ny: int, T: F64, A: F64, Lg: F64, known: NDArray[np.bool_],
+             cr: float, gr_: float) -> tuple[float, float, float]:
+    """The upwind update of pixel r from its known neighbours (Eikonal): per stencil (the axes,
+    spacing PIX; the diagonals, spacing PIX sqrt 2) and direction the smaller known neighbour,
+    on the axes second order (U = (4 T1 - T2) / 3) where the next one beyond it is known and no
+    larger (on the diagonals too, the open raster's T undershoots the straight line by up to
+    13%, 1.6% beyond 100 m: the smaller of two second-order stencils is biased low); T
+    solves sum_k alpha_k^2 (T - U_k)^2 = cr^2 (one direction alone where the two-direction root
+    is not upwind of both); the smaller T of the two stencils. With it the gain and length along
+    the characteristic, from the transport equations grad A . grad T = cr gr_ / PIX and grad L .
+    grad T = cr discretized on the same stencil: A = (sum_k alpha_k^2 (T - U_k) V_k + cr gr_ /
+    PIX) / sum_k alpha_k^2 (T - U_k), V_k the gains extrapolated as U_k is. (T, A, L)."""
+    ri, rj = r // ny, r % ny
+    bestT, bestA, bestL = np.inf, 0.0, 0.0
+    for st in range(2):
+        h = PIX if st == 0 else PIX * np.sqrt(2.0)
+        al = np.zeros(2)
+        U = np.zeros(2)
+        V = np.zeros(2)
+        W = np.zeros(2)
+        m = 0
+        for k in range(2):
+            if st == 0:
+                ui, uj = (1, 0) if k == 0 else (0, 1)
+            else:
+                ui, uj = (1, 1) if k == 0 else (1, -1)
+            t1 = np.inf
+            q1, q2 = -1, -1
+            for sgn in (-1, 1):
+                i1, j1 = ri + sgn * ui, rj + sgn * uj
+                if 0 <= i1 < nx and 0 <= j1 < ny:
+                    q = i1 * ny + j1
+                    if known[q] and T[q] < t1:
+                        t1 = T[q]
+                        q1 = q
+                        i2, j2 = i1 + sgn * ui, j1 + sgn * uj
+                        q2 = (i2 * ny + j2) if (0 <= i2 < nx and 0 <= j2 < ny) else -1
+            if q1 < 0:
+                continue
+            if st == 0 and q2 >= 0 and known[q2] and T[q2] <= T[q1]:
+                al[m] = 1.5 / h
+                U[m] = (4.0 * T[q1] - T[q2]) / 3.0
+                V[m] = (4.0 * A[q1] - A[q2]) / 3.0
+                W[m] = (4.0 * Lg[q1] - Lg[q2]) / 3.0
+            else:
+                al[m] = 1.0 / h
+                U[m] = T[q1]
+                V[m] = A[q1]
+                W[m] = Lg[q1]
+            m += 1
+        if m == 0:
+            continue
+        T0 = np.inf
+        use = 0
+        if m == 2:
+            a2 = al[0] ** 2 + al[1] ** 2
+            b2 = al[0] ** 2 * U[0] + al[1] ** 2 * U[1]
+            c2 = al[0] ** 2 * U[0] ** 2 + al[1] ** 2 * U[1] ** 2 - cr * cr
+            disc = b2 * b2 - a2 * c2
+            if disc >= 0.0:
+                t = (b2 + np.sqrt(disc)) / a2
+                if t >= U[0] and t >= U[1]:
+                    T0, use = t, 2
+        if use == 0:
+            for k in range(m):
+                t = U[k] + cr / al[k]
+                if t < T0:
+                    T0, use = t, -(k + 1)
+        if T0 < bestT:
+            if use == 2:
+                w0 = al[0] ** 2 * (T0 - U[0])
+                w1 = al[1] ** 2 * (T0 - U[1])
+                ws = w0 + w1
+                bestA = (w0 * V[0] + w1 * V[1] + cr * gr_ / PIX) / ws
+                bestL = (w0 * W[0] + w1 * W[1] + cr) / ws
+            else:
+                k = -use - 1
+                bestA = V[k] + gr_ / (al[k] * PIX)
+                bestL = W[k] + 1.0 / al[k]
+            bestT = T0
+    return bestT, bestA, bestL
+
+
+@njit(cache=True)
+def _fmm(a: int, nx: int, ny: int, face: I64, c: F64, gp: F64) -> tuple[F64, F64, F64]:
+    """Fast marching from pixel a over its face (Eikonal): arrival times T of |grad T| = c (the
+    cost per metre), the gain A and length L along each pixel's characteristic, each pixel's
+    taken from its final upwind stencil once it is known (`_stencil`: the second pass in arrival
+    order, folded into the march, since a pixel's upwind neighbours are known before it is).
+    Pixels within FMM_INIT_PX of a on open ground start at their straight segment's values
+    (`_seg`), which no stencil overwrites."""
+    n = nx * ny
+    f = face[a]
+    T = np.full(n, np.inf)
+    A = np.zeros(n)
+    Lg = np.zeros(n)
+    known = np.zeros(n, dtype=np.bool_)
+    init = np.zeros(n, dtype=np.bool_)
+    T[a] = 0.0
+    init[a] = True
+    heap = [(0.0, a)]
+    ai, aj = a // ny, a % ny
+    R = FMM_INIT_PX
+    for i in range(max(0, ai - R), min(nx, ai + R + 1)):
+        for j in range(max(0, aj - R), min(ny, aj + R + 1)):
+            q = i * ny + j
+            if q == a or face[q] != f or (i - ai) ** 2 + (j - aj) ** 2 > R * R:
+                continue
+            ok, cs, gn = _seg(a, q, ny, face, f, c, gp)
+            d = PIX * np.sqrt(float((i - ai) ** 2 + (j - aj) ** 2))
+            if ok and cs <= d * (1.0 + 1e-12):     # open ground all the way: exact (c >= 1)
+                T[q] = cs
+                A[q] = gn
+                Lg[q] = d
+                init[q] = True
+                heapq.heappush(heap, (cs, q))
+    while len(heap):
+        tq, q = heapq.heappop(heap)
+        if known[q] or tq > T[q]:
+            continue
+        if not init[q]:
+            _, A[q], Lg[q] = _stencil(q, nx, ny, T, A, Lg, known, c[q], gp[q])
+        known[q] = True
+        qi, qj = q // ny, q % ny
+        for di in range(-1, 2):
+            for dj in range(-1, 2):
+                i2, j2 = qi + di, qj + dj
+                if (di == 0 and dj == 0) or i2 < 0 or i2 >= nx or j2 < 0 or j2 >= ny:
+                    continue
+                r = i2 * ny + j2
+                if known[r] or face[r] != f:
+                    continue
+                t, _, _ = _stencil(r, nx, ny, T, A, Lg, known, c[r], gp[r])
+                if t < T[r] and not init[r]:
+                    T[r] = t
+                    heapq.heappush(heap, (t, r))
+    return T, A, Lg
+
+
+@njit(cache=True)
+def _interp(T: F64, nx: int, ny: int, x: float, y: float) -> tuple[float, float, float]:
+    """T bilinear between the pixel centres around (x, y) (pixel units, a centre at k + 0.5):
+    (T, dT/dx, dT/dy); inf where a corner is unreached or off the raster."""
+    i0 = int(np.floor(x - 0.5))
+    j0 = int(np.floor(y - 0.5))
+    if i0 < 0 or j0 < 0 or i0 + 1 >= nx or j0 + 1 >= ny:
+        return np.inf, 0.0, 0.0
+    fx, fy = x - 0.5 - i0, y - 0.5 - j0
+    t00, t10 = T[i0 * ny + j0], T[(i0 + 1) * ny + j0]
+    t01, t11 = T[i0 * ny + j0 + 1], T[(i0 + 1) * ny + j0 + 1]
+    if not (np.isfinite(t00) and np.isfinite(t10) and np.isfinite(t01) and np.isfinite(t11)):
+        return np.inf, 0.0, 0.0
+    v = (t00 * (1 - fx) * (1 - fy) + t10 * fx * (1 - fy) + t01 * (1 - fx) * fy + t11 * fx * fy)
+    gx = (t10 - t00) * (1 - fy) + (t11 - t01) * fy
+    gy = (t01 - t00) * (1 - fx) + (t11 - t10) * fx
+    return v, gx, gy
+
+
+@njit(cache=True)
+def _descend(T: F64, nx: int, ny: int, a: int, t: int) -> F64:
+    """The path from pixel t down T to its source a (Eikonal), in pixel units from t's centre to
+    a's: steps of DESCENT_STEP against the bilinear gradient while T keeps falling; where it
+    cannot (a corner unreached, a kink), a step to the current pixel's lowest 8-neighbour's centre
+    (every reached pixel but a has a lower neighbour: its upwind one)."""
+    ax_, ay_ = a // ny + 0.5, a % ny + 0.5
+    x, y = t // ny + 0.5, t % ny + 0.5
+    xs = [x]
+    ys = [y]
+    for _ in range(8 * nx * ny):
+        if (x - ax_) ** 2 + (y - ay_) ** 2 <= 1.0:
+            break
+        v, gx, gy = _interp(T, nx, ny, x, y)
+        g = np.sqrt(gx * gx + gy * gy)
+        moved = False
+        if np.isfinite(v) and g > 0.0:
+            x2, y2 = x - DESCENT_STEP * gx / g, y - DESCENT_STEP * gy / g
+            v2, _, _ = _interp(T, nx, ny, x2, y2)
+            if v2 < v:
+                x, y = x2, y2
+                moved = True
+        if not moved:
+            i, j = int(np.floor(x)), int(np.floor(y))
+            q = i * ny + j
+            bq, bt = -1, T[q]
+            for di in range(-1, 2):
+                for dj in range(-1, 2):
+                    i2, j2 = i + di, j + dj
+                    if 0 <= i2 < nx and 0 <= j2 < ny and T[i2 * ny + j2] < bt:
+                        bq, bt = i2 * ny + j2, T[i2 * ny + j2]
+            if bq < 0:          # at a's own pixel, or a flat spot of it
+                break
+            x, y = bq // ny + 0.5, bq % ny + 0.5
+        xs.append(x)
+        ys.append(y)
+    xs.append(ax_)
+    ys.append(ay_)
+    out = np.empty((len(xs), 2))
+    for k in range(len(xs)):
+        out[k, 0] = xs[len(xs) - 1 - k]
+        out[k, 1] = ys[len(xs) - 1 - k]
+    return out
+
+
+@dataclass(frozen=True, kw_only=True)
+class _TreeReach:
+    """A grid search's reach (Grid8): its distances, predecessor tree and settle order."""
+    src: int
+    cost: F64
+    pred: NDArray[np.int32]
+    order: I64
+    gain: F64
+    xy: F64
+
+    def length(self) -> F64:
+        p = self.pred[self.order]
+        inc = np.zeros(len(self.pred))
+        inc[self.order] = np.where(p >= 0, np.hypot(*(self.xy[self.order]
+                                                      - self.xy[np.maximum(p, 0)]).T), 0.0)
+        return _tree_sum(self.pred, self.order, inc)
+
+    def route(self, t: int) -> Route:
+        path = [t]
+        while path[-1] != self.src:
+            path.append(int(self.pred[path[-1]]))
+        p = np.asarray(path[::-1], dtype=np.int64)
+        return Route(path=p, line=self.xy[p])
+
+
+@dataclass(frozen=True, kw_only=True)
+class Grid8:
+    """Dijkstra on the 8-neighbour grid (the router of every run before 2026-11-19): an edge
+    costs its length times 1 + bld times its two pixels' mean building share (the cost field
+    integrated along it), the gain summed per pixel of the path (`_tree_sum`), the path the
+    grid's staircase. Directions come in multiples of 45 degrees, so the cheapest path between
+    two points on open ground is up to 8.2% longer than the straight line (at 22.5 degrees) and
+    every staircase between them ties (b0's right angles: the crossings study)."""
+
+    @property
+    def name(self) -> str:
+        return "grid8"
+
+    def reaches(self, ter: Terrain, src: I64) -> Iterator[Reach]:
+        ok = (ter.face[ter.ea] >= 0) & (ter.face[ter.ea] == ter.face[ter.eb])
+        w = ter.el[ok] * (1.0 + ter.bld * 0.5 * (ter.share[ter.ea[ok]] + ter.share[ter.eb[ok]]))
+        n = len(ter.face)
+        G = sp.coo_matrix((w, (ter.ea[ok], ter.eb[ok])), shape=(n, n)).tocsr()
+        for c0 in range(0, len(src), CHUNK):
+            s = src[c0:c0 + CHUNK]
+            dist, pred = dijkstra(G, directed=False, indices=s, return_predecessors=True)
+            for k, a in enumerate(s):
+                d = dist[k]
+                fin = np.isfinite(d)
+                order = np.flatnonzero(fin)[np.argsort(d[fin])]
+                yield _TreeReach(src=int(a), cost=d.copy(), pred=pred[k].copy(), order=order,
+                                 gain=_tree_sum(pred[k], order, ter.gain), xy=ter.xy)
+
+
+@dataclass(frozen=True, kw_only=True)
+class _PulledReach:
+    inner: Reach
+    ter: Terrain
+
+    @property
+    def src(self) -> int:
+        return self.inner.src
+
+    @property
+    def cost(self) -> F64:
+        return self.inner.cost
+
+    @property
+    def gain(self) -> F64:
+        return self.inner.gain
+
+    def length(self) -> F64:
+        return self.inner.length()
+
+    def route(self, t: int) -> Route:
+        ter = self.ter
+        v = _pull(self.inner.route(t).path, ter.shape[1], ter.face, ter.per_m(), ter.gain)
+        return Route(path=v, line=ter.xy[v])
+
+
+@dataclass(frozen=True, kw_only=True)
+class Pulled:
+    """Grid8's search and choice (its costs, gains and targets, so its octile bias in what is
+    chosen), the chosen path string-pulled before its corridor is built (`_pull`): a staircase
+    run replaced by the straight segment wherever that stays in the face and costs no more (the
+    cost field integrated along it, not its ends averaged). A path shaping on Grid8's reach, not
+    a search of its own."""
+    inner: Grid8
+
+    @property
+    def name(self) -> str:
+        return "pulled"
+
+    def reaches(self, ter: Terrain, src: I64) -> Iterator[Reach]:
+        for r in self.inner.reaches(ter, src):
+            yield _PulledReach(inner=r, ter=ter)
+
+
+@dataclass(frozen=True, kw_only=True)
+class _ArrayReach:
+    """A search's reach held as per-pixel arrays (Theta, Eikonal), its route drawn by `draw`."""
+    src: int
+    cost: F64
+    gain: F64
+    ln: F64
+    draw: Callable[[int, int], Route]
+
+    def length(self) -> F64:
+        return self.ln
+
+    def route(self, t: int) -> Route:
+        return self.draw(self.src, t)
+
+
+@dataclass(frozen=True, kw_only=True)
+class Theta:
+    """Any-angle search (`_theta`: Theta*, weighted): a path's vertices any pixels in line of
+    sight within the face, a segment costing the cost field integrated along it (`_seg`), its
+    gain the gain of the cells it crosses, each by its length in the cell over PIX. Near-optimal,
+    not exact, where the cost varies: a vertex's parent is its grid neighbour's or that one's
+    parent, never a pixel further back."""
+
+    @property
+    def name(self) -> str:
+        return "theta"
+
+    def reaches(self, ter: Terrain, src: I64) -> Iterator[Reach]:
+        nx, ny = ter.shape
+        c = ter.per_m()
+        for a in src:
+            g, acc, ln, par = _theta(int(a), nx, ny, ter.face, c, ter.gain)
+
+            def draw(s: int, t: int, par: I64 = par) -> Route:
+                path = [t]
+                while path[-1] != s:
+                    path.append(int(par[path[-1]]))
+                p = np.asarray(path[::-1], dtype=np.int64)
+                return Route(path=p, line=ter.xy[p])
+
+            yield _ArrayReach(src=int(a), cost=g, gain=acc, ln=ln, draw=draw)
+
+
+@dataclass(frozen=True, kw_only=True)
+class Eikonal:
+    """Fast marching (`_fmm`): arrival times T of |grad T| = the cost per metre on the raster,
+    continuous directions (a second-order upwind stencil on the axes and on the diagonals, the
+    smaller), building pixels a weighted region; no tree, so the gain along each pixel's
+    characteristic is carried by the same stencil as T in arrival order; the path the descent of
+    T from the target to the source (`_descend`), simplified to SIMPLIFY_M."""
+
+    @property
+    def name(self) -> str:
+        return "eikonal"
+
+    def reaches(self, ter: Terrain, src: I64) -> Iterator[Reach]:
+        nx, ny = ter.shape
+        c = ter.per_m()
+        for a in src:
+            T, A, Lg = _fmm(int(a), nx, ny, ter.face, c, ter.gain)
+
+            def draw(s: int, t: int, T: F64 = T) -> Route:
+                pts = _descend(T, nx, ny, s, t) * PIX + ter.lo
+                line = np.asarray(shapely.get_coordinates(
+                    shapely.simplify(shapely.linestrings(pts), SIMPLIFY_M)))
+                line[0], line[-1] = ter.xy[s], ter.xy[t]
+                pix = _pix_of_lo(ter.lo, ter.shape, pts)
+                keep = np.ones(len(pix), dtype=bool)
+                keep[1:] = pix[1:] != pix[:-1]
+                return Route(path=pix[keep], line=line)
+
+            yield _ArrayReach(src=int(a), cost=T, gain=A, ln=Lg, draw=draw)
+
+
+def router_of(tok: str) -> Router:
+    """The plan token's router (Plan.of)."""
+    match tok:
+        case "grid8":
+            return Grid8()
+        case "pulled":
+            return Pulled(inner=Grid8())
+        case "theta":
+            return Theta()
+        case "eikonal":
+            return Eikonal()
+    raise SystemExit(f"{tok}: a router is grid8|pulled|theta|eikonal")
 
 
 class Candidates(Protocol):
@@ -421,12 +1026,12 @@ def savings(r: Roads, a: int, tg: I64, length: F64) -> F64:
 class Field(Protocol):
     """The attraction at one state (Attract.field)."""
 
-    def credits(self, a: int, tg: I64, pred: NDArray[np.int32], order: I64) -> F64:
-        """Per target pixel of `tg` the credit in P of the path from `a` to it down the
-        shortest-path tree `pred` (its nodes `order`, nearest first)."""
+    def credits(self, a: int, tg: I64, reach: Reach) -> F64:
+        """Per target pixel of `tg` the credit in P of the path from `a` to it (`reach`, a's
+        search)."""
         ...
 
-    def of(self, path: I64, *, spur: bool) -> tuple[float, float]:
+    def of(self, route: Route, *, spur: bool) -> tuple[float, float]:
         """A costed path's (detour saving in m, credit in P)."""
         ...
 
@@ -443,10 +1048,10 @@ class Attract(Protocol):
 
 
 class _NoField:
-    def credits(self, a: int, tg: I64, pred: NDArray[np.int32], order: I64) -> F64:
+    def credits(self, a: int, tg: I64, reach: Reach) -> F64:
         return np.zeros(len(tg))
 
-    def of(self, path: I64, *, spur: bool) -> tuple[float, float]:
+    def of(self, route: Route, *, spur: bool) -> tuple[float, float]:
         return 0.0, 0.0
 
 
@@ -468,24 +1073,20 @@ class _DetourField:
     xy: F64
     kappa: float                                 # P per metre of detour saving
 
-    def credits(self, a: int, tg: I64, pred: NDArray[np.int32], order: I64) -> F64:
+    def credits(self, a: int, tg: I64, reach: Reach) -> F64:
         out = np.zeros(len(tg))
         on = self.roads.col[tg] >= 0             # sinks; a spur's open ground shortens nothing
         if not on.any():
             return out
-        p = pred[order]
-        inc = np.zeros(len(pred))
-        inc[order] = np.where(p >= 0, np.hypot(*(self.xy[order] - self.xy[np.maximum(p, 0)]).T),
-                              0.0)
-        length = _tree_sum(pred, order, inc)
+        length = reach.length()
         out[on] = self.kappa * savings(self.roads, a, tg[on], length[tg[on]])
         return out
 
-    def of(self, path: I64, *, spur: bool) -> tuple[float, float]:
+    def of(self, route: Route, *, spur: bool) -> tuple[float, float]:
         if spur:
             return 0.0, 0.0
-        L = float(np.hypot(*np.diff(self.xy[path], axis=0).T).sum())
-        S = float(savings(self.roads, int(path[0]), path[-1:], np.array([L]))[0])
+        L = float(np.hypot(*np.diff(route.line, axis=0).T).sum())
+        S = float(savings(self.roads, int(route.path[0]), route.path[-1:], np.array([L]))[0])
         return S, self.kappa * S
 
 
@@ -526,11 +1127,13 @@ class Detour:
 
 @dataclass(frozen=True, kw_only=True)
 class Paths:
-    """Cheapest paths on the raster (module docstring); `bld` the extra cost of a metre through a
+    """Cheapest paths on the raster (module docstring); `router` how they are searched and drawn
+    (Router: Grid8, Pulled, Theta, Eikonal); `bld` the extra cost of a metre through a
     building, `pairs` the sources whose best ears are built and costed; a face under `face_m2` is
     not split, an ear's ends at least `ear_m` apart in a straight line; `ends` where a path may
     end (Loop: at a sink; Spur: there or on open ground); `attract` the term added to the escape
     objective (NoDetour: none; Detour: detour saving)."""
+    router: Router
     bld: float
     pairs: int
     face_m2: float
@@ -540,7 +1143,8 @@ class Paths:
 
     @property
     def name(self) -> str:
-        return (f"paths.b{self.bld:g}.f{self.face_m2:g}.e{self.ear_m:g}.{self.ends.name}"
+        return (f"paths.{self.router.name}.b{self.bld:g}.f{self.face_m2:g}.e{self.ear_m:g}"
+                f".{self.ends.name}"
                 f".{self.attract.name}")
 
     def ears(self, e: EarWorld, faces: Face, gain: F64, *, cost: gr.Cost,
@@ -550,55 +1154,51 @@ class Paths:
         big = faces.area >= self.face_m2
         live = (pf >= 0) & big[np.maximum(pf, 0)]
         # the ends: sink pixels of the face (a road or the street, not a wall)
-        same = pf[ra.ea] == pf[ra.eb]
         bnd = live & e.sinks()
         ground = live & (ra.bld == 0) & ~bnd       # open ground: where a spur may end
         # per pixel its first-order gain density (the triangles under it)
         gp = np.bincount(_pix_of(ra, g.cen), weights=gain, minlength=len(pf))
         fld = self.attract.field(e, P0=g.P0)
-        ok = live[ra.ea] & live[ra.eb] & same
-        w = ra.el[ok] * (1.0 + self.bld * 0.5 * (ra.bld[ra.ea[ok]] + ra.bld[ra.eb[ok]]))
-        n = len(pf)
-        G = sp.coo_matrix((w, (ra.ea[ok], ra.eb[ok])), shape=(n, n)).tocsr()
+        ter = Terrain(shape=ra.shape, lo=ra.lo, xy=ra.xy, face=np.where(live, pf, -1),
+                      share=ra.bld, gain=gp, bld=self.bld, ea=ra.ea, eb=ra.eb, el=ra.el)
         src = np.flatnonzero(bnd)
         key = np.floor(ra.xy[src] / SRC_M).astype(np.int64)
         _, first = np.unique(key[:, 0] * 1_000_000 + key[:, 1], return_index=True)
         src = src[np.sort(first)]
-        best: list[tuple[float, int, int, NDArray[np.int32]]] = []
-        for c0 in range(0, len(src), CHUNK):
-            s = src[c0:c0 + CHUNK]
-            dist, pred = dijkstra(G, directed=False, indices=s, return_predecessors=True)
-            for k, a in enumerate(s):
-                d = dist[k]
-                fin = np.isfinite(d)
-                order = np.flatnonzero(fin)[np.argsort(d[fin])]
-                acc = _tree_sum(pred[k], order, gp)
-                crow = np.hypot(*(ra.xy - ra.xy[a]).T)     # straight-line, from the source
-                tg = np.flatnonzero(self.ends.targets(bnd, ground, crow, ear_m=self.ear_m)
-                                    & fin & (pf == pf[a]))
-                if not len(tg):
-                    continue
-                cr = fld.credits(int(a), tg, pred[k], order)
-                r = (acc[tg] + scale * cr) / np.maximum(d[tg], 1e-9)
-                t = int(tg[np.argmax(r)])
-                best.append((float(r.max()), int(a), t, pred[k].copy()))
+        # the best `pairs` sources so far, best first (a stable sort truncated: the same as
+        # every source's sorted and cut once, ties in insertion order), each with its reach
+        best: list[tuple[float, int, int, Reach]] = []
+        for reach in self.router.reaches(ter, src):
+            a = reach.src
+            d = reach.cost
+            fin = np.isfinite(d)
+            acc = reach.gain
+            crow = np.hypot(*(ra.xy - ra.xy[a]).T)     # straight-line, from the source
+            tg = np.flatnonzero(self.ends.targets(bnd, ground, crow, ear_m=self.ear_m)
+                                & fin & (pf == pf[a]))
+            if not len(tg):
+                continue
+            cr = fld.credits(int(a), tg, reach)
+            r = (acc[tg] + scale * cr) / np.maximum(d[tg], 1e-9)
+            t = int(tg[np.argmax(r)])
+            best.append((float(r.max()), int(a), t, reach))
+            if len(best) > 2 * self.pairs:
+                best.sort(key=lambda q: -q[0])
+                del best[self.pairs:]
         best.sort(key=lambda q: -q[0])
         out = []
-        for _, a, t, pr in best[:self.pairs]:
-            path = [t]
-            while path[-1] != a:
-                path.append(int(pr[path[-1]]))
-            path_a = np.asarray(path[::-1], dtype=np.int64)
+        for _, a, t, reach in best[:self.pairs]:
+            rt = reach.route(t)
             spur = not bool(bnd[t])
-            tris = e.corridor(ra.xy[path_a], spur=spur)
+            tris = e.corridor(rt.line, spur=spur)
             if not len(tris):
                 continue
             dD, dC = g.costs_of(tris)
             c = float(cost.of(np.array([dD]), np.array([dC]), P0=g.P0)[0])
-            sv, cr = fld.of(path_a, spur=spur)
-            out.append(Ear(face=int(pf[a]), path=path_a, spur=spur, tris=tris, dD=dD, dC=dC,
-                           cost=c, first=float(gain[tris].sum()), saving=sv, credit=cr,
-                           exact=np.nan))
+            sv, cr = fld.of(rt, spur=spur)
+            out.append(Ear(face=int(pf[a]), path=rt.path, line=rt.line, spur=spur, tris=tris,
+                           dD=dD, dC=dC, cost=c, first=float(gain[tris].sum()), saving=sv,
+                           credit=cr, exact=np.nan))
         return out
 
 
@@ -866,16 +1466,37 @@ class Divides:
                 continue
             dD, dC = g.costs_of(tris)
             c = float(cost.of(np.array([dD]), np.array([dC]), P0=g.P0)[0])
-            out.append(Ear(face=f, path=d.pixels, spur=False, tris=tris, dD=dD, dC=dC, cost=c,
+            out.append(Ear(face=f, path=d.pixels, line=ra.xy[d.pixels], spur=False, tris=tris,
+                           dD=dD, dC=dC, cost=c,
                            first=float(gain[tris].sum()), saving=0.0, credit=0.0, exact=np.nan))
         return out
 
 
 def _pix_of(ra: Raster, xy: F64) -> I64:
-    ij = np.floor((xy - ra.lo) / PIX).astype(np.int64)
-    ij[:, 0] = np.clip(ij[:, 0], 0, ra.shape[0] - 1)
-    ij[:, 1] = np.clip(ij[:, 1], 0, ra.shape[1] - 1)
-    return ij[:, 0] * ra.shape[1] + ij[:, 1]
+    return _pix_of_lo(ra.lo, ra.shape, xy)
+
+
+def line_pixels(lo: F64, shape: tuple[int, int], line: F64) -> I64:
+    """The pixels (flat) the polyline `line` (m) crosses, in order, each run of one pixel once:
+    each segment sampled at (k + 1/2) / m of its length, m one per PIX / 4 (a grid path's line,
+    centre to neighbouring centre, gives back its pixels: no sample on a corner)."""
+    pts = [line[:1]]
+    for p, q in zip(line[:-1], line[1:], strict=True):
+        m = max(1, int(np.ceil(4 * np.hypot(*(q - p)) / PIX)))
+        pts.append(p + ((np.arange(m) + 0.5) / m)[:, None] * (q - p))
+    pts.append(line[-1:])
+    pix = _pix_of_lo(lo, shape, np.vstack(pts))
+    keep = np.ones(len(pix), dtype=bool)
+    keep[1:] = pix[1:] != pix[:-1]
+    return np.asarray(pix[keep])
+
+
+def _pix_of_lo(lo: F64, shape: tuple[int, int], xy: F64) -> I64:
+    """Per point (m) its pixel (flat) on the PIX raster with lower corner lo, clipped."""
+    ij = np.floor((xy - lo) / PIX).astype(np.int64)
+    ij[:, 0] = np.clip(ij[:, 0], 0, shape[0] - 1)
+    ij[:, 1] = np.clip(ij[:, 1], 0, shape[1] - 1)
+    return np.asarray(ij[:, 0] * shape[1] + ij[:, 1])
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -898,14 +1519,15 @@ class Plan:
 
     @staticmethod
     def of(spec: str) -> Plan:
-        m = re.fullmatch(r"ears\.(?:paths\.b(?P<bld>[0-9.]+)\.f(?P<pf>[0-9.]+)\.e(?P<pe>[0-9.]+)"
+        m = re.fullmatch(r"ears\.(?:paths\.(?P<router>[a-z0-9]+)\.b(?P<bld>[0-9.]+)"
+                         r"\.f(?P<pf>[0-9.]+)\.e(?P<pe>[0-9.]+)"
                          r"\.(?P<ends>loop|spur(?P<lo>[0-9.]+)-(?P<hi>[0-9.]+))"
                          r"\.(?:nodt|dt(?P<lam>[0-9.]+))"
                          r"|divides\.p(?P<tau>[0-9.]+)\.f(?P<df>[0-9.]+)\.e(?P<de>[0-9.]+))"
                          r"\.gl(?P<h>[0-9.]+)Croad\.n(?P<nu>[0-9.e-]+)s(?P<price>[0-9.e-]+)"
                          r"\.M(?P<pairs>[0-9]+)\.K(?P<exact>[0-9]+)\.D(?P<D>[0-9.]+)", spec)
         if m is None:
-            raise SystemExit(f"{spec}: a plan is ears.<paths.b<bld>.f<face_m2>.e<ear_m>"
+            raise SystemExit(f"{spec}: a plan is ears.<paths.<router>.b<bld>.f<face_m2>.e<ear_m>"
                              ".<loop|spur<min_m>-<max_m>>.<nodt|dt<lam>>|divides.p<tau>.f<face_m2>"
                              ".e<ear_m>>"
                              ".gl<h>Croad.n<nu>s<price>.M<pairs>.K<exact>.D<D>")
@@ -914,7 +1536,8 @@ class Plan:
             ends: Ends = (Loop() if m["ends"] == "loop" else
                           Spur(min_m=float(m["lo"]), max_m=float(m["hi"])))
             att: Attract = NoDetour() if m["lam"] is None else Detour(lam=float(m["lam"]))
-            cands = Paths(bld=float(m["bld"]), pairs=int(m["pairs"]), face_m2=float(m["pf"]),
+            cands = Paths(router=router_of(m["router"]), bld=float(m["bld"]),
+                          pairs=int(m["pairs"]), face_m2=float(m["pf"]),
                           ear_m=float(m["pe"]), ends=ends, attract=att)
         else:
             cands = Divides(tau=float(m["tau"]), pairs=int(m["pairs"]), face_m2=float(m["df"]),
@@ -1154,7 +1777,7 @@ def build(e: EarWorld, plan: Plan, *, out: Path, log: Any, steps: int | None = N
         built, faces = max(off.scored, key=lambda s: ratio(s.ear))
         scale = scale_of(off.scored, scale=scale)
         g.step[built.tris] = step
-        xy = e.ra.xy[built.path]
+        xy = built.line
         picks.append(dict(step=step, face=built.face, spur=built.spur,
                           ax=float(xy[0, 0]), ay=float(xy[0, 1]),
                           bx=float(xy[-1, 0]), by=float(xy[-1, 1]),
@@ -1183,10 +1806,10 @@ def run(bid: str, plan: Plan) -> None:
 
 # ---------------------------------------------------------------- the checks
 
-CHECK_PLAN = "ears.paths.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K2.D1"
-CHECK_SPUR = "ears.paths.b20.f2000.e30.spur10-80.nodt.gl0.25Croad.n2s0.1.M16.K2.D1"
+CHECK_PLAN = "ears.paths.grid8.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K2.D1"
+CHECK_SPUR = "ears.paths.grid8.b20.f2000.e30.spur10-80.nodt.gl0.25Croad.n2s0.1.M16.K2.D1"
 CHECK_DIVIDES = "ears.divides.p0.1.f2000.e30.gl0.25Croad.n2s0.1.M16.K4.D1"
-CHECK_DETOUR = "ears.paths.b20.f2000.e30.loop.dt1.gl0.25Croad.n2s0.1.M8.K2.D1"
+CHECK_DETOUR = "ears.paths.grid8.b20.f2000.e30.loop.dt1.gl0.25Croad.n2s0.1.M8.K2.D1"
 
 
 def _horseshoe(arm_m: float, gap_m: float, *, crow: bool) -> tuple[float, float]:
@@ -1247,28 +1870,292 @@ def horseshoe(fault: str | None) -> None:
         raise SystemExit(1)
 
 
+# ---------------------------------------------------------------- the routers' checks
+
+ROUTERS: tuple[Router, ...] = (Grid8(), Pulled(inner=Grid8()), Theta(), Eikonal())
+OCTILE = float(np.cos(np.pi / 8) + (np.sqrt(2) - 1) * np.sin(np.pi / 8)) - 1   # 0.0824
+RC_N = 161             # router checks: the open raster's side (pixels)
+RC_NEAR_M = 20.0       # m: cost: pixels this near the source not judged
+RC_R_PX = 60           # straight, gain: the targets this many pixels from the source
+RC_ANGLES = (10.0, 22.5, 30.0, 37.0, 60.0, 80.0)   # straight: the targets' bearings (degrees)
+TOL_EXACT = 1e-9       # relative: a cost or gain the router computes exactly (Theta, Pulled's line)
+TOL_EIK = 5e-3         # relative: Eikonal's cost on open ground (an open 161 x 161 raster:
+                       # [-0.004, +0.002])
+TOL_STRAIGHT_M = 0.5   # m: Eikonal's line off the chord at most this, a quarter pixel (Theta and
+                       # Pulled: TOL_EXACT)
+RC_BLD_W = 20          # building: a square building this many pixels wide between the ends
+RC_BLDS = (0.05, 20.0)   # building: through it cheaper, around it cheaper
+TOL_AROUND = 0.02      # building: a router's path cost over the cheaper of the two, less 1 (the
+                       # raster's corner: the way around hugs pixel centres, not the corner)
+TOL_GAIN_EIK = 0.02    # gain: Eikonal's one-pass gain against the integral along its drawn line,
+                       # relative: the largest on open ground, the median with buildings (where a
+                       # line clipping a building's corner can part from the characteristic: up
+                       # to 0.095 at bld 20, its T 7% over the line's cost)
+RC_GAIN_BLDS = (0.0, 20.0)   # gain: the buildings free, and dear
+RC_SEED = 0            # gain: the smooth gain field's and the buildings' draw
+RC_BUMPS = 12          # gain: Gaussian bumps in the gain field
+RC_TARGETS = 24        # gain: targets judged
+# a fault is a mutation of this file's routers (`_mutant`): (the text, its replacement)
+MUTATIONS: dict[str, tuple[str, str]] = {
+    "no-parent": ("                if p != s:\n", "                if False:\n"),
+    "no-pull": ("            if ok and cs <= (cum[j] - cum[i]) * (1.0 + 1e-12):",
+                "            if False:"),
+    "no-start": ("FMM_INIT_PX = 6 ", "FMM_INIT_PX = 0 "),
+    "discrete-descent": ("        if np.isfinite(v) and g > 0.0:\n", "        if False:\n"),
+    "endpoint-cost": ("            cost += c[q] * s\n",
+                      "            cost += 0.5 * (c[p0] + c[p1]) * s\n"),
+    "flat-field": ("_stencil(r, nx, ny, T, A, Lg, known, c[r], gp[r])",
+                   "_stencil(r, nx, ny, T, A, Lg, known, 1.0, gp[r])"),
+    "gain-from-s": ("                            bacc = acc[p] + gn\n",
+                    "                            bacc = acc[s] + gn\n"),
+    "gain-per-pixel": ("                bestA = (w0 * V[0] + w1 * V[1] + cr * gr_ / PIX) / ws\n",
+                       "                bestA = (w0 * V[0] + w1 * V[1]) / ws + gr_\n"),
+}
+
+
+def _mutant(fault: str) -> Any:
+    """This module with the fault's mutation (MUTATIONS) applied once, loaded afresh: a guard's
+    fault is its code broken, not its inputs."""
+    import importlib.util
+    import tempfile
+    if fault not in MUTATIONS:
+        raise SystemExit(f"a router check's fault: {'|'.join(MUTATIONS)}")
+    old, new = MUTATIONS[fault]
+    src = Path(__file__).read_text()
+    a, b = src.index("MUTATIONS: dict["), src.index("def _mutant(")   # the table spells it too
+    head, table, tail = src[:a], src[a:b], src[b:]
+    if (head + tail).count(old) != 1:
+        raise ValueError(f"{fault}: its text occurs {(head + tail).count(old)} times, not once")
+    p = Path(tempfile.mkdtemp(prefix="ears_mutant_")) / f"ears_{fault.replace('-', '_')}.py"
+    p.write_text(head.replace(old, new) + table + tail.replace(old, new))
+    spec = importlib.util.spec_from_file_location(p.stem, p)
+    assert spec is not None and spec.loader is not None
+    m = importlib.util.module_from_spec(spec)
+    sys.modules[p.stem] = m
+    spec.loader.exec_module(m)
+    return m
+
+
+def open_terrain(nx: int, ny: int, *, share: F64, gain: F64, bld: float) -> Terrain:
+    """A synthetic one-face terrain nx x ny pixels (the router checks), its corner at 0."""
+    i, j = np.meshgrid(np.arange(nx), np.arange(ny), indexing="ij")
+    xy = np.column_stack([(i.ravel() + 0.5) * PIX, (j.ravel() + 0.5) * PIX])
+    ea, eb, el = _grid_edges((nx, ny))
+    return Terrain(shape=(nx, ny), lo=np.zeros(2), xy=xy, face=np.zeros(nx * ny, dtype=np.int64),
+                   share=share, gain=gain, bld=bld, ea=ea, eb=eb, el=el)
+
+
+def along(ter: Terrain, line: F64, w: F64) -> float:
+    """The per-pixel field w integrated along the polyline `line` by brute force, independently
+    of `_seg` (the router checks): each segment cut wherever it crosses a cell edge (every
+    x = lo + k PIX, y = lo + m PIX), each piece its cell's value times its length."""
+    out = 0.0
+    for p, q in zip(line[:-1], line[1:], strict=True):
+        d = q - p
+        L = float(np.hypot(*d))
+        ts = [0.0, 1.0]
+        for k in range(2):
+            if d[k] != 0:
+                lo, hi = sorted((p[k] - ter.lo[k], q[k] - ter.lo[k]))
+                for m in range(int(np.ceil(lo / PIX)), int(np.floor(hi / PIX)) + 1):
+                    ts.append((m * PIX + ter.lo[k] - p[k]) / d[k])
+        t = np.unique(np.clip(ts, 0.0, 1.0))
+        mid = p + ((t[:-1] + t[1:]) / 2)[:, None] * d
+        out += float((w[_pix_of_lo(ter.lo, ter.shape, mid)] * np.diff(t)).sum()) * L
+    return out
+
+
+def _one(r: Router, ter: Terrain, a: int) -> Reach:
+    [x] = list(r.reaches(ter, np.array([a], dtype=np.int64)))
+    return x
+
+
+def router_check(test: str, fault: str | None) -> None:
+    """The routers on synthetic open rasters (Grid8, Pulled, Theta, Eikonal), each judged against
+    what it claims; a fault is a mutation of its code (MUTATIONS, `_mutant`), which fails it:
+    cost: the cost of the cheapest path from the centre of an open RC_N raster to every pixel
+      RC_NEAR_M or more away, and its drawn line's length, against the straight line: Grid8's cost
+      up to OCTILE more (and reaching it); Pulled's line, Theta's cost and line exact; Eikonal's
+      cost and line within TOL_EIK. Faults no-parent (Theta never tries its parent), no-pull,
+      no-start (Eikonal from the source's pixel alone, no exact start) fail it.
+    straight: targets RC_R_PX pixels off at bearings RC_ANGLES: the drawn line's largest distance
+      from the chord (Grid8 reported, not judged; Pulled and Theta exact; Eikonal within
+      TOL_STRAIGHT_M). Faults no-parent, no-pull, discrete-descent (Eikonal's descent steps from
+      pixel to pixel) fail it.
+    building: a square building RC_BLD_W pixels wide midway between the ends, at each bld of
+      RC_BLDS: every router's path goes through it when that is cheaper and around it when that
+      is, its cost (the field integrated along its line, `along`) within TOL_AROUND of the cheaper
+      way (Grid8: OCTILE; Pulled: no more than the grid path it pulls). Faults endpoint-cost (a
+      segment costed by its ends' mean, not integrated: Theta and Pulled), flat-field (Eikonal's
+      stencil blind to the cost) fail it.
+    gain: a smooth gain field (RC_BUMPS Gaussian bumps) over the open raster with buildings
+      (at each bld of RC_GAIN_BLDS): each router's one-pass gain at RC_TARGETS targets against the
+      gain integrated along its drawn path (Grid8 and Pulled: the gain of the grid path's pixels;
+      Theta: `along`, exact; Eikonal: `along`, within TOL_GAIN_EIK). Faults gain-from-s (Theta
+      credits a segment from the parent on top of the child's gain), gain-per-pixel (Eikonal
+      adds a pixel's gain once however its characteristic crosses it) fail it."""
+    if fault is not None:
+        print(f"router {test}: mutant {fault}")
+        _mutant(fault).router_check(test, None)
+        return
+    n = RC_N
+    c0 = (n // 2) * n + n // 2
+    zero = np.zeros(n * n)
+    ok = True
+    if test == "cost":
+        ter = open_terrain(n, n, share=zero, gain=zero, bld=0.0)
+        eu = np.hypot(*(ter.xy - ter.xy[c0]).T)
+        far = eu >= RC_NEAR_M
+        ang = np.radians(np.arange(0.0, 90.0, 2.5))
+        tg = ((n // 2 + np.round(RC_R_PX * np.cos(ang))) * n
+              + n // 2 + np.round(RC_R_PX * np.sin(ang))).astype(np.int64)
+        for r in ROUTERS:
+            x = _one(r, ter, c0)
+            cost = x.cost[far] / eu[far] - 1
+            line = np.array([np.hypot(*np.diff(x.route(int(t)).line, axis=0).T).sum() / eu[t] - 1
+                             for t in tg])
+            match r:
+                case Grid8():
+                    good = cost.max() <= OCTILE + TOL_EXACT and cost.max() >= OCTILE - 2e-3
+                case Pulled():
+                    good = abs(line).max() <= TOL_EXACT
+                case Theta():
+                    good = max(abs(cost).max(), abs(line).max()) <= TOL_EXACT
+                case _:
+                    good = max(abs(cost).max(), abs(line).max()) <= TOL_EIK
+            ok &= bool(good)
+            print(f"  {r.name}: cost / straight line - 1 in [{cost.min():+.2e}, {cost.max():+.2e}]"
+                  f", drawn line's length in [{line.min():+.2e}, {line.max():+.2e}] -> "
+                  f"{'ok' if good else 'BAD'}")
+    elif test == "straight":
+        ter = open_terrain(n, n, share=zero, gain=zero, bld=0.0)
+        a = 10 * n + 10
+        for r in ROUTERS:
+            x = _one(r, ter, a)
+            worst = 0.0
+            for deg in RC_ANGLES:
+                t = int((10 + round(RC_R_PX * np.cos(np.radians(deg)))) * n
+                        + 10 + round(RC_R_PX * np.sin(np.radians(deg))))
+                line = x.route(t).line
+                d = line[-1] - line[0]
+                rel = line - line[0]
+                off = np.abs(d[0] * rel[:, 1] - d[1] * rel[:, 0]) / np.hypot(*d)
+                worst = max(worst, float(off.max()))
+            match r:
+                case Grid8():
+                    tol = np.inf
+                case Pulled() | Theta():
+                    tol = TOL_EXACT * RC_R_PX * PIX
+                case _:
+                    tol = TOL_STRAIGHT_M
+            good = worst <= tol
+            ok &= good
+            print(f"  {r.name}: the line at most {worst:.3g} m off its chord "
+                  f"({'not judged' if tol == np.inf else 'ok' if good else 'BAD'})")
+    elif test == "building":
+        nx, ny = 121, 61
+        a, t = 10 * ny + 30, 110 * ny + 30
+        i, j = np.divmod(np.arange(nx * ny), ny)
+        w = RC_BLD_W // 2
+        share = ((abs(i - 60) <= w) & (abs(j - 30) <= w)).astype(np.float64)
+        side = PIX * (2 * w + 1)
+        D = PIX * 100
+        for bld in RC_BLDS:
+            through = D + bld * side
+            around = 2 * float(np.hypot((D - side) / 2, side / 2)) + side
+            ter = open_terrain(nx, ny, share=share, gain=np.zeros(nx * ny), bld=bld)
+            for r in ROUTERS:
+                x = _one(r, ter, a)
+                line = x.route(t).line
+                cost = along(ter, line, ter.per_m())
+                went = "around" if np.abs(line[:, 1] - line[0, 1]).max() > side / 2 else "through"
+                want = "around" if around < through else "through"
+                match x:
+                    case _PulledReach():          # no dearer than the grid path it pulls
+                        bar = along(ter, x.inner.route(t).line, ter.per_m()) * (1 + TOL_EXACT)
+                    case _TreeReach():
+                        bar = min(through, around) * (1 + OCTILE)
+                    case _:
+                        bar = min(through, around) * (1 + TOL_AROUND)
+                good = went == want and cost <= bar
+                ok &= good
+                print(f"  bld {bld:g}, {r.name}: through {through:.1f}, around {around:.1f}; went "
+                      f"{went}, its line costs {cost:.1f} -> {'ok' if good else 'BAD'}")
+    elif test == "gain":
+        rng = np.random.default_rng(RC_SEED)
+        i, j = np.divmod(np.arange(n * n), n)
+        gp = np.zeros(n * n)
+        for _ in range(RC_BUMPS):
+            ci, cj, s = rng.uniform(0, n), rng.uniform(0, n), rng.uniform(6, 20)
+            gp += rng.uniform(0.5, 2.0) * np.exp(-((i - ci) ** 2 + (j - cj) ** 2) / (2 * s * s))
+        share = np.zeros(n * n)
+        for _ in range(30):
+            ci, cj = rng.integers(0, n, size=2)
+            share[(abs(i - ci) <= 3) & (abs(j - cj) <= 3)] = 1.0
+        share[c0] = 0.0
+        ang = rng.uniform(0, 2 * np.pi, RC_TARGETS)
+        tg = ((n // 2 + np.round(RC_R_PX * np.cos(ang))) * n
+              + n // 2 + np.round(RC_R_PX * np.sin(ang))).astype(np.int64)
+        for bld in RC_GAIN_BLDS:
+            ter = open_terrain(n, n, share=share, gain=gp, bld=bld)
+            for r in ROUTERS:
+                x = _one(r, ter, c0)
+                rel = []
+                for t in tg:
+                    match x:
+                        case _PulledReach():      # its gain is its grid path's (the choice)
+                            brute = float(gp[x.inner.route(int(t)).path].sum())
+                        case _TreeReach():
+                            brute = float(gp[x.route(int(t)).path].sum())
+                        case _:
+                            brute = along(ter, x.route(int(t)).line, gp / PIX)
+                    rel.append(x.gain[t] / brute - 1)
+                err = np.abs(rel)
+                if not isinstance(r, Eikonal):
+                    judged, tol = float(err.max()), TOL_EXACT
+                elif bld == 0:
+                    judged, tol = float(err.max()), TOL_GAIN_EIK
+                else:
+                    judged, tol = float(np.median(err)), TOL_GAIN_EIK
+                good = judged <= tol
+                ok &= good
+                print(f"  bld {bld:g}, {r.name}: |one-pass gain / along its path - 1| median "
+                      f"{np.median(err):.2e}, at most {err.max():.2e} (judged "
+                      f"{'the median' if isinstance(r, Eikonal) and bld else 'the largest'}, tol "
+                      f"{tol:g}) -> {'ok' if good else 'BAD'}")
+    else:
+        raise SystemExit(__doc__)
+    print(f"router {test}: -> {'PASS' if ok else 'FAIL'}")
+    if not ok:
+        raise SystemExit(1)
+
+
 def names(fault: str | None) -> None:
-    """Every check plan's name round-trips, and each paths name with its attraction token dropped
-    is refused (the token is required: a name that omits it means nothing). Fault `keep` (the
-    token kept) fails it."""
+    """Every check plan's name round-trips, every router's too (each check paths plan with its
+    router swapped in), and each paths name with its attraction token or its router token dropped
+    is refused (the tokens are required: a name that omits one means nothing; the router's is how
+    a pre-2026-11-19 name, which had none, is refused). Fault `keep` (the tokens kept) fails
+    it."""
     if fault not in (None, "keep"):
         raise SystemExit("names' fault: keep")
     ok = True
-    for spec in (CHECK_PLAN, CHECK_SPUR, CHECK_DETOUR, CHECK_DIVIDES):
+    specs = [CHECK_PLAN, CHECK_SPUR, CHECK_DETOUR, CHECK_DIVIDES]
+    specs += [CHECK_PLAN.replace(".grid8.", f".{r.name}.", 1) for r in ROUTERS[1:]]
+    for spec in specs:
         p = Plan.of(spec)
         back = p.name == f"{spec}.v{REV}"
         ok &= back
         print(f"  {spec}: {'round-trips' if back else f'named {p.name}'}")
         if isinstance(p.candidates, Paths):
-            tok = f".{p.candidates.attract.name}."
-            bare = spec if fault == "keep" else spec.replace(tok, ".", 1)
-            try:
-                Plan.of(bare)
-                refused = False
-            except SystemExit:
-                refused = True
-            ok &= refused
-            print(f"    {bare}: {'refused' if refused else 'PARSES'}")
+            for tok in (f".{p.candidates.attract.name}.", f".{p.candidates.router.name}."):
+                bare = spec if fault == "keep" else spec.replace(tok, ".", 1)
+                try:
+                    Plan.of(bare)
+                    refused = False
+                except SystemExit:
+                    refused = True
+                ok &= refused
+                print(f"    {bare}: {'refused' if refused else 'PARSES'}")
     print(f"names {fault or 'none'}: -> {'PASS' if ok else 'FAIL'}")
     if not ok:
         raise SystemExit(1)
@@ -1314,7 +2201,7 @@ def check(verb: str, bid: str, fault: str | None) -> None:
             gk, _ = g.grad(st, u)
             gain = -gk * (1.0 - g.kt0) + np.abs(u[g.m.c.cell]) * g.contrast.leak_t(g)
         fc = e.faces()
-        cands = Paths(bld=20.0, pairs=6, face_m2=2000.0, ear_m=30.0, ends=Loop(),
+        cands = Paths(router=Grid8(), bld=20.0, pairs=6, face_m2=2000.0, ear_m=30.0, ends=Loop(),
                       attract=NoDetour()).ears(
             e, fc, gain, cost=gr.Cost(nu=2.0, price=0.1), scale=0.0)
         worst = 0.0
@@ -1339,20 +2226,20 @@ def check(verb: str, bid: str, fault: str | None) -> None:
         st = g.state(g.step >= 0)
         u, _ = g.solve(st)
         fc = e.faces()
-        cands = Paths(bld=20.0, pairs=4, face_m2=2000.0, ear_m=30.0, ends=Loop(),
+        cands = Paths(router=Grid8(), bld=20.0, pairs=4, face_m2=2000.0, ear_m=30.0, ends=Loop(),
                       attract=NoDetour()).ears(
             e, fc, g.contrast.gains(g, st, u), cost=gr.Cost(nu=2.0, price=0.1), scale=0.0)
         ok = bool(cands)
         for q in cands[:4]:
-            path = q.path[: max(1, 2 * len(q.path) // 3)] if fault == "spur" else q.path
-            tris = e.corridor(e.ra.xy[path], spur=False)
+            line = q.line[: max(1, 2 * len(q.line) // 3)] if fault == "spur" else q.line
+            tris = e.corridor(line, spur=False)
             n0 = fc.n
             g.step[tris] = 0
             n1 = e.faces().n
             g.step[tris] = -1
             split = n1 > n0
             ok &= split
-            print(f"  ear of {len(path)} pixels: faces {n0} -> {n1}: "
+            print(f"  ear of {len(line)} points: faces {n0} -> {n1}: "
                   f"{'splits' if split else 'a dead end'}")
         print(f"ends {bid} {fault or 'none'}: -> {'PASS' if ok else 'FAIL'}")
     elif verb == "spur":
@@ -1369,7 +2256,7 @@ def check(verb: str, bid: str, fault: str | None) -> None:
         bounding = e.bounding()
         ok = bool(spurs)
         for q in spurs[:SPUR_EARS]:
-            tris = e.corridor(e.ra.xy[q.path], spur=fault != "both-ends")
+            tris = e.corridor(q.line, spur=fault != "both-ends")
             on = np.zeros(g.nt, dtype=bool)
             on[tris] = True
             inner = on[g.pa] & on[g.pb]
@@ -1382,7 +2269,7 @@ def check(verb: str, bid: str, fault: str | None) -> None:
             g.step[tris] = -1
             good = len(np.unique(pieces)) == 1 and joined and n1 == fc.n
             ok &= good
-            L = float(np.hypot(*np.diff(e.ra.xy[q.path], axis=0).T).sum())
+            L = float(np.hypot(*np.diff(q.line, axis=0).T).sum())
             print(f"  spur of {L:.0f} m: {len(np.unique(pieces))} piece(s), "
                   f"{'joined' if joined else 'detached'}, faces {fc.n} -> {n1}")
         print(f"spur {bid} {fault or 'none'}: {len(spurs)} spurs among the candidates -> "
@@ -1417,7 +2304,7 @@ def check(verb: str, bid: str, fault: str | None) -> None:
                                     scale=0.0) if not q.spur]
         judged: list[tuple[str, float, float]] = []
         for q in cands:
-            L = float(np.hypot(*np.diff(ra.xy[q.path], axis=0).T).sum())
+            L = float(np.hypot(*np.diff(q.line, axis=0).T).sum())
             judged.append((f"ear of {L:.0f} m (credit {q.credit / g.P0:.3g} P0)", half * q.saving,
                            brute(int(q.path[0]), int(q.path[-1]), L)))
         a0 = int(cands[0].path[0])
@@ -1479,6 +2366,8 @@ def main(argv: list[str]) -> None:
         horseshoe(argv[2] if len(argv) == 3 else None)
     elif len(argv) in (2, 3) and argv[:2] == ["check", "names"]:
         names(argv[2] if len(argv) == 3 else None)
+    elif len(argv) in (3, 4) and argv[:2] == ["check", "router"]:
+        router_check(argv[2], argv[3] if len(argv) == 4 else None)
     elif len(argv) in (3, 4) and argv[0] == "check":
         check(argv[1], argv[2], argv[3] if len(argv) == 4 else None)
     else:
