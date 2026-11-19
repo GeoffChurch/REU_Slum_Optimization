@@ -18,8 +18,9 @@ restricted per-face solve) and differs only in which ears it commits (a Search S
   la<k>all     Lookahead(depth k, All): the same, all k ears of the winning bundle committed (k
                whole roads chosen jointly).
   float<r>     Floating (SFFS): greedy adds; after each, conditional exclusion (the removable ear,
-               not the one just added, whose removal leaves a state with more L_P than every state
-               the run has held at that D or less, the largest margin first; repeated), then up to
+               not the one just added, whose removal leaves a state above the frontier of the states
+               the run has held, interpolated at its D as the readout is, the largest margin first;
+               repeated), then up to
                r swap rounds (one removable ear out, the best rescored ear at the state without it
                in, by P_out - exact, kept if the global P falls and D does not rise).
 
@@ -31,8 +32,8 @@ greedy and lookahead, its trajectory), linearly interpolated.
 
 Rows (rows/<block>/<search>/): trace.parquet, one row per state the search held (its ears, P, L_P,
 D, C, the wall time, the action), and replay/ (crossings.py's layout, so crossings/analyze.py reads
-it): ears.build over the ears of the frontier state with the largest D under CROSS_D, in their add
-order, recorded by crossings.Recording.
+it): ears.build over the ears of the frontier state with the largest D under the plan's D, in
+their add order, recorded by crossings.Recording.
 
     L=research/roadless/atlas/lookahead/lookahead.py     # from the repo root, PYTHONPATH=.
     uv run python $L run <bid> <search> <plan>
@@ -61,7 +62,6 @@ import ears  # noqa: E402
 import growth as gr  # noqa: E402
 
 ROWS = HERE / "rows"
-CROSS_D = 0.15         # the replayed state: the frontier's largest D under this (the readout's top)
 TIE_L = 1e-9           # an improvement in L_P must exceed this (floating-point ties are not moves)
 CHECK_STEPS = 4        # check greedy: ears compared
 
@@ -169,8 +169,11 @@ class Trace:
                     f"({h.t:.0f}s)")
 
     def best_at(self, D: float) -> float:
-        """The most L_P among the held states at D or less (-inf: none)."""
-        return max((h.L_P for h in self.held if h.D <= D), default=-np.inf)
+        """L_P at D along the frontier of the held states (`frontier`, linearly interpolated, as
+        the readout reads it; its last L_P past its end)."""
+        fr = frontier(pd.DataFrame({"D": [h.D for h in self.held],
+                                    "L_P": [h.L_P for h in self.held]}))
+        return float(np.interp(D, fr.D.to_numpy(), fr.L_P.to_numpy()))
 
 
 # ------------------------------------------------------------------ searches
@@ -250,7 +253,8 @@ class Lookahead:
                 break
             last = len(nodes) == self.depth - 1
 
-            def key(s: ears.Scored, last: bool = last) -> float:
+            def key(s: ears.Scored, last: bool = last, gain: float = gain,
+                    cost: float = cost) -> float:
                 return ((gain + s.ear.exact + s.ear.credit) / (cost + s.ear.cost) if last
                         else ears.ratio(s.ear))
 
@@ -428,7 +432,7 @@ def run(bid: str, search: Search, plan: ears.Plan) -> None:
     held.to_parquet(out / "trace.parquet")
     print(f"search done: {len(tr.held)} states, {tr.held[-1].t:.0f}s", flush=True)
     fr = frontier(held)
-    under = fr[fr.D < CROSS_D]
+    under = fr[fr.D < plan.D]
     ids = tuple(int(i) for i in under.iloc[-1].ears)
     replay(b, plan, sp.table, ids, out=out / "replay", world=f"block:{bid}:{search.name}")
     print(f"replayed {len(ids)} ears (D {under.iloc[-1].D:.4f}); done ({time.time() - t0:.0f}s)",
