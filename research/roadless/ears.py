@@ -1042,6 +1042,70 @@ class EarWorld:
         return c
 
 
+class Scored(NamedTuple):
+    """A rescored candidate (`offer`): the ear, its exact gain filled in, and the faces with it
+    built."""
+    ear: Ear
+    faces: Face
+
+
+class Offered(NamedTuple):
+    """A state's step (`offer`): its costed candidates, best first order per cost first, and the
+    `exact` splitting ones (and spurs) among them rescored by the restricted solve."""
+    cands: list[Ear]
+    scored: list[Scored]
+
+
+def ratio(q: Ear) -> float:
+    """An ear's exact score: (exact gain + credit) / cost (build's pick)."""
+    return (q.exact + q.credit) / q.cost
+
+
+def scale_of(scored: list[Scored], *, scale: float) -> float:
+    """The credit's weight after a step (build): its rescored ears' first order over their exact
+    gain, `scale` (the last step's) where they have none."""
+    ex = sum(s.ear.exact for s in scored)
+    return sum(s.ear.first for s in scored) / ex if ex > 0 else scale
+
+
+def offer(e: EarWorld, plan: Plan, faces: Face, st: gcl.State, u: F64, *, scale: float,
+          log: Any) -> Offered:
+    """The state's step (g.step the grown roads, (st, u) its solve, `faces` its faces): the
+    candidates, and the `exact` splitting ones rescored; build picks the best `ratio`, a search
+    (atlas/lookahead) may look further. Leaves g.step as it found it."""
+    g = e.g
+    gain = plan.contrast.gains(g, st, u)
+    e.set_u(u)
+    cands = plan.candidates.ears(e, faces, gain, cost=plan.cost, scale=scale)
+    cands.sort(key=lambda q: -(q.first + scale * q.credit) / q.cost)
+    on = g.step >= 0
+    mark = int(g.step.max()) + 1
+    # the splitting ones only (no dead end) and the spurs (a dead end by design: Spur), best
+    # first order per cost first, `exact` of them
+    split: list[tuple[Ear, Face]] = []
+    for q in cands:
+        if len(split) == plan.exact:
+            break
+        g.step[q.tris] = mark
+        nf = e.faces()
+        g.step[q.tris] = -1
+        if nf.n > faces.n or q.spur:
+            split.append((q, nf))
+        else:
+            log(f"  refused an ear in face {q.face}: it splits nothing")
+    before: dict[int, float] = {}
+    scored = []
+    for q, nf in split:
+        cells = e.face_cells(faces, q.face)
+        if q.face not in before:
+            before[q.face] = e.P_face(on, cells)
+        on2 = on.copy()
+        on2[q.tris] = True
+        scored.append(Scored(ear=q._replace(exact=before[q.face] - e.P_face(on2, cells)),
+                             faces=nf))
+    return Offered(cands=cands, scored=scored)
+
+
 def build(e: EarWorld, plan: Plan, *, out: Path, log: Any, steps: int | None = None) -> None:
     """Ears greedily until D reaches plan.D (or `steps` ears: the checks' short runs)."""
     g = e.g
@@ -1080,43 +1144,15 @@ def build(e: EarWorld, plan: Plan, *, out: Path, log: Any, steps: int | None = N
         pd.DataFrame({"step": g.step}).to_parquet(out / "tri_step.parquet")
         if D >= plan.D or (steps is not None and step >= steps):
             break
-        gain = plan.contrast.gains(g, st, u)
-        e.set_u(u)
-        cands = plan.candidates.ears(e, faces, gain, cost=plan.cost, scale=scale)
-        if not cands:
+        off = offer(e, plan, faces, st, u, scale=scale, log=log)
+        if not off.cands:
             log("no ear left: stopped short of the budget")
             break
-        cands.sort(key=lambda q: -(q.first + scale * q.credit) / q.cost)
-        on = g.step >= 0
-        # the splitting ones only (no dead end) and the spurs (a dead end by design: Spur), best
-        # first order per cost first, `exact` of them
-        split: list[tuple[Ear, Face]] = []
-        for q in cands:
-            if len(split) == plan.exact:
-                break
-            g.step[q.tris] = step
-            nf = e.faces()
-            g.step[q.tris] = -1
-            if nf.n > faces.n or q.spur:
-                split.append((q, nf))
-            else:
-                log(f"  refused an ear in face {q.face}: it splits nothing")
-        before: dict[int, float] = {}
-        scored = []
-        for q, nf in split:
-            cells = e.face_cells(faces, q.face)
-            if q.face not in before:
-                before[q.face] = e.P_face(on, cells)
-            on2 = on.copy()
-            on2[q.tris] = True
-            scored.append((q._replace(exact=before[q.face] - e.P_face(on2, cells)), nf))
-        if not scored:
+        if not off.scored:
             log("no candidate ear splits a face: stopped")
             break
-        built, faces = max(scored, key=lambda qn: (qn[0].exact + qn[0].credit) / qn[0].cost)
-        ex = sum(q.exact for q, _ in scored)
-        if ex > 0:
-            scale = sum(q.first for q, _ in scored) / ex
+        built, faces = max(off.scored, key=lambda s: ratio(s.ear))
+        scale = scale_of(off.scored, scale=scale)
         g.step[built.tris] = step
         xy = e.ra.xy[built.path]
         picks.append(dict(step=step, face=built.face, spur=built.spur,
@@ -1125,7 +1161,7 @@ def build(e: EarWorld, plan: Plan, *, out: Path, log: Any, steps: int | None = N
                           length=float(np.hypot(*np.diff(xy, axis=0).T).sum()),
                           n_tris=len(built.tris), dD=built.dD, dC=built.dC, cost=built.cost,
                           first=built.first, exact=built.exact, saving=built.saving,
-                          credit=built.credit, offered=len(cands)))
+                          credit=built.credit, offered=len(off.cands)))
         step += 1
     log(f"{faces.n - n0} faces added by {step} ears")
 
