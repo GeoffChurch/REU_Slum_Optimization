@@ -155,16 +155,22 @@ class Held(NamedTuple):
 
 
 class Trace:
-    def __init__(self, sp: Space) -> None:
-        self.sp = sp
+    """The held states, written to `path` at each (a long run killed keeps its trace)."""
+
+    def __init__(self, sp: Space, *, path: Path) -> None:
+        self.sp, self.path = sp, path
         self.t0 = time.time()
         self.held: list[Held] = []
+
+    def frame(self) -> pd.DataFrame:
+        return pd.DataFrame([h._asdict() | {"ears": list(h.ears)} for h in self.held])
 
     def hold(self, n: Node, action: str) -> None:
         P0 = self.sp.e.g.P0
         h = Held(ears=n.ears, P=n.P, L_P=1.0 - n.P / P0, D=n.D, C=n.C, t=time.time() - self.t0,
                  action=action)
         self.held.append(h)
+        self.frame().to_parquet(self.path)
         self.sp.log(f"{action:>5} {len(n.ears):3d} ears: L_P {h.L_P:.4f}, D {h.D:.4f} "
                     f"({h.t:.0f}s)")
 
@@ -424,12 +430,11 @@ def run(bid: str, search: Search, plan: ears.Plan) -> None:
     print(f"{bid} {search.name} {plan.name}: {e.g.nt} triangles, raster {e.ra.shape} "
           f"({time.time() - t0:.0f}s)", flush=True)
     sp = Space(e, plan, log=lambda s: print(s, flush=True))
-    tr = Trace(sp)
+    tr = Trace(sp, path=out / "trace.parquet")
     root = sp.node((), scale=0.0)
     tr.hold(root, "start")
     search.run(sp, root, tr, budget=plan.D)
-    held = pd.DataFrame([h._asdict() | {"ears": list(h.ears)} for h in tr.held])
-    held.to_parquet(out / "trace.parquet")
+    held = tr.frame()
     print(f"search done: {len(tr.held)} states, {tr.held[-1].t:.0f}s", flush=True)
     fr = frontier(held)
     under = fr[fr.D < plan.D]
