@@ -7,7 +7,7 @@ multiple of greedy's; and the crossings in each search's replayed network (cross
 definition, TOL_M and ROAD_W), against greedy's.
 
     S=research/roadless/atlas/lookahead/summary.py      # from the repo root, PYTHONPATH=.
-    uv run python $S <plan> <budget>...        # e.g. ears.paths...D0.15 0.05 0.1 0.15
+    uv run python $S [--also <plan>]... <plan> <budget>...   # e.g. ...D0.15 0.05 0.1 0.15
 """
 from __future__ import annotations
 
@@ -60,7 +60,13 @@ def readout(d: Path, *, nu: float, price: float,
 
 
 def main(argv: list[str]) -> None:
-    """argv: the plan's name (no .v<REV>), then the budgets."""
+    """argv: [--also <plan>]... the plan's name (no .v<REV>), then the budgets. A block's search
+    with no run of the plan is read from an --also plan's (the same plan to a smaller D: a run
+    cut short for time), the first that has one."""
+    also: list[str] = []
+    while argv[:1] == ["--also"]:
+        also.append(argv[1])
+        argv = argv[2:]
     if len(argv) < 2:
         raise SystemExit(__doc__)
     plan_spec, budgets = argv[0], tuple(float(x) for x in argv[1:])
@@ -68,9 +74,12 @@ def main(argv: list[str]) -> None:
     OUT.mkdir(exist_ok=True)
     rows = []
     fronts: dict[tuple[str, str], pd.DataFrame] = {}
-    for d in sorted(la.ROWS.glob(f"ZAF*/*.{la.ears.Plan.of(plan_spec).name}")):
-        if not (d / "trace.parquet").exists():
-            continue
+    dirs: dict[tuple[str, str], Path] = {}
+    for spec in reversed([plan_spec, *also]):
+        for d in la.ROWS.glob(f"ZAF*/*.{la.ears.Plan.of(spec).name}"):
+            if (d / "trace.parquet").exists():
+                dirs[(d.parent.name, d.name.split(".", 1)[0])] = d
+    for d in [dirs[k] for k in sorted(dirs)]:
         search, plan_name = d.name.split(".", 1)
         plan = la.ears.Plan.of(plan_name.rsplit(".v", 1)[0])
         r, fr = readout(d, nu=plan.cost.nu, price=plan.cost.price, budgets=budgets)
