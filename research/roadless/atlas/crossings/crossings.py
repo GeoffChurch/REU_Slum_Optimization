@@ -17,8 +17,10 @@ Worlds:
                                    SETBACK_M from its edge, CLEAR_M from every footprint already
                                    placed), to the block's own count or until MAX_TRIES misses;
                                    <shape> `same` (the block's boundary and streets, its OSM ways
-                                   outside its interior only) or `rect` (a RECT_ASPECT rectangle of
-                                   the block's area, all edges street, no OSM features)
+                                   outside its interior only), `rect` (a RECT_ASPECT rectangle of
+                                   the block's area, all edges street, no OSM features) or `tilt`
+                                   (that rectangle turned TILT_DEG off the raster's axes, so its
+                                   roads do not run along the ear sources' SRC_M grid)
   lattice:<bid>:<seed>             H2's positive control: <bid>'s area as a RECT_ASPECT rectangle
                                    of LAT_W x LAT_W m buildings on a LAT_W + LAT_GAP m grid (straight
                                    alleys LAT_GAP wide both ways), the grid turned by a random angle
@@ -56,6 +58,8 @@ SETBACK_M = 1.0        # fabric: a footprint this far inside the block's edge
 CLEAR_M = 1.0          # fabric: footprints at least this far apart (no two homes overlap)
 MAX_TRIES = 200_000    # fabric: drops before it stops short of the block's count
 RECT_ASPECT = 1.5      # fabric/lattice `rect`: width over height
+TILT_DEG = 30.0        # fabric `tilt`: the rectangle turned this far off the raster's (and the
+                       # ear sources' SRC_M grid's) axes
 LAT_W = 8.0            # m: lattice: a building's side
 LAT_GAP = 3.0          # m: lattice: an alley's width
 INTERIOR_M = 5.0       # m: fabric `same`: an OSM way meeting the block this far in is fabric
@@ -159,8 +163,8 @@ class Fabric:
     seed: int
 
     def __post_init__(self) -> None:
-        if self.shape not in ("same", "rect"):
-            raise ValueError(f"{self}: shape same|rect")
+        if self.shape not in ("same", "rect", "tilt"):
+            raise ValueError(f"{self}: shape same|rect|tilt")
 
     @property
     def name(self) -> str:
@@ -179,6 +183,8 @@ class Fabric:
             osm = gx.Osm(ways=ways, nodes=osm.nodes.iloc[:0], areas=osm.areas.iloc[:0])
         else:
             region = _rect_of(b)
+            if self.shape == "tilt":
+                region = affinity.rotate(region, TILT_DEG, origin="centroid")
             streets = region.exterior
             osm = _empty_osm(osm)
         polys = _drop(src, region, n=len(src), rng=rng)

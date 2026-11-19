@@ -206,7 +206,8 @@ def ends_of(run: Run) -> tuple[pd.DataFrame, Pools]:
                 keep = pa.side == side
                 pools.uniform.append(pa.foot[keep])
                 lat = keep & src[adm] if which == "a" else keep
-                pools.lattice.append(pa.foot[lat])
+                # the end's own place where sources_of's stand-in face areas miss it
+                pools.lattice.append(pa.foot[lat] if lat.any() else pl.foot)
                 # the face's deepest pixel at state i, onto k
                 infc = np.flatnonzero(ra.pf[i] == face)
                 deep = infc[np.argmax(ra.u[i][infc])]

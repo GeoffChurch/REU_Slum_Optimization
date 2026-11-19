@@ -18,6 +18,8 @@ sys.path.insert(0, str(HERE))
 import analyze as an  # noqa: E402
 
 ROWS = HERE / "rows"
+ALIGNED = 0.25     # a road's halves "aligned": their deepest spots closer along it than 3 in 4
+                   # independent uniform draws (analyze.halves_of's pct)
 OUT = HERE / "results"
 
 
@@ -33,9 +35,17 @@ def mechanism(d: Path) -> dict[str, float]:
     """The H1/H2 measures of one run (analyze's ends and halves)."""
     e = pd.read_parquet(d / "ends.parquet")
     h = pd.read_parquet(d / "halves.parquet")
+    if "deep_pct" not in e:            # no end joined an ear: only the halves count
+        e = e.reindex(columns=[*e.columns, "deep_pct", "ridge_pct", "lane_arm", "lane_far"])
     on = e[e.road >= 0]
     c, t = on[on.crossing], on[~on.crossing]
+    p = pd.read_parquet(d / "pairs.parquet")
+    crossed = set(p.road[p.ds <= an.TOL_M]) if len(p) else set()
+    hit = h.road.isin(crossed) if len(h) else pd.Series(dtype=bool)
+    al = h.pct <= ALIGNED if len(h) else pd.Series(dtype=bool)
     return dict(
+        aligned_roads=int(al.sum()), aligned_crossed=int((al & hit).sum()),
+        other_roads=int((~al).sum()), other_crossed=int((~al & hit).sum()),
         ends_on_ears=len(on), crossing_ends=len(c),
         deep_pct_sum=float(on.deep_pct.sum()), deep_n=int(on.deep_pct.notna().sum()),
         halves_pct_sum=float(h.pct.sum()) if len(h) else 0.0, halves_n=len(h),
@@ -77,7 +87,9 @@ def main() -> None:
         bld_share_crossing=m.bld_cross_sum / m.crossing_ends, bld_share_t=m.bld_t_sum / m.n_t,
         lane_arm_crossing=m.lane_arm_cross_sum / m.crossing_ends,
         lane_arm_t=m.lane_arm_t_sum / m.n_t,
-        t_far_side_open_lane=m.lane_far_t_open / m.n_t))
+        t_far_side_open_lane=m.lane_far_t_open / m.n_t,
+        crossed_if_aligned=m.aligned_crossed / m.aligned_roads, aligned_roads=m.aligned_roads,
+        crossed_otherwise=m.other_crossed / m.other_roads, other_roads=m.other_roads))
     out.to_csv(OUT / "mechanism.csv", float_format="%.4g")
     cols = ["world", "runs", "ears", "opposite_pairs"] + [
         f"{k}{x:g}" for x in an.TOLS for k in ("obs", "null", "p", "lnull", "lp")]

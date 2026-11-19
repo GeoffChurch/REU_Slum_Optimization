@@ -1,8 +1,2 @@
 block:ZAF.9.3.1_1_5810 ears.paths.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
 block:ZAF.9.3.1_1_5810 ears.paths.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
-block:ZAF.9.3.1_1_5618 ears.paths.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
-block:ZAF.9.3.1_1_20269 ears.paths.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
-block:ZAF.9.3.1_1_6310 ears.paths.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
-block:ZAF.9.3.1_1_21634 ears.paths.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
-block:ZAF.9.3.1_1_44882 ears.paths.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
-block:ZAF.9.3.1_1_18895 ears.paths.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
