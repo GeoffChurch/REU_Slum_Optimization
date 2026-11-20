@@ -22,6 +22,7 @@ Per run (crossings rows: <world>/<plan>/):
     R=research/roadless/atlas/routers/routers.py       # from the repo root, PYTHONPATH=.:src
     python $R table                                     # results/*.csv and the tables printed
     python $R plot <world> <b> <out.png>                # the four routers side by side
+    python $R budgets <world> <b> <routers,> <D,> <out.png>  # a row per router, a column per budget
 """
 from __future__ import annotations
 
@@ -29,7 +30,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import NamedTuple, TypeAlias
+from typing import Any, NamedTuple, TypeAlias
 
 import numpy as np
 import pandas as pd
@@ -246,6 +247,45 @@ def table() -> None:
         print(Q.round(4).to_string(index=False))
 
 
+def panel(ax: Any, m: Meta, *, budget: float | None) -> str:
+    """Draws m's network on ax (with `budget`, its prefix to that D, as an.load cuts it), the
+    crossings among its ears ringed; returns its caption."""
+    import matplotlib
+
+    run = an.load(m.dir, budget=budget)
+    ra = run.ra
+    nx, ny = ra.shape
+    img = np.ones((ny, nx, 3))
+    img[~ra.inside.reshape(nx, ny).T] = (0.97, 0.97, 0.96)
+    img[(ra.inside & (ra.bld > 0)).reshape(nx, ny).T] = matplotlib.colors.to_rgb(cx_bld())
+    ext = (ra.lo[0], ra.lo[0] + nx * an.PIX, ra.lo[1], ra.lo[1] + ny * an.PIX)
+    ax.imshow(img, origin="lower", extent=ext, interpolation="nearest")
+    n = len(run.paths)
+    for i, p in enumerate(run.paths):
+        for g in shapely.get_parts(LineString(p).buffer(an.ROAD_W / 2)):
+            x, y = g.exterior.xy
+            ax.fill(x, y, color="#52514e", alpha=0.95 - 0.5 * i / max(n - 1, 1), lw=0)
+    d = m.dir
+    ends = pd.read_parquet(d / "ends.parquet") if (d / "ends.parquet").exists() else None
+    pairs = pd.read_parquet(d / "pairs.parquet") if (d / "pairs.parquet").exists() else None
+    nx_ = 0
+    if ends is not None and pairs is not None:
+        for q in pairs.itertuples():
+            if q.ds > an.TOL_M or max(q.a_ear, q.b_ear) >= n:
+                continue
+            a = ends[(ends.ear == q.a_ear) & (ends.road == q.road)]
+            c = ends[(ends.ear == q.b_ear) & (ends.road == q.road)]
+            ax.scatter([(a.x.mean() + c.x.mean()) / 2], [(a.y.mean() + c.y.mean()) / 2],
+                       s=200, facecolors="none", edgecolors="#eb6834", linewidths=2, zorder=5)
+            nx_ += 1
+    st = pd.read_parquet(d / "steps.parquet")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_aspect("equal")
+    return (f"{m.router}: {n} ears, D {st.D.iloc[n]:.3f}, L_P {st.L_P.iloc[n]:.3f}, "
+            f"{nx_} crossings")
+
+
 def plot(world: str, b: float, out: Path) -> None:
     import matplotlib
 
@@ -259,39 +299,27 @@ def plot(world: str, b: float, out: Path) -> None:
             ax.set_title(f"{r}: no run")
             ax.axis("off")
             continue
-        run = an.load(ms[r].dir, budget=None)
-        ra = run.ra
-        nx, ny = ra.shape
-        img = np.ones((ny, nx, 3))
-        img[~ra.inside.reshape(nx, ny).T] = (0.97, 0.97, 0.96)
-        img[(ra.inside & (ra.bld > 0)).reshape(nx, ny).T] = matplotlib.colors.to_rgb(cx_bld())
-        ext = (ra.lo[0], ra.lo[0] + nx * an.PIX, ra.lo[1], ra.lo[1] + ny * an.PIX)
-        ax.imshow(img, origin="lower", extent=ext, interpolation="nearest")
-        n = len(run.paths)
-        for i, p in enumerate(run.paths):
-            for g in shapely.get_parts(LineString(p).buffer(an.ROAD_W / 2)):
-                x, y = g.exterior.xy
-                ax.fill(x, y, color="#52514e", alpha=0.95 - 0.5 * i / max(n - 1, 1), lw=0)
-        d = ms[r].dir
-        ends = pd.read_parquet(d / "ends.parquet") if (d / "ends.parquet").exists() else None
-        pairs = pd.read_parquet(d / "pairs.parquet") if (d / "pairs.parquet").exists() else None
-        nx_ = 0
-        if ends is not None and pairs is not None:
-            for q in pairs.itertuples():
-                if q.ds > an.TOL_M:
-                    continue
-                a = ends[(ends.ear == q.a_ear) & (ends.road == q.road)]
-                c = ends[(ends.ear == q.b_ear) & (ends.road == q.road)]
-                ax.scatter([(a.x.mean() + c.x.mean()) / 2], [(a.y.mean() + c.y.mean()) / 2],
-                           s=200, facecolors="none", edgecolors="#eb6834", linewidths=2, zorder=5)
-                nx_ += 1
-        st = pd.read_parquet(ms[r].dir / "steps.parquet")
-        ax.set_title(f"{r}: {n} ears, D {st.D.iloc[-1]:.2f}, L_P {st.L_P.iloc[-1]:.3f}, "
-                     f"{nx_} crossings", fontsize=9)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_aspect("equal")
+        ax.set_title(panel(ax, ms[r], budget=None), fontsize=9)
     fig.suptitle(f"{world}, b{b:g}", fontsize=11)
+    fig.tight_layout()
+    fig.savefig(out)
+    plt.close(fig)
+
+
+def budgets(world: str, b: float, routers: list[str], Ds: list[float], out: Path) -> None:
+    """A grid: a row per router, a column per budget D (each the run's prefix to it)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    ms = {m.router: m for m in runs() if m.world == world and m.b == b}
+    fig, axs = plt.subplots(len(routers), len(Ds), figsize=(4.6 * len(Ds), 4.6 * len(routers)),
+                            dpi=130, squeeze=False)
+    for row, r in zip(axs, routers, strict=True):
+        for ax, D in zip(row, Ds, strict=True):
+            ax.set_title(f"D {D:g} -- " + panel(ax, ms[r], budget=D), fontsize=8)
+    fig.suptitle(f"{world}, b{b:g}: each run's prefix to each budget", fontsize=11)
     fig.tight_layout()
     fig.savefig(out)
     plt.close(fig)
@@ -306,6 +334,9 @@ def main(argv: list[str]) -> None:
         table()
     elif len(argv) == 4 and argv[0] == "plot":
         plot(argv[1], float(argv[2]), Path(argv[3]))
+    elif len(argv) == 6 and argv[0] == "budgets":
+        budgets(argv[1], float(argv[2]), argv[3].split(","),
+                [float(x) for x in argv[4].split(",")], Path(argv[5]))
     else:
         raise SystemExit(__doc__)
 

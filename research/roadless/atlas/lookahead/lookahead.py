@@ -1,22 +1,16 @@
 """Less greedy searches around Shock Reblock (owner 2026-11-19: "Is it possible to test a less
 greedy version that jointly solves for k whole roads at a time? Or a floating search
-middle-ground?").
+middle-ground?"). Lookahead (depth-k rollouts, receding-horizon or k ears at once) was tried and
+deleted as dominated (no better than greedy beyond noise at 2.5-7.5x the time; the wiki's
+reblock/lookahead-does-not-beat-shock-reblocks-greedy, commit 52a0b2ec for its code and runs).
 
 Shock Reblock (ears.py's `paths` plan) builds one ear a step: the best exact gain per cost among
 the step's `exact` rescored candidates (ears.offer, ears.ratio). Every search here reuses that step
 unchanged (ears.offer: the state's costed candidates and the splitting ones rescored by the
 restricted per-face solve) and differs only in which ears it commits (a Search Strategy):
 
-  greedy       Lookahead(depth 1, First): the best ears.ratio, ears.build's pick (the check
-               `greedy` compares the two runs' ears).
-  la<k>first   Lookahead(depth k, First), receding horizon: per rescored candidate c1 of the root,
-               build it and roll out k - 1 more ears, each the best ears.ratio at its state but the
-               last, which is the one maximising the bundle's (sum of exact gains) / (sum of
-               costs); the bundle with the best (sum gain) / (sum cost) wins and its first ear is
-               committed. At k = 2 that is the whole K x K tree of the candidates; at k = 3 the
-               middle ear is greedy.
-  la<k>all     Lookahead(depth k, All): the same, all k ears of the winning bundle committed (k
-               whole roads chosen jointly).
+  greedy       Greedy: the best ears.ratio, ears.build's pick (the check `greedy` compares
+               the two runs' ears).
   float<r>     Floating (SFFS): greedy adds; after each, conditional exclusion (the removable ear,
                not the one just added, whose removal leaves a state above the frontier of the states
                the run has held, interpolated at its D as the readout is, the largest margin first;
@@ -28,7 +22,7 @@ An ear is removable when, without it, every other ear still splits its face (rem
 too lowers the face count: none is left a dead end).
 
 Readout (summary.py): L_P at matched D along the Pareto frontier of the states a run held (for
-greedy and lookahead, its trajectory), linearly interpolated.
+greedy, its trajectory), linearly interpolated.
 
 Rows (rows/<block>/<search>/): trace.parquet, one row per state the search held (its ears, P, L_P,
 D, C, the wall time, the action), and replay/ (crossings.py's layout, so crossings/analyze.py reads
@@ -193,81 +187,13 @@ class Search(Protocol):
         ...
 
 
-class Commit(Protocol):
-    @property
-    def name(self) -> str: ...
-
-    def take(self, k: int) -> int:
-        """Of a winning bundle of k ears, how many to commit."""
-        ...
-
-
 @dataclass(frozen=True, kw_only=True)
-class First:
-    """Receding horizon: the bundle's first ear."""
+class Greedy:
+    """ears.build's pick: each step the best ears.ratio among the rescored candidates."""
 
     @property
     def name(self) -> str:
-        return "first"
-
-    def take(self, k: int) -> int:
-        return 1
-
-
-@dataclass(frozen=True, kw_only=True)
-class All:
-    """Joint k-at-a-time: the whole bundle."""
-
-    @property
-    def name(self) -> str:
-        return "all"
-
-    def take(self, k: int) -> int:
-        return k
-
-
-class Bundle(NamedTuple):
-    nodes: list[Node]          # the states after each of its ears
-    gain: float                # sum of exact gain + credit
-    cost: float
-
-    @property
-    def score(self) -> float:
-        return self.gain / self.cost
-
-
-@dataclass(frozen=True, kw_only=True)
-class Lookahead:
-    depth: int
-    commit: Commit
-
-    def __post_init__(self) -> None:
-        if self.depth < 1:
-            raise ValueError(f"{self}: depth >= 1")
-
-    @property
-    def name(self) -> str:
-        return "greedy" if self.depth == 1 else f"la{self.depth}{self.commit.name}"
-
-    def rollout(self, sp: Space, root: Node, s1: ears.Scored) -> Bundle:
-        n = sp.child(root, s1)
-        nodes = [n]
-        gain, cost = s1.ear.exact + s1.ear.credit, s1.ear.cost
-        while len(nodes) < self.depth:
-            sc = sp.offered(nodes[-1]).scored
-            if not sc:
-                break
-            last = len(nodes) == self.depth - 1
-
-            def key(s: ears.Scored, last: bool = last, gain: float = gain,
-                    cost: float = cost) -> float:
-                return ((gain + s.ear.exact + s.ear.credit) / (cost + s.ear.cost) if last
-                        else ears.ratio(s.ear))
-
-            s = max(sc, key=key)
-            nodes.append(sp.child(nodes[-1], s))
-            gain, cost = gain + s.ear.exact + s.ear.credit, cost + s.ear.cost
-        return Bundle(nodes=nodes, gain=gain, cost=cost)
+        return "greedy"
 
     def run(self, sp: Space, root: Node, tr: Trace, *, budget: float) -> None:
         while root.D < budget:
@@ -275,13 +201,8 @@ class Lookahead:
             if not sc:
                 sp.log("no candidate ear splits a face: stopped")
                 return
-            if self.depth == 1:                       # greedy: only the pick's state is solved
-                b = self.rollout(sp, root, max(sc, key=lambda s: ears.ratio(s.ear)))
-            else:
-                b = max((self.rollout(sp, root, s) for s in sc), key=lambda b: b.score)
-            for n in b.nodes[:self.commit.take(len(b.nodes))]:
-                tr.hold(n, "add")
-                root = n
+            root = sp.child(root, max(sc, key=lambda s: ears.ratio(s.ear)))
+            tr.hold(root, "add")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -345,13 +266,10 @@ class Floating:
 
 def search_of(spec: str) -> Search:
     if spec == "greedy":
-        return Lookahead(depth=1, commit=First())
-    if spec.startswith("la") and spec.endswith(("first", "all")):
-        k = int(spec[2:].removesuffix("first").removesuffix("all"))
-        return Lookahead(depth=k, commit=First() if spec.endswith("first") else All())
+        return Greedy()
     if spec.startswith("float"):
         return Floating(rounds=int(spec[5:]), max_moves=1000)
-    raise SystemExit(f"{spec}: a search is greedy | la<k>first | la<k>all | float<rounds>")
+    raise SystemExit(f"{spec}: a search is greedy | float<rounds>")
 
 
 # ------------------------------------------------------------------ replay (crossings' layout)
