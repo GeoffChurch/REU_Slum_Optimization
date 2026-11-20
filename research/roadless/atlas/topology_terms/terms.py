@@ -107,7 +107,7 @@ WALK_X = 10.0            # their travelcost=True factor on non-road edges
 SKEL_SIMPLIFY = 0.5      # m: the corridor skeleton's raster stairs simplified away
 ROAD_W = 7.0             # m: the line methods' road width (topology's, the floor's, bisections')
 BISECTIONS = 6
-SHOCK = "ears.paths.b20.f100.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.91.v3"  # build.py COMPARED
+SHOCK = "ears.paths.grid8.b20.f100.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.91.v3"  # build.py COMPARED
 TOPOLOGY_GRID = "topology.a10.s0.w7.built"                                     # its grid table
 DEMO_D = (0.05, 0.10, 0.15)                        # the Demo page's slider budgets reported
 

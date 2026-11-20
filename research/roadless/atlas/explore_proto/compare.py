@@ -148,10 +148,10 @@ def sheets() -> None:
 # The face-off's further methods (owner 2026-11-03: the spur runs beside Shock Reblock's loops):
 # each a grid on 41785 (atlas/buildout.py `table`), with the label the picker shows.
 FACEOFF = (
-    (bd.Grid("ears.paths.b20.f100.e30.spur10-30.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.91.v3",
+    (bd.Grid("ears.paths.grid8.b20.f100.e30.spur10-30.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.91.v3",
              stem="es30", stops_because="no road left that would split a sub-block or end a spur"),
      "Shock Reblock with spurs of 10 to 30 m"),
-    (bd.Grid("ears.paths.b20.f100.e30.spur10-80.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.91.v3",
+    (bd.Grid("ears.paths.grid8.b20.f100.e30.spur10-80.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.91.v3",
              stem="es80", stops_because="no road left that would split a sub-block or end a spur"),
      "Shock Reblock with spurs of 10 to 80 m"),
 )
