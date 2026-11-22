@@ -963,6 +963,17 @@ class Free(NamedTuple):
     per_m: F64
 
 
+def _polygons(g: Any) -> NDArray[np.object_]:
+    """g's polygons of positive area (an overlay snapped to a grid can return a collection with
+    collapsed lines and points beside them, which the next overlay refuses: mixed-dimension)."""
+    p = shapely.get_parts(shapely.get_parts(g))          # a collection's multipolygons too
+    return p[(shapely.get_type_id(p) == 3) & (shapely.area(p) > 0)]
+
+
+def _polygonal(g: Any) -> Any:
+    return shapely.multipolygons(_polygons(g))
+
+
 def free_of(vec: Shapes, f: int, *, bld: float) -> Free:
     """Face f's free space: its polygon (simplified to FACE_SIMPLIFY_M) cut by the footprints
     into open pieces (1 per metre: the face less the footprints, opened by GAP_M / 2, so a crack
@@ -970,30 +981,23 @@ def free_of(vec: Shapes, f: int, *, bld: float) -> Free:
     building pieces (1 + bld: the rest), rings segmentized to SEGMENT_M and the overlay snapped
     to GRID_M, so pieces meet vertex for vertex; where a metre through a building costs
     infinitely much (binf) the building pieces are holes."""
-    F = shapely.segmentize(shapely.set_precision(shapely.simplify(vec.face(f), FACE_SIMPLIFY_M),
-                                                 GRID_M), SEGMENT_M)
+    F = _polygonal(shapely.segmentize(shapely.set_precision(
+        _polygonal(shapely.simplify(vec.face(f), FACE_SIMPLIFY_M)), GRID_M), SEGMENT_M))
     fp = vec.footprints
     near = fp[shapely.intersects(fp, F)]
-    U = shapely.segmentize(shapely.union_all(near, grid_size=GRID_M), SEGMENT_M)
+    U = _polygonal(shapely.segmentize(shapely.union_all(near, grid_size=GRID_M), SEGMENT_M))
     r = GAP_M / 2
-    opened = shapely.buffer(shapely.buffer(shapely.difference(F, U, grid_size=GRID_M), -r,
-                                           join_style="mitre"), r, join_style="mitre")
-    opened = shapely.intersection(F, shapely.set_precision(shapely.make_valid(opened), GRID_M),
-                                  grid_size=GRID_M)
-    op = shapely.get_parts(opened)
-    op = op[shapely.get_type_id(op) == 3]                # polygons: no lines, points (slivers)
+    opened = shapely.buffer(shapely.buffer(_polygonal(shapely.difference(F, U, grid_size=GRID_M)),
+                                           -r, join_style="mitre"), r, join_style="mitre")
+    opened = _polygonal(shapely.set_precision(_polygonal(shapely.make_valid(opened)), GRID_M))
+    op = _polygons(shapely.intersection(F, opened, grid_size=GRID_M))
     opened = shapely.multipolygons(op)
     w = 1.0 + bld
     if np.isinf(w):
-        domain, pieces, per_m = opened, op, np.ones(len(op))
-    else:
-        inner = shapely.get_parts(shapely.difference(F, opened, grid_size=GRID_M))
-        inner = inner[shapely.get_type_id(inner) == 3]   # polygons: no lines, points
-        domain = F
-        pieces = np.concatenate([op, inner])
-        per_m = np.concatenate([np.ones(len(op)), np.full(len(inner), w)])
-    keep = shapely.area(pieces) > 0
-    return Free(domain=domain, pieces=pieces[keep], per_m=per_m[keep])
+        return Free(domain=opened, pieces=op, per_m=np.ones(len(op)))
+    inner = _polygons(shapely.difference(F, opened, grid_size=GRID_M))
+    return Free(domain=F, pieces=np.concatenate([op, inner]),
+                per_m=np.concatenate([np.ones(len(op)), np.full(len(inner), w)]))
 
 
 def attach(domain: Any, xy: F64) -> tuple[F64, B]:
