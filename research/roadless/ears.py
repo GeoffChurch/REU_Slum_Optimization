@@ -25,7 +25,16 @@ along the path, B, then the least length; grown ground closed), on a PIX m raste
 their vector geometry (the Router), from the faces'
 sinks (EarWorld.sinks: pixels on the street or a grounded road, not a block edge with no exit nor
 a paved way inside the block, where an ear would dead-end), sampled every SRC_M
-m, to any other sink pixel of the same face at least `ear_m` away in a straight line: per
+m, to any other sink pixel of the same face and ring (EarWorld.arcs: the face's boundary
+component; a path to another, a hole's, splits nothing) at least `ear_m` away in a straight
+line whose path cuts its face into two pieces each of growth.FACE_M2 or more, less CUT_ALLOW
+PATCH_R a metre of path for its corridor (`cuts`, owner 2026-11-22: rank only ears that can be
+built; build refuses an ear whose faces of FACE_M2 and more do not rise): the pieces by Green's
+theorem, the signed area the path sweeps (Reach.area, one pass with the search: a tree's sum,
+Theta's per segment, Eikonal's transported, Visibility's per piece) closed along the face's
+contour on the raster (Arcs). Without it, at binf on 5618 every source's best was a B-free path
+in the open strip along the street that cut off 41 -- 73 m^2, and the build stopped after 1 ear
+(grid8) or 2 (theta): per
 source the target with the most first-order gain along the path per path cost (the gains summed
 down the shortest-path tree), the best `pairs` sources' ears built as ROAD_W corridors
 (EarWorld.corridor) and costed exactly (dD, dC); and `divides` (Divides,
@@ -64,8 +73,8 @@ over exact gain where the first order stands in for the exact gain (build).
     uv run python $E run <block> <plan>
     uv run python $E check decouple|first|ends|spur|detour|offer <block> [fault]
     uv run python $E check horseshoe|names [fault]
-    uv run python $E check router cost|straight|building|gain [fault]
-    uv run python $E check vector|share|limit <block> [fault]
+    uv run python $E check router cost|straight|building|gain|area [fault]
+    uv run python $E check vector|share|limit|rings|binf <block> [fault]
 
 plan: ears.<paths.<router>.b<bld>.f<face_m2>.e<ear_m>.<loop|spur<min_m>-<max_m>>.<nodt|dt<lam>>
 |divides.p<tau>.f<face_m2>.e<ear_m>>.gl<h>Croad.n<nu>s<price>.M<pairs>.K<exact>.D<D> (a face under
@@ -90,10 +99,9 @@ first: on that state, for the top ears (their open triangles only, kt0 >= OPEN_K
 ends: every router's top candidate ears, at b0, b20 and binf (`routers_at`), whose ideal
   corridor (the line buffered by PATCH_R) separates their face into pieces of ENDS_M2 and more,
   each split it (its faces of ENDS_M2 and more rise; a piece under FACE_M2 build then refuses);
-  the others reported (binf: a B-free path along the street's margin, which no corridor of it
-  separates). Faults `spur` (an ear's last third dropped: a dead end) and
-  `vertex-sites` (a mutation: a corridor's patches at its line's vertices only, which for an
-  any-angle line leaves gaps) fail it.
+  the others reported. Faults `spur` (an ear's last
+  third dropped: a dead end) and `vertex-sites` (a mutation: a corridor's patches at its
+  line's vertices only, which for an any-angle line leaves gaps) fail it.
 spur: the spur check plan's top SPUR_EARS candidate spurs each a corridor in one piece, touching
   the network, that splits nothing (its end on open ground). Fault `both-ends` (a spur's
   corridor extended at its end too, as a loop's is) fails it.
@@ -112,7 +120,7 @@ names: every check plan's name round-trips (Plan.of(name).name), every router's 
   Visibility at b0.05, b20 and binf and Eikonal at binf. Fault `keep` (the tokens kept: the name
   parses) fails it.
 router: the routers on synthetic rasters, each fault a mutation of a router's code (`router_check`:
-  cost, straight, building, gain).
+  cost, straight, building, gain, area).
 share: the road's building share (`road_share`, the raster's pixel centres) against an
   independent exact one (the disc a polygon of 4 x SHARE_CHECK_SEGS sides, intersected with each
   sampled point's footprints one by one) on SHARE_SAMPLE pixels within ROAD_W / 2 + PIX of a
@@ -127,6 +135,15 @@ limit: on the block's first state, LIMIT_SOURCES sources to LIMIT_TARGETS goal p
   relative; Theta (not exact) its violations reported, not judged. Faults no-lex (Grid8's binf
   ignores B: the shortest path) and length-first (Grid8's binf orders by length, then B) fail
   it.
+rings: on a block with a hole (5810: its 132 m^2 one, a ring of its own), the rings plan built
+  RINGS_STEPS ears: the face's sinks on two rings or more at the first state, the build not
+  stopped short, and every candidate offered on the way ending on its source's ring. Fault
+  one-ring (every sink on one ring: rev 3's targets) fails it (5810, Theta at b0: after the
+  first ear every source's best target is a sink on the hole, its 8 ears split nothing, and the
+  build stops at D 0.020, as rev 3's runs did).
+binf: on a block (5618, 5810), Grid8 and Theta at binf (BINF_PLANS) build BINF_STEPS ears, not
+  stopped short (the ears refused on the way reported). Fault no-cut (the cut test dropped)
+  fails it (5618: Grid8 builds 1 ear, Theta 2: "no candidate ear splits a face").
 offer: after OFFER_EARS ears of the divides check plan (faces of very different sizes), the
   `pairs` divides Divides costs hold a splitting one within TOL_OFFER of the best first order
   per cost among every face's divides. Fault `persistence` (rev 1's order, the most persistent
@@ -139,7 +156,7 @@ import re
 import sys
 import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol, TypeAlias
 
@@ -150,9 +167,11 @@ import shapely
 import shapely.ops
 from numba import njit
 from numpy.typing import NDArray
+from scipy import ndimage
 from scipy.sparse.csgraph import connected_components, dijkstra
 from scipy.sparse.linalg import splu
 from scipy.spatial import cKDTree
+from skimage import measure
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -329,6 +348,33 @@ def _tree_sum(pred: NDArray[np.int32], order: I64, w: F64) -> F64:
     return acc
 
 
+@njit(cache=True)
+def _tri(x0: float, y0: float, x1: float, y1: float) -> float:
+    """The signed area the segment (x0, y0) -- (x1, y1) sweeps about the origin, (x0 y1 - x1 y0)
+    / 2: summed along a closed curve, the area it encloses (positive anticlockwise)."""
+    return 0.5 * (x0 * y1 - x1 * y0)
+
+
+@njit(cache=True)
+def _sweep(p: int, q: int, ny: int) -> float:
+    """`_tri` of the segment between the centres of pixels p and q (flat, ny columns), about the
+    raster's lower corner."""
+    return _tri((p // ny + 0.5) * PIX, (p % ny + 0.5) * PIX, (q // ny + 0.5) * PIX,
+                (q % ny + 0.5) * PIX)
+
+
+@njit(cache=True)
+def _tree_area(pred: NDArray[np.int32], order: I64, ny: int) -> F64:
+    """Per node the signed area its path down the shortest-path tree sweeps (`_sweep`)."""
+    out = np.zeros(len(pred))
+    for k in range(len(order)):
+        v = order[k]
+        p = pred[v]
+        if p >= 0:
+            out[v] = out[p] + _sweep(p, v, ny)
+    return out
+
+
 # ---------------------------------------------------------------- routers (owner 2026-11-19)
 
 
@@ -378,9 +424,11 @@ class Route(NamedTuple):
 
 class Reach(Protocol):
     """One source's search (Router.reaches): its source pixel, per pixel its path's cost (at binf
-    its B, the limit's first key) and the first-order gain summed along it (inf / 0 where
-    unreached), the path's length on demand (Detour; at binf the limit's second key), and the
-    path to a pixel."""
+    its B, the limit's first key), the first-order gain summed along it (inf / 0 where
+    unreached) and the signed area it sweeps about the raster's lower corner (the integral of
+    (x dy - y dx) / 2 along it: with Arcs, the pieces its corridor cuts its face into, `cuts`),
+    the path's length on demand (Detour; at binf the limit's
+    second key), and the path to a pixel."""
     @property
     def src(self) -> int: ...
 
@@ -389,6 +437,9 @@ class Reach(Protocol):
 
     @property
     def gain(self) -> F64: ...
+
+    @property
+    def area(self) -> F64: ...
 
     def length(self) -> F64: ...
 
@@ -525,21 +576,22 @@ def _pull(path: I64, ny: int, face: I64, c: F64, sh: F64, gp: F64, lex: bool) ->
 
 @njit(cache=True)
 def _theta(a: int, nx: int, ny: int, face: I64, c: F64, sh: F64, gp: F64,
-           lex: bool) -> tuple[F64, F64, F64, F64, I64]:
+           lex: bool) -> tuple[F64, F64, F64, F64, F64, I64]:
     """Theta* from pixel a over its face, weighted (Theta): Dijkstra on the 8-neighbour grid,
     but a pixel s2 reached from s may take s's parent as its own when the straight segment from
     it stays in the face and is cheaper (`_better`: the cost field integrated along it, `_seg`;
     at the limit, lex, its B, each segment's rounded `_qb`, then its length) than through s. Per
-    pixel (cost, gain summed along its path, the path's length, its B, its parent; -1
-    unreached, a its own). A parent is settled before its children, so each child's gain,
-    length and B add its segment's to its parent's: one pass, as `_tree_sum` down a grid
-    tree."""
+    pixel (cost, gain summed along its path, the path's length, its B, its swept area
+    (`_sweep`), its parent; -1 unreached, a its own). A parent is settled before its children,
+    so each child's gain, length, B and area add its segment's to its parent's: one pass, as
+    `_tree_sum` down a grid tree."""
     n = nx * ny
     f = face[a]
     g = np.full(n, np.inf)
     acc = np.zeros(n)
     ln = np.full(n, np.inf)
     blk = np.full(n, np.inf)
+    ar = np.zeros(n)
     par = -np.ones(n, dtype=np.int64)
     done = np.zeros(n, dtype=np.bool_)
     g[a] = 0.0
@@ -571,6 +623,7 @@ def _theta(a: int, nx: int, ny: int, face: I64, c: F64, sh: F64, gp: F64,
                 bacc = acc[s] + gn
                 bln = ln[s] + PIX * np.sqrt(float(di * di + dj * dj))
                 bb = blk[s] + (_qb(bs) if lex else bs)
+                bar = ar[s] + _sweep(s, s2, ny)
                 if p != s:
                     d = PIX * np.sqrt(float((i2 - pi) ** 2 + (j2 - pj) ** 2))
                     # a metre costs at least 1 (lex: B grows by at least 0 and the length by d)
@@ -585,17 +638,19 @@ def _theta(a: int, nx: int, ny: int, face: I64, c: F64, sh: F64, gp: F64,
                             bacc = acc[p] + gn
                             bln = ln[p] + d
                             bb = b2
+                            bar = ar[p] + _sweep(p, s2, ny)
                 if _better(best, bb, bln, g[s2], blk[s2], ln[s2], lex):
                     g[s2] = best
                     par[s2] = bp
                     acc[s2] = bacc
                     ln[s2] = bln
                     blk[s2] = bb
+                    ar[s2] = bar
                     if lex:
                         heapq.heappush(heap, (bb, bln, s2))
                     else:
                         heapq.heappush(heap, (best, 0.0, s2))
-    return g, acc, ln, blk, par
+    return g, acc, ln, blk, ar, par
 
 
 @njit(cache=True)
@@ -655,8 +710,8 @@ SIMPLIFY_M = 0.1       # m: Eikonal: the descent's line simplified to this toler
 
 
 @njit(cache=True)
-def _stencil(r: int, nx: int, ny: int, T: F64, A: F64, Lg: F64, known: NDArray[np.bool_],
-             cr: float, gr_: float) -> tuple[float, float, float]:
+def _stencil(r: int, nx: int, ny: int, T: F64, A: F64, Lg: F64, W: F64,
+             known: NDArray[np.bool_], cr: float, gr_: float) -> tuple[float, float, float, float]:
     """The upwind update of pixel r from its known neighbours (Eikonal): per stencil (the axes,
     spacing PIX; the diagonals, spacing PIX sqrt 2) and direction the smaller known neighbour,
     on the axes second order (U = (4 T1 - T2) / 3) where the next one beyond it is known and no
@@ -666,15 +721,18 @@ def _stencil(r: int, nx: int, ny: int, T: F64, A: F64, Lg: F64, known: NDArray[n
     is not upwind of both); the smaller T of the two stencils. With it the gain and length along
     the characteristic, from the transport equations grad A . grad T = cr gr_ / PIX and grad L .
     grad T = cr discretized on the same stencil: A = (sum_k alpha_k^2 (T - U_k) V_k + cr gr_ /
-    PIX) / sum_k alpha_k^2 (T - U_k), V_k the gains extrapolated as U_k is. (T, A, L)."""
+    PIX) / sum_k alpha_k^2 (T - U_k), V_k the gains extrapolated as U_k is; and the swept area
+    the same way, each upwind neighbour's own (W) and its segment to r's centre (`_sweep`). (T,
+    A, L, W)."""
     ri, rj = r // ny, r % ny
-    bestT, bestA, bestL = np.inf, 0.0, 0.0
+    bestT, bestA, bestL, bestW = np.inf, 0.0, 0.0, 0.0
     for st in range(2):
         h = PIX if st == 0 else PIX * np.sqrt(2.0)
         al = np.zeros(2)
         U = np.zeros(2)
         V = np.zeros(2)
-        W = np.zeros(2)
+        W_ = np.zeros(2)
+        X = np.zeros(2)
         m = 0
         for k in range(2):
             if st == 0:
@@ -694,16 +752,17 @@ def _stencil(r: int, nx: int, ny: int, T: F64, A: F64, Lg: F64, known: NDArray[n
                         q2 = (i2 * ny + j2) if (0 <= i2 < nx and 0 <= j2 < ny) else -1
             if q1 < 0:
                 continue
+            X[m] = W[q1] + _sweep(q1, r, ny)
             if st == 0 and q2 >= 0 and known[q2] and T[q2] <= T[q1]:
                 al[m] = 1.5 / h
                 U[m] = (4.0 * T[q1] - T[q2]) / 3.0
                 V[m] = (4.0 * A[q1] - A[q2]) / 3.0
-                W[m] = (4.0 * Lg[q1] - Lg[q2]) / 3.0
+                W_[m] = (4.0 * Lg[q1] - Lg[q2]) / 3.0
             else:
                 al[m] = 1.0 / h
                 U[m] = T[q1]
                 V[m] = A[q1]
-                W[m] = Lg[q1]
+                W_[m] = Lg[q1]
             m += 1
         if m == 0:
             continue
@@ -729,19 +788,22 @@ def _stencil(r: int, nx: int, ny: int, T: F64, A: F64, Lg: F64, known: NDArray[n
                 w1 = al[1] ** 2 * (T0 - U[1])
                 ws = w0 + w1
                 bestA = (w0 * V[0] + w1 * V[1] + cr * gr_ / PIX) / ws
-                bestL = (w0 * W[0] + w1 * W[1] + cr) / ws
+                bestL = (w0 * W_[0] + w1 * W_[1] + cr) / ws
+                bestW = (w0 * X[0] + w1 * X[1]) / ws
             else:
                 k = -use - 1
                 bestA = V[k] + gr_ / (al[k] * PIX)
-                bestL = W[k] + 1.0 / al[k]
+                bestL = W_[k] + 1.0 / al[k]
+                bestW = X[k]
             bestT = T0
-    return bestT, bestA, bestL
+    return bestT, bestA, bestL, bestW
 
 
 @njit(cache=True)
-def _fmm(a: int, nx: int, ny: int, face: I64, c: F64, gp: F64) -> tuple[F64, F64, F64]:
+def _fmm(a: int, nx: int, ny: int, face: I64, c: F64, gp: F64) -> tuple[F64, F64, F64, F64]:
     """Fast marching from pixel a over its face (Eikonal): arrival times T of |grad T| = c (the
-    cost per metre), the gain A and length L along each pixel's characteristic, each pixel's
+    cost per metre), the gain A, length L and swept area W along each pixel's characteristic,
+    each pixel's
     taken from its final upwind stencil once it is known (`_stencil`: the second pass in arrival
     order, folded into the march, since a pixel's upwind neighbours are known before it is).
     Pixels within FMM_INIT_PX of a on open ground start at their straight segment's values
@@ -751,6 +813,7 @@ def _fmm(a: int, nx: int, ny: int, face: I64, c: F64, gp: F64) -> tuple[F64, F64
     T = np.full(n, np.inf)
     A = np.zeros(n)
     Lg = np.zeros(n)
+    W = np.zeros(n)
     known = np.zeros(n, dtype=np.bool_)
     init = np.zeros(n, dtype=np.bool_)
     T[a] = 0.0
@@ -769,6 +832,7 @@ def _fmm(a: int, nx: int, ny: int, face: I64, c: F64, gp: F64) -> tuple[F64, F64
                 T[q] = cs
                 A[q] = gn
                 Lg[q] = d
+                W[q] = _sweep(a, q, ny)
                 init[q] = True
                 heapq.heappush(heap, (cs, q))
     while len(heap):
@@ -776,7 +840,7 @@ def _fmm(a: int, nx: int, ny: int, face: I64, c: F64, gp: F64) -> tuple[F64, F64
         if known[q] or tq > T[q]:
             continue
         if not init[q]:
-            _, A[q], Lg[q] = _stencil(q, nx, ny, T, A, Lg, known, c[q], gp[q])
+            _, A[q], Lg[q], W[q] = _stencil(q, nx, ny, T, A, Lg, W, known, c[q], gp[q])
         known[q] = True
         qi, qj = q // ny, q % ny
         for di in range(-1, 2):
@@ -787,11 +851,11 @@ def _fmm(a: int, nx: int, ny: int, face: I64, c: F64, gp: F64) -> tuple[F64, F64
                 r = i2 * ny + j2
                 if known[r] or face[r] != f:
                     continue
-                t, _, _ = _stencil(r, nx, ny, T, A, Lg, known, c[r], gp[r])
+                t, _, _, _ = _stencil(r, nx, ny, T, A, Lg, W, known, c[r], gp[r])
                 if t < T[r] and not init[r]:
                     T[r] = t
                     heapq.heappush(heap, (t, r))
-    return T, A, Lg
+    return T, A, Lg, W
 
 
 @njit(cache=True)
@@ -866,6 +930,7 @@ class _TreeReach:
     pred: NDArray[np.int32]
     order: I64
     gain: F64
+    area: F64
     xy: F64
 
     def length(self) -> F64:
@@ -903,12 +968,14 @@ class Grid8:
             for a in src:
                 B, _, pred, order = _grid8_lex(int(a), nx, ny, ter.face, ter.share)
                 yield _TreeReach(src=int(a), cost=B, pred=pred, order=order,
-                                 gain=_tree_sum(pred, order, ter.gain), xy=ter.xy)
+                                 gain=_tree_sum(pred, order, ter.gain),
+                                 area=_tree_area(pred, order, ny), xy=ter.xy)
             return
         ok = (ter.face[ter.ea] >= 0) & (ter.face[ter.ea] == ter.face[ter.eb])
         c = ter.per_m()
         w = ter.el[ok] * 0.5 * (c[ter.ea[ok]] + c[ter.eb[ok]])
         n = len(ter.face)
+        ny = ter.shape[1]
         G = sp.coo_matrix((w, (ter.ea[ok], ter.eb[ok])), shape=(n, n)).tocsr()
         for c0 in range(0, len(src), CHUNK):
             s = src[c0:c0 + CHUNK]
@@ -918,7 +985,8 @@ class Grid8:
                 fin = np.isfinite(d)
                 order = np.flatnonzero(fin)[np.argsort(d[fin])]
                 yield _TreeReach(src=int(a), cost=d.copy(), pred=pred[k].copy(), order=order,
-                                 gain=_tree_sum(pred[k], order, ter.gain), xy=ter.xy)
+                                 gain=_tree_sum(pred[k], order, ter.gain),
+                                 area=_tree_area(pred[k], order, ny), xy=ter.xy)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -937,6 +1005,10 @@ class _PulledReach:
     @property
     def gain(self) -> F64:
         return self.inner.gain
+
+    @property
+    def area(self) -> F64:
+        return self.inner.area
 
     def length(self) -> F64:
         return self.inner.length()
@@ -974,6 +1046,7 @@ class _ArrayReach:
     cost: F64
     gain: F64
     ln: F64
+    area: F64
     draw: Callable[[int, int], Route]
 
     def length(self) -> F64:
@@ -1001,7 +1074,8 @@ class Theta:
         c = ter.per_m()
         lex = ter.lex()
         for a in src:
-            g, acc, ln, blk, par = _theta(int(a), nx, ny, ter.face, c, ter.share, ter.gain, lex)
+            g, acc, ln, blk, ar, par = _theta(int(a), nx, ny, ter.face, c, ter.share, ter.gain,
+                                              lex)
 
             def draw(s: int, t: int, par: I64 = par) -> Route:
                 path = [t]
@@ -1010,7 +1084,8 @@ class Theta:
                 p = np.asarray(path[::-1], dtype=np.int64)
                 return Route(path=p, line=ter.xy[p])
 
-            yield _ArrayReach(src=int(a), cost=blk if lex else g, gain=acc, ln=ln, draw=draw)
+            yield _ArrayReach(src=int(a), cost=blk if lex else g, gain=acc, ln=ln, area=ar,
+                              draw=draw)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1040,7 +1115,7 @@ class Eikonal:
         nx, ny = ter.shape
         c = ter.per_m()
         for a in src:
-            T, A, Lg = _fmm(int(a), nx, ny, ter.face, c, ter.gain)
+            T, A, Lg, W = _fmm(int(a), nx, ny, ter.face, c, ter.gain)
 
             def draw(s: int, t: int, T: F64 = T) -> Route:
                 pts = _descend(T, nx, ny, s, t) * PIX + ter.lo
@@ -1052,7 +1127,7 @@ class Eikonal:
                 keep[1:] = pix[1:] != pix[:-1]
                 return Route(path=pix[keep], line=line)
 
-            yield _ArrayReach(src=int(a), cost=T, gain=A, ln=Lg, draw=draw)
+            yield _ArrayReach(src=int(a), cost=T, gain=A, ln=Lg, area=W, draw=draw)
 
 
 # ---------------------------------------------------------------- vector routers (2026-11-22)
@@ -1254,6 +1329,27 @@ def _net_gain(order: I64, pred: I64, xy: F64, sx: float, sy: float, lx: float, l
 
 
 @njit(cache=True)
+def _net_area(order: I64, pred: I64, xy: F64, sx: float, sy: float, lx: float,
+              ly: float) -> F64:
+    """Per node the signed area (`_tri`, about (lx, ly)) its shortest-path tree's path from the
+    point (sx, sy) sweeps."""
+    out = np.zeros(len(xy))
+    for k in range(len(order)):
+        v = order[k]
+        p = pred[v]
+        x0, y0 = (sx, sy) if p == -1 else (xy[p, 0], xy[p, 1])
+        out[v] = (0.0 if p == -1 else out[p]) + _tri(x0 - lx, y0 - ly, xy[v, 0] - lx,
+                                                     xy[v, 1] - ly)
+    return out
+
+
+def _tris(a: F64, b: F64, lo: F64) -> F64:
+    """`_tri` of each segment a[k] -- b[k] about lo."""
+    return np.asarray(0.5 * ((a[:, 0] - lo[0]) * (b[:, 1] - lo[1])
+                             - (b[:, 0] - lo[0]) * (a[:, 1] - lo[1])))
+
+
+@njit(cache=True)
 def _net_targets(dist: F64, ln: F64, acc: F64, xy: F64, aptr: I64, aidx: I64, acost: F64,
                  alen: F64, dc: F64, dl: F64, pt: F64, sx: float, sy: float, lx: float,
                  ly: float, nx: int, ny: int, gp: F64) -> tuple[F64, F64, F64, I64]:
@@ -1296,7 +1392,8 @@ def _stub_gain(a: F64, b: F64, lx: float, ly: float, nx: int, ny: int, gp: F64) 
 class Net:
     """A face's search graph (Visibility's): its nodes' points, the graph (CSR: indptr,
     idx, each edge's cost and length), the face's goal pixels (sorted) with their points in the
-    free space (`attach`; `ok` whether attached) and stubs (pixel centre to point: length, gain),
+    free space (`attach`; `ok` whether attached) and stubs (pixel centre to point: length, gain,
+    swept area about the raster's corner),
     per goal pixel the nodes its point joins (CSR: aptr, aidx, acost, alen), `direct` per goal
     row (a source's) the straight piece to every goal row (cost, length; inf where none), and the
     gain density counted (the face's pixels' only)."""
@@ -1310,6 +1407,7 @@ class Net:
     ok: B
     stub: F64
     stub_gain: F64
+    stub_area: F64
     aptr: I64
     aidx: I64
     acost: F64
@@ -1320,9 +1418,10 @@ class Net:
     def reach(self, ter: Terrain, a: int) -> Reach:
         k = int(np.searchsorted(self.pix, a))
         n = len(ter.face)
-        cost, gain, ln = np.full(n, np.inf), np.zeros(n), np.zeros(n)
+        cost, gain, ln, area = np.full(n, np.inf), np.zeros(n), np.zeros(n), np.zeros(n)
         if k == len(self.pix) or self.pix[k] != a or not self.ok[k]:
-            return _NetReach(src=a, cost=cost, gain=gain, ln=ln, net=self, row=-1, ter=ter,
+            return _NetReach(src=a, cost=cost, gain=gain, ln=ln, area=area, net=self, row=-1,
+                             ter=ter,
                              pred=np.zeros(0, dtype=np.int64), via=np.zeros(0, dtype=np.int64))
         s = self.pt[k]
         a0, a1 = self.aptr[k], self.aptr[k + 1]
@@ -1331,16 +1430,23 @@ class Net:
                                             self.alen[a0:a1])
         nx, ny = ter.shape
         acc = _net_gain(order, pred, self.xy, s[0], s[1], ter.lo[0], ter.lo[1], nx, ny, self.gp)
+        na = _net_area(order, pred, self.xy, s[0], s[1], ter.lo[0], ter.lo[1])
         dc, dl = self.direct(k)
         best, bl, bg, via = _net_targets(dist, dln, acc, self.xy, self.aptr, self.aidx,
                                          self.acost, self.alen, dc, dl, self.pt, s[0], s[1],
                                          ter.lo[0], ter.lo[1], nx, ny, self.gp)
+        node = via >= 0
+        frm = np.repeat(s[None], len(via), axis=0)
+        frm[node] = self.xy[via[node]]
+        ba = _tris(frm, self.pt, ter.lo)
+        ba[node] += na[via[node]]
         fin = np.isfinite(best) & self.ok
         stubs = self.stub[k] + self.stub
         cost[self.pix[fin]] = best[fin] + stubs[fin]
         ln[self.pix[fin]] = bl[fin] + stubs[fin]
         gain[self.pix[fin]] = bg[fin] + self.stub_gain[k] + self.stub_gain[fin]
-        return _NetReach(src=a, cost=cost, gain=gain, ln=ln, net=self, row=k, ter=ter,
+        area[self.pix[fin]] = ba[fin] + self.stub_area[k] - self.stub_area[fin]
+        return _NetReach(src=a, cost=cost, gain=gain, ln=ln, area=area, net=self, row=k, ter=ter,
                          pred=pred, via=via)
 
 
@@ -1352,6 +1458,7 @@ class _NetReach:
     cost: F64
     gain: F64
     ln: F64
+    area: F64
     net: Net
     row: int
     ter: Terrain
@@ -1390,16 +1497,29 @@ def _net_reaches(ter: Terrain, src: I64, build: Callable[[Terrain, int], Net]) -
         yield nets[f].reach(ter, int(a))
 
 
-def _goal_points(ter: Terrain, f: int, domain: Any) -> tuple[I64, F64, B, F64, F64, F64]:
-    """Face f's goal pixels (sorted), their points in the domain, whether attached, and their
-    stubs' lengths and gains; the gain density counted (the face's pixels' only)."""
+class Goals(NamedTuple):
+    """A face's goal pixels (sorted), their points in the domain, whether attached, their stubs'
+    lengths, gains and swept areas (pixel centre to point), and the gain density counted (the
+    face's pixels' only)."""
+    pix: I64
+    pt: F64
+    ok: B
+    stub: F64
+    stub_gain: F64
+    stub_area: F64
+    gp: F64
+
+
+def _goal_points(ter: Terrain, f: int, domain: Any) -> Goals:
+    """Face f's goal pixels and their points in the domain (Goals)."""
     pix = np.flatnonzero(ter.goal & (ter.face == f))
     pt, ok = attach(domain, ter.xy[pix])
     gp = np.where(ter.face == f, ter.gain, 0.0)
     stub = np.hypot(*(pt - ter.xy[pix]).T)
     nx, ny = ter.shape
     sg = _stub_gain(ter.xy[pix], pt, ter.lo[0], ter.lo[1], nx, ny, gp)
-    return pix, pt, ok, stub, sg, gp
+    return Goals(pix=pix, pt=pt, ok=ok, stub=stub, stub_gain=sg,
+                 stub_area=_tris(ter.xy[pix], pt, ter.lo), gp=gp)
 
 
 def _csr(n: int, a: I64, b: I64, *vals: F64) -> tuple[I64, I64, tuple[F64, ...]]:
@@ -1671,7 +1791,8 @@ class Visibility:
     def net(self, ter: Terrain, f: int) -> Net:
         dom = free_of(ter.vec, f)
         rg = rings_of(dom)
-        pix, pt, ok, stub, sg, gp = _goal_points(ter, f, dom)
+        gl = _goal_points(ter, f, dom)
+        pt, ok = gl.pt, gl.ok
         args = (rg.ev, rg.g0[0], rg.g0[1], rg.gn[0], rg.gn[1], rg.gptr, rg.gidx)
         ia, ib, il = _vis_graph(rg.corner, rg.xy, rg.prv, rg.nxt, *args)
         indptr, idx, (cost, length) = _csr(len(rg.corner), ia, ib, il, il)
@@ -1682,8 +1803,9 @@ class Visibility:
             return d, d
 
         return Net(xy=rg.xy[rg.corner], indptr=indptr, idx=idx, cost=cost, length=length,
-                   pix=pix, pt=pt, ok=ok, stub=stub, stub_gain=sg, aptr=aptr, aidx=aidx,
-                   acost=alen, alen=alen, direct=direct, gp=gp)
+                   pix=gl.pix, pt=pt, ok=ok, stub=gl.stub, stub_gain=gl.stub_gain,
+                   stub_area=gl.stub_area, aptr=aptr, aidx=aidx, acost=alen, alen=alen,
+                   direct=direct, gp=gl.gp)
 
 
 ROUTER_TOKENS = "grid8|pulled|theta|eikonal|visibility"
@@ -1982,13 +2104,15 @@ class Detour:
 
 class Routing(NamedTuple):
     """A state's routing (Paths.routing): the Terrain, the sources (sink pixels, one per SRC_M
-    square), per pixel its face (pf: before Terrain's own, which drops the faces under face_m2
-    and binf's buildings), whether it is a sink of a live face (bnd) and open ground (ground)."""
+    square), per pixel its face (pf: before Terrain's own, which drops the faces under face_m2),
+    whether it is a sink of a live face (bnd) and open ground (ground), and the faces' Arcs
+    (EarWorld.arcs: its sink's ring, -1 off every sink, and place on its face's contour)."""
     ter: Terrain
     src: I64
     pf: I64
     bnd: B
     ground: B
+    arcs: Arcs
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -2021,8 +2145,9 @@ class Paths:
         pf = np.where(ra.tri >= 0, faces.lab[np.maximum(ra.tri, 0)], -1)    # pixel's face
         big = faces.area >= self.face_m2
         live = (pf >= 0) & big[np.maximum(pf, 0)]
-        # the ends: sink pixels of the face (a road or the street, not a wall)
-        bnd = live & e.sinks()
+        # the ends: sink pixels of the face (a road or the street, not a wall), on their rings
+        arcs = e.arcs(faces)
+        bnd = live & (arcs.ring >= 0)
         ground = live & (ra.bld == 0) & ~bnd       # open ground: where a spur may end
         # per pixel its first-order gain density (the triangles under it)
         gp = np.bincount(_pix_of(ra, g.cen), weights=gain, minlength=len(pf))
@@ -2033,12 +2158,14 @@ class Paths:
         src = np.flatnonzero(bnd)
         key = np.floor(ra.xy[src] / SRC_M).astype(np.int64)
         _, first = np.unique(key[:, 0] * 1_000_000 + key[:, 1], return_index=True)
-        return Routing(ter=ter, src=src[np.sort(first)], pf=pf, bnd=bnd, ground=ground)
+        return Routing(ter=ter, src=src[np.sort(first)], pf=pf, bnd=bnd, ground=ground,
+                       arcs=arcs)
 
     def ears(self, e: EarWorld, faces: Face, gain: F64, *, cost: gr.Cost,
              scale: float) -> list[Ear]:
         g, ra = e.g, e.ra
-        ter, src, pf, bnd, ground = self.routing(e, faces, gain)
+        ter, src, pf, bnd, ground, arcs = self.routing(e, faces, gain)
+        ring = arcs.ring
         fld = self.attract.field(e, P0=g.P0)
         # the best `pairs` sources so far, best first (a stable sort truncated: the same as
         # every source's sorted and cut once, ties in insertion order), each with its reach
@@ -2050,12 +2177,18 @@ class Paths:
             fin = np.isfinite(d)
             acc = reach.gain
             crow = np.hypot(*(ra.xy - ra.xy[a]).T)     # straight-line, from the source
-            tg = np.flatnonzero(self.ends.targets(bnd, ground, crow, ear_m=self.ear_m)
+            own = bnd & (ring == ring[a])              # a loop ends on its source's ring
+            tg = np.flatnonzero(self.ends.targets(own, ground, crow, ear_m=self.ear_m)
                                 & fin & (pf == pf[a]))
+            ln = reach.length()[tg]
+            X, Y = cuts(arcs, int(pf[a]), int(a), tg, reach.area[tg])
+            big = np.minimum(X, Y) - CUT_ALLOW * gr.PATCH_R * ln >= gr.FACE_M2
+            keep = ~bnd[tg] | big                      # a loop must split its face; a spur not
+            tg, ln = tg[keep], ln[keep]
             if not len(tg):
                 continue
             cr = fld.credits(int(a), tg, reach)
-            tier, r = rank(acc[tg] + scale * cr, d[tg], reach.length()[tg] if lex else None)
+            tier, r = rank(acc[tg] + scale * cr, d[tg], ln if lex else None)
             k = int(np.lexsort((-r, -tier))[0])
             t = int(tg[k])
             best.append(((int(tier[k]), float(r[k])), int(a), t, reach))
@@ -2453,6 +2586,113 @@ class Plan:
                     exact=int(m["exact"]), D=float(m["D"]))
 
 
+class Arcs(NamedTuple):
+    """A state's faces' boundaries on the raster (`arcs_of`): per pixel (flat) the ring its sink
+    lies on (-1 off the sinks), and per sink the contour it lies on (cid; -1 none), its place
+    there (k: the nearest of the contour's vertices, v, at (vx, vy) m about the raster's lower
+    corner), h, the signed area (`_tri`) the contour sweeps from its first vertex to v plus the
+    segment from v to the sink's centre, and the contour's signed area (tot); per face (by its
+    label) the sign of its outer contour's area (sign: the side the face is on; a hole's
+    contour has the other) and the area its outer contour encloses (outer: its holes'
+    included)."""
+    ring: I64
+    cid: I64
+    k: I64
+    h: F64
+    tot: F64
+    vx: F64
+    vy: F64
+    sign: F64
+    outer: F64
+
+
+def arcs_of(pf: I64, sink: B) -> Arcs:
+    """Arcs of the raster's pixel faces `pf` (2-D; -1 in no face: the network, the raster padded
+    by one such pixel so the street's outside is one) and sinks (flat). The network in
+    8-connected pieces; a sink's ring the piece of the network pixel nearest it (EarWorld.arcs).
+    Each face's contours: its pixels' boundary (skimage's marching squares at 0.5, the face
+    8-connected; a contour's vertices mid-way between a face pixel and another), each one ring's
+    (the piece nearest the non-face pixels its vertices border, most of them); a sink's vertex
+    the nearest of its ring's contours' in its face."""
+    nx, ny = pf.shape
+    net = np.pad(pf < 0, 1, constant_values=True)
+    lab, _ = ndimage.label(net, structure=np.ones((3, 3), dtype=bool))
+    _, (ii, jj) = ndimage.distance_transform_edt(~net, return_indices=True)
+    near = lab[ii, jj]                               # padded: the nearest network piece
+    n = nx * ny
+    flat = pf.ravel()
+    ring = np.where(sink, near[1:-1, 1:-1].ravel(), -1)
+    cid = np.full(n, -1, dtype=np.int64)
+    kk = np.zeros(n, dtype=np.int64)
+    h, tot, vx, vy = np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n)
+    nf = int(flat.max()) + 1 if flat.max() >= 0 else 0
+    sign, outer = np.zeros(nf), np.zeros(nf)
+    pfp = np.pad(pf, 1, constant_values=-1)
+    objs = ndimage.find_objects(pfp + 1)             # face f: label f + 1, objs[f]
+    xy = np.column_stack([(np.arange(n) // ny + 0.5) * PIX, (np.arange(n) % ny + 0.5) * PIX])
+    c_id = 0
+    for f in np.unique(flat[sink & (flat >= 0)]):
+        sl = objs[f]
+        r0, c0 = max(sl[0].start - 1, 0), max(sl[1].start - 1, 0)
+        m = pfp[r0:sl[0].stop + 1, c0:sl[1].stop + 1] == f
+        conts = measure.find_contours(m.astype(np.float64), 0.5, fully_connected="high")
+        verts, rings_c, ids, cum, tots = [], [], [], [], []
+        for cv in conts:
+            V = cv[:-1]                              # closed: its last vertex its first
+            lo_ = np.floor(V).astype(np.int64)
+            hi_ = np.ceil(V).astype(np.int64)
+            out = np.where(m[lo_[:, 0], lo_[:, 1]][:, None], hi_, lo_)   # the non-face pixel
+            rl = np.bincount(near[out[:, 0] + r0, out[:, 1] + c0]).argmax()
+            P = (V + [r0 - 0.5, c0 - 0.5]) * PIX     # m about the raster's lower corner
+            Q = np.roll(P, -1, axis=0)
+            seg = 0.5 * (P[:, 0] * Q[:, 1] - Q[:, 0] * P[:, 1])
+            verts.append(P)
+            rings_c.append(np.full(len(P), rl))
+            ids.append(np.full(len(P), c_id))
+            cum.append(np.concatenate([[0.0], np.cumsum(seg)[:-1]]))
+            tots.append(np.full(len(P), seg.sum()))
+            c_id += 1
+        V_, R_, I_, C_, T_ = (np.concatenate(x) for x in (verts, rings_c, ids, cum, tots))
+        outer_ = int(np.argmax(np.abs([t[0] for t in tots])))
+        sign[f] = np.sign(tots[outer_][0])
+        outer[f] = abs(tots[outer_][0])
+        K_ = np.concatenate([np.arange(len(v)) for v in verts])
+        own = np.flatnonzero(sink & (flat == f))
+        for r in np.unique(ring[own]):
+            on = np.flatnonzero(R_ == r)
+            q = own[ring[own] == r]
+            if not len(on):
+                continue
+            _, j = cKDTree(V_[on]).query(xy[q], k=1)
+            v = on[j]
+            cid[q], kk[q], tot[q] = I_[v], K_[v], T_[v]
+            vx[q], vy[q] = V_[v, 0], V_[v, 1]
+            h[q] = C_[v] + 0.5 * (V_[v, 0] * xy[q, 1] - xy[q, 0] * V_[v, 1])
+    return Arcs(ring=ring, cid=cid, k=kk, h=h, tot=tot, vx=vx, vy=vy, sign=sign, outer=outer)
+
+
+CUT_ALLOW = 1.0        # cuts: the corridor's share of each piece, in PATCH_R per metre of path
+                       # (a corridor 2 PATCH_R wide about its centreline: PATCH_R a side)
+
+
+def cuts(ar: Arcs, f: int, a: int, tg: I64, area: F64) -> tuple[F64, F64]:
+    """The two pieces (m^2) the path from sink a to each of its face f's sinks tg (on a's ring;
+    `area` each path's swept area, Reach.area) cuts the face into, gross of the face's other
+    holes (a hole within a piece counts in it), by Green's theorem: X the signed area the path
+    and the contour from the target forward to a bound (the path's swept area and the
+    contour's, Arcs.h and tot), times the face's side (sign). On the outer contour X is a piece
+    and the face's outer area less X the other. On a hole's, X is the piece the path cuts off
+    when positive (the arc on the face's side) and that piece with the hole when negative (the
+    arc round the hole's far side), the other the outer area less both. nan where a target
+    lies on another contour than a's."""
+    s1 = (area + ar.h[a] - ar.h[tg] + np.where(ar.k[a] < ar.k[tg], ar.tot[tg], 0.0))
+    X = ar.sign[f] * s1
+    hole = np.abs(ar.tot[tg]) * (ar.sign[f] * ar.tot[tg] < 0)
+    P = np.where(X < 0, -X - hole, X)
+    other = ar.cid[tg] != ar.cid[a]
+    return np.where(other, np.nan, P), np.where(other, np.nan, ar.outer[f] - P - hole)
+
+
 class EarWorld:
     """growth.Growth's grounded world, its faces and their restricted solves."""
 
@@ -2473,6 +2713,22 @@ class EarWorld:
         """Per pixel whether a bounding triangle (`bounding`) lies within PIX of its centre: the
         faces' sinks."""
         return self.sinks_of(self.bounding())
+
+    def arcs(self, faces: Face) -> Arcs:
+        """The faces' boundaries on the raster (`arcs_of`; pixels in no face, grown or off the
+        block, the network): per sink the ring it lies on (`sinks`), the network's 8-connected
+        piece nearest it, and its place on its face's contour. A face's boundary components are
+        rings: the street's, and a hole's where the block has one (5810, 132 m^2; 6310, 21634,
+        23743), until a road joins it to the street. A cut between two rings splits nothing (in
+        a plane region a cut splits only between two points of one boundary component), so a
+        loop ends on its source's ring
+        (Paths.ears). Rev 3 offered such cuts: on 5810 after Theta's first ear at b0 every
+        source's best target was on the hole, its 8 ears were refused and the run stopped. (The
+        bounding triangles are no network to label: the street's are one per street face, not
+        edge-connected.) Paths.ears' cut test reads the contours (`cuts`)."""
+        ra = self.ra
+        pf = np.where(ra.tri >= 0, faces.lab[np.maximum(ra.tri, 0)], -1)
+        return arcs_of(pf.reshape(ra.shape), self.sinks())
 
     def sinks_of(self, bounding: B) -> B:
         """`sinks` with the triangles `bounding` the roads (Detour: the street's alone)."""
@@ -2811,6 +3067,10 @@ TOL_GAIN_VEC = 1e-6    # gain: Visibility's one-pass gain against `along` its li
 RC_SEED = 0            # gain: the smooth gain field's and the buildings' draw
 RC_BUMPS = 12          # gain: Gaussian bumps in the gain field
 RC_TARGETS = 24        # gain: targets judged
+RC_HOLE_PX = 10        # area: the hole's half-width (pixels) in the middle of the open raster
+RC_AREA_FROM_PX = 12   # area: targets this many pixels or more from the source (straight line)
+TOL_AREA = 1e-9        # area: an exact router's pieces against the split, over the face's area
+TOL_AREA_EIK = 2e-3    # area: Eikonal's (transported) median, over the face's area
 # a fault is a mutation of this file's routers (`_mutant`): (the text, its replacement)
 MUTATIONS: dict[str, tuple[str, str]] = {
     "no-parent": ("                if p != s:\n", "                if False:\n"),
@@ -2819,8 +3079,14 @@ MUTATIONS: dict[str, tuple[str, str]] = {
     "discrete-descent": ("        if np.isfinite(v) and g > 0.0:\n", "        if False:\n"),
     "endpoint-cost": ("            cost += c[q] * ds\n",
                       "            cost += 0.5 * (c[p0] + c[p1]) * ds\n"),
-    "flat-field": ("_stencil(r, nx, ny, T, A, Lg, known, c[r], gp[r])",
-                   "_stencil(r, nx, ny, T, A, Lg, known, 1.0, gp[r])"),
+    "no-cut": ("keep = ~bnd[tg] | big ", "keep = ~bnd[tg] | np.isfinite(ln) "),
+    "area-wrap": ("np.where(ar.k[a] < ar.k[tg], ar.tot[tg], 0.0)", "0.0 * ar.tot[tg]"),
+    "area-from-s": ("                            bar = ar[p] + _sweep(p, s2, ny)",
+                    "                            bar = ar[s] + _sweep(s, s2, ny)"),
+    "area-node": ("        out[v] = (0.0 if p == -1 else out[p]) + _tri(",
+                  "        out[v] = 0.0 + _tri("),
+    "flat-field": ("_stencil(r, nx, ny, T, A, Lg, W, known, c[r], gp[r])",
+                   "_stencil(r, nx, ny, T, A, Lg, W, known, 1.0, gp[r])"),
     "gain-from-s": ("                            bacc = acc[p] + gn\n",
                     "                            bacc = acc[s] + gn\n"),
     "vertex-sites": ("query_ball_point(sites(pts), r=gr.PATCH_R)",
@@ -2832,6 +3098,8 @@ MUTATIONS: dict[str, tuple[str, str]] = {
     "half-corners": ("    corner = np.flatnonzero(turn < -TAN_TOL * scale)",
                      "    corner = np.flatnonzero(turn < -TAN_TOL * scale)[::2]"),
     "gain-unit": ("    return acc * L / PIX\n", "    return acc * L\n"),
+    "one-ring": ("        return np.where(self.sinks(), near, -1)",
+                 "        return np.where(self.sinks(), 0, -1)"),
     "share-radius": ("share = road_share(np.asarray(geo.polys), xy, r=gr.ROAD_W / 2.0)",
                      "share = road_share(np.asarray(geo.polys), xy, r=gr.ROAD_W)"),
     "share-raster": ("tri=tri, bld=bld, share=share,", "tri=tri, bld=bld, share=bld,"),
@@ -2884,24 +3152,32 @@ def open_terrain(nx: int, ny: int, *, share: F64, gain: F64, bld: float) -> Terr
                    goal=np.ones(nx * ny, dtype=bool), vec=vec)
 
 
-def along(ter: Terrain, line: F64, w: F64) -> float:
-    """The per-pixel field w integrated along the polyline `line` by brute force, independently
-    of `_seg` (the router checks): each segment cut wherever it crosses a cell edge (every
-    x = lo + k PIX, y = lo + m PIX), each piece its cell's value times its length."""
-    out = 0.0
+def pieces(lo: F64, shape: tuple[int, int], line: F64) -> tuple[I64, F64]:
+    """The polyline `line` cut by brute force, independently of `_seg` (the checks), wherever it
+    crosses a cell edge of the PIX raster at lo (every x = lo + k PIX, y = lo + m PIX): per piece
+    its cell and its length."""
+    cells, lens = [], []
     for p, q in zip(line[:-1], line[1:], strict=True):
         d = q - p
         L = float(np.hypot(*d))
         ts = [0.0, 1.0]
         for k in range(2):
             if d[k] != 0:
-                lo, hi = sorted((p[k] - ter.lo[k], q[k] - ter.lo[k]))
-                for m in range(int(np.ceil(lo / PIX)), int(np.floor(hi / PIX)) + 1):
-                    ts.append((m * PIX + ter.lo[k] - p[k]) / d[k])
+                a, b = sorted((p[k] - lo[k], q[k] - lo[k]))
+                for m in range(int(np.ceil(a / PIX)), int(np.floor(b / PIX)) + 1):
+                    ts.append((m * PIX + lo[k] - p[k]) / d[k])
         t = np.unique(np.clip(ts, 0.0, 1.0))
         mid = p + ((t[:-1] + t[1:]) / 2)[:, None] * d
-        out += float((w[_pix_of_lo(ter.lo, ter.shape, mid)] * np.diff(t)).sum()) * L
-    return out
+        cells.append(_pix_of_lo(lo, shape, mid))
+        lens.append(np.diff(t) * L)
+    return np.concatenate(cells), np.concatenate(lens)
+
+
+def along(ter: Terrain, line: F64, w: F64) -> float:
+    """The per-pixel field w integrated along the polyline `line` (`pieces`: each piece its
+    cell's value times its length; the router checks)."""
+    cells, lens = pieces(ter.lo, ter.shape, line)
+    return float((w[cells] * lens).sum())
 
 
 def _one(r: Router, ter: Terrain, a: int) -> Reach:
@@ -2936,7 +3212,19 @@ def router_check(test: str, fault: str | None) -> None:
       Theta: `along`, exact; Eikonal: `along`, within TOL_GAIN_EIK; Visibility: `along`, within
       TOL_GAIN_VEC). Faults gain-from-s (Theta credits a segment from the parent on top of the
       child's gain), gain-per-pixel (Eikonal adds a pixel's gain once however its characteristic
-      crosses it), gain-unit (Visibility's gain per metre, not per PIX) fail it."""
+      crosses it), gain-unit (Visibility's gain per metre, not per PIX) fail it.
+    area: the open raster less a square hole in its middle (RC_HOLE_PX; off the face and a hole
+      in Visibility's polygon), the gain test's buildings at each bld of RC_GAIN_BLDS, its sinks
+      the pixels beside the outside or the hole (`arcs_of`): from a source on the outer ring and
+      one on the hole's, to RC_TARGETS of the same ring's sinks RC_AREA_FROM_PX or more away,
+      the two pieces (`cuts`: each router's one-pass swept area, Reach.area, and the contours)
+      against the face's contour polygon split by the drawn line (its ends joined to their
+      contour vertices; Grid8 and Pulled: the grid path; from the outer ring the polygon with
+      its hole filled: `cuts` counts the hole in the piece it lies in), a split into other than
+      two pieces not judged: exact (TOL_AREA of the face's area) but Eikonal's (transported:
+      its median within TOL_AREA_EIK). Faults area-wrap (the contour's own area never added
+      where the arc wraps past its first vertex), area-from-s (Theta's segment from the parent
+      swept from s), area-node (Visibility's node areas not summed down its tree) fail it."""
     if fault is not None:
         print(f"router {test}: mutant {fault}")
         _mutant(fault).router_check(test, None)
@@ -3074,6 +3362,67 @@ def router_check(test: str, fault: str | None) -> None:
                       f"{np.median(err):.2e}, at most {err.max():.2e} (judged "
                       f"{'the median' if isinstance(r, Eikonal) and bld else 'the largest'}, tol "
                       f"{tol:g}) -> {'ok' if good else 'BAD'}")
+    elif test == "area":
+        rng = np.random.default_rng(RC_SEED)
+        i, j = np.divmod(np.arange(n * n), n)
+        hole = (abs(i - n // 2) <= RC_HOLE_PX) & (abs(j - n // 2) <= RC_HOLE_PX)
+        share = np.zeros(n * n)
+        for _ in range(30):
+            ci, cj = rng.integers(0, n, size=2)
+            share[(abs(i - ci) <= 3) & (abs(j - cj) <= 3)] = 1.0
+        pf = np.where(hole, -1, 0).reshape(n, n)
+        off = np.pad(pf < 0, 1, constant_values=True)
+        sink = (ndimage.binary_dilation(off, structure=np.ones((3, 3), dtype=bool))[1:-1, 1:-1]
+                & (pf >= 0)).ravel()
+        arcs = arcs_of(pf, sink)
+        share[sink] = 0.0
+        conts = measure.find_contours(np.pad(pf >= 0, 1).astype(np.float64), 0.5,
+                                      fully_connected="high")
+        rings_ = sorted(((c - 0.5) * PIX for c in conts), key=lambda c: -len(c))
+        poly = shapely.Polygon(rings_[0], [rings_[1]])
+        h0, h1 = n // 2 - RC_HOLE_PX - 1, n // 2
+        srcs = (n // 2, h0 * n + h1)                 # on the outer ring, on the hole's
+        face = np.where(hole, -1, 0)
+        dom = shapely.box(0.0, 0.0, n * PIX, n * PIX).difference(shapely.box(
+            (n // 2 - RC_HOLE_PX) * PIX, (n // 2 - RC_HOLE_PX) * PIX,
+            (n // 2 + RC_HOLE_PX + 1) * PIX, (n // 2 + RC_HOLE_PX + 1) * PIX))
+        for bld in RC_GAIN_BLDS:
+            ter = open_terrain(n, n, share=share, gain=zero, bld=bld)._replace(
+                face=face, goal=sink, vec=FixedShapes(faces={0: dom}))
+            for r in routers_at(bld):
+                err, skipped = [], 0
+                for a in srcs:
+                    x = _one(r, ter, a)
+                    on = np.flatnonzero(sink & (arcs.ring == arcs.ring[a])
+                                        & (np.hypot(*(ter.xy - ter.xy[a]).T)
+                                           >= RC_AREA_FROM_PX * PIX) & np.isfinite(x.cost))
+                    for t in on[np.linspace(0, len(on) - 1, RC_TARGETS).astype(np.int64)]:
+                        X, Y = cuts(arcs, 0, a, np.array([t]), x.area[[t]])
+                        line = (x.inner.route(int(t)).line if isinstance(x, _PulledReach)
+                                else x.route(int(t)).line)
+                        cut = np.vstack([[arcs.vx[a], arcs.vy[a]], line,
+                                         [arcs.vx[t], arcs.vy[t]]])
+                        dom_ = shapely.Polygon(poly.exterior) if a == srcs[0] else poly
+                        got = shapely.get_parts(shapely.ops.split(dom_,
+                                                                  shapely.LineString(cut)))
+                        if len(got) != 2 or not np.isfinite(X[0]):
+                            skipped += 1
+                            continue
+                        want = np.sort(shapely.area(got))
+                        err.append(float(np.abs(np.sort([X[0], Y[0]]) - want).max())
+                                   / poly.area)
+                err_ = np.asarray(err)
+                if isinstance(r, Eikonal):
+                    judged, tol = float(np.median(err_)), TOL_AREA_EIK
+                else:
+                    judged, tol = float(err_.max()), TOL_AREA
+                good = judged <= tol and len(err_) >= RC_TARGETS
+                ok &= good
+                print(f"  bld {bld:g}, {r.name}: |pieces - the split's| / the face's area median "
+                      f"{np.median(err_):.2e}, at most {err_.max():.2e} over {len(err_)} "
+                      f"targets ({skipped} not split in two, not judged; judged "
+                      f"{'the median' if isinstance(r, Eikonal) else 'the largest'}, tol "
+                      f"{tol:g}) -> {'ok' if good else 'BAD'}")
     else:
         raise SystemExit(__doc__)
     print(f"router {test}: -> {'PASS' if ok else 'FAIL'}")
@@ -3157,7 +3506,7 @@ def vector_check(bid: str, fault: str | None) -> None:
     for b in (0.0,):
         pa = Paths(router=Grid8(), bld=b, pairs=8, face_m2=2000.0, ear_m=30.0, ends=Loop(),
                    attract=NoDetour())
-        ter, src, _, _, _ = pa.routing(e, fc, gain)
+        ter, src = pa.routing(e, fc, gain)[:2]
         src = src[np.linspace(0, len(src) - 1, VEC_SOURCES).astype(np.int64)]
         vis = list(Visibility(bld=b).reaches(ter, src))
         far = [ter.goal & np.isfinite(x.cost) & (np.hypot(*(ter.xy - ter.xy[x.src]).T)
@@ -3243,6 +3592,96 @@ def share_check(bid: str, fault: str | None) -> None:
         raise SystemExit(1)
 
 
+RINGS_PLAN = "ears.paths.theta.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D1"
+RINGS_STEPS = 3        # rings: ears built (rev 3 stopped after 1 on 5810)
+
+
+class _Offer(NamedTuple):
+    """An offered candidate (_Offers): the rings of its path's two ends, at the state it was
+    offered in."""
+    ring0: int
+    ring1: int
+
+
+@dataclass(kw_only=True)
+class _Offers:
+    """Paths whose offers are noted (the rings check)."""
+    inner: Paths
+    offers: list[_Offer]
+
+    @property
+    def name(self) -> str:
+        return self.inner.name
+
+    @property
+    def pairs(self) -> int:
+        return self.inner.pairs
+
+    def ears(self, e: EarWorld, faces: Face, gain: F64, *, cost: gr.Cost,
+             scale: float) -> list[Ear]:
+        out = self.inner.ears(e, faces, gain, cost=cost, scale=scale)
+        ring = e.arcs(faces).ring
+        self.offers += [_Offer(ring0=int(ring[q.path[0]]), ring1=int(ring[q.path[-1]]))
+                        for q in out]
+        return out
+
+
+def rings_check(bid: str, fault: str | None) -> None:
+    """`rings` (module docstring). Fault one-ring (MUTATIONS) fails it."""
+    if fault is not None:
+        print(f"rings {bid}: mutant {fault}")
+        _mutant(fault).rings_check(bid, None)
+        return
+    plan = Plan.of(RINGS_PLAN)
+    assert isinstance(plan.candidates, Paths)
+    e = world_of(bid, plan.contrast.h)
+    ring = e.arcs(e.faces()).ring
+    n0 = len(np.unique(ring[ring >= 0]))
+    rec = _Offers(inner=plan.candidates, offers=[])
+    out = gr.OUT / bid / f"check.{plan.name}"
+    build(e, replace(plan, candidates=rec), out=out, log=lambda s: print(s, flush=True),
+          steps=RINGS_STEPS)
+    built = len(pd.read_parquet(out / "picks.parquet"))
+    cross = sum(o.ring0 != o.ring1 for o in rec.offers)
+    ok = n0 >= 2 and built == RINGS_STEPS and cross == 0
+    print(f"rings {bid} {fault or 'none'}: {n0} rings at the first state; {built} ears built of "
+          f"{RINGS_STEPS}; {cross} of {len(rec.offers)} offered candidates end on another ring "
+          f"than their source's -> {'PASS' if ok else 'FAIL'}")
+    if not ok:
+        raise SystemExit(1)
+
+
+BINF_PLANS = tuple(f"ears.paths.{r}.binf.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D1"
+                   for r in ("grid8", "theta"))
+BINF_STEPS = 10        # binf: ears built (before the cut test: 1 for grid8, 2 for theta on 5618)
+
+
+def binf_check(bid: str, fault: str | None) -> None:
+    """`binf` (module docstring). Fault no-cut (MUTATIONS) fails it."""
+    if fault is not None:
+        print(f"binf {bid}: mutant {fault}")
+        _mutant(fault).binf_check(bid, None)
+        return
+    ok = True
+    for spec in BINF_PLANS:
+        plan = Plan.of(spec)
+        assert isinstance(plan.candidates, Paths)
+        e = world_of(bid, plan.contrast.h)
+        out = gr.OUT / bid / f"check.{plan.name}"
+        lines: list[str] = []
+        build(e, plan, out=out, log=lambda s, lines=lines: (lines.append(s), print(s, flush=True)),
+              steps=BINF_STEPS)
+        built = len(pd.read_parquet(out / "picks.parquet"))
+        refused = sum("refused" in s for s in lines)
+        good = built == BINF_STEPS
+        ok &= good
+        print(f"  {plan.candidates.router.name}: {built} ears built of {BINF_STEPS} ({refused} "
+              f"offered ears refused on the way) -> {'ok' if good else 'BAD'}")
+    print(f"binf {bid}: -> {'PASS' if ok else 'FAIL'}")
+    if not ok:
+        raise SystemExit(1)
+
+
 LIMIT_SOURCES = 8      # limit: sources (evenly through the state's)
 LIMIT_TARGETS = 10     # limit: goal pixels per source, ear_m or more away (drawn)
 LIMIT_BLDS = (0.0, 5.0, 20.0, 1e3, 1e4)   # limit: the finite b compared with binf
@@ -3271,7 +3710,7 @@ def limit_check(bid: str, fault: str | None) -> None:
         for b in bs:
             pa = Paths(router=router, bld=b, pairs=8, face_m2=2000.0, ear_m=30.0, ends=Loop(),
                        attract=NoDetour())
-            ter, src, pf, _, _ = pa.routing(e, fc, gain)
+            ter, src, pf = pa.routing(e, fc, gain)[:3]
             if not pairs:
                 rng = np.random.default_rng(LIMIT_SEED)
                 for a in src[np.linspace(0, len(src) - 1, LIMIT_SOURCES).astype(np.int64)]:
@@ -3388,7 +3827,7 @@ def check(verb: str, bid: str, fault: str | None) -> None:
         fc = e.faces()
         shp = MeshShapes(xy=g.m.fx.fm.xy, tri=g.m.fx.fm.tri, lab=fc.lab)
         ok = True
-        judged = 0
+        n_judged = 0
         for b in (0.0, 20.0, np.inf):
             for r in routers_at(b):
                 cands = Paths(router=r, bld=b, pairs=4, face_m2=2000.0, ear_m=30.0, ends=Loop(),
@@ -3402,7 +3841,7 @@ def check(verb: str, bid: str, fault: str | None) -> None:
                         print(f"  b{b:g} {r.name}: ear of {len(q.line)} points: its ideal "
                               "corridor separates nothing (not judged)")
                         continue
-                    judged += 1
+                    n_judged += 1
                     line = q.line
                     if fault == "spur":           # its last third dropped
                         ls = shapely.LineString(line)
@@ -3417,8 +3856,8 @@ def check(verb: str, bid: str, fault: str | None) -> None:
                     ok &= split
                     print(f"  b{b:g} {r.name}: ear of {len(line)} points: faces {n0} -> {n1}: "
                           f"{'splits' if split else 'a dead end'}")
-        ok &= judged > 0
-        print(f"ends {bid} {fault or 'none'}: {judged} ears judged -> {'PASS' if ok else 'FAIL'}")
+        ok &= n_judged > 0
+        print(f"ends {bid} {fault or 'none'}: {n_judged} ears judged -> {'PASS' if ok else 'FAIL'}")
     elif verb == "spur":
         if fault not in (None, "both-ends"):
             raise SystemExit("spur's fault: both-ends")
@@ -3547,6 +3986,10 @@ def main(argv: list[str]) -> None:
         vector_check(argv[2], argv[3] if len(argv) == 4 else None)
     elif len(argv) in (3, 4) and argv[:2] == ["check", "share"]:
         share_check(argv[2], argv[3] if len(argv) == 4 else None)
+    elif len(argv) in (3, 4) and argv[:2] == ["check", "rings"]:
+        rings_check(argv[2], argv[3] if len(argv) == 4 else None)
+    elif len(argv) in (3, 4) and argv[:2] == ["check", "binf"]:
+        binf_check(argv[2], argv[3] if len(argv) == 4 else None)
     elif len(argv) in (3, 4) and argv[:2] == ["check", "limit"]:
         limit_check(argv[2], argv[3] if len(argv) == 4 else None)
     elif len(argv) in (3, 4) and argv[:2] == ["check", "router"]:

@@ -32,8 +32,8 @@ their add order, recorded by crossings.Recording.
     L=research/roadless/atlas/lookahead/lookahead.py     # from the repo root, PYTHONPATH=.
     uv run python $L run <bid> <search> <plan>
     uv run python $L check greedy <bid> <plan> [fault]   # greedy's ears are ears.build's, e.g.
-        ears.paths.<router>.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D1 (b0 or binf for
-        visibility)
+        ears.paths.<router>.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D1 (b0 for
+        visibility, not binf for eikonal)
 """
 from __future__ import annotations
 
@@ -365,7 +365,8 @@ def run(bid: str, search: Search, plan: ears.Plan) -> None:
 
 
 def check_greedy(bid: str, plan: ears.Plan, fault: str | None) -> None:
-    """greedy's first CHECK_STEPS ears (paths' pixels) are ears.build's on the plan (any router).
+    """greedy's first CHECK_STEPS ears (paths' pixels) are ears.build's on the plan (any router),
+    and where build stops short of them (no candidate splits a face) greedy stops there too.
     Fault `second` (greedy taking each step's second-best rescored ear) fails it."""
     if fault not in (None, "second"):
         raise SystemExit("greedy's fault: second")
@@ -379,6 +380,11 @@ def check_greedy(bid: str, plan: ears.Plan, fault: str | None) -> None:
     ok = True
     for k in range(CHECK_STEPS):
         sc = sorted(sp.offered(n).scored, key=lambda s: -ears.ratio(s.ear))
+        if not sc or k == len(built):            # one stopped: both must, here
+            same = not sc and k == len(built)
+            ok &= same
+            print(f"  ear {k}: {'both stopped' if same else 'one stopped, not the other'}")
+            break
         s = sc[1] if fault == "second" and len(sc) > 1 else sc[0]
         xy = e2.ra.xy[s.ear.path]
         r = built.iloc[k]
