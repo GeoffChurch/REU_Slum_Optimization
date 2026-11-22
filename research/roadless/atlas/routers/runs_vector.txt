@@ -1,45 +1,22 @@
-# 2026-11-22: Visibility (b0) and Steiner (k 2; b0, b20) on the paired study's 24 worlds,
+# 2026-11-22: Visibility (b0) on the paired study's 24 worlds (Steiner's lines: commit 1a92867c),
 # then grid8, theta and visibility at binf on the real blocks (5810 to D 0.15). Run by
 # pool.sh; the cheap worlds first, 5810 last.
 fabric:ZAF.9.3.1_1_21634:rect:0 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-fabric:ZAF.9.3.1_1_21634:rect:0 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 fabric:ZAF.9.3.1_1_21634:rect:1 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-fabric:ZAF.9.3.1_1_21634:rect:1 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 fabric:ZAF.9.3.1_1_21634:tilt:0 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-fabric:ZAF.9.3.1_1_21634:tilt:0 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 fabric:ZAF.9.3.1_1_21634:tilt:1 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-fabric:ZAF.9.3.1_1_21634:tilt:1 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 fabric:ZAF.9.3.1_1_23743:rect:0 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-fabric:ZAF.9.3.1_1_23743:rect:0 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 fabric:ZAF.9.3.1_1_23743:rect:1 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-fabric:ZAF.9.3.1_1_23743:rect:1 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 fabric:ZAF.9.3.1_1_23743:tilt:0 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-fabric:ZAF.9.3.1_1_23743:tilt:0 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 fabric:ZAF.9.3.1_1_23743:tilt:1 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-fabric:ZAF.9.3.1_1_23743:tilt:1 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 fabric:ZAF.9.3.1_1_5618:rect:0 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-fabric:ZAF.9.3.1_1_5618:rect:0 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 fabric:ZAF.9.3.1_1_5618:rect:1 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-fabric:ZAF.9.3.1_1_5618:rect:1 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 fabric:ZAF.9.3.1_1_5618:tilt:0 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-fabric:ZAF.9.3.1_1_5618:tilt:0 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 fabric:ZAF.9.3.1_1_5618:tilt:1 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-fabric:ZAF.9.3.1_1_5618:tilt:1 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-fabric:ZAF.9.3.1_1_21634:tilt:0 ears.paths.steiner2.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-fabric:ZAF.9.3.1_1_23743:tilt:0 ears.paths.steiner2.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-fabric:ZAF.9.3.1_1_5618:tilt:0 ears.paths.steiner2.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 block:ZAF.9.3.1_1_18895 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-block:ZAF.9.3.1_1_18895 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 block:ZAF.9.3.1_1_20269 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-block:ZAF.9.3.1_1_20269 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 block:ZAF.9.3.1_1_5618 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-block:ZAF.9.3.1_1_5618 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 block:ZAF.9.3.1_1_6310 ears.paths.visibility.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-block:ZAF.9.3.1_1_6310 ears.paths.steiner2.b0.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-block:ZAF.9.3.1_1_18895 ears.paths.steiner2.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-block:ZAF.9.3.1_1_20269 ears.paths.steiner2.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-block:ZAF.9.3.1_1_5618 ears.paths.steiner2.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-block:ZAF.9.3.1_1_6310 ears.paths.steiner2.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 block:ZAF.9.3.1_1_5618 ears.paths.grid8.binf.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 block:ZAF.9.3.1_1_5618 ears.paths.theta.binf.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 block:ZAF.9.3.1_1_5618 ears.paths.visibility.binf.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
@@ -52,7 +29,6 @@ block:ZAF.9.3.1_1_20269 ears.paths.visibility.binf.f2000.e30.loop.nodt.gl0.25Cro
 block:ZAF.9.3.1_1_6310 ears.paths.grid8.binf.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 block:ZAF.9.3.1_1_6310 ears.paths.theta.binf.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
 block:ZAF.9.3.1_1_6310 ears.paths.visibility.binf.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.5
-block:ZAF.9.3.1_1_5810 ears.paths.steiner2.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
 block:ZAF.9.3.1_1_5810 ears.paths.grid8.binf.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
 block:ZAF.9.3.1_1_5810 ears.paths.theta.binf.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15
 block:ZAF.9.3.1_1_5810 ears.paths.visibility.binf.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15

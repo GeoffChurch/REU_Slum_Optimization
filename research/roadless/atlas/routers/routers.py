@@ -1,6 +1,7 @@
 """The routers compared (ears.Router; owner 2026-11-19: "why do we need to discretize the directions
-at all?"): Grid8, Pulled, Theta and Eikonal on the raster, Visibility (b0 and binf: exact) and
-Steiner (k 2) on the vector faces (2026-11-22), each run by the crossings study's recorder
+at all?"): Grid8, Pulled, Theta and Eikonal on the raster, Visibility (b0 and binf: exact) on
+the vector faces (2026-11-22; Steiner, deleted as dominated: the wiki's
+reblock/steiner-router-is-dominated, commit 1a92867c), each run by the crossings study's recorder
 (atlas/crossings/crossings.py: its worlds, its rows) on the same worlds at b0 and b20, and the
 real blocks at binf (buildings impassable).
 
@@ -56,7 +57,7 @@ AXIS_TOL = 5.0           # degrees
 JCT_M = 10.0             # m: junctions: the ear's direction from its end over this much of it
 TAN_M = 3.0              # m: junctions: the road's tangent from this far either side of the foot
 MATCHED_D = (0.05, 0.10, 0.15)
-ROUTERS = ("grid8", "pulled", "theta", "eikonal", "visibility", "steiner2")
+ROUTERS = ("grid8", "pulled", "theta", "eikonal", "visibility")
 BASES = ("grid8", "theta")
 F64: TypeAlias = NDArray[np.float64]
 
