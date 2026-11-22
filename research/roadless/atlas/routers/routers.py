@@ -20,8 +20,8 @@ Per run (crossings rows: <world>/<plan>/):
     run's states interpolated linearly in D (a run that stops short of a D is not read there).
   time: the run's wall time to each matched D (steps' t; the world's build excluded) and per
     ear.
-  paired: each router against each of BASES on the same world and b (objective: mean
-    difference, wins; time: geometric mean ratio).
+  paired: each router against each of BASES on the same world and b, per b and pooled (b
+    nan) (objective: mean difference, wins; time: geometric mean ratio).
 
     R=research/roadless/atlas/routers/routers.py       # from the repo root, PYTHONPATH=.:src
     python $R table                                     # results/*.csv and the tables printed
@@ -223,10 +223,13 @@ def table() -> None:
     P.to_csv(OUT / "pooled.csv", index=False, float_format="%.4g")
     # paired against each base on the same world and b
     pair = []
-    for bs, r in ((bs, r) for bs in BASES for r in ROUTERS if r != bs):
+    for bs, r, bv in ((bs, r, bv) for bs in BASES for r in ROUTERS if r != bs
+                      for bv in [np.nan, *sorted(t.b.unique())]):
         base = t[t.router == bs].set_index(["world", "b"])
         o = t[t.router == r].set_index(["world", "b"])
         common = o.index.intersection(base.index)
+        if not np.isnan(bv):                    # one b; nan: every b pooled
+            common = common[common.get_level_values("b") == bv]
         for D in MATCHED_D:
             for col in (f"LP{D:g}", f"len{D:g}", f"t{D:g}"):
                 x, y = o.loc[common, col], base.loc[common, col]
@@ -235,13 +238,13 @@ def table() -> None:
                     continue
                 if col.startswith("t"):
                     ratio = np.log(x[k].to_numpy() / y[k].to_numpy())
-                    pair.append(dict(base=bs, router=r, what=col, n=int(k.sum()),
+                    pair.append(dict(base=bs, router=r, b=bv, what=col, n=int(k.sum()),
                                      geo_mean_ratio=float(np.exp(ratio.mean())),
                                      lo=float(np.exp(ratio.min())), hi=float(np.exp(ratio.max()))))
                 else:
                     dd = (x[k] - y[k]).to_numpy()
                     se = dd.std(ddof=1) / np.sqrt(len(dd)) if len(dd) > 1 else np.nan
-                    pair.append(dict(base=bs, router=r, what=col, n=int(k.sum()),
+                    pair.append(dict(base=bs, router=r, b=bv, what=col, n=int(k.sum()),
                                      mean_diff=float(dd.mean()), se=float(se),
                                      wins=int((dd > 0).sum()), losses=int((dd < 0).sum())))
     Q = pd.DataFrame(pair)
