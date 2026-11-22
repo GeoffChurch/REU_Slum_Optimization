@@ -1,9 +1,12 @@
 """The routers compared (ears.Router; owner 2026-11-19: "why do we need to discretize the directions
-at all?"): Grid8, Pulled, Theta and Eikonal on the raster, Visibility (b0 and binf: exact) on
+at all?"): Grid8, Pulled, Theta and Eikonal on the raster, Visibility (b0: exact) on
 the vector faces (2026-11-22; Steiner, deleted as dominated: the wiki's
 reblock/steiner-router-is-dominated, commit 1a92867c), each run by the crossings study's recorder
 (atlas/crossings/crossings.py: its worlds, its rows) on the same worlds at b0 and b20, and the
-real blocks at binf (buildings impassable).
+real blocks at binf. Rev 4 (2026-11-22): b charges for the building share of the road's
+cross-section (ears.road_share), binf is the limit (lexicographic: least B, then length; Grid8,
+Pulled and Theta only); every b > 0 run again (runs_bcost.txt), rev 3's moved to
+crossings/rows_old_bcost (migrate_bcost.py).
 
 Per run (crossings rows: <world>/<plan>/):
   directions: the built ears' centrelines in CHORD_M chords (a line resampled every CHORD_M m of

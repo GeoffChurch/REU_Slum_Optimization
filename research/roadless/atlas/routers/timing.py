@@ -1,5 +1,5 @@
 """The routers' own time (ears.Router): on a block's first state, per router and building cost
-(ears.routers_at: Visibility at b0 and binf only),
+(ears.routers_at: Visibility at b0 only, Eikonal not at binf),
 Paths.ears (every source's search, the best `pairs` drawn and costed) timed REPEAT times after a
 compiling call, its least kept; beside it the step's exact rescoring (ears.offer less Paths.ears),
 what a run's step costs besides its routing.
