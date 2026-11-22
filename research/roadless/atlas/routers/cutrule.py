@@ -37,7 +37,7 @@ import growth as gr  # noqa: E402
 
 ROWS = HERE / "rows" / "cutrule"
 DROPPED = 16           # dropped: sources tested per state (the best by their best dropped target)
-ALLOWS = tuple(np.round(np.arange(0.5, 2.05, 0.1), 2))   # table: the allowances judged
+ALLOWS = tuple(np.round(np.arange(0.8, 1.45, 0.05), 2))   # table: the allowances judged
 
 
 def split_of(e: ears.EarWorld, faces: ears.Face, f: int, tris: Any) -> tuple[bool, float]:
@@ -73,6 +73,27 @@ def pinches(ra: ears.Raster, pf: Any, f: int, line: Any) -> int:
     return int(((pf[o1] != f) & (pf[o2] != f)).sum())
 
 
+def sides(ra: ears.Raster, pf: Any, line: Any) -> tuple[float, float]:
+    """The face area the corridor (PATCH_R a side of the centreline) covers left and right of
+    it, by samples every PIX / 4 along it and PIX / 4 across it (offline: the oracle)."""
+    seg = np.diff(line, axis=0)
+    out = np.zeros(2)
+    for p, d in zip(line[:-1], seg, strict=True):
+        L = float(np.hypot(*d))
+        if L == 0:
+            continue
+        u = d / L
+        nrm = np.array([-u[1], u[0]])
+        n = max(int(np.ceil(L / (ears.PIX / 4))), 1)
+        ts = (np.arange(n) + 0.5) / n
+        ofs = (np.arange(int(gr.PATCH_R / (ears.PIX / 4))) + 0.5) * (ears.PIX / 4)
+        for k, sg in enumerate((1.0, -1.0)):
+            pts = (p + ts[:, None] * d)[:, None, :] + sg * ofs[None, :, None] * nrm
+            px = ears._pix_of(ra, pts.reshape(-1, 2))
+            out[k] += float((pf[px] >= 0).mean()) * gr.PATCH_R * L
+    return float(out[0]), float(out[1])
+
+
 @dataclass(kw_only=True)
 class Audit:
     """Paths (`inner`) whose states are audited (module docstring); rows appended to `rows`."""
@@ -99,15 +120,17 @@ class Audit:
                 continue
             a, t = int(q.path[0]), int(q.path[-1])
             reach = next(iter(p.router.reaches(ter, np.array([a]))))
-            P, Q = ears.cuts(arcs, int(pf[a]), a, np.array([t]), reach.area[[t]])
+            cut = ears.cuts(arcs, int(pf[a]), a, np.array([t]), reach.area[[t]])
             ok, small = split_of(e, faces, q.face, q.tris)
-            self.rows.append(dict(step=step, kind="kept", P=P[0], Q=Q[0],
+            sl, sr = sides(ra, pf, q.line)
+            self.rows.append(dict(step=step, kind="kept", P=cut.P[0], Q=cut.Q[0],
+                                  left=bool(cut.left[0]), E=reach.cor[t, 0], S=reach.cor[t, 1],
                                   L=float(reach.length()[t]), split=ok, small=small,
-                                  pinch=pinches(ra, pf, q.face, q.line)))
+                                  pinch=pinches(ra, pf, q.face, q.line), El=sl, Er=sr))
         # the dropped: per source its best target the cut test drops
         fld = p.attract.field(e, P0=e.g.P0)
         lex = ter.lex()
-        best: list[tuple[tuple[int, float], int, int, Any, float, float, float]] = []
+        best: list[tuple[tuple[int, float], int, int, Any, Any]] = []
         for reach in p.router.reaches(ter, src):
             a = reach.src
             d = reach.cost
@@ -118,26 +141,31 @@ class Audit:
             if not len(tg):
                 continue
             ln = reach.length()[tg]
-            X, Y = ears.cuts(arcs, int(pf[a]), int(a), tg, reach.area[tg])
-            drop = ~(np.minimum(X, Y) - ears.CUT_ALLOW * gr.PATCH_R * ln >= gr.FACE_M2)
+            cut = ears.cuts(arcs, int(pf[a]), int(a), tg, reach.area[tg])
+            X, Y = cut.net(reach.cor[tg])
+            drop = ~(np.minimum(X, Y) >= gr.FACE_M2)
             if not drop.any():
                 continue
-            tg, ln, X, Y = tg[drop], ln[drop], X[drop], Y[drop]
+            tg, ln = tg[drop], ln[drop]
             cr = fld.credits(int(a), tg, reach)
             tier, r = ears.rank(reach.gain[tg] + scale * cr, d[tg], ln if lex else None)
             k = int(np.lexsort((-r, -tier))[0])
-            best.append(((int(tier[k]), float(r[k])), int(a), int(tg[k]), reach,
-                         float(X[k]), float(Y[k]), float(ln[k])))
+            t = int(tg[k])
+            row = dict(P=float(cut.P[drop][k]), Q=float(cut.Q[drop][k]),
+                       left=bool(cut.left[drop][k]), E=float(reach.cor[t, 0]),
+                       S=float(reach.cor[t, 1]), L=float(ln[k]))
+            best.append(((int(tier[k]), float(r[k])), int(a), t, reach, row))
             best.sort(key=lambda z: (-z[0][0], -z[0][1]))
             del best[DROPPED:]
-        for _, a, t, reach, X_, Y_, L in best:
+        for _, a, t, reach, row in best:
             rt = reach.route(t)
             tris = e.corridor(rt.line, spur=False)
             if not len(tris):
                 continue
             ok, small = split_of(e, faces, int(pf[a]), tris)
-            self.rows.append(dict(step=step, kind="dropped", P=X_, Q=Y_, L=L, split=ok,
-                                  small=small, pinch=pinches(ra, pf, int(pf[a]), rt.line)))
+            sl, sr = sides(ra, pf, rt.line)
+            self.rows.append(dict(step=step, kind="dropped", **row, split=ok, small=small,
+                                  pinch=pinches(ra, pf, int(pf[a]), rt.line), El=sl, Er=sr))
         return out
 
 
@@ -158,13 +186,21 @@ def run(world: str, spec: str) -> None:
     print(f"done: {len(df)} ears tested ({time.time() - t0:.0f}s)", flush=True)
 
 
+def net_min(df: pd.DataFrame, allow: float) -> Any:
+    """The smaller piece less `allow` times the corridor's take on its side (ears.Cut.net)."""
+    lt, rt = (df.E + df.S) / 2.0, (df.E - df.S) / 2.0
+    sp = np.where(df.left, lt, rt)
+    sq = np.where(df.left, rt, lt)
+    return np.minimum(df.P - allow * sp, df.Q - allow * sq).to_numpy()
+
+
 def table() -> None:
     df = pd.concat([pd.read_parquet(p) for p in sorted(ROWS.glob("*.parquet"))],
                    ignore_index=True)
     df["b"] = df.plan.str.extract(r"\.b([0-9.]+|inf)\.")[0]
     rows = []
     for allow in ALLOWS:
-        keep = (np.minimum(df.P, df.Q) - allow * gr.PATCH_R * df.L >= gr.FACE_M2).to_numpy()
+        keep = net_min(df, allow) >= gr.FACE_M2
         for (b, kind), sub in df.groupby(["b", "kind"]):
             k = keep[sub.index.to_numpy()]
             rows.append(dict(allow=allow, b=b, sample=kind, n=len(sub),

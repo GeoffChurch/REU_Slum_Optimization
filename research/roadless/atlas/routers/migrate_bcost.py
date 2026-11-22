@@ -80,10 +80,11 @@ def pieces(row: Path) -> pd.DataFrame:
     steps, tri_step.parquet; every candidate offered, cands.parquet; symlinks followed) under rev
     4's rules: its world rebuilt and at each state its faces and their Arcs (EarWorld.arcs, as
     Paths.ears takes them); per candidate its state, whether its ends are on two rings, the
-    smaller piece it cuts (ears.cuts, its line's swept area: as Grid8's, Theta's and
-    Visibility's searches take it; Pulled's line is the string-pulled one and Eikonal's the
-    descent, whose swept areas rev 4 takes from the grid path and the characteristic) and its
-    length."""
+    pieces it cuts (ears.cuts, its line's swept area: as Grid8's, Theta's and Visibility's
+    searches take it; Pulled's line is the string-pulled one and Eikonal's the descent, whose
+    swept areas rev 4 takes from the grid path and the characteristic), whether P lies on its
+    left, and its corridor's side fields along its line (ears.cor_along, the state's
+    side_fields; Reach.cor)."""
     js = json.loads((row / "world.json").read_text())
     w = cx.world_of(js["world"])
     gl = re.search(r"\.gl([0-9.]+)C", js["plan"])
@@ -102,21 +103,25 @@ def pieces(row: Path) -> pd.DataFrame:
         faces = e.faces()
         pf = np.where(ra.tri >= 0, faces.lab[np.maximum(ra.tri, 0)], -1)
         ar = e.arcs(faces)
+        sd = ears.side_fields((pf >= 0).reshape(shape))
         for x, y in zip(grp.path_x, grp.path_y, strict=True):
             line = np.column_stack([x, y]).astype(np.float64)
             a, b = ears._pix_of_lo(lo, shape, line[[0, -1]])
             two = bool(ar.ring[a] != ar.ring[b])
             swept = float(ears._tris(line[:-1], line[1:], lo).sum())
-            L = float(np.hypot(*np.diff(line, axis=0).T).sum())
-            P, Q = ears.cuts(ar, int(pf[a]), int(a), np.array([b]), np.array([swept]))
-            rows.append(dict(step=int(step), cross=two, piece=float(min(P[0], Q[0])), L=L))
-    return pd.DataFrame(rows, columns=["step", "cross", "piece", "L"])
+            cut = ears.cuts(ar, int(pf[a]), int(a), np.array([b]), np.array([swept]))
+            we, lean = ears.cor_along(lo, shape, sd, line)
+            rows.append(dict(step=int(step), cross=two, P=float(cut.P[0]), Q=float(cut.Q[0]),
+                             left=bool(cut.left[0]), E=we, S=lean))
+    return pd.DataFrame(rows, columns=["step", "cross", "P", "Q", "left", "E", "S"])
 
 
 def replay(row: Path) -> Replay:
-    """`pieces` judged by ears.cuts' rule (CUT_ALLOW)."""
+    """`pieces` judged by the cut test's rule (ears.Cut.net)."""
     df = pieces(row)
-    tiny = ~df.cross & ~(df.piece - ears.CUT_ALLOW * gr.PATCH_R * df.L >= gr.FACE_M2)
+    cut = ears.Cut(P=df.P.to_numpy(), Q=df.Q.to_numpy(), left=df.left.to_numpy())
+    X, Y = cut.net(df[["E", "S"]].to_numpy())
+    tiny = ~df.cross & ~(np.minimum(X, Y) >= gr.FACE_M2)
     bad = df.step[df.cross | tiny]
     return Replay(offered=len(df), cross=int(df.cross.sum()), small=int(tiny.sum()),
                   first=int(bad.min()) if len(bad) else -1)
