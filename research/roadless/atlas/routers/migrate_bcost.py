@@ -33,6 +33,7 @@ Idempotent: a migrated name matches the pattern no more. A destination that exis
 from __future__ import annotations
 
 import functools
+import json
 import os
 import re
 import subprocess
@@ -45,6 +46,8 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]          # research/roadless
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "atlas" / "crossings"))
+import crossings as cx  # noqa: E402
 import ears  # noqa: E402
 import growth as gr  # noqa: E402
 
@@ -72,22 +75,33 @@ class Replay(NamedTuple):
 
 
 @functools.cache
-def replay(row: Path) -> Replay:
-    """The rev 3 b0 paths row `row` (a crossings row: its states' pixel faces, states.npz, and
-    every candidate offered, cands.parquet; symlinks followed) under rev 4's rules: at each state
-    the faces' Arcs (ears.arcs_of), each candidate's ends' rings and the pieces it cuts
-    (ears.cuts, its line's swept area: as Grid8's, Theta's and Visibility's searches take it;
-    Pulled's line is the string-pulled one and Eikonal's the descent, whose swept areas rev 4
-    takes from the grid path and the characteristic)."""
-    z = np.load(row / "states.npz")
+def pieces(row: Path) -> pd.DataFrame:
+    """The rev 3 b0 paths row `row` (a crossings row: its world, world.json; its triangles'
+    steps, tri_step.parquet; every candidate offered, cands.parquet; symlinks followed) under rev
+    4's rules: its world rebuilt and at each state its faces and their Arcs (EarWorld.arcs, as
+    Paths.ears takes them); per candidate its state, whether its ends are on two rings, the
+    smaller piece it cuts (ears.cuts, its line's swept area: as Grid8's, Theta's and
+    Visibility's searches take it; Pulled's line is the string-pulled one and Eikonal's the
+    descent, whose swept areas rev 4 takes from the grid path and the characteristic) and its
+    length."""
+    js = json.loads((row / "world.json").read_text())
+    w = cx.world_of(js["world"])
+    gl = re.search(r"\.gl([0-9.]+)C", js["plan"])
+    if gl is None:
+        raise SystemExit(f"{row}: no contrast in its plan {js['plan']}")
+    h = float(gl[1])                                 # the plan's (faces read none)
+    metric = ears.metrics.metric_of(ears.metrics.RUNTIME, device="cpu")
+    e = ears.EarWorld(gr.growth_of(w.block(), metric, contrast=gr.GroundedLeak(h=h)))
+    ts = pd.read_parquet(row / "tri_step.parquet").step.to_numpy()
     c = pd.read_parquet(row / "cands.parquet")
-    shape = (int(z["shape"][0]), int(z["shape"][1]))
-    lo = np.asarray(z["lo"], dtype=np.float64)
-    cross = small = 0
-    first = -1
+    ra = e.ra
+    shape, lo = ra.shape, ra.lo
+    rows = []
     for step, grp in c.groupby("step", sort=True):
-        pf = z["pf"][int(step)]
-        ar = ears.arcs_of(pf.reshape(shape), z["sink"][int(step)].astype(bool))
+        e.g.step[:] = np.where((ts >= 0) & (ts < int(step)), ts, -1)
+        faces = e.faces()
+        pf = np.where(ra.tri >= 0, faces.lab[np.maximum(ra.tri, 0)], -1)
+        ar = e.arcs(faces)
         for x, y in zip(grp.path_x, grp.path_y, strict=True):
             line = np.column_stack([x, y]).astype(np.float64)
             a, b = ears._pix_of_lo(lo, shape, line[[0, -1]])
@@ -95,12 +109,17 @@ def replay(row: Path) -> Replay:
             swept = float(ears._tris(line[:-1], line[1:], lo).sum())
             L = float(np.hypot(*np.diff(line, axis=0).T).sum())
             P, Q = ears.cuts(ar, int(pf[a]), int(a), np.array([b]), np.array([swept]))
-            tiny = not bool(min(P[0], Q[0]) - ears.CUT_ALLOW * gr.PATCH_R * L >= gr.FACE_M2)
-            cross += two
-            small += tiny and not two
-            if (two or tiny) and first < 0:
-                first = int(step)
-    return Replay(offered=len(c), cross=cross, small=small, first=first)
+            rows.append(dict(step=int(step), cross=two, piece=float(min(P[0], Q[0])), L=L))
+    return pd.DataFrame(rows, columns=["step", "cross", "piece", "L"])
+
+
+def replay(row: Path) -> Replay:
+    """`pieces` judged by ears.cuts' rule (CUT_ALLOW)."""
+    df = pieces(row)
+    tiny = ~df.cross & ~(df.piece - ears.CUT_ALLOW * gr.PATCH_R * df.L >= gr.FACE_M2)
+    bad = df.step[df.cross | tiny]
+    return Replay(offered=len(df), cross=int(df.cross.sum()), small=int(tiny.sum()),
+                  first=int(bad.min()) if len(bad) else -1)
 
 
 def replayed(row: Path) -> bool:

@@ -32,7 +32,10 @@ PATCH_R a metre of path for its corridor (`cuts`, owner 2026-11-22: rank only ea
 built; build refuses an ear whose faces of FACE_M2 and more do not rise): the pieces by Green's
 theorem, the signed area the path sweeps (Reach.area, one pass with the search: a tree's sum,
 Theta's per segment, Eikonal's transported, Visibility's per piece) closed along the face's
-contour on the raster (Arcs). Without it, at binf on 5618 every source's best was a B-free path
+contour on the raster (Arcs; a saddle, pixels of one label meeting at a corner only, joined as
+the mesh is at that corner: a fixed rule miscounted both ways on 21634, keeping ears whose piece
+a one-pixel neck of the face left joined, dropping ears across a road's corner). Without it,
+at binf on 5618 every source's best was a B-free path
 in the open strip along the street that cut off 41 -- 73 m^2, and the build stopped after 1 ear
 (grid8) or 2 (theta): per
 source the target with the most first-order gain along the path per path cost (the gains summed
@@ -2592,8 +2595,8 @@ class Arcs(NamedTuple):
     there (k: the nearest of the contour's vertices, v, at (vx, vy) m about the raster's lower
     corner), h, the signed area (`_tri`) the contour sweeps from its first vertex to v plus the
     segment from v to the sink's centre, and the contour's signed area (tot); per face (by its
-    label) the sign of its outer contour's area (sign: the side the face is on; a hole's
-    contour has the other) and the area its outer contour encloses (outer: its holes'
+    label) the sign of its outer contours' areas (sign: the side the face is on; a hole's
+    contour has the other) and the area its outer contours enclose (outer: its holes'
     included)."""
     ring: I64
     cid: I64
@@ -2606,17 +2609,79 @@ class Arcs(NamedTuple):
     outer: F64
 
 
-def arcs_of(pf: I64, sink: B) -> Arcs:
+def _chain(cs: list[F64]) -> F64:
+    """One ring's contours in one face (closed vertex loops, the largest first after sorting)
+    as one loop: each next one entered and left at its vertex nearest the loop so far, the loop
+    turned to start there (the contours of a ring a face's pixels touch along lobes the raster
+    joins at a diagonal only: in the mesh one boundary component). The bridges, there and back,
+    sweep no area net."""
+    cs = sorted(cs, key=len, reverse=True)
+    out = cs[0]
+    for c in cs[1:]:
+        d, j = cKDTree(c).query(out, k=1)
+        i = int(np.argmin(d))
+        out = np.vstack([np.roll(out, -i, axis=0), np.roll(c, -int(j[i]), axis=0)])
+    return out
+
+
+def saddles(pfp: I64) -> B:
+    """Per corner of the padded pixel faces' 2 x 2 windows (shape one less each way) whether it
+    is a saddle: one label on a diagonal, neither of the other diagonal's that one. Which way
+    the raster joins there is the mesh's to say (EarWorld.arcs: the label at the corner)."""
+    a, b, c, d = pfp[:-1, :-1], pfp[1:, 1:], pfp[1:, :-1], pfp[:-1, 1:]
+    return np.asarray(((a == b) & (c != a) & (d != a)) | ((c == d) & (a != c) & (b != c)))
+
+
+def face_loops(pfp: I64, corner: I64, f: int) -> list[F64]:
+    """Face f's contours (closed vertex loops, m about the raster's lower corner; its first
+    vertex not repeated) on the padded pixel faces `pfp`, each saddle (`saddles`) joined the way
+    `corner` (the label at each window's corner) says: skimage's marching squares at 0.5 on the
+    raster split in two each way, the four quarter pixels at a saddle's corner f where the corner
+    is f's, not f where not. A contour's vertices run mid-way between quarter pixels; with no
+    saddle the loop is the pixels' boundary less a corner's (PIX / 4)^2 / 2 at each turn."""
+    pfp0 = pfp
+    sl = ndimage.find_objects((pfp0 == f).astype(np.int64))[0]
+    r0, c0 = max(sl[0].start - 1, 0), max(sl[1].start - 1, 0)
+    r1, c1 = sl[0].stop + 1, sl[1].stop + 1
+    m = pfp0[r0:r1, c0:c1] == f
+    M = np.repeat(np.repeat(m, 2, axis=0), 2, axis=1)
+    win = pfp0[r0:r1, c0:c1]
+    a, b, c, d = win[:-1, :-1], win[1:, 1:], win[1:, :-1], win[:-1, 1:]
+    sd = ((a == f) & (b == f) & (c != f) & (d != f)) | ((c == f) & (d == f) & (a != f) & (b != f))
+    for i, j in np.argwhere(sd):
+        M[2 * i + 1:2 * i + 3, 2 * j + 1:2 * j + 3] = corner[r0 + i, c0 + j] == f
+    out = []
+    for cv in measure.find_contours(M.astype(np.float64), 0.5, fully_connected="low"):
+        out.append((cv[:-1] / 2.0 + [r0 - 0.75, c0 - 0.75]) * PIX)
+    return out
+
+
+def arcs_of(pf: I64, sink: B, corner: I64) -> Arcs:
     """Arcs of the raster's pixel faces `pf` (2-D; -1 in no face: the network, the raster padded
-    by one such pixel so the street's outside is one) and sinks (flat). The network in
-    8-connected pieces; a sink's ring the piece of the network pixel nearest it (EarWorld.arcs).
-    Each face's contours: its pixels' boundary (skimage's marching squares at 0.5, the face
-    8-connected; a contour's vertices mid-way between a face pixel and another), each one ring's
-    (the piece nearest the non-face pixels its vertices border, most of them); a sink's vertex
-    the nearest of its ring's contours' in its face."""
+    by one such pixel so the street's outside is one), sinks (flat) and, per corner of the
+    padded raster's 2 x 2 windows, the label there where it is a saddle (`saddles`; the mesh's,
+    EarWorld.arcs). The network in pieces: 4-connected, and joined at a saddle of two network
+    pixels whose corner is network; a sink's ring the piece of the network pixel nearest it.
+    Each face's contours (`face_loops`: the saddles joined the same way), each one ring's (the
+    piece nearest the non-face pixels its vertices border, most of them), an outer one where its
+    area has the largest one's sign (a face the raster cuts at a neck has more than one), a
+    hole's else, a ring's contours in a face one loop (`_chain`); a sink's vertex the nearest of
+    its ring's loop's in its face. A path between a face's pixels that crosses a saddle whose
+    corner is not the face's leaves it there (it crosses a road, its pieces miscounted:
+    Paths.ears drops it where they come out under FACE_M2)."""
     nx, ny = pf.shape
-    net = np.pad(pf < 0, 1, constant_values=True)
-    lab, _ = ndimage.label(net, structure=np.ones((3, 3), dtype=bool))
+    pfp = np.pad(pf, 1, constant_values=-1)
+    net = pfp < 0
+    lab, nl = ndimage.label(net)
+    # network saddles whose corner is network: their two diagonal pieces one
+    sd = saddles(pfp) & (corner < 0)
+    i1, j1 = np.nonzero(sd & net[:-1, :-1] & net[1:, 1:])
+    i2, j2 = np.nonzero(sd & net[1:, :-1] & net[:-1, 1:])
+    u = np.concatenate([lab[i1, j1], lab[i2 + 1, j2]])
+    v = np.concatenate([lab[i1 + 1, j1 + 1], lab[i2, j2 + 1]])
+    _, comp = connected_components(
+        sp.coo_matrix((np.ones(len(u)), (u, v)), shape=(nl + 1, nl + 1)), directed=False)
+    lab = np.where(net, comp[lab], -1)
     _, (ii, jj) = ndimage.distance_transform_edt(~net, return_indices=True)
     near = lab[ii, jj]                               # padded: the nearest network piece
     n = nx * ny
@@ -2627,23 +2692,24 @@ def arcs_of(pf: I64, sink: B) -> Arcs:
     h, tot, vx, vy = np.zeros(n), np.zeros(n), np.zeros(n), np.zeros(n)
     nf = int(flat.max()) + 1 if flat.max() >= 0 else 0
     sign, outer = np.zeros(nf), np.zeros(nf)
-    pfp = np.pad(pf, 1, constant_values=-1)
-    objs = ndimage.find_objects(pfp + 1)             # face f: label f + 1, objs[f]
     xy = np.column_stack([(np.arange(n) // ny + 0.5) * PIX, (np.arange(n) % ny + 0.5) * PIX])
     c_id = 0
     for f in np.unique(flat[sink & (flat >= 0)]):
-        sl = objs[f]
-        r0, c0 = max(sl[0].start - 1, 0), max(sl[1].start - 1, 0)
-        m = pfp[r0:sl[0].stop + 1, c0:sl[1].stop + 1] == f
-        conts = measure.find_contours(m.astype(np.float64), 0.5, fully_connected="high")
+        by: dict[int, list[F64]] = {}
+        for P in face_loops(pfp, corner, int(f)):
+            # the padded pixel either side of each vertex (mid-way between quarter pixels): the
+            # one not in f, its nearest network piece
+            g_ = P / PIX + 1.0                       # padded pixel units, centres at k + 0.5
+            nb = np.floor(np.stack([g_ - 0.125, g_ + 0.125])).astype(np.int64)   # 2 x V x 2
+            nb[..., 0] = np.clip(nb[..., 0], 0, nx + 1)
+            nb[..., 1] = np.clip(nb[..., 1], 0, ny + 1)
+            inf_ = pfp[nb[0, :, 0], nb[0, :, 1]] == f
+            o = np.where(inf_[:, None], nb[1], nb[0])
+            rl = int(np.bincount(np.maximum(near[o[:, 0], o[:, 1]], 0)).argmax())
+            by.setdefault(rl, []).append(P)
         verts, rings_c, ids, cum, tots = [], [], [], [], []
-        for cv in conts:
-            V = cv[:-1]                              # closed: its last vertex its first
-            lo_ = np.floor(V).astype(np.int64)
-            hi_ = np.ceil(V).astype(np.int64)
-            out = np.where(m[lo_[:, 0], lo_[:, 1]][:, None], hi_, lo_)   # the non-face pixel
-            rl = np.bincount(near[out[:, 0] + r0, out[:, 1] + c0]).argmax()
-            P = (V + [r0 - 0.5, c0 - 0.5]) * PIX     # m about the raster's lower corner
+        for rl, cs in by.items():
+            P = _chain(cs)
             Q = np.roll(P, -1, axis=0)
             seg = 0.5 * (P[:, 0] * Q[:, 1] - Q[:, 0] * P[:, 1])
             verts.append(P)
@@ -2653,9 +2719,9 @@ def arcs_of(pf: I64, sink: B) -> Arcs:
             tots.append(np.full(len(P), seg.sum()))
             c_id += 1
         V_, R_, I_, C_, T_ = (np.concatenate(x) for x in (verts, rings_c, ids, cum, tots))
-        outer_ = int(np.argmax(np.abs([t[0] for t in tots])))
-        sign[f] = np.sign(tots[outer_][0])
-        outer[f] = abs(tots[outer_][0])
+        ts = np.array([t[0] for t in tots])
+        sign[f] = np.sign(ts[np.argmax(np.abs(ts))])
+        outer[f] = float(np.abs(ts[sign[f] * ts > 0]).sum())
         K_ = np.concatenate([np.arange(len(v)) for v in verts])
         own = np.flatnonzero(sink & (flat == f))
         for r in np.unique(ring[own]):
@@ -2716,8 +2782,9 @@ class EarWorld:
 
     def arcs(self, faces: Face) -> Arcs:
         """The faces' boundaries on the raster (`arcs_of`; pixels in no face, grown or off the
-        block, the network): per sink the ring it lies on (`sinks`), the network's 8-connected
-        piece nearest it, and its place on its face's contour. A face's boundary components are
+        block, the network): per sink the ring it lies on (`sinks`), the network's piece nearest it
+        (the raster's diagonal saddles joined as the mesh is at their corners), and its place on
+        its face's contour. A face's boundary components are
         rings: the street's, and a hole's where the block has one (5810, 132 m^2; 6310, 21634,
         23743), until a road joins it to the street. A cut between two rings splits nothing (in
         a plane region a cut splits only between two points of one boundary component), so a
@@ -2727,8 +2794,16 @@ class EarWorld:
         bounding triangles are no network to label: the street's are one per street face, not
         edge-connected.) Paths.ears' cut test reads the contours (`cuts`)."""
         ra = self.ra
-        pf = np.where(ra.tri >= 0, faces.lab[np.maximum(ra.tri, 0)], -1)
-        return arcs_of(pf.reshape(ra.shape), self.sinks())
+        pf = np.where(ra.tri >= 0, faces.lab[np.maximum(ra.tri, 0)], -1).reshape(ra.shape)
+        # each saddle's corner: the label of the triangle there (as a pixel's, `raster_of`)
+        sd = saddles(np.pad(pf, 1, constant_values=-1))
+        corner = np.full(sd.shape, -1, dtype=np.int64)
+        ij = np.argwhere(sd)
+        xy = ra.lo + ij * PIX
+        boundary: Any = self.g.m.geo.boundary
+        inside = shapely.contains_xy(boundary, xy[:, 0], xy[:, 1])
+        corner[ij[:, 0], ij[:, 1]] = np.where(inside, faces.lab[self.g.tree.query(xy)[1]], -1)
+        return arcs_of(pf, self.sinks(), corner)
 
     def sinks_of(self, bounding: B) -> B:
         """`sinks` with the triangles `bounding` the roads (Detour: the street's alone)."""
@@ -3098,8 +3173,7 @@ MUTATIONS: dict[str, tuple[str, str]] = {
     "half-corners": ("    corner = np.flatnonzero(turn < -TAN_TOL * scale)",
                      "    corner = np.flatnonzero(turn < -TAN_TOL * scale)[::2]"),
     "gain-unit": ("    return acc * L / PIX\n", "    return acc * L\n"),
-    "one-ring": ("        return np.where(self.sinks(), near, -1)",
-                 "        return np.where(self.sinks(), 0, -1)"),
+    "one-ring": ("    lab = np.where(net, comp[lab], -1)\n", "    lab = np.where(net, 0, -1)\n"),
     "share-radius": ("share = road_share(np.asarray(geo.polys), xy, r=gr.ROAD_W / 2.0)",
                      "share = road_share(np.asarray(geo.polys), xy, r=gr.ROAD_W)"),
     "share-raster": ("tri=tri, bld=bld, share=share,", "tri=tri, bld=bld, share=bld,"),
@@ -3374,11 +3448,11 @@ def router_check(test: str, fault: str | None) -> None:
         off = np.pad(pf < 0, 1, constant_values=True)
         sink = (ndimage.binary_dilation(off, structure=np.ones((3, 3), dtype=bool))[1:-1, 1:-1]
                 & (pf >= 0)).ravel()
-        arcs = arcs_of(pf, sink)
+        pfp = np.pad(pf, 1, constant_values=-1)
+        corner = np.full(saddles(pfp).shape, -1, dtype=np.int64)     # no saddle here
+        arcs = arcs_of(pf, sink, corner)
         share[sink] = 0.0
-        conts = measure.find_contours(np.pad(pf >= 0, 1).astype(np.float64), 0.5,
-                                      fully_connected="high")
-        rings_ = sorted(((c - 0.5) * PIX for c in conts), key=lambda c: -len(c))
+        rings_ = sorted(face_loops(pfp, corner, 0), key=lambda c: -len(c))
         poly = shapely.Polygon(rings_[0], [rings_[1]])
         h0, h1 = n // 2 - RC_HOLE_PX - 1, n // 2
         srcs = (n // 2, h0 * n + h1)                 # on the outer ring, on the hole's

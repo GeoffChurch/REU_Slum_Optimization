@@ -37,7 +37,7 @@ import growth as gr  # noqa: E402
 
 ROWS = HERE / "rows" / "cutrule"
 DROPPED = 16           # dropped: sources tested per state (the best by their best dropped target)
-ALLOWS = (0.0, 0.5, 1.0, 1.5, 2.0, 3.0)   # table: the allowances judged
+ALLOWS = tuple(np.round(np.arange(0.5, 2.05, 0.1), 2))   # table: the allowances judged
 
 
 def split_of(e: ears.EarWorld, faces: ears.Face, f: int, tris: Any) -> tuple[bool, float]:
@@ -52,6 +52,25 @@ def split_of(e: ears.EarWorld, faces: ears.Face, f: int, tris: Any) -> tuple[boo
     new = np.unique(nf.lab[was & (nf.lab >= 0)])
     areas = np.sort(nf.area[new])[::-1]
     return bool(nf.n > faces.n), float(areas[1]) if len(areas) > 1 else 0.0
+
+
+def pinches(ra: ears.Raster, pf: Any, f: int, line: Any) -> int:
+    """Diagonal steps of the centreline (sampled every PIX / 8) between two of face f's pixels
+    whose two common neighbours are both out of it: where the raster's network touches itself
+    at a corner and the path crosses it."""
+    seg = np.diff(line, axis=0)
+    n = np.maximum(np.ceil(np.hypot(*seg.T) / (ears.PIX / 8)).astype(np.int64), 1)
+    pts = np.vstack([line[i] + seg[i] * (np.arange(k) / k)[:, None] for i, k in enumerate(n)]
+                    + [line[-1:]])
+    px = ears._pix_of(ra, pts)
+    px = px[np.r_[True, px[1:] != px[:-1]]]
+    ny = ra.shape[1]
+    i, j = px // ny, px % ny
+    di, dj = np.diff(i), np.diff(j)
+    diag = np.flatnonzero((np.abs(di) == 1) & (np.abs(dj) == 1))
+    o1 = (i[diag] + di[diag]) * ny + j[diag]
+    o2 = i[diag] * ny + j[diag] + dj[diag]
+    return int(((pf[o1] != f) & (pf[o2] != f)).sum())
 
 
 @dataclass(kw_only=True)
@@ -83,7 +102,8 @@ class Audit:
             P, Q = ears.cuts(arcs, int(pf[a]), a, np.array([t]), reach.area[[t]])
             ok, small = split_of(e, faces, q.face, q.tris)
             self.rows.append(dict(step=step, kind="kept", P=P[0], Q=Q[0],
-                                  L=float(reach.length()[t]), split=ok, small=small))
+                                  L=float(reach.length()[t]), split=ok, small=small,
+                                  pinch=pinches(ra, pf, q.face, q.line)))
         # the dropped: per source its best target the cut test drops
         fld = p.attract.field(e, P0=e.g.P0)
         lex = ter.lex()
@@ -117,7 +137,7 @@ class Audit:
                 continue
             ok, small = split_of(e, faces, int(pf[a]), tris)
             self.rows.append(dict(step=step, kind="dropped", P=X_, Q=Y_, L=L, split=ok,
-                                  small=small))
+                                  small=small, pinch=pinches(ra, pf, int(pf[a]), rt.line)))
         return out
 
 
