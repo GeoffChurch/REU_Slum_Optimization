@@ -31,7 +31,9 @@ their add order, recorded by crossings.Recording.
 
     L=research/roadless/atlas/lookahead/lookahead.py     # from the repo root, PYTHONPATH=.
     uv run python $L run <bid> <search> <plan>
-    uv run python $L check greedy <bid> [fault]          # greedy's ears are ears.build's
+    uv run python $L check greedy <bid> <plan> [fault]   # greedy's ears are ears.build's, e.g.
+        ears.paths.<router>.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D1 (b0 or binf for
+        visibility)
 """
 from __future__ import annotations
 
@@ -362,14 +364,13 @@ def run(bid: str, search: Search, plan: ears.Plan) -> None:
           flush=True)
 
 
-def check_greedy(bid: str, fault: str | None) -> None:
-    """greedy's first CHECK_STEPS ears (paths' pixels) are ears.build's on the plan. Fault `second`
-    (greedy taking each step's second-best rescored ear) fails it."""
+def check_greedy(bid: str, plan: ears.Plan, fault: str | None) -> None:
+    """greedy's first CHECK_STEPS ears (paths' pixels) are ears.build's on the plan (any router).
+    Fault `second` (greedy taking each step's second-best rescored ear) fails it."""
     if fault not in (None, "second"):
         raise SystemExit("greedy's fault: second")
-    plan = ears.Plan.of("ears.paths.grid8.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D1")
     e = ears.world_of(bid, plan.contrast.h)
-    out = ROWS / "check" / bid
+    out = ROWS / "check" / bid / plan.name
     ears.build(e, plan, out=out, log=lambda s: None, steps=CHECK_STEPS)
     built = pd.read_parquet(out / "picks.parquet")
     e2 = ears.world_of(bid, plan.contrast.h)
@@ -395,8 +396,8 @@ def check_greedy(bid: str, fault: str | None) -> None:
 def main(argv: list[str]) -> None:
     if len(argv) == 4 and argv[0] == "run":
         run(argv[1], search_of(argv[2]), ears.Plan.of(argv[3]))
-    elif len(argv) in (3, 4) and argv[:2] == ["check", "greedy"]:
-        check_greedy(argv[2], argv[3] if len(argv) == 4 else None)
+    elif len(argv) in (4, 5) and argv[:2] == ["check", "greedy"]:
+        check_greedy(argv[2], ears.Plan.of(argv[3]), argv[4] if len(argv) == 5 else None)
     else:
         raise SystemExit(__doc__)
 

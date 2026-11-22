@@ -1,6 +1,8 @@
 """The routers compared (ears.Router; owner 2026-11-19: "why do we need to discretize the directions
-at all?"): Grid8, Pulled, Theta and Eikonal, each run by the crossings study's recorder
-(atlas/crossings/crossings.py: its worlds, its rows) on the same worlds at b0 and b20.
+at all?"): Grid8, Pulled, Theta and Eikonal on the raster, Visibility (b0 and binf: exact) and
+Steiner (k 2) on the vector faces (2026-11-22), each run by the crossings study's recorder
+(atlas/crossings/crossings.py: its worlds, its rows) on the same worlds at b0 and b20, and the
+real blocks at binf (buildings impassable).
 
 Per run (crossings rows: <world>/<plan>/):
   directions: the built ears' centrelines in CHORD_M chords (a line resampled every CHORD_M m of
@@ -18,10 +20,12 @@ Per run (crossings rows: <world>/<plan>/):
     run's states interpolated linearly in D (a run that stops short of a D is not read there).
   time: the run's wall time to each matched D (steps' t; the world's build excluded) and per
     ear.
+  paired: each router against each of BASES on the same world and b (objective: mean
+    difference, wins; time: geometric mean ratio).
 
     R=research/roadless/atlas/routers/routers.py       # from the repo root, PYTHONPATH=.:src
     python $R table                                     # results/*.csv and the tables printed
-    python $R plot <world> <b> <out.png>                # the four routers side by side
+    python $R plot <world> <b> <out.png>                # the routers run there side by side
     python $R budgets <world> <b> <routers,> <D,> <out.png>  # a row per router, a column per budget
 """
 from __future__ import annotations
@@ -52,7 +56,8 @@ AXIS_TOL = 5.0           # degrees
 JCT_M = 10.0             # m: junctions: the ear's direction from its end over this much of it
 TAN_M = 3.0              # m: junctions: the road's tangent from this far either side of the foot
 MATCHED_D = (0.05, 0.10, 0.15)
-ROUTERS = ("grid8", "pulled", "theta", "eikonal")
+ROUTERS = ("grid8", "pulled", "theta", "eikonal", "visibility", "steiner2")
+BASES = ("grid8", "theta")
 F64: TypeAlias = NDArray[np.float64]
 
 
@@ -216,10 +221,10 @@ def table() -> None:
                            jct_mean=float(np.nanmean(g.jct_mean))))
     P = pd.DataFrame(pooled)
     P.to_csv(OUT / "pooled.csv", index=False, float_format="%.4g")
-    # paired against grid8 on the same world and b
-    base = t[t.router == "grid8"].set_index(["world", "b"])
+    # paired against each base on the same world and b
     pair = []
-    for r in ROUTERS[1:]:
+    for bs, r in ((bs, r) for bs in BASES for r in ROUTERS if r != bs):
+        base = t[t.router == bs].set_index(["world", "b"])
         o = t[t.router == r].set_index(["world", "b"])
         common = o.index.intersection(base.index)
         for D in MATCHED_D:
@@ -230,15 +235,15 @@ def table() -> None:
                     continue
                 if col.startswith("t"):
                     ratio = np.log(x[k].to_numpy() / y[k].to_numpy())
-                    pair.append(dict(router=r, what=col, n=int(k.sum()),
+                    pair.append(dict(base=bs, router=r, what=col, n=int(k.sum()),
                                      geo_mean_ratio=float(np.exp(ratio.mean())),
                                      lo=float(np.exp(ratio.min())), hi=float(np.exp(ratio.max()))))
                 else:
                     dd = (x[k] - y[k]).to_numpy()
                     se = dd.std(ddof=1) / np.sqrt(len(dd)) if len(dd) > 1 else np.nan
-                    pair.append(dict(router=r, what=col, n=int(k.sum()), mean_diff=float(dd.mean()),
-                                     se=float(se), wins=int((dd > 0).sum()),
-                                     losses=int((dd < 0).sum())))
+                    pair.append(dict(base=bs, router=r, what=col, n=int(k.sum()),
+                                     mean_diff=float(dd.mean()), se=float(se),
+                                     wins=int((dd > 0).sum()), losses=int((dd < 0).sum())))
     Q = pd.DataFrame(pair)
     Q.to_csv(OUT / "paired.csv", index=False, float_format="%.5g")
     with pd.option_context("display.width", 250, "display.max_columns", 30,
@@ -293,12 +298,9 @@ def plot(world: str, b: float, out: Path) -> None:
     import matplotlib.pyplot as plt
 
     ms = {m.router: m for m in runs() if m.world == world and m.b == b}
-    fig, axs = plt.subplots(1, len(ROUTERS), figsize=(5 * len(ROUTERS), 5.6), dpi=130)
-    for ax, r in zip(axs, ROUTERS, strict=True):
-        if r not in ms:
-            ax.set_title(f"{r}: no run")
-            ax.axis("off")
-            continue
+    rs = [r for r in ROUTERS if r in ms]
+    fig, axs = plt.subplots(1, len(rs), figsize=(5 * len(rs), 5.6), dpi=130, squeeze=False)
+    for ax, r in zip(axs[0], rs, strict=True):
         ax.set_title(panel(ax, ms[r], budget=None), fontsize=9)
     fig.suptitle(f"{world}, b{b:g}", fontsize=11)
     fig.tight_layout()

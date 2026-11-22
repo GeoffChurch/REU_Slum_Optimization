@@ -1,4 +1,5 @@
-"""The routers' own time (ears.Router): on a block's first state, per router and building cost,
+"""The routers' own time (ears.Router): on a block's first state, per router and building cost
+(ears.routers_at: Visibility at b0 and binf only, Steiner at ears.CHECK_K),
 Paths.ears (every source's search, the best `pairs` drawn and costed) timed REPEAT times after a
 compiling call, its least kept; beside it the step's exact rescoring (ears.offer less Paths.ears),
 what a run's step costs besides its routing.
@@ -20,8 +21,7 @@ import ears  # noqa: E402
 
 REPEAT = 3
 PLAN = "ears.paths.{r}.b{b:g}.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D1"
-ROUTERS = ("grid8", "pulled", "theta", "eikonal")
-BLDS = (0.0, 20.0)
+BLDS = (0.0, 20.0, float("inf"))
 
 
 def main(bids: list[str]) -> None:
@@ -35,7 +35,7 @@ def main(bids: list[str]) -> None:
         faces = e.faces()
         rows = []
         for b in BLDS:
-            for r in ROUTERS:
+            for r in (x.name for x in ears.routers_at(b)):
                 plan = ears.Plan.of(PLAN.format(r=r, b=b))
                 gain = plan.contrast.gains(g, st, u)
                 e.set_u(u)
