@@ -2907,8 +2907,11 @@ def arcs_of(pf: I64, sink: B, corner: I64) -> Arcs:
     return Arcs(ring=ring, cid=cid, k=kk, h=h, tot=tot, vx=vx, vy=vy, sign=sign, outer=outer)
 
 
-CUT_ALLOW = 1.0        # Cut.net: a piece's loss to the corridor, in the face area the corridor
-                       # takes on its side (Reach.cor)
+CUT_ALLOW = 1.25       # Cut.net: a piece's loss to the corridor, in the face area the corridor
+                       # takes on its side (Reach.cor): the median of the loss over that on 21
+                       # audited runs (atlas/routers/cutrule.py: 1.26, q25 1.13, q75 1.44; the
+                       # corridor's triangles are whole), which leaves 1 of 6,657 kept ears
+                       # refused
 
 
 class Cut(NamedTuple):
