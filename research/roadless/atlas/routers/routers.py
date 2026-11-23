@@ -5,8 +5,8 @@ reblock/steiner-router-is-dominated, commit 1a92867c), each run by the crossings
 (atlas/crossings/crossings.py: its worlds, its rows) on the same worlds at b0 and b20, and the
 real blocks at binf. Rev 4 (2026-11-22): b charges for the building share of the road's
 cross-section (ears.road_share), binf is the limit (lexicographic: least B, then length; Grid8,
-Pulled and Theta only); every b > 0 run again (runs_bcost.txt), rev 3's moved to
-crossings/rows_old_bcost (migrate_bcost.py).
+Pulled and Theta only); every b > 0 run again (runs_bcost.txt; 5810's binf stopped at 45
+states, short of every matched D), rev 3's moved to crossings/rows_old_bcost (migrate_bcost.py).
 
 Per run (crossings rows: <world>/<plan>/):
   directions: the built ears' centrelines in CHORD_M chords (a line resampled every CHORD_M m of
