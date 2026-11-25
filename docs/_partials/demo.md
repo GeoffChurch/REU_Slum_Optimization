@@ -85,6 +85,8 @@ inside the block, and none is mapped, since not every report's street can be pla
 
 ## Roads through the block {#methods}
 
+The roads our method builds through the block, and how it chooses them:
+
 <!-- DEMOMETHOD -->
 
 Drag the budget: each step lets the method displace more of the homes' floor area, and the plate
