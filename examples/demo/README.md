@@ -3,22 +3,24 @@
 
 # The Demo page's bundle
 
-What the site's Demo page reads: Cape Town block `ZAF.9.3.1_1_5810`, followed from the city-wide screens to
-the roads our method builds through it, and our method beside the original topology algorithm
-on block `ZAF.9.3.1_1_41785`, where topology has run.
+What the site's Demo page reads.
+It follows Cape Town block `ZAF.9.3.1_1_5810` from the city-wide screens to the roads our method builds through it.
+It then sets our method beside the original topology algorithm on block `ZAF.9.3.1_1_41785`, where topology has run.
 
-- `demo.json`: the page's facts -- the block's place, the shipped screen's verdict on it (checked
-  against `../screen-map/capetown.json`) and the two-stage depth_density screen's, the fires
-  reported near it (each quoted from its report and checked against the article; none is placed
-  inside the block, and the page draws none of them on a map), topology's run time on each block
-  (extrapolated on the first, measured on the second), and the encoding.
-- `buildout_ZAF.9.3.1_1_5810.json` and `buildout_ZAF.9.3.1_1_41785.json`: the two build-outs the page's slider widgets fetch -- budgets, and per
-  method its escape-time sprite sheet (beside them) and what it shows at each budget.
+`demo.json` holds the page's facts, one field per part of the page:
 
-`web/src/demo.d.ts` is generated beside it from the same dataclasses, so a renamed field is a
-TypeScript error.
+- `block`: the page's block -- its place and map link, the shipped screen's verdict on it (checked against `../screen-map/capetown.json`), the two-stage depth_density screen's peel of it, topology's extrapolated run time on it, and the fires reported near it.
+  Each fire is quoted from its report and checked against the article; none is placed inside the block, and the page draws none of them on a map.
+- `comparison`: the second block, with topology's measured run on it.
+- `screen`: the shipped screen's floor, pool, precision and recall, and the peel screen's settings.
+- `method`: our method's name and how it works, in the page's words.
+- `encoding`: the plates' colours and the quantities their legend states.
+- `topology_port`: how our port of topology's run times compare with the original algorithm's.
 
-The producer is `research/roadless/atlas/explore_proto/build.py` on the `research/roadless`
-branch, which cannot merge into `main` (it carries a private submit group and a large GPU group):
-the frames are the build-out pipeline's stored ones, so this directory is how they reach the
-public site.
+`buildout_ZAF.9.3.1_1_5810.json` and `buildout_ZAF.9.3.1_1_41785.json` are the two build-outs the page's slider widgets fetch.
+Each holds the budgets and, per method, what it shows at each budget and the file name of its escape-time sprite sheet, which sits in this directory.
+
+`web/src/demo.d.ts` is generated from the same dataclasses, so a renamed field is a TypeScript error.
+
+The producer is `research/roadless/atlas/explore_proto/build.py` on the `research/roadless` branch.
+That branch cannot merge into `main` (it carries a private submit group and a large GPU group), and the frames are the build-out pipeline's stored ones, so this directory is how they reach the public site.
