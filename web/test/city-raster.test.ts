@@ -5,6 +5,7 @@ import type { CityBundle } from "../src/screen_map.js";
 import { createLayer } from "../src/render/city.js";
 import { sizeCanvas } from "../src/render/canvas.js";
 import { toScreen, type View } from "../src/view/transform.js";
+import { FakePath2D } from "./harness.js";
 import { PixelCanvas, type PixelContext } from "./raster.js";
 
 // The committed bundle's own encoding, so the colours tested are the ones the site ships.
@@ -15,6 +16,7 @@ const E = (JSON.parse(readFileSync("../examples/screen-map/capetown.json", "utf8
 const DPR = 1;
 (globalThis as Record<string, unknown>).document = { createElement: () => new PixelCanvas() };
 (globalThis as Record<string, unknown>).window = { devicePixelRatio: DPR };
+(globalThis as Record<string, unknown>).Path2D = FakePath2D;
 
 const square = (x: number, y: number, s: number): [number, number][][] =>
   [[[x, y], [x + s, y], [x + s, y + s], [x, y + s]]];

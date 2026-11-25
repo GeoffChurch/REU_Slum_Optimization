@@ -647,6 +647,15 @@ test("a resize rebuilds the prefix from the repainted base layer, not from what 
   const order = ranking(ct, "depth_density_proxy");
   assert.equal(selectedPaths(cv).length,
     selectAt(ct, order, scores(ct, "depth_density_proxy"), CT_DDP.floor(700)).count);
+  // And every block where the NEW size puts it: render/city.ts caches each block's screen-space
+  // outline per (bundle, view), so outlines kept across the resize would paint the whole city at
+  // the old scale. Found by the top-ranked block's own first vertex under the 500 px fit, on the
+  // base layer and in the selection alike.
+  const view500 = fitBbox(cityBbox(ct), 500, 500, E.pad);
+  assert.ok(isSelected(cv, view500, ct, order[0]!),
+    "the top-ranked block is not drawn red where the resized view puts it");
+  assert.ok(baseFillColorOf(baseOf(cv), view500, ct, order[0]!) !== undefined,
+    "the base layer has no fill where the resized view puts the top-ranked block");
 });
 
 test("an uncalibrated metric defaults to the shipped default's own pool size", async () => {

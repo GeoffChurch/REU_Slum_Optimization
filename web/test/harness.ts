@@ -20,6 +20,19 @@ let clock = 0;
 
 export interface PathOp { op: "moveTo" | "lineTo" | "arc" | "closePath"; args: number[] }
 
+/** The fake `Path2D`: the same path-building surface as a context, recording into its own `ops`, so
+ * a `fill(path)`/`stroke(path)` records exactly the `Call.path` the equivalent `beginPath`/`moveTo`
+ * sequence would have. render/city.ts builds one per block once and paints it many times. */
+export class FakePath2D {
+  readonly ops: PathOp[] = [];
+  closePath(): void { this.ops.push({ op: "closePath", args: [] }); }
+  moveTo(x: number, y: number): void { this.ops.push({ op: "moveTo", args: [x, y] }); }
+  lineTo(x: number, y: number): void { this.ops.push({ op: "lineTo", args: [x, y] }); }
+  arc(x: number, y: number, r: number, a0: number, a1: number): void {
+    this.ops.push({ op: "arc", args: [x, y, r, a0, a1] });
+  }
+}
+
 /** One drawing call, with the whole style state it was made under and the path it painted.
  *
  * The style snapshot is the point. `ctx.strokeStyle` is a mutable property, so "the widget set
@@ -110,12 +123,13 @@ export class RecordingContext {
   /** The screen map's score view fills its whole ground with one (render/city.ts
    * `paintScoreFrame`); recorded with the fill style it was made in, like a `fill`. */
   fillRect(): void { this.record("fillRect"); }
-  stroke(): void { this.record("stroke"); }
-  /** No `Path2D` overload: nothing in this project ever passes one (checked -- `region.ts`,
-   * `city.ts` and `canvas.ts` all call `fill()` bare or `fill("evenodd")`, always against the
-   * context's OWN current path built via `beginPath`/`moveTo`/`lineTo`/`closePath`), so accepting
-   * one here would be surface area nothing in this codebase exercises. */
-  fill(fillRule?: CanvasFillRule): void { this.record("fill", fillRule); }
+  /** With a `Path2D`, that path is painted and the context's own current path left alone, as a
+   * real context does (render/city.ts passes one; everything else paints its current path). */
+  stroke(path?: FakePath2D): void { this.record("stroke", undefined, undefined, path); }
+  fill(pathOrRule?: FakePath2D | CanvasFillRule, fillRule?: CanvasFillRule): void {
+    if (pathOrRule instanceof FakePath2D) this.record("fill", fillRule, undefined, pathOrRule);
+    else this.record("fill", pathOrRule);
+  }
   /** Minimal on purpose: only the 3-argument, unscaled form (`drawImage(image, dx, dy)`) is
    * modelled -- the only one `city.ts` calls, blitting an offscreen canvas onto the visible one at
    * its own natural size. `dx`/`dy` are accepted (so the real call shape type-checks against this
@@ -124,7 +138,8 @@ export class RecordingContext {
    * element it copied from (`Call.image`). */
   drawImage(image: FakeElement, _dx: number, _dy: number): void { this.record("drawImage", undefined, image); }
 
-  private record(op: Call["op"], fillRule?: CanvasFillRule, image?: FakeElement): void {
+  private record(op: Call["op"], fillRule?: CanvasFillRule, image?: FakeElement,
+                 path?: FakePath2D): void {
     if (this.failWith !== null) throw new Error(this.failWith);
     this.calls.push({
       op,
@@ -133,7 +148,7 @@ export class RecordingContext {
       lineWidth: this.lineWidth,
       lineCap: this.lineCap,
       globalAlpha: this.globalAlpha,
-      path: [...this.path],
+      path: [...(path?.ops ?? this.path)],
       fillRule: fillRule ?? "nonzero",
       image,
       imageCalls: image?.ctx.calls.length,
@@ -321,6 +336,7 @@ export function installStubs(): void {
   };
   (globalThis as Record<string, unknown>).window = { devicePixelRatio: DPR };
   (globalThis as Record<string, unknown>).ResizeObserver = FakeResizeObserver;
+  (globalThis as Record<string, unknown>).Path2D = FakePath2D;
   (globalThis as Record<string, unknown>).requestAnimationFrame = (cb: FrameRequestCallback): number => {
     pendingFrames.push(cb);
     return ++nextFrameId;
