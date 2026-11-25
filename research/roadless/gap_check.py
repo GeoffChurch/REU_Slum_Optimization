@@ -29,7 +29,9 @@ again without the flips.
 
 `apertures`: two footprints facing each other across a gap g (APERTURE_GAPS) at angles
 APERTURE_ANGLES, one shifted along the other by APERTURE_SHIFT (so no corners face each other):
-the shortest passage between them lies in [g, sqrt(g^2 + s^2)] at every S_SENS. Fault `corners`:
+the shortest passage between them lies in [g, sqrt(g^2 + s^2)] at every S_SENS, g the gap between
+the footprints as the complex receives them (gap_complex.geometry's, regular: on the FEATURE_M grid,
+up to 0.4 mm off the gap drawn at 17 and 45 degrees). Fault `corners`:
 no densification (the outlines' own vertices only): the corner-to-corner distance.
 
 `filtration`: a courtyard home with two exits (gaps FILT_EXITS) has the wider exit's aperture as
@@ -275,10 +277,11 @@ def apertures(_ids: list[str]) -> list[str]:
                 va = np.asarray(vb[cx.pv].todense())
                 between = ((ua[:, 0] > 0) & (va[:, 1] > 0)) | ((ua[:, 1] > 0) & (va[:, 0] > 0))
                 m = float(cx.ap[between].min()) if between.any() else np.inf
-                hi = np.hypot(g, s)
-                ok = g - 1e-9 <= m <= hi + 1e-9
-                print(f"s {s:g} gap {g:g} angle {ang:g}: measured {m:.4f} (in [{g:g}, {hi:.4f}]: "
-                      f"{'ok' if ok else 'FAILS'})", flush=True)
+                g0 = float(shapely.distance(geo.polys[0], geo.polys[1]))
+                hi = np.hypot(g0, s)
+                ok = g0 - 1e-9 <= m <= hi + 1e-9
+                print(f"s {s:g} gap {g:g} angle {ang:g}: measured {m:.4f} (in [{g0:.4f}, "
+                      f"{hi:.4f}]: {'ok' if ok else 'FAILS'})", flush=True)
                 if not ok:
                     bad.append(f"s {s:g} g {g:g} a {ang:g}")
     return bad

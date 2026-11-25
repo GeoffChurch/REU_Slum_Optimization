@@ -83,9 +83,17 @@ TOL = 1e-6           # metres: a vertex on an outline (in the block's local coor
                      # overlay's and segmentize's vertices sit within 1e-14 of it; in UTM
                      # segmentize's sat up to 9e-6 off, so every geometry is moved first)
 FREE_STEP = 1e-12    # clear.FREE_STEP: every step through the region graph costs this more
-DUST_M2 = 1e-6       # a part of the open ground smaller than this (m^2) is the overlay's dust
-                     # (slivers 1e-15 -- 1e-8 m^2 between footprints that share a wall, where
-                     # GEOS's triangles fall inside the footprints): dropped, holding no one
+FEATURE_M = 1e-3     # the mesh's one precision (m), its minimum feature size: every polygon the
+                     # fixed mesh is built from (the footprints, `geometry`; a carving's atoms,
+                     # gap_clear.Carving.of) is `regular` (on this grid, no part thinner than it)
+                     # and the linework is noded on the same grid (gap_clear._faces), so the mesher
+                     # receives nothing it cannot mesh (a hair-thin piece of a building beside its
+                     # neighbour's zone line cascaded the conformity: BACKLOG, "One precision model
+                     # for the mesh")
+DUST_M2 = FEATURE_M ** 2    # a part of the open ground smaller than this (m^2), the smallest
+                            # feature's area, is the overlay's dust (slivers 1e-15 -- 1e-8 m^2
+                            # between footprints that share a wall, where GEOS's triangles fall
+                            # inside the footprints): dropped, holding no one
 DELAUNAY_TOL = 1e-9  # a passage is flipped when its two triangles' circumcentres lie in the wrong
                      # order along its normal by more than this share of its length: (cot a +
                      # cot b) / 2 < -DELAUNAY_TOL, a and b the angles facing it (an angle sum's
@@ -142,14 +150,43 @@ def _shifted(g: Any, origin: tuple[float, float]) -> Any:
 
 
 def origin_of(block) -> tuple[float, float]:
-    """The block's local frame's origin: its polygon's lower bounds."""
-    return (float(block.boundary.bounds[0]), float(block.boundary.bounds[1]))
+    """The block's local frame's origin: its polygon's lower bounds, floored to the FEATURE_M grid,
+    so every frame of a block (cut by its barriers or not: gap_clear.ComplexMetric.fixed moves a
+    carving between them) holds one grid and `regular` puts a footprint on the same points in each
+    (3934's railway cut moved the origin by an amount off the grid: the atoms left the cut mesh's
+    footprints by up to half a step)."""
+    x0, y0 = block.boundary.bounds[:2]
+    return (math.floor(x0 / FEATURE_M) * FEATURE_M, math.floor(y0 / FEATURE_M) * FEATURE_M)
+
+
+_MITRE_LIMIT = 1e3   # `regular`'s mitre joins: a corner as sharp as 0.11 degrees comes back whole
+                     # (in MESH_REV: a change to `regular` raises it)
+
+
+def regular(g: Any) -> Any:
+    """`g` at the mesh's precision (FEATURE_M): opened by FEATURE_M / 2 (buffered in, then out,
+    mitre joins: a part thinner than FEATURE_M vanishes, a fatter one comes back as it was) and
+    set on the FEATURE_M grid. Vectorized as shapely is. The grid's precision model is not kept
+    with it: GEOS rounds a buffer to its input's model, so a regular piece opened again (a cut's
+    outside, Carving.of) moved by a grid step or vanished (41785: a building of 89.7 m^2 eroded to
+    nothing, a rectangle shifted 1 mm per opening)."""
+    d = FEATURE_M / 2
+    opened = shapely.buffer(shapely.buffer(g, -d, join_style="mitre", mitre_limit=_MITRE_LIMIT),
+                            d, join_style="mitre", mitre_limit=_MITRE_LIMIT)
+    return shapely.set_precision(shapely.set_precision(opened, FEATURE_M), 0.0)
 
 
 def geometry(block) -> Geometry:
+    """The block in its local frame, every footprint `regular` (once, here: the fixed mesh, the
+    rebuild and free first all read these footprints)."""
     origin = origin_of(block)
+    polys = regular(_shifted(np.asarray(block.buildings.outlines), origin))
+    if shapely.is_empty(polys).any():
+        raise ValueError(f"{block.block_id}: footprints "
+                         f"{np.flatnonzero(shapely.is_empty(polys)).tolist()} thinner than "
+                         f"FEATURE_M everywhere")
     return Geometry(boundary=_shifted(block.boundary, origin),
-                    polys=_shifted(np.asarray(block.buildings.outlines), origin),
+                    polys=polys,
                     streets=_shifted(shapely.union_all(list(block.streets.geometry)), origin),
                     origin=origin)
 

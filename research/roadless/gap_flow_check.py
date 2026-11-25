@@ -22,7 +22,9 @@ raster under Fws: 1.21 at 1 m).
 `shift`: P's max / min over SHIFTS lattice offsets (the Steiner lattice moved k / SHIFTS of R on
 both axes) at 0 deg, WIDTHS_SHIFT: within SHIFT_TOL of 1.
 `channel`: P sigma W / (L_C - 5/3) within CHANNEL_TOL of 1 at WIDTHS_CHANNEL (cracks of 5 and
-12.5 cm among them: a crack conducts by its width) at 0 and 30 deg.
+12.5 cm among them: a crack conducts by its width) at 0 and 30 deg, W the channel's mean width as
+the complex receives it (its open area over L_C between gap_complex.geometry's walls, regular: on
+the FEATURE_M grid, the 5 cm crack at 30 deg 1.2% wider than drawn).
 `field`: an open disk (no footprint), the demand uniform over the disk inside the band: P = 1 / (8
 pi sigma) for any radius; within FIELD_TOL.
 Fault `centroids` (all four): the cells centred at their centroids, the two-point flux across a
@@ -154,6 +156,18 @@ def P_of(b, src, fs: gf.FlowSpec, form: gf.Width) -> tuple[float, float]:
     return float(b_ @ u), reached
 
 
+def _received_width(b, alpha_deg: float, W: float) -> float:
+    """The channel's mean width as the complex receives it: the open ground between
+    gap_complex.geometry's walls (to their middles) along its length L_C, over L_C."""
+    geo = gc.geometry(b)
+    a = np.radians(alpha_deg)
+    e, n = np.array([np.cos(a), np.sin(a)]), np.array([-np.sin(a), np.cos(a)])
+    o = np.array(geo.origin)
+    t = (W + WALL_M) / 2
+    strip = Polygon([s_ * e + t_ * n - o for s_, t_ in ((0.0, -t), (L_C, -t), (L_C, t), (0.0, t))])
+    return float(shapely.difference(strip, shapely.union_all(geo.polys)).area / L_C)
+
+
 def _exact(W: float) -> float:
     return (L_C - 2.0 + 1.0 / 3.0) / (SIGMA * W)
 
@@ -194,8 +208,9 @@ def channel(_ids: list[str]) -> list[str]:
     bad = []
     for W in WIDTHS_CHANNEL:
         for a in (0.0, 30.0):
-            P, _r = P_of(*corridor(a, W), fspec(R_CHECK), OPEN)
-            x = P / _exact(W)
+            blk, src = corridor(a, W)
+            P, _r = P_of(blk, src, fspec(R_CHECK), OPEN)
+            x = P / _exact(_received_width(blk, a, W))
             ok = bool(abs(x - 1.0) <= CHANNEL_TOL)
             print(f"W {W:g} angle {a:g}: P / ((L - 5/3) / sigma W) {x:.4f} -> "
                   f"{'ok' if ok else 'FAILS'}", flush=True)

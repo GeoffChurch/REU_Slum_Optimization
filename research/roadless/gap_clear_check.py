@@ -42,6 +42,7 @@ cache of its own, in a temporary directory), so a fault in the meshing is seen.
     uv run python $S own-ground <ids,> [fault]        # fault: ring-reach
     uv run python $S groundless <ids,> [fault]        # fault: own-everywhere
     uv run python $S conform-floor - [fault]          # fault: no-floor
+    uv run python $S features - [fault]               # faults: exact-cuts, no-precision
     uv run python $S both-ways <guards,> <ids,|->  # each guard, then under each of its faults
 
 `baseline`: the fixed mesh (the runtime's metric, METRIC) against the complex rebuilt
@@ -175,7 +176,7 @@ and the complex walls in the homes the flow model does (Model.free_first's check
 `features-dropped` (every block built with no OSM features: the cut absent), `unshifted` (the
 atoms left in the uncut block's frame: on 3934, whose railway cut moves its origin, the
 footprints misplaced and the complex's walled-in homes not the flow model's).
-`exits-identity`: the per-block metric's name is PER_BLOCK and its code digests 29 constants to the
+`exits-identity`: the per-block metric's name is PER_BLOCK and its code digests 28 constants to the
 same digest; RUNTIME is the per-block metric with metrics.EXITS, read back, and the region's
 T500b90D10; every configuration of region_leaks (and more shares and lam with the boost) under
 each preset's search spells a name that parses back to it, and no two share a name; every stored
@@ -200,9 +201,24 @@ as trips), `wrong-home` (each home's trips measured from the next home's injecti
 `conform-floor` (gap_clear._conform's floor): the four atoms of CONFORM_ATOMS, the 4 m about the
 spot where road_simp's D 0.15 k 0.08 r 7 answer on 5810 cascaded (a corridor vertex 5.3e-6 m from a
 footprint's edge: from the tenth round each round doubled its bad edges at half their length, past
-110 GB by the 30th), meshed alone (gap_clear.full_mesh) within CONFORM_ROUNDS_CAP rounds: the
-conformity refuses the first split under the vertex grid (gap_complex.SNAP_M) and raises, naming
-the edge. Fault `no-floor`: the floor 0 (the cascade runs to the cap and its own error).
+110 GB by the 30th), meshed alone (gap_clear.full_mesh, bypassing the carving) with the linework
+noded on CONFORM_GRID_M (MESH_REV 3's: on the mesh's own grid, gap_complex.FEATURE_M, they conform)
+within CONFORM_ROUNDS_CAP rounds: the conformity refuses the first split under the vertex grid
+(gap_complex.SNAP_M) and raises, naming the edge. Fault `no-floor`: the floor 0 (the cascade runs
+to the cap and its own error).
+`features` (the mesh's one precision, gap_complex.FEATURE_M; BACKLOG, "One precision model for the
+mesh"): the three known cascades (FEATURE_CASES: road_simp's D 0.15 k 0.08 r 7 answer on 5810, its
+paved ground rebuilt from its design; Shock Reblock with spurs of 10 to 80 m on 41785 rev 4, at
+stops 59 and 68, and at building 247 with the stops overlaid jointly on 1 mm, as the prototype
+that made that cascade did), each its footprints and corridors cropped to a 4 m square about the
+spot (its south edge the street), the footprints made regular as gap_complex.geometry makes them,
+carved by gap_clear.Carving.of and meshed by gap_clear.full_mesh within CONFORM_ROUNDS_CAP rounds:
+each conforms, and every atom is regular (its vertices on the FEATURE_M grid within FEATURE_GRID_TOL
+of a step, and an opening by FEATURE_M / 2 removes under FEATURE_THIN_M2 of it). Faults
+`exact-cuts` (Carving.of's cuts exact, as before the model: the cases conform on the mesh's grid
+and on its footprints, but the atoms are neither on the grid nor free of hair-thin parts) and
+`no-precision` (the model undone: the footprints as given, the cuts exact, the linework noded on
+CONFORM_GRID_M: each cascades, as it did).
 `closed-edge`: on TRIP_BLOCK with its edge closed (gap_exits.ClosedEdge), every live component has
 a leak and the cells live are the open edge's, the street drains nothing and the leaks the
 injection, and the pooled median trip is the method of images' with the images added. Fault
@@ -389,11 +405,11 @@ LEAK_PAIRS = ((LEAK_LAM, math.inf), (math.inf, 20.0), (100.0, 25.0))   # ... the
                          # (open_m, foot_m): open ground only, footprints only, both
 FOLD_SHARES = (0.0, 1.0, 0.75)   # leak-fold: the region test's shares at LEAK_LAM, as constants
                                  # (0.75: not symmetric under the swap)
-PER_BLOCK = "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+v1569a066"   # the per-block metric's name (moved by
-                                                          # gap_complex.ENCLOSURE_REV 2: every row
-                                                          # stored under v34d40e8a is the previous
-                                                          # test's)
-PER_BLOCK_CONSTANTS = 29
+PER_BLOCK = "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+ved297a08"   # the per-block metric's name (moved by
+                                                          # gap_clear.MESH_REV 4, the one precision
+                                                          # model: every row stored under v1569a066
+                                                          # is the previous mesh's)
+PER_BLOCK_CONSTANTS = 28
 CONFORM_ATOMS = (        # conform-floor: the cascade's four atoms (5810's carving, its local frame)
     "POLYGON ((546.4662255144212 667.5179657656699, 547.0873077790664 665.0049, 545.252525 "
     "665.0049, 545.252525 667.2180103082314, 546.4662255144212 667.5179657656699))",
@@ -417,6 +433,132 @@ CONFORM_BOX = (545.252525, 665.0049, 549.252525, 669.0049)   # their square (its
                                                               # street)
 CONFORM_ROUNDS_CAP = 26  # conform-floor's rounds (the cascade passes SNAP_M at its 23rd; the 26th
                          # holds about a million triangles)
+CONFORM_GRID_M = 1e-4    # conform-floor: the linework's grid its atoms are noded on (MESH_REV 3's,
+                         # where they cascade; on gap_complex.FEATURE_M's they conform)
+
+
+class FeatureCase(NamedTuple):
+    """features: a cascade's inputs cropped to a 4 m square (`box`, the block's local frame), as
+    full-precision WKT: its footprints (as the block gives them) and one network's stop
+    corridors."""
+    box: tuple[float, float, float, float]
+    footprints: tuple[str, ...]
+    corridors: tuple[str, ...]
+
+
+FEATURE_CASES = {        # features: the three known cascades (`features`' docstring entry)
+    "road_simp5810": FeatureCase(
+        box=(545.252525, 665.0049, 549.252525, 669.0049),
+        footprints=(
+            "POLYGON ((546.4662255144212 667.5179657656699, 547.0873077790664 665.0049, 545.252525"
+            " 665.0049, 545.252525 667.2180103082314, 546.4662255144212 667.5179657656699))",
+            "POLYGON ((549.0870388178737 668.8695702254772, 549.252525 668.8901590739019, "
+            "549.252525 667.5394483979014, 549.0870388178737 668.8695702254772))",
+            "POLYGON ((545.252525 667.0333826108317, 545.252525 669.0049, 549.252525 669.0049, "
+            "549.252525 667.4793085953638, 545.252525 667.0333826108317))",
+        ),
+        corridors=(
+            "POLYGON ((545.3283802999649 668.1169488485903, 545.5206452153507 668.3499618750066, "
+            "545.6551751845982 668.1169490274042, 545.8283802811056 668.1169490199536, "
+            "546.0185724682524 668.3999614650384, 546.4649824610096 668.3999614920467, "
+            "546.6551747962949 668.1169490674511, 546.8283798092743 668.1169490069151, "
+            "547.0206450133701 668.349961495027, 547.2283801410231 667.9901541331783, "
+            "547.0232254202128 667.4830978233367, 547.2320851010736 667.254072310403, "
+            "548.1500224414049 667.3291097432375, 548.2878050037543 667.1202020021155, 549.252525 "
+            "667.2277452611505, 549.252525 665.0049, 545.252525 665.0049, 545.252525 "
+            "668.1653119105018, 545.3283802999649 668.1169488485903))",
+        )),
+    "stops59_68": FeatureCase(
+        box=(120.2087, 114.655, 124.2087, 118.655),
+        footprints=(
+            "POLYGON ((122.04686875157647 118.655, 124.2087 118.655, 124.2087 114.655, "
+            "122.88051057593799 114.655, 122.04686875157647 118.655))",
+        ),
+        corridors=(
+            "POLYGON ((122.662 116.094, 123.086 116.123, 122.812 115.796, 123.374 115.682, 123.967"
+            " 114.655, 120.209 114.655, 120.209 118.655, 123.552 118.655, 123.374 118.325, 122.832"
+            " 118.252, 122.559 117.902, 122.569 117.895, 122.323 117.55, 122.457 116.685, 122.533 "
+            "116.318, 122.662 116.094))",
+            "POLYGON ((123.967 114.655, 120.209 114.655, 120.209 118.655, 123.552 118.655, 123.374"
+            " 118.325, 122.832 118.252, 122.559 117.902, 122.569 117.895, 122.323 117.551, 122.323"
+            " 117.55, 122.406 117.016, 122.457 116.685, 122.533 116.318, 122.662 116.094, 123.086 "
+            "116.123, 122.812 115.796, 123.374 115.682, 123.967 114.655))",
+        )),
+    "wall247": FeatureCase(
+        box=(121.886, 28.502, 125.886, 32.501999999999995),
+        footprints=(
+            "POLYGON ((123.50514665956143 31.96147668734193, 123.81324243776324 28.502, 121.886 "
+            "28.502, 121.886 31.817277920773346, 123.50514665956143 31.96147668734193))",
+            "POLYGON ((124.8802732648613 32.501999999999995, 125.886 32.501999999999995, 125.886 "
+            "28.502, 125.23756957811229 28.502, 124.8802732648613 32.501999999999995))",
+            "POLYGON ((121.886 32.34785332570105, 121.886 32.501999999999995, 123.6117013406836 "
+            "32.501999999999995, 121.886 32.34785332570105))",
+        ),
+        corridors=(
+            "POLYGON ((123.649 28.599, 123.146 28.671, 123.558 28.743, 123.601 28.921, 123.401 "
+            "29.131, 123.697 29.416, 123.729 29.447, 123.703 29.484, 123.389 29.941, 123.393 "
+            "29.941, 123.683 29.957, 123.637 30.48, 123.522 31.778, 122.692 32.42, 122.412 32.423,"
+            " 122.368 32.502, 125.886 32.502, 125.886 28.502, 123.589 28.502, 123.649 28.599))",
+            "POLYGON ((123.649 28.599, 123.146 28.671, 123.558 28.743, 123.601 28.921, 123.401 "
+            "29.131, 123.697 29.416, 123.729 29.447, 123.703 29.484, 123.389 29.941, 123.393 "
+            "29.941, 123.683 29.957, 123.637 30.48, 123.522 31.778, 122.692 32.42, 122.412 32.423,"
+            " 122.368 32.502, 125.886 32.502, 125.886 28.502, 123.589 28.502, 123.649 28.599))",
+            "POLYGON ((123.649 28.599, 123.146 28.671, 123.558 28.743, 123.601 28.921, 123.401 "
+            "29.131, 123.697 29.416, 123.729 29.447, 123.703 29.484, 123.389 29.941, 123.393 "
+            "29.941, 123.683 29.957, 123.637 30.48, 123.522 31.778, 122.692 32.42, 122.412 32.423,"
+            " 122.368 32.502, 125.886 32.502, 125.886 28.502, 123.589 28.502, 123.649 28.599))",
+            "POLYGON ((123.649 28.599, 123.146 28.671, 123.558 28.743, 123.601 28.921, 123.401 "
+            "29.131, 123.697 29.416, 123.729 29.447, 123.703 29.484, 123.389 29.941, 123.393 "
+            "29.941, 123.683 29.957, 123.637 30.48, 123.522 31.778, 122.692 32.42, 122.412 32.423,"
+            " 122.368 32.502, 125.886 32.502, 125.886 28.502, 123.589 28.502, 123.649 28.599))",
+            "POLYGON ((123.649 28.599, 123.146 28.671, 123.558 28.743, 123.601 28.921, 123.401 "
+            "29.131, 123.697 29.416, 123.729 29.447, 123.703 29.484, 123.389 29.941, 123.393 "
+            "29.941, 123.683 29.957, 123.637 30.48, 123.522 31.778, 122.692 32.42, 122.412 32.423,"
+            " 122.368 32.502, 125.886 32.502, 125.886 28.502, 123.589 28.502, 123.649 28.599))",
+            "POLYGON ((123.649 28.599, 123.146 28.671, 123.558 28.743, 123.601 28.921, 123.401 "
+            "29.131, 123.697 29.416, 123.729 29.447, 123.703 29.484, 123.389 29.941, 123.393 "
+            "29.941, 123.683 29.957, 123.637 30.48, 123.522 31.778, 122.692 32.42, 122.412 32.423,"
+            " 122.368 32.502, 125.886 32.502, 125.886 28.502, 123.589 28.502, 123.649 28.599))",
+            "POLYGON ((123.649 28.599, 123.146 28.671, 123.558 28.743, 123.601 28.921, 123.401 "
+            "29.131, 123.697 29.416, 123.729 29.447, 123.703 29.484, 123.389 29.941, 123.393 "
+            "29.941, 123.683 29.957, 123.637 30.48, 123.522 31.778, 122.692 32.42, 122.412 32.423,"
+            " 122.368 32.502, 125.886 32.502, 125.886 28.502, 123.589 28.502, 123.649 28.599))",
+            "POLYGON ((123.649 28.599, 123.146 28.671, 123.558 28.743, 123.601 28.921, 123.401 "
+            "29.131, 123.697 29.416, 123.729 29.447, 123.703 29.484, 123.389 29.941, 123.393 "
+            "29.941, 123.683 29.957, 123.637 30.48, 123.522 31.778, 122.692 32.42, 122.412 32.423,"
+            " 122.368 32.502, 125.886 32.502, 125.886 28.502, 123.589 28.502, 123.649 28.599))",
+            "POLYGON ((123.649 28.599, 123.146 28.671, 123.558 28.743, 123.601 28.921, 123.401 "
+            "29.131, 123.697 29.416, 123.729 29.447, 123.703 29.484, 123.389 29.941, 123.393 "
+            "29.941, 123.683 29.957, 123.637 30.48, 123.522 31.778, 122.692 32.42, 122.412 32.423,"
+            " 122.368 32.502, 125.886 32.502, 125.886 28.502, 123.589 28.502, 123.649 28.599))",
+            "POLYGON ((123.649 28.599, 123.146 28.671, 123.558 28.743, 123.601 28.921, 123.401 "
+            "29.131, 123.697 29.416, 123.729 29.447, 123.703 29.484, 123.389 29.941, 123.393 "
+            "29.941, 123.683 29.957, 123.637 30.48, 123.522 31.778, 122.692 32.42, 122.412 32.423,"
+            " 122.368 32.502, 125.886 32.502, 125.886 28.502, 123.589 28.502, 123.649 28.599))",
+            "POLYGON ((123.649 28.599, 123.146 28.671, 123.558 28.743, 123.601 28.921, 123.401 "
+            "29.131, 123.697 29.416, 123.729 29.447, 123.703 29.484, 123.389 29.941, 123.393 "
+            "29.941, 123.683 29.957, 123.637 30.48, 123.522 31.778, 122.692 32.42, 122.412 32.423,"
+            " 122.368 32.502, 125.886 32.502, 125.886 28.502, 123.589 28.502, 123.649 28.599))",
+            "POLYGON ((123.649 28.599, 123.146 28.671, 123.558 28.743, 123.601 28.921, 123.401 "
+            "29.131, 123.697 29.416, 123.729 29.447, 123.703 29.484, 123.389 29.941, 123.393 "
+            "29.941, 123.683 29.957, 123.637 30.48, 123.522 31.778, 122.692 32.42, 122.412 32.423,"
+            " 122.368 32.502, 125.886 32.502, 125.886 28.502, 123.589 28.502, 123.649 28.599))",
+            "POLYGON ((123.703 29.484, 123.389 29.941, 123.393 29.941, 123.389 29.946, 123.683 "
+            "29.957, 123.637 30.48, 123.499 30.563, 123.142 30.413, 122.874 29.99, 122.419 29.967,"
+            " 122.084 29.534, 121.886 29.524, 121.886 32.502, 122.368 32.502, 125.886 32.502, "
+            "125.886 28.502, 123.589 28.502, 123.649 28.599, 123.146 28.671, 123.558 28.743, "
+            "123.601 28.921, 123.401 29.131, 123.697 29.416, 123.703 29.484))",
+            "POLYGON ((121.886 28.502, 121.886 29.524, 121.886 32.502, 122.368 32.502, 125.886 "
+            "32.502, 125.886 28.502, 123.589 28.502, 121.886 28.502))",
+            "POLYGON ((121.886 28.502, 121.886 29.524, 121.886 32.502, 122.368 32.502, 125.886 "
+            "32.502, 125.886 28.502, 123.589 28.502, 121.886 28.502))",
+        )),
+}
+FEATURE_GRID_TOL = 1e-6  # features: an atom's vertex off the FEATURE_M grid by at most this share
+                         # of a step (the grid's coordinates are k FEATURE_M in floating point)
+FEATURE_THIN_M2 = 1e-12  # ... and an opening by FEATURE_M / 2 removes at most this much of it (m^2;
+                         # floating-point noise: 4e-16 seen; a hair-thin part 0.27 mm wide and 1
+                         # mm long is 2.7e-7)
 SCALE_L = 800.0          # leak-scale: the open square's side (m)
 SCALE_LAM = 60.0         # ... the uniform leak's lam (the square's half-side over 6.7 lam: its
                          # Dirichlet edge moves the potential within SCALE_R by under 1e-4)
@@ -435,7 +577,7 @@ TRIP_LAM = 60.0          # ... the lam the two homes' pooled trips are read at
 TRIP_ORACLE_DR = 0.05    # ... the oracle's polar grid: radial step (m) and angles
 TRIP_ORACLE_NT = 1440
 BARRIER_EDGE_M = 0.05   # barriers on a real block: the cut less this (m) holds no triangle (its
-                        # edges are the mesh's own, noded at LINE_SNAP_M)
+                        # edges are the mesh's own, noded on gap_complex.FEATURE_M's grid)
 NO_FEATURES_TOL = 1e-12  # no-features: RUNTIME's baseline against the leak-only metric's (relative)
 UNDERFLOW_BLOCK = "ZAF.9.1.4_1_7283"    # underflow: its potential underflows along a 4 km strip
 UNDERFLOW_TOL = 1e-9     # ... its refined solve against spsolve, of the largest (9.6e-13 apart)
@@ -1550,7 +1692,7 @@ def _sgrad_unleaked(self: gcl.Relaxation, x: np.ndarray) -> tuple[float, np.ndar
     else:
         bare = m.sys.with_graph(m.sys.graph.with_leak(np.zeros(m.sys.n),
                                                       live0=m.leak_site.live))
-        st2 = m._state(bare, self.k_of(x), prefix=gcl._NO_ROADS)
+        st2 = m._state(bare, self.k_of(x), prefix=gcl._NO_ROADS, b=m.boost_of(gcl._NO_ROADS))
         lam = m.solve(st2, np.where(m.nodem, 0.0, m.inj * p * np.nan_to_num(uh) ** (p - 1.0)))
     g = m.grad(st, u, lam) * (1.0 - self.eps)
     if self.q != 1.0:
@@ -2057,19 +2199,19 @@ def _road_boost_on(b: Block, metric: gcl.ComplexMetric) -> list[str]:
     return [] if ok else [f"{bid} ({metric.exits.boost.name or 'no boost'})"]
 
 
-def _road_unboosted(self: gcl.Model, prefix: gcl.Prefix) -> gcl.FullMesh:
-    """Model.mesh_of leaving a road prefix's corridor unboosted (fault `unboosted-road`)."""
-    return self.fm
+def _road_unboosted(self: gcl.Model, prefix: gcl.Prefix) -> np.ndarray:
+    """Model.boost_of leaving a road prefix's corridor unboosted (fault `unboosted-road`; the
+    states read boost_of since 45419b77, so a fault on mesh_of went unseen)."""
+    return self.b_ways
 
 
-def _road_without_ways(self: gcl.Model, prefix: gcl.Prefix) -> gcl.FullMesh:
-    """Model.mesh_of boosting a road prefix's corridor on the unboosted mesh, the ways' boost
+def _road_without_ways(self: gcl.Model, prefix: gcl.Prefix) -> np.ndarray:
+    """Model.boost_of boosting a road prefix's corridor on the unboosted mesh, the ways' boost
     dropped (fault `ways-dropped`)."""
     if prefix.stop == 0:
-        return self.fm
+        return self.b_ways
     on = self.carving.paved(prefix, self.cen_)
-    return self.exits.edge.mesh(gx.boosted(self.fx.fm,
-                                           np.where(on, self.exits.boost.road, 1.0)))
+    return np.where(on, self.exits.boost.road, 1.0)
 
 
 # ------------------------------------------------------------------ the exits' identity
@@ -2281,14 +2423,70 @@ def conform_floor(_ids: list[str]) -> list[str]:
                       streets=shapely.LineString([(x0, y0), (x1, y0)]), origin=(0.0, 0.0))
     with _patched(gcl, "CONFORM_ROUNDS", CONFORM_ROUNDS_CAP):
         try:
-            fm = gcl.full_mesh(geo, METRIC.spec, METRIC.fs, METRIC.form,
-                               box=gcl.lattice_box(geo, METRIC.spec, METRIC.form))
+            fm = _noded_at(CONFORM_GRID_M, gcl.full_mesh)(
+                geo, METRIC.spec, METRIC.fs, METRIC.form,
+                box=gcl.lattice_box(geo, METRIC.spec, METRIC.form))
             outcome = f"conformed: {fm.nt} triangles, {fm.splits} splits in {fm.rounds} rounds"
         except RuntimeError as e:
             outcome = str(e)
     ok = "under the vertex grid" in outcome
     print(f"conform-floor: {outcome} -> {'ok' if ok else 'FAILS'}", flush=True)
     return [] if ok else [f"conform-floor: {outcome[:160]}"]
+
+
+def _noded_at(grid: float, mesh: Callable[..., gcl.FullMesh]) -> Callable[..., gcl.FullMesh]:
+    """`mesh` (gap_clear.full_mesh) with the linework noded on `grid`, not the mesh's own
+    (gap_complex.FEATURE_M, which the noding, the band's test and the outlines' query read: at
+    CONFORM_GRID_M, MESH_REV 3's full_mesh)."""
+    def at(*a: Any, **k: Any) -> gcl.FullMesh:
+        with _patched(gc, "FEATURE_M", grid):
+            return mesh(*a, **k)
+    return at
+
+
+def features(_ids: list[str]) -> list[str]:
+    bad = []
+    for name, case in FEATURE_CASES.items():
+        x0, y0, x1, y1 = case.box
+        fp = np.asarray(shapely.from_wkt(list(case.footprints)), dtype=object)
+        geo = gc.Geometry(boundary=shapely.box(*case.box), polys=gc.regular(fp),
+                          streets=shapely.LineString([(x0, y0), (x1, y0)]), origin=(0.0, 0.0))
+        carving = gcl.Carving.of(geo, [list(shapely.from_wkt(list(case.corridors)))])
+        xy = shapely.get_coordinates(carving.polys) / gc.FEATURE_M
+        off = float(np.abs(xy - np.round(xy)).max())
+        thin = float(shapely.area(shapely.difference(carving.polys,
+                                                     gc.regular(carving.polys))).max())
+        atoms = geo._replace(polys=carving.polys)
+        with _patched(gcl, "CONFORM_ROUNDS", CONFORM_ROUNDS_CAP):
+            try:
+                fm = gcl.full_mesh(atoms, METRIC.spec, METRIC.fs, METRIC.form,
+                                   box=gcl.lattice_box(geo, METRIC.spec, METRIC.form))
+                outcome = (f"conformed: {fm.nt} triangles, {fm.splits} splits in {fm.rounds} "
+                           "rounds")
+            except RuntimeError as e:
+                outcome = str(e)[:150]
+        ok = (outcome.startswith("conformed") and off <= FEATURE_GRID_TOL
+              and thin <= FEATURE_THIN_M2)
+        print(f"features {name}: {carving.n} atoms, off the grid by {off:.1e} of a step at most, "
+              f"an opening removes {thin:.1e} m^2 of one at most; {outcome} -> "
+              f"{'ok' if ok else 'FAILS'}", flush=True)
+        if not ok:
+            bad.append(name)
+    return bad
+
+
+def _exact_cut(a: np.ndarray, c: BaseGeometry) -> tuple[np.ndarray, np.ndarray]:
+    """Carving.of's cut before the model, verbatim (fault `exact-cuts`)."""
+    return shapely.intersection(a, c), shapely.difference(a, c)
+
+
+@contextmanager
+def _no_precision() -> Iterator[None]:
+    """The model undone (fault `no-precision`): the footprints as given, the cuts exact, the
+    linework noded on CONFORM_GRID_M (MESH_REV 3's)."""
+    with (_patched(gc, "regular", lambda g: g), _patched(gcl, "_cut", _exact_cut),
+          _patched(gcl, "full_mesh", _noded_at(CONFORM_GRID_M, gcl.full_mesh))):
+        yield
 
 
 _CONFORM_ROUND = gcl._conform_round
@@ -3002,7 +3200,8 @@ GUARDS: dict[str, Callable[[list[str]], list[str]]] = {
     "faces": faces, "lazy-baseline": lazy_baseline, "uniform-control": uniform_control,
     "pocket-escape": pocket_escape, "pocket-gradient": pocket_gradient,
     "pocket-count": pocket_count, "own-ground": own_ground, "groundless": groundless,
-    "home-demand": home_demand, "conform-floor": conform_floor, "cleared-roads": cleared_roads}
+    "home-demand": home_demand, "conform-floor": conform_floor, "cleared-roads": cleared_roads,
+    "features": features}
 
 
 _GROUNDLESS = gf.groundless
@@ -3015,9 +3214,14 @@ def _none_groundless(geo: gc.Geometry, ring_m: float, quad: int, xy: np.ndarray,
     return np.zeros_like(_GROUNDLESS(geo, ring_m, quad, xy, tri, open_ring, homes))
 
 
+def _on_band_unsnapped(band_line: BaseGeometry, mid: np.ndarray) -> np.ndarray:
+    """gap_clear._on_band at the unsnapped tolerance, gap_complex.TOL (fault `exits`)."""
+    return shapely.dwithin(band_line, shapely.points(mid[:, 0], mid[:, 1]), gc.TOL)
+
+
 def _fault_exits():
     """The band line's faces read at the unsnapped tolerance (gap_complex.TOL)."""
-    return _patched(gcl, "BAND_TOL_M", gc.TOL)
+    return _patched(gcl, "_on_band", _on_band_unsnapped)
 
 
 FAULTS: dict[str, dict[str, Callable]] = {
@@ -3038,6 +3242,8 @@ FAULTS: dict[str, dict[str, Callable]] = {
         gcl.Model, "cleared_road_state", lambda self, k, prefix: self.road_state(prefix))},
     "conform-floor": {"no-floor": lambda: _patched(gcl, "_conform_round",
                                                    lambda *a: _CONFORM_ROUND(*a[:-1], 0.0))},
+    "features": {"exact-cuts": lambda: _patched(gcl, "_cut", _exact_cut),
+                 "no-precision": _no_precision},
     "flux": {"flip-one": _flip_one},
     "leak-assembly": {"drop-one": lambda: _leak_fault(_drop_one),
                       "not-live": lambda: _leak_fault(_not_live)},
@@ -3063,8 +3269,8 @@ FAULTS: dict[str, dict[str, Callable]] = {
     "street-boost": {"classes-dropped": lambda: _patched(gx.StreetBoost, "on_way", _every_class),
                      "surfaces-dropped": lambda: _patched(gx.StreetBoost, "on_way",
                                                           _any_surface)},
-    "road-boost": {"unboosted-road": lambda: _patched(gcl.Model, "mesh_of", _road_unboosted),
-                   "ways-dropped": lambda: _patched(gcl.Model, "mesh_of", _road_without_ways)},
+    "road-boost": {"unboosted-road": lambda: _patched(gcl.Model, "boost_of", _road_unboosted),
+                   "ways-dropped": lambda: _patched(gcl.Model, "boost_of", _road_without_ways)},
     "underflow": {"unfloored": lambda: _patched(gap_factor, "_residual", _residual_unfloored)},
     "faces": {"unsorted": lambda: _patched(gcl, "_by_face", _unsorted)},
     "uniform-control": {"every-cell": lambda: _patched(gx.OpenSites, "cells", _every_site),

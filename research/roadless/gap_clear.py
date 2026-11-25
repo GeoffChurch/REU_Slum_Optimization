@@ -3,11 +3,13 @@ complex as the runtime: one fixed mesh"; its fractional clearing first in "The g
 passability, enclosure and flow without the raster"). The owner's decision (2026-10-14): the shy
 distance at w 0.5 m on the complex, isotropic, as the metric and its runtime.
 
-THE MESH (`full_mesh`; `Fixed.of` caches it on disk by its identity). Every footprint's outline,
-its w / 2 offset (the width form's growth: the shy distance's zero zone; Closing has none) and the
-street band's line, noded together (shapely's union of lines, the region's boundary whole),
-clipped to the block beyond the band, densified to s once and polygonized: faces, each covered by
-a set of footprints (none: open ground; one: a building's interior; several: an overlap) and lying
+THE MESH (`full_mesh`; `Fixed.of` caches it on disk by its identity), at one precision
+(gap_complex.FEATURE_M: every footprint and every atom of a carving regular, no part thinner than
+it, on its grid). Every footprint's outline, its w / 2 offset (the width form's growth: the shy
+distance's zero zone; Closing has none) and the street band's line, noded together on that grid
+(shapely's union of lines, the region's boundary whole), clipped to the block beyond the band,
+densified to s once and polygonized: faces, each covered by a set of footprints (none: open
+ground; one: a building's interior; several: an overlap) and lying
 within w / 2 of a set (its zone). Each face is triangulated by GEOS (constrained Delaunay) on that
 shared linework, so faces meet vertex for vertex; Lawson's flips within each face (the face
 boundaries flagged, never flipped: a triangle lies in one face); Steiner points on gap_flow's
@@ -117,14 +119,10 @@ HERE = Path(__file__).resolve().parent
 CACHE = Path(os.environ["GAP_CACHE"]) if "GAP_CACHE" in os.environ else HERE / "gap_cache"
 CONFORM_ROUNDS = 64     # conformity: rounds at most (each splits every bad edge it finds; a mesh
                         # still holding one after them raises)
-MESH_REV = 3            # the fixed mesh's construction, in its cache key with every meshing
-                        # constant: raised by any change to the code that moves a mesh
-LINE_SNAP_M = 1e-4      # the linework's precision (m): a crack narrower than this conducts
-                        # nothing under any passable width while either footprint stands (it is
-                        # in their zero zone, or flat: gap_flow.FLAT_REL s is 1.25e-5 m), and with
-                        # both cleared it is nothing; the vertices move by at most half of it
-BAND_TOL_M = LINE_SNAP_M    # a boundary edge whose midpoint lies this near the band's line is a
-                            # street face (its vertices snapped: gap_complex.TOL lost the exits)
+MESH_REV = 4            # the fixed mesh's construction, in its cache key with every meshing
+                        # constant: raised by any change to the code that moves a mesh (4: one
+                        # precision, gap_complex.FEATURE_M: the footprints and the carving's cuts
+                        # regular, the linework noded on its grid)
 
 
 # ------------------------------------------------------------------ the mesh
@@ -153,14 +151,16 @@ def _faces(geo: gc.Geometry, spec: gc.Spec, grow: float
     if grow > 0:
         inside.append(shapely.boundary(shapely.buffer(geo.polys, grow)))
     clipped = shapely.intersection(np.concatenate(inside), region)
-    # noded by snap-rounding (OverlayNG at a grid of LINE_SNAP_M): lines closer than that are
-    # one, so a hairline crack between two footprints is a shared boundary, not a sliver face of
-    # flat triangles (a wall between the two interiors once both are cleared). Snapping the noded
+    # noded by snap-rounding (OverlayNG on the mesh's grid, gap_complex.FEATURE_M): lines closer
+    # than that are one, so a hairline crack between two footprints is a shared boundary, not a
+    # sliver face of flat triangles (a wall between the two interiors once both are cleared; a
+    # crack that narrow conducts nothing under any passable width while either footprint stands:
+    # it is in their zero zone, or flat, and with both cleared it is nothing). Snapping the noded
     # set afterwards (set_precision) left dangles where offset arcs nearly coincide, and
     # polygonize lost the faces they bound (38136: a crack between two footprints joined to the
     # open ground, its homes' escape times 3% low)
     noded = shapely.union_all(np.concatenate([clipped, [shapely.boundary(region)]]),
-                              grid_size=LINE_SNAP_M)
+                              grid_size=gc.FEATURE_M)
     noded = shapely.segmentize(noded, spec.s)
     faces = shapely.get_parts(shapely.polygonize(shapely.get_parts(noded)))
     faces = faces[shapely.area(faces) >= gc.DUST_M2]
@@ -578,7 +578,7 @@ def full_mesh(geo: gc.Geometry, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width, 
     bi = np.flatnonzero(single)
     mid = 0.5 * (xy[es[bi, 0]] + xy[es[bi, 1]])
     shapely.prepare(band_line := shapely.boundary(geo.streets.buffer(spec.band_m)))
-    on_band = shapely.dwithin(band_line, shapely.points(mid[:, 0], mid[:, 1]), BAND_TOL_M)
+    on_band = _on_band(band_line, mid)
     fb = bi[on_band]
     fa_, fu_, fv_ = fb // 3, es[fb, 0], es[fb, 1]
     fl = np.hypot(*(xy[fv_] - xy[fu_]).T)
@@ -589,10 +589,10 @@ def full_mesh(geo: gc.Geometry, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width, 
     fn[inward] *= -1.0
     df = ((xy[fu_] - cc[fa_]) * fn).sum(1)
     Tf = np.where(df > gf.MERGE_REL * fl, fs.sigma * fl / np.maximum(df, 1e-300), np.inf)
-    # vertices on outlines (Closing's filled gaps)
+    # vertices on outlines (Closing's filled gaps), within the noding's grid of them
     tree = shapely.STRtree(geo.polys)
     qv, qb = tree.query(shapely.points(xy[:, 0], xy[:, 1]), predicate="dwithin",
-                        distance=LINE_SNAP_M)
+                        distance=gc.FEATURE_M)
     vb = sp.csr_matrix((np.ones(len(qv)), (qv, qb)), shape=(nvv, n))
     obstacle = np.zeros(nvv, dtype=bool)
     obstacle[qv] = True
@@ -602,6 +602,13 @@ def full_mesh(geo: gc.Geometry, spec: gc.Spec, fs: gf.FlowSpec, form: gf.Width, 
                     fv=fv_, Tf=Tf, vb=vb, obstacle=obstacle, sigma=fs.sigma, unflat=conf.unflat,
                     splits=conf.splits, rounds=conf.rounds, flat=int(drop.sum()),
                     skipped=int(skipped))
+
+
+def _on_band(band_line: Any, mid: NDArray[np.float64]) -> NDArray[np.bool_]:
+    """Per boundary edge's midpoint `mid` (n x 2): on the band's line, within gap_complex.FEATURE_M
+    of it (the noding moved its vertices by up to half the grid's diagonal, 0.71 FEATURE_M:
+    gap_complex.TOL lost the exits)."""
+    return shapely.dwithin(band_line, shapely.points(mid[:, 0], mid[:, 1]), gc.FEATURE_M)
 
 
 def lattice_box(geo: gc.Geometry, spec: gc.Spec, form: gf.Width) -> tuple[float, float, float,
@@ -736,10 +743,16 @@ class Carving(NamedTuple):
 
     def shifted(self, by: tuple[float, float]) -> Carving:
         """The same atoms in a frame where every point's coordinates are its coordinates here
-        plus `by` (a block's local frame moved by its barriers' cut: ComplexMetric.fixed)."""
+        plus `by` (a block's local frame moved by its barriers' cut: ComplexMetric.fixed), a whole
+        number of gap_complex.FEATURE_M steps (gc.origin_of), every point rounded to that grid
+        again (pointwise: the subtraction's rounding off it, the rings as they were), kept without
+        its precision model (gc.regular's reason)."""
         def move(g: Any) -> Any:
             return shapely.transform(g, lambda xy: xy + np.array(by))
-        return self._replace(polys=move(self.polys),
+        polys = shapely.set_precision(
+            shapely.set_precision(move(self.polys), gc.FEATURE_M, mode="pointwise"), 0.0,
+            mode="pointwise")
+        return self._replace(polys=polys,
                              corridors=tuple(tuple(move(c) for c in cs) for cs in self.corridors))
 
     @staticmethod
@@ -752,10 +765,11 @@ class Carving(NamedTuple):
     @staticmethod
     def of(geo: gc.Geometry, networks: list[list[Any]]) -> Carving:
         """The atoms of `geo`'s footprints cut by each network's nested stop corridors (local
-        coordinates, in order); refuses a network whose corridors are not nested (a prefix's
-        corridor holds every shorter one's, but for slivers under the linework's precision,
-        LINE_SNAP_M along the shorter one's outline: each corridor is unioned afresh, as the
-        rebuild and the raster carve it, and two unions part by such slivers, 3.4e-6 m^2 on
+        coordinates, in order), each cut regular (`_cut`: no piece has a part thinner than the
+        mesh's precision, gap_complex.FEATURE_M); refuses a network whose corridors are not nested
+        (a prefix's corridor holds every shorter one's, but for slivers under the mesh's
+        precision, FEATURE_M along the shorter one's outline: each corridor is unioned afresh, as
+        the rebuild and the raster carve it, and two unions part by such slivers, 3.4e-6 m^2 on
         18895)."""
         if not networks or not all(networks):
             raise ValueError("a carving needs a network with a stop: Carving.none is the plain "
@@ -764,7 +778,7 @@ class Carving(NamedTuple):
         for i, cs in enumerate(nets):
             for k in range(1, len(cs)):
                 out = shapely.area(shapely.difference(cs[k - 1], cs[k]))
-                if out > LINE_SNAP_M * shapely.length(cs[k - 1]):
+                if out > gc.FEATURE_M * shapely.length(cs[k - 1]):
                     raise ValueError(f"network {i}: stop {k + 1}'s corridor misses {out:.2e} m^2 "
                                      f"of stop {k}'s: not one network's nested prefixes")
         polys = np.asarray(geo.polys, dtype=object)
@@ -776,8 +790,7 @@ class Carving(NamedTuple):
                 hit = hit[tag[hit, i] == 0]
                 if not len(hit):
                     continue
-                inside = shapely.intersection(polys[hit], c)
-                outside = shapely.difference(polys[hit], c)
+                inside, outside = _cut(polys[hit], c)
                 new_p, new_par, new_tag = [], [], []
                 for j, a, z in zip(hit, inside, outside, strict=True):
                     for part in _polygons(a):
@@ -840,6 +853,20 @@ class Carving(NamedTuple):
         """A per-atom derivative summed to the buildings (the atoms `prefix` carves held at 1)."""
         return np.bincount(self.parent, weights=np.where(self.carved(prefix), 0.0, g),
                            minlength=n)
+
+
+def _cut(a: NDArray[np.object_], c: Any) -> tuple[NDArray[np.object_], NDArray[np.object_]]:
+    """(inside, outside) of each piece of `a` (on the FEATURE_M grid) cut by the corridor `c`, every
+    overlay on that grid, no part of either side thinner than gap_complex.FEATURE_M: the inside
+    regular (a and c), the outside regular (a less that inside), the inside then a less the
+    outside, so a thin part joins the other side (not dropped: that would open a crack in the
+    building). Cut exactly, a corridor vertex 5.3e-6 m from a wall (road_simp, 5810) or two
+    stops' outlines 0.27 mm apart (41785) left a hair-thin piece the conformity cascaded on
+    (BACKLOG, "One precision model for the mesh")."""
+    g = gc.FEATURE_M
+    inside = gc.regular(shapely.intersection(a, c, grid_size=g))
+    outside = gc.regular(shapely.difference(a, inside, grid_size=g))
+    return shapely.difference(a, outside, grid_size=g), outside
 
 
 def _polygons(g: Any) -> list[Any]:

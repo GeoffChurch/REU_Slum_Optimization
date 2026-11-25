@@ -164,8 +164,8 @@ NODAL_FLOOR = 0.01       # Nodal: the mass's share spread by area (the open grou
 KMEANS_ITER = 50         # Voronoi, Spectral: k-means iterations
 SNAP_TOL = 1.0           # m: the cut answer's boundaries simplified to this
 GRID_M = 1e-3            # m: every answer's ground snapped to this grid in the block's local
-                         # frame before it is stored and scored (`gridded`: the 5810 page's
-                         # networks.GRID_M)
+                         # frame before it is stored and scored (`gridded`: the mesh's grid,
+                         # gap_complex.FEATURE_M)
 FACE_M2 = 100.0          # m^2: a sub-block is a face of the block less the roads this large
 TIP_STREET_M = 5.0       # m: a skeleton end farther than this from the street is a dead end
 REACH_M = 50.0           # m: a home "reached": within this of a road (the growth pilot's)

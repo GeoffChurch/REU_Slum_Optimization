@@ -127,7 +127,7 @@ CURRENT_TOL = 1e-8       # a wall group's current from the definition against co
 ENERGY_TOL = 1e-9        # P against the dissipation (relative), a cell's imbalance (of the
                          # largest current through a cell: gap_clear_check.FLUX_TOL)
 SOURCE_TOL = 1e-6        # a home's sources against the oracle, of its population: a triangle in a
-                         # sliver within the linework's snap (gap_clear.LINE_SNAP_M) of an outline
+                         # sliver within the linework's grid (gap_complex.FEATURE_M) of an outline
                          # reads either side by its centroid (8e-8 -- 1.8e-7 on 19570, 20269, 23597)
 MONO_ORDERS = 3
 MONO_STEPS = 8
