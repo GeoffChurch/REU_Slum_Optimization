@@ -367,11 +367,10 @@ interface Column {
 }
 
 /** How a series' whole run time was had, in the heading's words: recorded by the method's own
- * run, timed by a run made to time it, or measured (topology's). Exhaustive over the kinds. */
+ * run, or measured (topology's). Exhaustive over the kinds. */
 function runHow(run: DemoSeries["run"]): string {
   switch (run.kind) {
     case "recorded": return "recorded";
-    case "timed": return "timed";
     case "measured": return "measured";
   }
 }
