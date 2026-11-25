@@ -1,5 +1,6 @@
-/** The ScreenMap canvas: 16,451 Cape Town blocks (3,500 Nairobi), a base layer painted once onto
- * an offscreen canvas and blitted back every frame, with the selected prefix FILLED red on top.
+/** The ScreenMap canvas: every block of a whole metro (Cape Town's bundle carries tens of
+ * thousands, Nairobi's a few thousand), a base layer painted once onto an offscreen canvas, and the
+ * selected prefix FILLED red over a copy of it.
  *
  * **The encoding: three fills.** Each block is red if the current floor selects it, whatever the
  * City's survey says; gold if it is not selected but the survey marks it informal; grey otherwise
@@ -28,10 +29,12 @@
  * partially covered pixel and then the base colour back over it does not restore the original --
  * repeated select/deselect cycles converge toward a permanent pink residue (a coverage-α pixel
  * converges to (1−α)/(2−α) of the way to `selected_color`, never back to 0). A filled selection
- * would make that worse, not better. So each frame clears the visible canvas and copies the
- * offscreen base layer back whole (`drawImage`, a pixel COPY of untouched pixels), then fills the
- * current prefix: what a frame shows depends only on its own floor, never on the frames before it
- * (`city-raster.test.ts` drags the floor down and back and compares every pixel).
+ * would make that worse, not better. So red is only ever ADDED, never taken back: every prefix
+ * starts from a pixel COPY (`drawImage`) of the untouched base layer, or of a saved copy of an
+ * earlier prefix of the same ranking, and fills blocks over it in ranking order; each frame clears
+ * the visible canvas and copies that prefix onto it. What a frame shows depends only on its own
+ * floor, never on the frames before it (`city-raster.test.ts` drags the floor down and back and
+ * compares every pixel, and compares a random walk of floors against a fresh layer's).
  *
  * **Why the offscreen canvas is a plain, uninserted `<canvas>`, not `OffscreenCanvas`.** Both give
  * the same 2D context and `drawImage` accepts either; a second `<canvas>` element needs no new
@@ -40,15 +43,20 @@
  *
  * `region.ts`'s neighbourhood tops out at 213 blocks, so redrawing everything every frame there is
  * free. At city scale it is not: `paintBase` below is the ONE O(n_blocks) pass this module ever
- * makes for a given (bundle, view) pair, run once into the offscreen canvas. Every later frame --
- * a floor drag, a metric switch -- goes through `paintFrame` alone: one `clearRect`, one
- * `drawImage` (the whole base layer, correctly restored, in one call), and O(k) fills for the
- * current selected prefix -- never another O(n_blocks) pass. That is what keeps a floor-slider
- * drag cheap at 1,655 selected blocks rather than 16,451 (a full repaint of every block in its
- * final colour measured ~70 ms a frame on a desktop and ~290 ms at a phone's 4x CPU slowdown,
- * 2026-10-29; batched into one path per colour, slower still); `web/test/screen-map-boot.test.ts`'s
- * base-layer test makes the claim checkable by following a frame's own `drawImage` call to the
- * offscreen canvas it names and counting what THAT canvas's own log holds. */
+ * makes for a given (bundle, view) pair, run once into the offscreen canvas. Nor is the selected
+ * prefix repainted whole on every frame: it runs to nearly every block over most of the floor
+ * track (on Cape Town the log track spends its left two-thirds above three-quarters of the
+ * city), where a repaint per frame costs a full repaint -- 90 to 240 ms in headless Chromium at
+ * DPR 1 to 2, measured 2026-11-25. `paintFrame` instead keeps the prefix on a second offscreen
+ * canvas and only ever ADDS blocks to it, in `order`, which leaves it pixel for pixel what a
+ * repaint from the base layer would draw (the same fills, in the same order, over the same copy);
+ * a shrinking floor restarts from a saved copy at or below the new prefix (`PREFIX_CHECKPOINTS`).
+ * So a frame paints the blocks the drag added since the last one, or at most
+ * n_blocks / PREFIX_CHECKPOINTS of them on a shrink, then one blit and the ring.
+ * `web/test/screen-map-boot.test.ts`'s base-layer test makes the claims checkable by following a
+ * frame's own `drawImage` calls to the offscreen canvases they name and counting what THOSE
+ * canvases' own logs hold, and `city-raster.test.ts` compares a random walk of floors against a
+ * fresh layer pixel for pixel. */
 import type { CityBundle, CityEncoding } from "../screen_map.js";
 import { sizeCanvas } from "./canvas.js";
 import { toScreen, type View } from "../view/transform.js";
@@ -124,20 +132,29 @@ export interface CityLayer {
    * `paintFrame` alone handles by re-blitting this unchanged. */
   paintBase(bundle: CityBundle, view: View, e: CityEncoding,
            size: { width: number; height: number }): void;
-  /** Every frame: clear `ctx`, blit the offscreen base layer onto it (a single `drawImage`, in
-   * device-pixel space so a DPR-scaled backing store is copied 1:1 rather than re-scaled), then
-   * FILL `order[0..k)` in `e.selected_color`, edged in it at `e.block_lw * 2`, directly on `ctx`,
-   * in the CSS-pixel space every other draw call in this codebase uses -- over whatever
-   * `paintBase` painted there, gold included (this module's docstring). Finally, where the
-   * bundle carries one, `bundle.follow` gets a `FOLLOW_RADIUS_PX` ring in `e.follow_color`, drawn
-   * last so it sits over those fills rather than under them. That draw
-   * order is one of the two reasons it belongs on THIS layer; the other is that `paintBase` is the
-   * strictly per-block pass, one fill and one outline for each of `bundle.rings` and nothing else.
-   * Survival is NOT among the reasons: the base layer is blitted back whole on every frame, so a
-   * ring painted into it would still reach the screen after a floor change (verified). */
+  /** Every frame: bring the offscreen PREFIX layer to the base layer with `order[0..k)` FILLED
+   * over it in `e.selected_color`, edged in it at `e.block_lw * 2` -- in the CSS-pixel space every
+   * other draw call in this codebase uses, over whatever `paintBase` painted there, gold included
+   * (this module's docstring) -- then clear `ctx` and blit that layer onto it (a single
+   * `drawImage`, in device-pixel space so a DPR-scaled backing store is copied 1:1 rather than
+   * re-scaled). The prefix layer is kept between calls: a larger `k` for the same `order` fills
+   * only the blocks it adds, a smaller one restarts from the last saved state at or below it
+   * (`PREFIX_CHECKPOINTS`), and a new `order` or a `paintBase` restarts from the base layer.
+   * Finally, where the bundle carries one, `bundle.follow` gets a `FOLLOW_RADIUS_PX` ring in
+   * `e.follow_color` on `ctx` itself, drawn last so it sits over those fills rather than under
+   * them. */
   paintFrame(ctx: CanvasRenderingContext2D, bundle: CityBundle, view: View, e: CityEncoding,
             order: Int32Array, k: number, size: { width: number; height: number }): void;
 }
+
+/** How many saved prefix states a layer keeps between metric switches: `paintFrame` saves the
+ * prefix layer each time it grows past another `n_blocks / PREFIX_CHECKPOINTS` blocks, and a
+ * SHRINKING floor restarts from the last one at or below it instead of from the bare base layer,
+ * so no frame repaints more than that many blocks plus the ones it adds. A constant, not a
+ * setting: it trades memory for speed and cannot change a pixel (`city-raster.test.ts` checks
+ * every frame of a random walk against a fresh layer's). Each one costs a backing store the size
+ * of the visible canvas -- 1 MB for a 500 CSS px canvas at DPR 1, 4 MB at DPR 2. */
+const PREFIX_CHECKPOINTS = 8;
 
 /** Builds one OFFSCREEN `<canvas>` (never inserted into the document -- a pure pixel buffer) and
  * closes over it, so its contents belong to ONE widget instance. Deliberately not module state the
@@ -146,9 +163,24 @@ export interface CityLayer {
 export function createLayer(): CityLayer {
   const base = document.createElement("canvas");
   const baseCtx = base.getContext("2d")!;
-  // The DPR `base`'s backing store was actually sized for -- read exactly once, inside `paintBase`
-  // (the same moment `sizeCanvas` reads `window.devicePixelRatio` to size `base` itself, so the
-  // two can never disagree even though they are technically two reads of the same global: nothing
+  // The PREFIX layer: the base layer with `order[0..preK)` filled over it, kept between frames so a
+  // floor drag paints only the blocks it adds (module docstring). `preFor` is the ranking it was
+  // painted for, compared by reference: `render` makes a fresh `order` on every metric or city
+  // switch, and `paintBase` resets it to `null`, since a repainted base invalidates every prefix.
+  const pre = document.createElement("canvas");
+  const preCtx = pre.getContext("2d")!;
+  let preFor: Int32Array | null = null;
+  let preK = 0;
+  // Saved prefix states: `saved[j]` holds what `pre` held at `preK === (j + 1) * step` for
+  // `preFor`, for every j below `nSaved`. A pool, so a metric switch reuses the canvases rather
+  // than allocating eight more. `pre` only ever grows one block at a time from a restore, so it
+  // passes, and saves, every multiple of `step` at or below the highest `preK` it has reached --
+  // which is why a shrink to `k` always finds `saved[floor(k / step) - 1]`.
+  const saved: HTMLCanvasElement[] = [];
+  let nSaved = 0;
+  // The DPR `base`'s (and `pre`'s) backing store was actually sized for -- read exactly once,
+  // inside `paintBase` (the same moment `sizeCanvas` reads `window.devicePixelRatio` to size
+  // `base` itself, so the two can never disagree even though they are technically two reads of the same global: nothing
   // can mutate it between two synchronous statements in the same call). `paintFrame` reuses THIS
   // value for its own transform reset/restore around the blit rather than re-deriving it
   // independently on every frame -- a floor-only change never re-runs `paintBase`, so an
@@ -158,11 +190,40 @@ export function createLayer(): CityLayer {
   // widget in this codebase). Reusing the stored value keeps the selected-prefix overlay at the
   // SAME scale as the just-blitted base layer regardless, rather than silently drifting.
   let dpr = 1;
+
+  /** `src`'s pixels into `pre`, 1:1 in device-pixel space, over a cleared canvas: an exact copy. */
+  const restore = (src: HTMLCanvasElement, size: { width: number; height: number }): void => {
+    preCtx.clearRect(0, 0, size.width, size.height);
+    preCtx.setTransform(1, 0, 0, 1, 0, 0);
+    preCtx.drawImage(src, 0, 0);
+    preCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  /** `pre`'s pixels into the next saved slot, an exact copy likewise. Sized off `pre` itself, never
+   * a fresh `devicePixelRatio` read, for `dpr`'s own reason above. */
+  const save = (): void => {
+    let cp = saved[nSaved];
+    if (cp === undefined) {
+      cp = document.createElement("canvas");
+      saved.push(cp);
+    }
+    if (cp.width !== pre.width || cp.height !== pre.height) {
+      cp.width = pre.width;
+      cp.height = pre.height;
+    }
+    const cpCtx = cp.getContext("2d")!;
+    cpCtx.setTransform(1, 0, 0, 1, 0, 0);
+    cpCtx.clearRect(0, 0, cp.width, cp.height);
+    cpCtx.drawImage(pre, 0, 0);
+    nSaved++;
+  };
+
   return {
     paintBase(bundle, view, e, size) {
       dpr = window.devicePixelRatio || 1;
       sizeCanvas(base, size); // matches the DESTINATION's own backing-store size exactly, so
                               // `paintFrame`'s blit is a 1:1 device-pixel copy, never a rescale
+      sizeCanvas(pre, size);
+      preFor = null;
       baseCtx.clearRect(0, 0, size.width, size.height);
       const screen = screenRingsOf(bundle, view);
       const informal = bundle.informal;
@@ -177,28 +238,40 @@ export function createLayer(): CityLayer {
       }
     },
     paintFrame(ctx, bundle, view, e, order, k, size) {
+      const screen = screenRingsOf(bundle, view);
+      const step = Math.ceil(order.length / PREFIX_CHECKPOINTS);
+      if (preFor !== order) {
+        restore(base, size);
+        preFor = order;
+        preK = 0;
+        nSaved = 0;
+      } else if (k < preK) {
+        // A shrink: back to the last saved state at or below `k` (the bare base layer below the
+        // first), and grow from there.
+        const j = Math.floor(k / step);
+        restore(j === 0 ? base : saved[j - 1]!, size);
+        preK = j * step;
+      }
+      while (preK < k) {
+        const rings = screen[order[preK]!]!;
+        fillBlock(preCtx, rings, e.selected_color);
+        strokeBlock(preCtx, rings, e.selected_color, e.block_lw * 2);
+        preK++;
+        if (preK % step === 0 && preK / step > nSaved) save();
+      }
       ctx.clearRect(0, 0, size.width, size.height);
-      // The blit happens in DEVICE-PIXEL space: `base` and `ctx`'s own canvas were sized to the
+      // The blit happens in DEVICE-PIXEL space: `pre` and `ctx`'s own canvas were sized to the
       // same backing-store dimensions (this module's own `dpr`, above), so copying them 1:1 needs
       // the identity transform, not the CSS-pixel-space one `sizeCanvas` leaves active -- drawing
-      // `base` under THAT transform would scale its already-DPR-sized pixels up by another factor
-      // of `dpr`, blitting only the top-left 1/dpr² of the base layer at the wrong scale.
+      // `pre` under THAT transform would scale its already-DPR-sized pixels up by another factor
+      // of `dpr`, blitting only the top-left 1/dpr² of it at the wrong scale.
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.drawImage(base, 0, 0);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // back to CSS-pixel space for the fills below
-      const screen = screenRingsOf(bundle, view);
-      for (let i = 0; i < k; i++) {
-        const rings = screen[order[i]!]!;
-        fillBlock(ctx, rings, e.selected_color);
-        strokeBlock(ctx, rings, e.selected_color, e.block_lw * 2);
-      }
-      // Drawn last, so wherever it meets a selected block it sits over it rather than under it --
-      // which is the first of the two reasons it is on the FRAME and not the base layer. The second: `paintBase` is the strictly per-block pass, and a marker
-      // belonging to no block has no place in a loop whose stroke count is exactly `n_blocks`
-      // (`screen-map-boot.test.ts`'s base-layer test counts it). Note which reason is NOT in that
-      // list: a ring painted into the base layer would still be VISIBLE after a floor change,
-      // because the base layer is copied back whole on every frame. What it would not be is drawn
-      // by this frame.
+      ctx.drawImage(pre, 0, 0);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // back to CSS-pixel space for the ring below
+      // Drawn on the VISIBLE canvas, never into `pre`: `pre` is kept and grown between frames, so
+      // a ring painted there would sit under every block a later frame adds. It also stays off the
+      // base layer, `paintBase` being the strictly per-block pass (`screen-map-boot.test.ts`'s
+      // base-layer test counts it).
       //
       // `follow` is absent for Nairobi (screen_map.d.ts), so this branch is a real optional, not a
       // guard: a bundle that carries no followed block draws no ring.

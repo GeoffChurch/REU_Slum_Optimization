@@ -107,3 +107,35 @@ test("dragging the floor down and back up leaves no residue", () => {
   paint(5);
   assert.deepEqual(ctx.data, low);
 });
+
+test("a frame is the same pixels however the floor reached it", () => {
+  // render/city.ts keeps the selected prefix between frames, growing it in place and restoring a
+  // saved copy on a shrink; neither may show. Thirty blocks, so a saved copy holds four
+  // (ceil(30 / 8)) and a shrink to a k between two of them restores AND regrows -- the five-block
+  // bundle above saves every block and never reaches that path. Overlapping and sub-pixel
+  // squares, so the ORDER red lands in shows in the pixels too. Each frame of a seeded random walk
+  // is compared with a fresh layer's frame at the same k, which has never drawn anything else.
+  const rings = Array.from({ length: 30 }, (_, i) =>
+    square(3 + (i % 10) * 4.3, 3 + Math.floor(i / 10) * 8.7, i % 3 === 0 ? 0.3 : 5));
+  const many = { ...bundle, n_blocks: rings.length, rings,
+                 informal: rings.map((_, i) => i % 2) } as unknown as CityBundle;
+  let seed = 7;
+  const rand = (): number => (seed = (seed * 48271) % 2147483647) / 2147483647;
+  const order = new Int32Array(rings.map((_, i) => i).sort(() => rand() - 0.5));
+  const layerAt = (): { ctx: PixelContext; paint: (k: number) => void } => {
+    const layer = createLayer();
+    layer.paintBase(many, VIEW, E, SIZE);
+    const visible = new PixelCanvas();
+    sizeCanvas(visible as unknown as HTMLCanvasElement, SIZE);
+    return { ctx: visible.ctx, paint: (k) => layer.paintFrame(
+      visible.ctx as unknown as CanvasRenderingContext2D, many, VIEW, E, order, k, SIZE) };
+  };
+  const walk = layerAt();
+  for (let i = 0; i < 40; i++) {
+    const k = Math.floor(rand() * (rings.length + 1));
+    walk.paint(k);
+    const fresh = layerAt();
+    fresh.paint(k);
+    assert.deepEqual(walk.ctx.data, fresh.ctx.data, `step ${i}, k = ${k}`);
+  }
+});

@@ -146,10 +146,10 @@ function asMetric(raw: string): MetricName {
 
 /** `density`/`depth_proxy` ship no calibration of their own (only `depth_density_proxy` and
  * `density_compactness` do -- design §3.1). Defaulting them to "select everything" reported the
- * corpus base rate as if it were a screen's own performance (16,451 of 16,451 selected, precision
+ * corpus base rate as if it were a screen's own performance (every block selected, precision
  * equal to the informal share of the whole city) and defeated `city.ts`'s O(prefix) design
  * outright. Instead default to the score that selects exactly the SAME pool size as the shipped
- * `DEFAULT_METRIC` floor on this bundle (1,655 for Cape Town, 169 for Nairobi): the score of the
+ * `DEFAULT_METRIC` floor on this bundle (its `floors` entry's own `n`): the score of the
  * block at that rank in THIS metric's own ranking. This is exactly how `examples/screen-bakeoff/
  * screen_comparison.csv` compares screens that ship no floor of their own -- at equal pool
  * fractions, not at an arbitrary threshold, and it is a number this bundle already carries, not
@@ -487,7 +487,7 @@ function boot(host: HTMLElement, makeState: StateFactory<ScreenState>, bundles: 
   // `force`: true from the resize callback (a new view invalidates every cached screen coordinate,
   // so the base layer must be repainted regardless of what else changed) and from a city switch (a
   // different bundle's blocks need their own bbox/view/base layer); false from every other state
-  // change, so a floor or metric change alone never repaints the ~16,451-block base layer -- see
+  // change, so a floor or metric change alone never repaints the whole-city base layer -- see
   // render/city.ts's own module comment for why that split is the whole performance point.
   const render = (force: boolean): void => {
     const st = state.get();
