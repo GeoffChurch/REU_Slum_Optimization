@@ -76,49 +76,50 @@ import { toScreen, type View } from "../view/transform.js";
 export const FOLLOW_RADIUS_PX = 6;
 const FOLLOW_LW_PX = 2;
 
-/** One block's rings (exterior first, then any interiors), projected to screen space. */
-type ScreenRings = [number, number][][];
-
-/** The last VIEW this module projected for, and every block's rings already computed for it --
- * mirrors `render/region.ts`'s own `screenRingsOf` cache, one level up in scale. Keyed on `bundle`
+/** The last VIEW this module built paths for, and every block's outline already built for it, as a
+ * `Path2D` in screen space (exterior ring first, then any interiors) -- built ONCE per (bundle,
+ * view) and handed to `fill`/`stroke` on every later paint, so a frame that paints k blocks makes
+ * 2k canvas calls rather than re-walking every vertex through `moveTo`/`lineTo` twice per block.
+ * Mirrors `render/region.ts`'s own `screenRingsOf` cache, one level up in scale. Keyed on `bundle`
  * by reference: a city switch is a different bundle object, which invalidates it exactly like a
- * resized `view` does. Sharing this across widget instances is harmless (worst case, an extra
- * recompute), unlike the offscreen canvas itself -- see `createLayer`'s own comment. */
-let cache: { bundle: CityBundle; view: View; screen: ScreenRings[] } | null = null;
+ * resized `view` does (`fitBbox` returns a new one). The paths are in CSS pixels; the context's own
+ * transform carries the DPR at paint time, as it did for the traced paths. Sharing this across
+ * widget instances is harmless (worst case, an extra rebuild), unlike the offscreen canvases --
+ * see `createLayer`'s own comment. */
+let cache: { bundle: CityBundle; view: View; paths: Path2D[] } | null = null;
 
-function screenRingsOf(bundle: CityBundle, view: View): ScreenRings[] {
-  if (cache !== null && cache.bundle === bundle && cache.view === view) return cache.screen;
-  const screen = bundle.rings.map(
-    (rings) => rings.map((ring) => ring.map(([x, y]) => toScreen(view, x, y))));
-  cache = { bundle, view, screen };
-  return screen;
+function pathsOf(bundle: CityBundle, view: View): Path2D[] {
+  if (cache !== null && cache.bundle === bundle && cache.view === view) return cache.paths;
+  const paths = bundle.rings.map((rings) => {
+    const path = new Path2D();
+    for (const ring of rings) {
+      ring.forEach(([x, y], i) => {
+        const [sx, sy] = toScreen(view, x, y);
+        if (i === 0) path.moveTo(sx, sy); else path.lineTo(sx, sy);
+      });
+      path.closePath();
+    }
+    return path;
+  });
+  cache = { bundle, view, paths };
+  return paths;
 }
 
-function tracePath(ctx: CanvasRenderingContext2D, rings: ScreenRings): void {
-  ctx.beginPath();
-  for (const ring of rings) {
-    ring.forEach(([x, y], i) => { if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
-    ctx.closePath();
-  }
-}
-
-/** One beginPath()/fill() PER block, matching `region.ts`'s own reasoning: a test that counts
- * layer membership by counting `fill()` calls in a given colour needs one call per block, not one
- * batched path across many. */
-function fillBlock(ctx: CanvasRenderingContext2D, rings: ScreenRings, style: string): void {
+/** One fill() PER block, matching `region.ts`'s own reasoning: a test that counts layer membership
+ * by counting `fill()` calls in a given colour needs one call per block, not one batched path
+ * across many. */
+function fillBlock(ctx: CanvasRenderingContext2D, path: Path2D, style: string): void {
   ctx.fillStyle = style;
-  tracePath(ctx, rings);
   // Even-odd, per screen_map.d.ts's own note on `rings`: "Exterior ring first, then interiors."
-  // Nonzero (the default) would fill Cape Town's 6,990 holes solid instead of cutting them out.
-  ctx.fill("evenodd");
+  // Nonzero (the default) would fill Cape Town's holes solid instead of cutting them out.
+  ctx.fill(path, "evenodd");
 }
 
-function strokeBlock(ctx: CanvasRenderingContext2D, rings: ScreenRings, style: string,
+function strokeBlock(ctx: CanvasRenderingContext2D, path: Path2D, style: string,
                      lineWidth: number): void {
   ctx.strokeStyle = style;
   ctx.lineWidth = lineWidth;
-  tracePath(ctx, rings);
-  ctx.stroke();
+  ctx.stroke(path);
 }
 
 export interface CityLayer {
@@ -225,20 +226,20 @@ export function createLayer(): CityLayer {
       sizeCanvas(pre, size);
       preFor = null;
       baseCtx.clearRect(0, 0, size.width, size.height);
-      const screen = screenRingsOf(bundle, view);
+      const paths = pathsOf(bundle, view);
       const informal = bundle.informal;
-      for (let i = 0; i < screen.length; i++) {
-        const rings = screen[i]!;
+      for (let i = 0; i < paths.length; i++) {
+        const path = paths[i]!;
         // Fill and outline in the SAME colour, so the outline can never obliterate the fill it
         // surrounds -- see this function's own docstring for why that is not merely cosmetic at
         // this bundle's block sizes.
         const style = informal?.[i] ? e.informal_color : e.base_color;
-        fillBlock(baseCtx, rings, style);
-        strokeBlock(baseCtx, rings, style, e.block_lw);
+        fillBlock(baseCtx, path, style);
+        strokeBlock(baseCtx, path, style, e.block_lw);
       }
     },
     paintFrame(ctx, bundle, view, e, order, k, size) {
-      const screen = screenRingsOf(bundle, view);
+      const paths = pathsOf(bundle, view);
       const step = Math.ceil(order.length / PREFIX_CHECKPOINTS);
       if (preFor !== order) {
         restore(base, size);
@@ -253,9 +254,9 @@ export function createLayer(): CityLayer {
         preK = j * step;
       }
       while (preK < k) {
-        const rings = screen[order[preK]!]!;
-        fillBlock(preCtx, rings, e.selected_color);
-        strokeBlock(preCtx, rings, e.selected_color, e.block_lw * 2);
+        const path = paths[order[preK]!]!;
+        fillBlock(preCtx, path, e.selected_color);
+        strokeBlock(preCtx, path, e.selected_color, e.block_lw * 2);
         preK++;
         if (preK % step === 0 && preK / step > nSaved) save();
       }
@@ -332,11 +333,11 @@ export function paintScoreFrame(ctx: CanvasRenderingContext2D, bundle: CityBundl
   ctx.clearRect(0, 0, size.width, size.height);
   ctx.fillStyle = SCORE_GROUND;
   ctx.fillRect(0, 0, size.width, size.height);
-  const screen = screenRingsOf(bundle, view);
-  for (let i = 0; i < screen.length; i++) {
+  const paths = pathsOf(bundle, view);
+  for (let i = 0; i < paths.length; i++) {
     const style = rampColour(shades[i]!);
-    fillBlock(ctx, screen[i]!, style);
-    strokeBlock(ctx, screen[i]!, style, e.block_lw);
+    fillBlock(ctx, paths[i]!, style);
+    strokeBlock(ctx, paths[i]!, style, e.block_lw);
   }
   drawFollow(ctx, bundle, view, e, true);
 }

@@ -11,6 +11,8 @@
  * where both a sub-pixel block's colour and any frame-to-frame residue come from. Exact match to
  * Skia is not the point; the compositing rule is. */
 
+import { FakePath2D } from "./harness.js";
+
 const SS = 8;                                  // samples per pixel side
 
 type Pt = [number, number];
@@ -93,14 +95,33 @@ export class PixelContext {
 
   clearRect(): void { this.data.fill(0); }
 
-  fill(_rule?: CanvasFillRule): void {
-    this.paint(parse(this.fillStyle), 0, (x, y) => insideEvenOdd(this.polys, x, y));
+  /** With a `Path2D`, its ops are replayed through the CURRENT transform at paint time, as a real
+   * context applies it, and the context's own current path is left as it was. */
+  fill(pathOrRule?: FakePath2D | CanvasFillRule, _rule?: CanvasFillRule): void {
+    this.withPath(pathOrRule, () =>
+      this.paint(parse(this.fillStyle), 0, (x, y) => insideEvenOdd(this.polys, x, y)));
   }
 
-  stroke(): void {
+  stroke(path?: FakePath2D): void {
     const r = (this.lineWidth * this.m[0]!) / 2;
-    this.paint(parse(this.strokeStyle), r,
-               (x, y) => nearSegments(this.polys, this.closed, x, y, r));
+    this.withPath(path, () => this.paint(parse(this.strokeStyle), r,
+                                         (x, y) => nearSegments(this.polys, this.closed, x, y, r)));
+  }
+
+  private withPath(path: unknown, paint: () => void): void {
+    if (!(path instanceof FakePath2D)) { paint(); return; }
+    const [polys, closed] = [this.polys, this.closed];
+    this.beginPath();
+    for (const { op, args } of path.ops) {
+      switch (op) {
+        case "moveTo": this.moveTo(args[0]!, args[1]!); break;
+        case "lineTo": this.lineTo(args[0]!, args[1]!); break;
+        case "closePath": this.closePath(); break;
+        case "arc": this.arc(args[0]!, args[1]!, args[2]!, args[3]!, args[4]!); break;
+      }
+    }
+    paint();
+    [this.polys, this.closed] = [polys, closed];
   }
 
   drawImage(image: PixelCanvas, _dx: number, _dy: number): void {
