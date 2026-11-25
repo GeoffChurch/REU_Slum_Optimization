@@ -52,6 +52,11 @@ export interface Call {
    * e.g. to confirm an offscreen base layer was painted once and merely re-blitted on every later
    * frame, not rebuilt. */
   image?: FakeElement;
+  /** Set only on a `drawImage` call: how many calls `image`'s own log held at the moment of the
+   * copy. The log only grows, so its first `imageCalls` entries are what was copied -- which is
+   * what lets `shown` read a canvas copied from and THEN drawn on again (render/city.ts's prefix
+   * layer) as it was when copied, not as it is now. */
+  imageCalls?: number;
 }
 
 /** Armed by each consumer's own `mount()` helper (via `armDrawFailure`) to make the first drawing
@@ -131,6 +136,7 @@ export class RecordingContext {
       path: [...this.path],
       fillRule: fillRule ?? "nonzero",
       image,
+      imageCalls: image?.ctx.calls.length,
     });
     this.firstDrawAt ??= ++clock;
   }
@@ -365,6 +371,20 @@ export function lastFrame(cv: FakeElement): Call[] {
   const from = starts.at(-1);
   assert.ok(from !== undefined, "nothing was ever drawn: no clearRect in the call log");
   return cv.ctx.calls.slice(from);
+}
+
+/** What `cv` shows, as the paint calls that made it: its calls since the last `clearRect` (as
+ * `lastFrame`), with each `drawImage` replaced, recursively, by what ITS source showed at the
+ * moment of the copy (`Call.imageCalls`). A picture assembled from offscreen layers then reads as
+ * one list, the base layer's paints first, so "which blocks are red on screen" is a filter over it
+ * however many copies the red went through. `upTo` reads the log as it stood after that many
+ * calls. */
+export function shown(cv: FakeElement, upTo: number = cv.ctx.calls.length): Call[] {
+  const calls = cv.ctx.calls.slice(0, upTo);
+  const from = calls.flatMap((c, i) => c.op === "clearRect" ? [i] : []).at(-1);
+  assert.ok(from !== undefined, "nothing was ever drawn: no clearRect in the call log");
+  return calls.slice(from)
+    .flatMap((c) => c.op === "drawImage" ? shown(c.image!, c.imageCalls) : [c]);
 }
 
 /** A `UrlLocation` over a plain string, plus every search string it was ever asked to write. Lives

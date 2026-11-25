@@ -39,7 +39,7 @@ export interface CityBundle {
   crs_epsg: number;
   origin: [number, number];
   n_blocks: number;
-  /** Column arrays, not an array of objects: 16,451 blocks with repeated keys would add megabytes
+  /** Column arrays, not an array of objects: a city's blocks with repeated keys would add megabytes
    * of field names. Same shape as field.json's `buildings: {x, y, r}`. */
   block_id: string[];
   n: number[];

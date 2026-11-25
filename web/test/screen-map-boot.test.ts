@@ -9,7 +9,7 @@ import { urlStore } from "../src/url/store.js";
 import { fitBbox, toScreen, type Bbox, type View } from "../src/view/transform.js";
 import {
   armDrawFailure, canvasOf, Call, DPR, fakeLocation, FakeElement, fireAnimationFrame, fireResize,
-  installStubs, lastFrame, mountPoint, writeNow,
+  installStubs, lastFrame, mountPoint, shown, writeNow,
 } from "./harness.js";
 import { screenMap, SCREEN_MAP_URL, type ScreenState } from "../src/widgets/screen-map.js";
 
@@ -191,16 +191,35 @@ function cityBbox(bundle: CityBundle): Bbox {
 const SIZE = 700;
 const VIEW_CT = fitBbox(cityBbox(ct), SIZE, SIZE, E.pad);
 
-/** The offscreen canvas the last frame's OWN `drawImage` call blitted, found by following the
+/** The offscreen PREFIX layer the last frame's OWN `drawImage` call blitted, found by following the
  * `Call.image` reference `RecordingContext.drawImage` records -- not by assuming there is only
  * ever one other canvas anywhere, so this stays correct even if a page ever holds more than one
  * ScreenMap. */
-function offscreenOf(cv: unknown): FakeElement {
+function prefixOf(cv: unknown): FakeElement {
   const frame = lastFrame(cv as never);
   const blit = frame.find((c) => c.op === "drawImage");
   assert.ok(blit !== undefined, "no drawImage call in the last frame");
   assert.ok(blit.image !== undefined, "the drawImage call recorded no source image");
   return blit.image;
+}
+
+/** The offscreen BASE layer under the last frame: followed from the frame's own `drawImage` down
+ * through each copy's own source -- the prefix layer, and any saved copy of it it was restored
+ * from -- to the one canvas whose picture is copied from nothing. Not by assuming how many copies
+ * lie between: a shrinking floor restores the prefix layer from a saved copy, a growing one does
+ * not. */
+function baseOf(cv: unknown): FakeElement {
+  let el = cv as FakeElement;
+  let upTo = el.ctx.calls.length;
+  for (;;) {
+    const calls = el.ctx.calls.slice(0, upTo);
+    const from = calls.flatMap((c, i) => c.op === "clearRect" ? [i] : []).at(-1);
+    assert.ok(from !== undefined, "a canvas in the copy chain was never cleared");
+    const blit = calls.slice(from).find((c) => c.op === "drawImage");
+    if (blit === undefined) return el;
+    el = blit.image!;
+    upTo = blit.imageCalls!;
+  }
 }
 
 function firstVertexScreen(view: View, bundle: CityBundle, blockIndex: number): [number, number] {
@@ -214,8 +233,8 @@ function firstVertexScreen(view: View, bundle: CityBundle, blockIndex: number): 
  * `isSelected`, `baseFillColorOf` and the informal/selection interaction test below, so the
  * first-vertex matching logic exists in exactly one place.
  *
- * Cape Town's own geometry makes that key a real collision risk -- 606 first-vertex keys are shared
- * by 1,213 of 16,451 blocks, measured against the committed bundle -- so a caller could silently be
+ * Cape Town's own geometry makes that key a real collision risk -- hundreds of first-vertex keys
+ * are shared by two or more blocks in the committed bundle -- so a caller could silently be
  * handed another block's draws instead of `blockIndex`'s own. Asserted here, not merely trusted,
  * because three of this file's four callers pick `blockIndex` FROM THE DATA at test time (`findFlip`,
  * `findHit`, `ct.informal!.findIndex(...)`), so a re-bake can move any of them onto a colliding key
@@ -247,18 +266,20 @@ function poolSizeFloor(bundle: CityBundle, metric: MetricName): number {
 
 /** Blocks the picture currently shows as SELECTED, in the CURRENT frame -- identified by the
  * bundle's own `selected_color`, never by a path count (region-grow-boot.test.ts's own layer
- * helpers carry the reasoning). Stroked, not filled: see `isSelected` just below. */
+ * helpers carry the reasoning). Read through every copy the frame is made of (harness.ts's
+ * `shown`): the red is painted on the offscreen prefix layer, not the visible canvas. Stroked,
+ * not filled: see `isSelected` just below. */
 function selectedPaths(cv: unknown): Call[] {
-  return lastFrame(cv as never)
+  return shown(cv as never)
     .filter((c) => c.op === "stroke" && c.strokeStyle === E.selected_color);
 }
 
-/** Whether `blockIndex` is painted `E.selected_color` in the CURRENT frame on the MAIN canvas.
- * A block that is NOT selected is never painted on the main canvas at all under this design (it
- * shows through from the blitted offscreen base layer instead), so absence here means "not
- * selected", not "selected in some other colour". */
+/** Whether `blockIndex` is painted `E.selected_color` in what the CURRENT frame shows. A block
+ * that is NOT selected is never painted in that colour at all under this design (it shows through
+ * from the copied base layer instead), so absence here means "not selected", not "selected in
+ * some other colour". */
 function isSelected(cv: unknown, view: View, bundle: CityBundle, blockIndex: number): boolean {
-  return callsForBlock(lastFrame(cv as never), view, bundle, blockIndex)
+  return callsForBlock(shown(cv as never), view, bundle, blockIndex)
     .some((c) => c.op === "stroke" && c.strokeStyle === E.selected_color);
 }
 
@@ -290,9 +311,9 @@ function findFlip(bundle: CityBundle, metricA: MetricName, metricB: MetricName):
 }
 
 /** A block selected at `metric`'s own shipped floor that the City's own survey also records as
- * really informal -- a "hit" in `_render_screen_map`'s own legend (gold + a red ring). 455 of
- * Cape Town's 682 real informal blocks are hits at the shipped `depth_density_proxy` floor
- * (682 * 0.667155 recall, rounded -- the reviewer's own figure); found empirically here, not
+ * really informal -- a "hit" in `_render_screen_map`'s own legend (gold + a red ring). Most of
+ * Cape Town's real informal blocks are hits at the shipped `depth_density_proxy` floor (its
+ * `floors` entry's recall says how many); found empirically here, not
  * hardcoded, so the test can never drift from what the bundle and the model actually produce. */
 function findHit(bundle: CityBundle, metric: MetricName): number {
   const informal = bundle.informal;
@@ -327,7 +348,7 @@ test("the number of selected blocks drawn equals what the model selects", async 
   for (const c of selectedStrokes) {
     assert.equal(c.lineWidth, E.block_lw * 2, `selected edge drawn at ${c.lineWidth}, not block_lw * 2`);
   }
-  const selectedFills = lastFrame(cv as never)
+  const selectedFills = shown(cv as never)
     .filter((c) => c.op === "fill" && c.fillStyle === E.selected_color);
   assert.equal(selectedFills.length, sel.count);
 });
@@ -406,15 +427,17 @@ test("the base layer is drawn once, not per frame, and blitted every frame in de
   async () => {
     // The performance claim, made checkable the strong way: one drawImage per frame, with the
     // offscreen canvas it names holding exactly one fill per block -- on the first frame AND after
-    // a floor change, not growing by another 16,451 -- and the blit itself bracketed by a reset to
-    // the identity transform and back, so a DPR-scaled backing store is copied 1:1 rather than
+    // a floor change, not growing by another `n_blocks` -- and the blit itself bracketed by a reset
+    // to the identity transform and back, so a DPR-scaled backing store is copied 1:1 rather than
     // blown up by another factor of dpr.
     const { host, cv } = await mount();
 
     const frame1 = lastFrame(cv as never);
     assert.equal(frame1.filter((c) => c.op === "drawImage").length, 1,
-      "each frame should blit the base layer exactly once");
-    const offscreen1 = offscreenOf(cv);
+      "each frame should blit the prefix layer exactly once");
+    const prefix1 = prefixOf(cv);
+    const offscreen1 = baseOf(cv);
+    assert.notEqual(offscreen1, prefix1, "the frame blits the prefix layer, not the base layer");
     const fills1 = offscreen1.ctx.calls.filter((c) => c.op === "fill");
     assert.equal(fills1.length, ct.n_blocks,
       "the offscreen canvas should hold exactly one fill per block");
@@ -423,8 +446,8 @@ test("the base layer is drawn once, not per frame, and blitted every frame in de
     // block_lw consumed: every block outlined once on the offscreen layer, at the bundle's own
     // width -- not a literal, and not a field that ships and is never read. The outline colour must
     // match THAT BLOCK'S OWN fill, not merely be "one of the two colours in play" -- an `assert.ok`
-    // accepting either constant for every block would pass an injection that outlined ALL 16,451
-    // blocks gold just as readily as one that left the pre-fix bug (all outlined base_color) in
+    // accepting either constant for every block would pass an injection that outlined EVERY block
+    // gold just as readily as one that left the pre-fix bug (all outlined base_color) in
     // place, since both colours are individually valid somewhere in the bundle. Pairing each stroke
     // with the fill it was drawn immediately after -- `fillBlock`/`strokeBlock` run back-to-back per
     // block inside `paintBase`'s own loop, so `fills1[i]`/`strokes1[i]` are the same block's two
@@ -449,11 +472,12 @@ test("the base layer is drawn once, not per frame, and blitted every frame in de
     const frame2 = lastFrame(cv as never);
     assert.equal(frame2.filter((c) => c.op === "drawImage").length, 1,
       "a floor change should still blit exactly once");
-    const blit2 = frame2.find((c) => c.op === "drawImage")!;
-    assert.equal(blit2.image, offscreen1,
-      "the SAME offscreen canvas must be reused across a floor change, not rebuilt");
+    assert.equal(prefixOf(cv), prefix1,
+      "the SAME prefix layer must be reused across a floor change, not rebuilt");
 
-    const offscreen2 = offscreenOf(cv);
+    const offscreen2 = baseOf(cv);
+    assert.equal(offscreen2, offscreen1,
+      "the SAME base layer must be reused across a floor change, not rebuilt");
     assert.equal(offscreen2.ctx.calls.filter((c) => c.op === "fill").length, ct.n_blocks,
       "a floor change must not repaint the offscreen base layer -- its fill count must be unchanged");
 
@@ -489,7 +513,7 @@ test("Cape Town's real informal blocks are painted informal_color on the base la
   // about, so it gets the same "picked one block and asserted its own colour" treatment as
   // everything else here, not merely a shape check.
   const { cv } = await mount();
-  const offscreen = offscreenOf(cv);
+  const offscreen = baseOf(cv);
   const informalIndex = ct.informal!.findIndex((v) => v === 1);
   const plainIndex = ct.informal!.findIndex((v) => v === 0);
   assert.ok(informalIndex >= 0 && plainIndex >= 0, "sanity: both kinds of block should exist");
@@ -506,7 +530,7 @@ test("a known informal block's own outline does not overpaint its gold fill", as
   // outline match its own fill, so an informal block's outline can never be a DIFFERENT, opaque
   // colour that would paint over the fill underneath it.
   const { cv } = await mount();
-  const offscreen = offscreenOf(cv);
+  const offscreen = baseOf(cv);
   const informalIndex = ct.informal!.findIndex((v) => v === 1);
   assert.ok(informalIndex >= 0, "sanity: an informal block should exist");
 
@@ -525,16 +549,17 @@ test("a selected block that is really informal is filled red on the frame, over 
   async () => {
     // Owner, 2026-10-29: selection is a red FILL, whatever the survey says -- gold now means
     // "informal and not selected". The block keeps its gold on the base layer (paintFrame never
-    // touches the offscreen canvas); the frame fills it red over the blit. What the reader then
-    // sees is pixels, which city-raster.test.ts measures.
+    // touches the base canvas); the prefix layer fills it red over a copy of it. What the reader
+    // then sees is pixels, which city-raster.test.ts measures.
     const { cv } = await mount();
     const hitIndex = findHit(ct, "depth_density_proxy");
     assert.ok(isSelected(cv, VIEW_CT, ct, hitIndex), "sanity: the chosen block should be selected");
-    assert.equal(baseFillColorOf(offscreenOf(cv), VIEW_CT, ct, hitIndex), E.informal_color);
-    const fills = callsForBlock(lastFrame(cv as never), VIEW_CT, ct, hitIndex)
+    assert.equal(baseFillColorOf(baseOf(cv), VIEW_CT, ct, hitIndex), E.informal_color);
+    const fills = callsForBlock(shown(cv as never), VIEW_CT, ct, hitIndex)
       .filter((c) => c.op === "fill");
     assert.deepEqual(fills.map((c) => [c.fillStyle, c.fillRule]),
-                     [[E.selected_color, "evenodd"]]);
+                     [[E.informal_color, "evenodd"], [E.selected_color, "evenodd"]],
+                     "the frame shows the block's gold, then red over it, and nothing else");
   });
 
 test("floor-slider redraws are requestAnimationFrame-coalesced, not synchronous", async () => {
@@ -562,8 +587,66 @@ test("floor-slider redraws are requestAnimationFrame-coalesced, not synchronous"
     `two rapid floor changes before a flush produced ${blits.length} frames, not one`);
   const expected = selectAt(ct, ranking(ct, "depth_density_proxy"), scores(ct, "depth_density_proxy"),
     CT_DDP.floor(latest)).count;
-  const drawn = added.filter((c) => c.op === "stroke" && c.strokeStyle === E.selected_color).length;
-  assert.equal(drawn, expected, "the coalesced frame should reflect the LATEST floor, not the first");
+  assert.equal(selectedPaths(cv).length, expected,
+    "the coalesced frame should reflect the LATEST floor, not the first");
+});
+
+test("a floor drag paints only the blocks it adds, and a shrink at most an eighth of the city",
+  async () => {
+    // The performance claim of render/city.ts's prefix layer, made checkable the way the base-layer
+    // test above makes its own: by counting the fills each frame adds to the prefix layer's log.
+    // Over most of the track the prefix is nearly every block, so a design that repainted it per
+    // frame would add nearly `n_blocks` fills here, not tens. 8 is a literal, not city.ts's own
+    // PREFIX_CHECKPOINTS, which would agree with itself whatever it is set to.
+    const { host, cv } = await mount();
+    const pre = prefixOf(cv);
+    const order = ranking(ct, "depth_density_proxy");
+    const s = scores(ct, "depth_density_proxy");
+    const count = (u: number): number => selectAt(ct, order, s, CT_DDP.floor(u)).count;
+    const step = Math.ceil(ct.n_blocks / 8);
+    const prefixFills = (): number => pre.ctx.calls.filter((c) => c.op === "fill").length;
+    let k = selectedPaths(cv).length;
+    for (const u of [700, 690, 400, 399, 650, 640, 700]) {
+      const before = prefixFills();
+      dragFloor(host, u);
+      assert.equal(prefixOf(cv), pre, "the prefix layer was replaced, not kept");
+      const next = count(u);
+      const added = prefixFills() - before;
+      const expected = next >= k ? next - k : next - Math.floor(next / step) * step;
+      assert.equal(added, expected, `${k} -> ${next} blocks at position ${u} filled ${added}`);
+      assert.ok(added <= Math.max(next - k, step), `${added} fills for one frame`);
+      assert.equal(selectedPaths(cv).length, next, `the frame at position ${u} shows ${next}`);
+      k = next;
+    }
+  });
+
+test("a resize rebuilds the prefix from the repainted base layer, not from what it held",
+  async () => {
+  // `paintBase` resizes the prefix layer (which clears it) and repaints the base, but the ranking
+  // is unchanged, so a prefix kept by `order` alone would show a blank map. Followed through the
+  // fake's copy log: the base layer the frame shows must be the base layer as it now stands --
+  // `Call.imageCalls` equal to its whole log -- not an earlier stretch of that log.
+  const { host, cv } = await mount();
+  dragFloor(host, 700);
+  fireResize(500, 500);
+  let el = cv as FakeElement;
+  let upTo = el.ctx.calls.length;
+  let copy: Call | undefined;
+  for (;;) {
+    const calls = el.ctx.calls.slice(0, upTo);
+    const from = calls.flatMap((c, i) => c.op === "clearRect" ? [i] : []).at(-1)!;
+    const blit = calls.slice(from).find((c) => c.op === "drawImage");
+    if (blit === undefined) break;
+    copy = blit;
+    el = blit.image!;
+    upTo = blit.imageCalls!;
+  }
+  assert.ok(copy !== undefined, "the frame copies no layer at all");
+  assert.equal(copy.imageCalls, el.ctx.calls.length,
+    "the frame shows the base layer as it was before the resize repainted it");
+  const order = ranking(ct, "depth_density_proxy");
+  assert.equal(selectedPaths(cv).length,
+    selectAt(ct, order, scores(ct, "depth_density_proxy"), CT_DDP.floor(700)).count);
 });
 
 test("an uncalibrated metric defaults to the shipped default's own pool size", async () => {
@@ -604,7 +687,7 @@ test("?metric= alone takes THAT metric's own default floor, not the previous met
     // calibration in `ct.floors`, `depth_proxy` ships none and falls back to the shipped default's
     // own pool size. Measured against the committed bundle, a write-back of
     // `depth_density_proxy`'s 0.0128 would select 1 block under `density_compactness` (whose scores
-    // top out at 0.00109, so it clamps to the ceiling) and all 16,451 under `depth_proxy` (whose
+    // top out at 0.00109, so it clamps to the ceiling) and every block under `depth_proxy` (whose
     // scores start at 0.168, so it clamps to the floor) -- neither of them this metric's own pool,
     // from a URL that asked for nothing unusual.
     const shippedDefault = ct.floors.find((f) => f.metric === "depth_density_proxy")!;
@@ -702,8 +785,8 @@ test("a city round trip returns an untouched floor to where it started", async (
   // number, and the number belongs to the OTHER corpus. Measured on the committed bundles,
   // `density` (which ships no calibration, so its default is the shipped default's own pool size)
   // resolves to 0.00773 on Cape Town and 0.00625 on Nairobi -- so an unconditional pin sends a
-  // reader who only looked at Nairobi home to Nairobi's number, drawing 2,859 blocks where their
-  // own city's default draws 1,655, under a `?floor=` they never typed.
+  // reader who only looked at Nairobi home to Nairobi's number, drawing a different pool from
+  // their own city's default, under a `?floor=` they never typed.
   const { host, cv, loc, store } = await mount();
   setMetric(host, "density");
   setCity(host, true);
