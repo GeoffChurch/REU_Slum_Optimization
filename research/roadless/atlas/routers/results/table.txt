@@ -1,245 +1,245 @@
  condition     router  runs  ears  obs   null     p  lnull    lp  grid45  block  right  jct_mean
-  block b0    eikonal     5   211    7  8.972 0.799  8.521 0.750   0.222    NaN  0.062    53.704
-  block b0      grid8     7   312   23 12.671 0.004 14.577 0.022   0.778    NaN  0.297    57.017
-  block b0     pulled     4   201    9  8.496 0.476  9.234 0.581   0.425    NaN  0.194    58.815
-  block b0      theta     5   222    8  9.561 0.751  9.786 0.765   0.209    NaN  0.079    54.692
-  block b0 visibility     5   222    9  8.824 0.524  8.460 0.476   0.244    NaN  0.069    53.455
- block b20    eikonal     5   283    7 10.582 0.905 10.590 0.902   0.235    NaN  0.124    59.327
- block b20      grid8     5   312   11 10.997 0.540 11.966 0.651   0.377    NaN  0.127    57.528
- block b20     pulled     5   336   10 12.591 0.808 11.488 0.708   0.280    NaN  0.121    56.251
- block b20      theta     5   326    7 12.073 0.956 11.355 0.934   0.252    NaN  0.117    57.943
-block binf      grid8     5   277    8  8.364 0.597  8.084 0.555   0.384    NaN  0.097    49.820
-block binf      theta     5   269    4  7.598 0.947  7.752 0.951   0.240    NaN  0.097    48.520
-   rect b0    eikonal     6   207   25 12.726 0.001 15.154 0.011   0.426  0.354  0.057    53.256
-   rect b0      grid8    18   800  136 49.062 0.000 82.376 0.000   0.898  0.858  0.518    70.397
-   rect b0     pulled     6   218   43 15.259 0.000 23.888 0.000   0.724  0.714  0.387    70.490
-   rect b0      theta     6   216   28 14.733 0.001 18.770 0.022   0.357  0.306  0.071    55.613
-   rect b0 visibility     6   215   28 14.585 0.001 18.711 0.022   0.356  0.308  0.065    55.028
-  rect b20      grid8    18   844   25 46.630 1.000 46.916 1.000   0.253  0.150  0.113    58.989
-   same b0      grid8     6   284   19 11.627 0.025 16.923 0.335   0.826    NaN  0.362    62.458
-   tilt b0    eikonal     6   227   21 16.260 0.144 14.586 0.068   0.176  0.211  0.074    56.333
-   tilt b0      grid8    18   852  133 54.480 0.000 78.166 0.000   0.873  0.023  0.509    71.504
-   tilt b0     pulled     6   224   28 14.962 0.001 18.214 0.014   0.588  0.036  0.293    68.718
-   tilt b0      theta     6   227   21 16.379 0.153 15.349 0.101   0.201  0.203  0.047    54.860
-   tilt b0 visibility     6   222   18 15.676 0.308 14.447 0.206   0.189  0.202  0.050    55.492
-  tilt b20    eikonal     3   111    5  5.252 0.603  5.026 0.564   0.215  0.132  0.097    59.405
-  tilt b20      grid8     6   281    9 15.672 0.969 14.998 0.962   0.234  0.123  0.093    60.233
-  tilt b20     pulled     3   112    4  5.902 0.843  5.588 0.809   0.261  0.096  0.104    60.386
-  tilt b20      theta     3   109    4  6.506 0.892  6.629 0.893   0.240  0.119  0.091    61.751
+  block b0    eikonal     5   199    6  8.194 0.830  7.539 0.767   0.224    NaN  0.056    53.908
+  block b0      grid8     7   312   23 12.639 0.004 14.510 0.021   0.778    NaN  0.297    57.017
+  block b0     pulled     4   199   10  8.995 0.409 10.027 0.551   0.418    NaN  0.196    59.296
+  block b0      theta     5   221    8  9.729 0.764  9.681 0.759   0.204    NaN  0.069    53.784
+  block b0 visibility     5   221    7  8.436 0.747  8.386 0.739   0.255    NaN  0.073    53.602
+ block b20    eikonal     5   284    9 10.925 0.764 11.172 0.780   0.235    NaN  0.121    59.673
+ block b20      grid8     5   312   10 10.978 0.657 11.904 0.757   0.383    NaN  0.117    57.093
+ block b20     pulled     5   331   10 12.869 0.826 11.731 0.733   0.274    NaN  0.120    56.261
+ block b20      theta     5   329   10 11.752 0.734 11.333 0.698   0.245    NaN  0.138    59.521
+block binf      grid8     5   278    8  8.185 0.570  7.863 0.526   0.383    NaN  0.096    49.723
+block binf      theta     5   272    5  7.797 0.890  7.865 0.892   0.232    NaN  0.097    48.807
+   rect b0    eikonal     6   211   21 12.472 0.016 15.538 0.106   0.408  0.340  0.050    52.291
+   rect b0      grid8    18   801  135 49.456 0.000 82.871 0.000   0.899  0.858  0.522    70.502
+   rect b0     pulled     6   220   44 15.536 0.000 24.549 0.000   0.723  0.711  0.375    70.444
+   rect b0      theta     6   217   24 14.838 0.017 19.787 0.192   0.356  0.304  0.060    55.366
+   rect b0 visibility     6   215   22 14.783 0.045 20.280 0.378   0.357  0.308  0.054    54.492
+  rect b20      grid8    18   844   24 46.443 1.000 46.851 1.000   0.253  0.149  0.112    58.905
+   same b0      grid8     6   287   21 12.028 0.009 17.914 0.255   0.829    NaN  0.365    62.107
+   tilt b0    eikonal     6   227   21 16.268 0.143 14.585 0.069   0.176  0.211  0.074    56.415
+   tilt b0      grid8    18   851  134 54.961 0.000 79.520 0.000   0.873  0.022  0.512    71.908
+   tilt b0     pulled     6   223   25 14.734 0.008 17.790 0.055   0.594  0.039  0.286    67.949
+   tilt b0      theta     6   226   20 16.761 0.242 15.874 0.181   0.204  0.201  0.048    55.456
+   tilt b0 visibility     6   222   19 16.205 0.270 15.245 0.200   0.199  0.200  0.050    55.606
+  tilt b20    eikonal     3   112    5  5.185 0.594  5.148 0.586   0.218  0.131  0.101    59.884
+  tilt b20      grid8     6   280    5 15.334 0.999 15.286 0.999   0.237  0.121  0.092    60.234
+  tilt b20     pulled     3   112    3  5.690 0.926  5.752 0.926   0.276  0.097  0.092    59.455
+  tilt b20      theta     3   112    4  6.656 0.902  6.283 0.869   0.217  0.124  0.089    60.351
  base     router    b    what  n  mean_diff       se  wins  losses  geo_mean_ratio     lo     hi
-grid8     pulled  NaN  LP0.05 24    -0.0044   0.0106  16.0     8.0             NaN    NaN    NaN
-grid8     pulled  NaN len0.05 24   -22.1345  15.7602  12.0    12.0             NaN    NaN    NaN
-grid8     pulled  NaN   t0.05 24        NaN      NaN   NaN     NaN          1.0060 0.6502 1.3292
-grid8     pulled  NaN   LP0.1 24     0.0020   0.0035  16.0     8.0             NaN    NaN    NaN
-grid8     pulled  NaN  len0.1 24    17.3268  13.5597  13.0    11.0             NaN    NaN    NaN
-grid8     pulled  NaN    t0.1 24        NaN      NaN   NaN     NaN          1.0189 0.6354 1.2192
-grid8     pulled  NaN  LP0.15 24     0.0098   0.0084  13.0    11.0             NaN    NaN    NaN
-grid8     pulled  NaN len0.15 24    24.3330  14.9744  13.0    11.0             NaN    NaN    NaN
-grid8     pulled  NaN   t0.15 24        NaN      NaN   NaN     NaN          1.0439 0.6649 1.2361
-grid8     pulled  0.0  LP0.05 16    -0.0125   0.0155   9.0     7.0             NaN    NaN    NaN
-grid8     pulled  0.0 len0.05 16   -16.8934   7.6650   7.0     9.0             NaN    NaN    NaN
-grid8     pulled  0.0   t0.05 16        NaN      NaN   NaN     NaN          0.9671 0.6502 1.1007
-grid8     pulled  0.0   LP0.1 16    -0.0054   0.0033   8.0     8.0             NaN    NaN    NaN
-grid8     pulled  0.0  len0.1 16    -7.5337   9.8641   6.0    10.0             NaN    NaN    NaN
-grid8     pulled  0.0    t0.1 16        NaN      NaN   NaN     NaN          0.9840 0.6354 1.2038
-grid8     pulled  0.0  LP0.15 16    -0.0003   0.0029   5.0    11.0             NaN    NaN    NaN
-grid8     pulled  0.0 len0.15 16     0.4971  15.4846   6.0    10.0             NaN    NaN    NaN
-grid8     pulled  0.0   t0.15 16        NaN      NaN   NaN     NaN          1.0297 0.6649 1.2361
-grid8     pulled 20.0  LP0.05  8     0.0118   0.0044   7.0     1.0             NaN    NaN    NaN
-grid8     pulled 20.0 len0.05  8   -32.6167  46.6156   5.0     3.0             NaN    NaN    NaN
-grid8     pulled 20.0   t0.05  8        NaN      NaN   NaN     NaN          1.0883 1.0031 1.3292
-grid8     pulled 20.0   LP0.1  8     0.0167   0.0054   8.0     0.0             NaN    NaN    NaN
-grid8     pulled 20.0  len0.1  8    67.0479  29.4216   7.0     1.0             NaN    NaN    NaN
-grid8     pulled 20.0    t0.1  8        NaN      NaN   NaN     NaN          1.0924 1.0417 1.2192
-grid8     pulled 20.0  LP0.15  8     0.0299   0.0240   8.0     0.0             NaN    NaN    NaN
-grid8     pulled 20.0 len0.15  8    72.0048  26.3764   7.0     1.0             NaN    NaN    NaN
-grid8     pulled 20.0   t0.15  8        NaN      NaN   NaN     NaN          1.0730 0.9808 1.1780
-grid8      theta  NaN  LP0.05 29     0.0157   0.0098  22.0     7.0             NaN    NaN    NaN
-grid8      theta  NaN len0.05 29   -63.1022  32.6561  13.0    16.0             NaN    NaN    NaN
-grid8      theta  NaN   t0.05 29        NaN      NaN   NaN     NaN          1.0083 0.5005 1.4427
-grid8      theta  NaN   LP0.1 29    -0.0089   0.0065  15.0    14.0             NaN    NaN    NaN
-grid8      theta  NaN  len0.1 29   -17.7138  21.1708  12.0    17.0             NaN    NaN    NaN
-grid8      theta  NaN    t0.1 29        NaN      NaN   NaN     NaN          0.9605 0.6507 1.3732
-grid8      theta  NaN  LP0.15 29    -0.0001   0.0072  18.0    11.0             NaN    NaN    NaN
-grid8      theta  NaN len0.15 29   -38.7253  17.8637   8.0    21.0             NaN    NaN    NaN
-grid8      theta  NaN   t0.15 29        NaN      NaN   NaN     NaN          0.9504 0.6772 1.3082
-grid8      theta  0.0  LP0.05 17     0.0220   0.0089  12.0     5.0             NaN    NaN    NaN
-grid8      theta  0.0 len0.05 17   -25.5152  23.6917   7.0    10.0             NaN    NaN    NaN
-grid8      theta  0.0   t0.05 17        NaN      NaN   NaN     NaN          0.9906 0.7230 1.4427
-grid8      theta  0.0   LP0.1 17    -0.0100   0.0047   6.0    11.0             NaN    NaN    NaN
-grid8      theta  0.0  len0.1 17    -1.3116  22.9022   6.0    11.0             NaN    NaN    NaN
-grid8      theta  0.0    t0.1 17        NaN      NaN   NaN     NaN          0.8920 0.7310 1.3193
-grid8      theta  0.0  LP0.15 17     0.0041   0.0035   9.0     8.0             NaN    NaN    NaN
-grid8      theta  0.0 len0.15 17   -29.7486  12.2006   4.0    13.0             NaN    NaN    NaN
-grid8      theta  0.0   t0.15 17        NaN      NaN   NaN     NaN          0.8734 0.6772 1.2654
-grid8      theta 20.0  LP0.05  8     0.0270   0.0151   8.0     0.0             NaN    NaN    NaN
-grid8      theta 20.0 len0.05  8   -45.1210  82.3882   6.0     2.0             NaN    NaN    NaN
-grid8      theta 20.0   t0.05  8        NaN      NaN   NaN     NaN          1.1061 1.0235 1.2554
-grid8      theta 20.0   LP0.1  8     0.0129   0.0046   8.0     0.0             NaN    NaN    NaN
-grid8      theta 20.0  len0.1  8    23.9377  23.6525   5.0     3.0             NaN    NaN    NaN
-grid8      theta 20.0    t0.1  8        NaN      NaN   NaN     NaN          1.0950 0.9957 1.2847
-grid8      theta 20.0  LP0.15  8     0.0154   0.0113   8.0     0.0             NaN    NaN    NaN
-grid8      theta 20.0 len0.15  8    19.7370  25.9254   4.0     4.0             NaN    NaN    NaN
-grid8      theta 20.0   t0.15  8        NaN      NaN   NaN     NaN          1.0890 0.9430 1.2607
-grid8      theta  inf  LP0.05  4    -0.0339   0.0519   2.0     2.0             NaN    NaN    NaN
-grid8      theta  inf len0.05  4  -258.8091 113.0401   0.0     4.0             NaN    NaN    NaN
-grid8      theta  inf   t0.05  4        NaN      NaN   NaN     NaN          0.9032 0.5005 1.1696
-grid8      theta  inf   LP0.1  4    -0.0476   0.0375   1.0     3.0             NaN    NaN    NaN
-grid8      theta  inf  len0.1  4  -170.7265  80.5410   1.0     3.0             NaN    NaN    NaN
-grid8      theta  inf    t0.1  4        NaN      NaN   NaN     NaN          1.0125 0.6507 1.3732
-grid8      theta  inf  LP0.15  4    -0.0492   0.0405   1.0     3.0             NaN    NaN    NaN
-grid8      theta  inf len0.15  4  -193.8009  68.3650   0.0     4.0             NaN    NaN    NaN
-grid8      theta  inf   t0.15  4        NaN      NaN   NaN     NaN          1.0366 0.7349 1.3082
-grid8    eikonal  NaN  LP0.05 25     0.0124   0.0077  13.0    12.0             NaN    NaN    NaN
-grid8    eikonal  NaN len0.05 25   -65.6729  56.8933  13.0    12.0             NaN    NaN    NaN
-grid8    eikonal  NaN   t0.05 25        NaN      NaN   NaN     NaN          1.0332 0.7561 1.5117
-grid8    eikonal  NaN   LP0.1 25    -0.0081   0.0038   6.0    19.0             NaN    NaN    NaN
-grid8    eikonal  NaN  len0.1 25    12.4321  19.5409  14.0    11.0             NaN    NaN    NaN
-grid8    eikonal  NaN    t0.1 25        NaN      NaN   NaN     NaN          0.9686 0.6308 1.4273
-grid8    eikonal  NaN  LP0.15 25     0.0094   0.0058  14.0    11.0             NaN    NaN    NaN
-grid8    eikonal  NaN len0.15 25    -8.0154  19.4192   7.0    18.0             NaN    NaN    NaN
-grid8    eikonal  NaN   t0.15 25        NaN      NaN   NaN     NaN          0.9389 0.6645 1.4473
-grid8    eikonal  0.0  LP0.05 17     0.0197   0.0108  11.0     6.0             NaN    NaN    NaN
-grid8    eikonal  0.0 len0.05 17   -36.9779  32.2907   7.0    10.0             NaN    NaN    NaN
-grid8    eikonal  0.0   t0.05 17        NaN      NaN   NaN     NaN          0.9876 0.7561 1.5117
-grid8    eikonal  0.0   LP0.1 17    -0.0100   0.0048   5.0    12.0             NaN    NaN    NaN
-grid8    eikonal  0.0  len0.1 17     2.2843  25.2212   7.0    10.0             NaN    NaN    NaN
-grid8    eikonal  0.0    t0.1 17        NaN      NaN   NaN     NaN          0.8990 0.6308 1.4272
-grid8    eikonal  0.0  LP0.15 17     0.0058   0.0035  11.0     6.0             NaN    NaN    NaN
-grid8    eikonal  0.0 len0.15 17   -32.3032  14.6732   3.0    14.0             NaN    NaN    NaN
-grid8    eikonal  0.0   t0.15 17        NaN      NaN   NaN     NaN          0.8647 0.6645 1.4473
-grid8    eikonal 20.0  LP0.05  8    -0.0031   0.0031   2.0     6.0             NaN    NaN    NaN
-grid8    eikonal 20.0 len0.05  8  -126.6497 169.8082   6.0     2.0             NaN    NaN    NaN
-grid8    eikonal 20.0   t0.05  8        NaN      NaN   NaN     NaN          1.1371 0.8644 1.5035
-grid8    eikonal 20.0   LP0.1  8    -0.0040   0.0065   1.0     7.0             NaN    NaN    NaN
-grid8    eikonal 20.0  len0.1  8    33.9962  30.0639   7.0     1.0             NaN    NaN    NaN
-grid8    eikonal 20.0    t0.1  8        NaN      NaN   NaN     NaN          1.1348 0.9400 1.4273
-grid8    eikonal 20.0  LP0.15  8     0.0171   0.0169   3.0     5.0             NaN    NaN    NaN
-grid8    eikonal 20.0 len0.15  8    43.5963  49.3464   4.0     4.0             NaN    NaN    NaN
-grid8    eikonal 20.0   t0.15  8        NaN      NaN   NaN     NaN          1.1185 0.9494 1.4251
-grid8 visibility  NaN  LP0.05 17     0.0222   0.0088  12.0     5.0             NaN    NaN    NaN
-grid8 visibility  NaN len0.05 17   -30.3157  28.6895   7.0    10.0             NaN    NaN    NaN
-grid8 visibility  NaN   t0.05 17        NaN      NaN   NaN     NaN          0.9870 0.7276 1.2692
-grid8 visibility  NaN   LP0.1 17    -0.0098   0.0048   6.0    11.0             NaN    NaN    NaN
-grid8 visibility  NaN  len0.1 17   -27.7002  11.2355   5.0    12.0             NaN    NaN    NaN
-grid8 visibility  NaN    t0.1 17        NaN      NaN   NaN     NaN          0.9024 0.7438 1.2217
-grid8 visibility  NaN  LP0.15 17     0.0050   0.0035   9.0     8.0             NaN    NaN    NaN
-grid8 visibility  NaN len0.15 17   -51.6341  20.9860   3.0    14.0             NaN    NaN    NaN
-grid8 visibility  NaN   t0.15 17        NaN      NaN   NaN     NaN          0.9074 0.6427 1.2034
-grid8 visibility  0.0  LP0.05 17     0.0222   0.0088  12.0     5.0             NaN    NaN    NaN
-grid8 visibility  0.0 len0.05 17   -30.3157  28.6895   7.0    10.0             NaN    NaN    NaN
-grid8 visibility  0.0   t0.05 17        NaN      NaN   NaN     NaN          0.9870 0.7276 1.2692
-grid8 visibility  0.0   LP0.1 17    -0.0098   0.0048   6.0    11.0             NaN    NaN    NaN
-grid8 visibility  0.0  len0.1 17   -27.7002  11.2355   5.0    12.0             NaN    NaN    NaN
-grid8 visibility  0.0    t0.1 17        NaN      NaN   NaN     NaN          0.9024 0.7438 1.2217
-grid8 visibility  0.0  LP0.15 17     0.0050   0.0035   9.0     8.0             NaN    NaN    NaN
-grid8 visibility  0.0 len0.15 17   -51.6341  20.9860   3.0    14.0             NaN    NaN    NaN
-grid8 visibility  0.0   t0.15 17        NaN      NaN   NaN     NaN          0.9074 0.6427 1.2034
-theta      grid8  NaN  LP0.05 29    -0.0157   0.0098   7.0    22.0             NaN    NaN    NaN
-theta      grid8  NaN len0.05 29    63.1022  32.6561  16.0    13.0             NaN    NaN    NaN
-theta      grid8  NaN   t0.05 29        NaN      NaN   NaN     NaN          0.9918 0.6931 1.9980
-theta      grid8  NaN   LP0.1 29     0.0089   0.0065  14.0    15.0             NaN    NaN    NaN
-theta      grid8  NaN  len0.1 29    17.7138  21.1708  17.0    12.0             NaN    NaN    NaN
-theta      grid8  NaN    t0.1 29        NaN      NaN   NaN     NaN          1.0411 0.7282 1.5368
-theta      grid8  NaN  LP0.15 29     0.0001   0.0072  11.0    18.0             NaN    NaN    NaN
-theta      grid8  NaN len0.15 29    38.7253  17.8637  21.0     8.0             NaN    NaN    NaN
-theta      grid8  NaN   t0.15 29        NaN      NaN   NaN     NaN          1.0522 0.7644 1.4766
-theta      grid8  0.0  LP0.05 17    -0.0220   0.0089   5.0    12.0             NaN    NaN    NaN
-theta      grid8  0.0 len0.05 17    25.5152  23.6917  10.0     7.0             NaN    NaN    NaN
-theta      grid8  0.0   t0.05 17        NaN      NaN   NaN     NaN          1.0095 0.6931 1.3831
-theta      grid8  0.0   LP0.1 17     0.0100   0.0047  11.0     6.0             NaN    NaN    NaN
-theta      grid8  0.0  len0.1 17     1.3116  22.9022  11.0     6.0             NaN    NaN    NaN
-theta      grid8  0.0    t0.1 17        NaN      NaN   NaN     NaN          1.1211 0.7580 1.3680
-theta      grid8  0.0  LP0.15 17    -0.0041   0.0035   8.0     9.0             NaN    NaN    NaN
-theta      grid8  0.0 len0.15 17    29.7486  12.2006  13.0     4.0             NaN    NaN    NaN
-theta      grid8  0.0   t0.15 17        NaN      NaN   NaN     NaN          1.1450 0.7903 1.4766
-theta      grid8 20.0  LP0.05  8    -0.0270   0.0151   0.0     8.0             NaN    NaN    NaN
-theta      grid8 20.0 len0.05  8    45.1210  82.3882   2.0     6.0             NaN    NaN    NaN
-theta      grid8 20.0   t0.05  8        NaN      NaN   NaN     NaN          0.9040 0.7966 0.9771
-theta      grid8 20.0   LP0.1  8    -0.0129   0.0046   0.0     8.0             NaN    NaN    NaN
-theta      grid8 20.0  len0.1  8   -23.9377  23.6525   3.0     5.0             NaN    NaN    NaN
-theta      grid8 20.0    t0.1  8        NaN      NaN   NaN     NaN          0.9133 0.7784 1.0043
-theta      grid8 20.0  LP0.15  8    -0.0154   0.0113   0.0     8.0             NaN    NaN    NaN
-theta      grid8 20.0 len0.15  8   -19.7370  25.9254   4.0     4.0             NaN    NaN    NaN
-theta      grid8 20.0   t0.15  8        NaN      NaN   NaN     NaN          0.9183 0.7932 1.0604
-theta      grid8  inf  LP0.05  4     0.0339   0.0519   2.0     2.0             NaN    NaN    NaN
-theta      grid8  inf len0.05  4   258.8091 113.0401   4.0     0.0             NaN    NaN    NaN
-theta      grid8  inf   t0.05  4        NaN      NaN   NaN     NaN          1.1072 0.8550 1.9980
-theta      grid8  inf   LP0.1  4     0.0476   0.0375   3.0     1.0             NaN    NaN    NaN
-theta      grid8  inf  len0.1  4   170.7265  80.5410   3.0     1.0             NaN    NaN    NaN
-theta      grid8  inf    t0.1  4        NaN      NaN   NaN     NaN          0.9877 0.7282 1.5368
-theta      grid8  inf  LP0.15  4     0.0492   0.0405   3.0     1.0             NaN    NaN    NaN
-theta      grid8  inf len0.15  4   193.8009  68.3650   4.0     0.0             NaN    NaN    NaN
-theta      grid8  inf   t0.15  4        NaN      NaN   NaN     NaN          0.9647 0.7644 1.3608
-theta     pulled  NaN  LP0.05 24    -0.0296   0.0129   9.0    15.0             NaN    NaN    NaN
-theta     pulled  NaN len0.05 24    -4.9644  15.7816  12.0    12.0             NaN    NaN    NaN
-theta     pulled  NaN   t0.05 24        NaN      NaN   NaN     NaN          0.9943 0.4885 1.4357
+grid8     pulled  NaN  LP0.05 24    -0.0039   0.0106  17.0     7.0             NaN    NaN    NaN
+grid8     pulled  NaN len0.05 24   -20.4783  15.2802  14.0    10.0             NaN    NaN    NaN
+grid8     pulled  NaN   t0.05 24        NaN      NaN   NaN     NaN          0.9950 0.6442 1.2466
+grid8     pulled  NaN   LP0.1 24     0.0030   0.0037  17.0     7.0             NaN    NaN    NaN
+grid8     pulled  NaN  len0.1 24    21.6506  15.3721  15.0     9.0             NaN    NaN    NaN
+grid8     pulled  NaN    t0.1 24        NaN      NaN   NaN     NaN          1.0115 0.6905 1.2564
+grid8     pulled  NaN  LP0.15 24     0.0125   0.0107  14.0    10.0             NaN    NaN    NaN
+grid8     pulled  NaN len0.15 24    26.5878  15.8606  14.0    10.0             NaN    NaN    NaN
+grid8     pulled  NaN   t0.15 24        NaN      NaN   NaN     NaN          1.0337 0.7194 1.2916
+grid8     pulled  0.0  LP0.05 16    -0.0118   0.0156  10.0     6.0             NaN    NaN    NaN
+grid8     pulled  0.0 len0.05 16   -16.1671   7.7548   8.0     8.0             NaN    NaN    NaN
+grid8     pulled  0.0   t0.05 16        NaN      NaN   NaN     NaN          0.9593 0.6442 1.1213
+grid8     pulled  0.0   LP0.1 16    -0.0049   0.0034   9.0     7.0             NaN    NaN    NaN
+grid8     pulled  0.0  len0.1 16    -6.8170   9.9096   7.0     9.0             NaN    NaN    NaN
+grid8     pulled  0.0    t0.1 16        NaN      NaN   NaN     NaN          0.9757 0.6905 1.2564
+grid8     pulled  0.0  LP0.15 16     0.0002   0.0029   6.0    10.0             NaN    NaN    NaN
+grid8     pulled  0.0 len0.15 16     2.1886  15.5357   7.0     9.0             NaN    NaN    NaN
+grid8     pulled  0.0   t0.15 16        NaN      NaN   NaN     NaN          1.0117 0.7194 1.2916
+grid8     pulled 20.0  LP0.05  8     0.0120   0.0044   7.0     1.0             NaN    NaN    NaN
+grid8     pulled 20.0 len0.05  8   -29.1006  45.0313   6.0     2.0             NaN    NaN    NaN
+grid8     pulled 20.0   t0.05  8        NaN      NaN   NaN     NaN          1.0705 0.9475 1.2466
+grid8     pulled 20.0   LP0.1  8     0.0186   0.0058   8.0     0.0             NaN    NaN    NaN
+grid8     pulled 20.0  len0.1  8    78.5859  34.8391   8.0     0.0             NaN    NaN    NaN
+grid8     pulled 20.0    t0.1  8        NaN      NaN   NaN     NaN          1.0872 0.9641 1.1637
+grid8     pulled 20.0  LP0.15  8     0.0371   0.0311   8.0     0.0             NaN    NaN    NaN
+grid8     pulled 20.0 len0.15  8    75.3862  30.5777   7.0     1.0             NaN    NaN    NaN
+grid8     pulled 20.0   t0.15  8        NaN      NaN   NaN     NaN          1.0790 0.9336 1.1479
+grid8      theta  NaN  LP0.05 29     0.0129   0.0093  22.0     7.0             NaN    NaN    NaN
+grid8      theta  NaN len0.05 29   -64.3115  34.2429  14.0    15.0             NaN    NaN    NaN
+grid8      theta  NaN   t0.05 29        NaN      NaN   NaN     NaN          0.9906 0.4477 1.4683
+grid8      theta  NaN   LP0.1 29    -0.0081   0.0065  16.0    13.0             NaN    NaN    NaN
+grid8      theta  NaN  len0.1 29   -16.5588  24.1571  13.0    16.0             NaN    NaN    NaN
+grid8      theta  NaN    t0.1 29        NaN      NaN   NaN     NaN          0.9468 0.5944 1.4369
+grid8      theta  NaN  LP0.15 29     0.0064   0.0107  18.0    11.0             NaN    NaN    NaN
+grid8      theta  NaN len0.15 29   -49.6596  21.7608   7.0    22.0             NaN    NaN    NaN
+grid8      theta  NaN   t0.15 29        NaN      NaN   NaN     NaN          0.9322 0.6488 1.3734
+grid8      theta  0.0  LP0.05 17     0.0243   0.0095  12.0     5.0             NaN    NaN    NaN
+grid8      theta  0.0 len0.05 17   -32.0752  31.8408   7.0    10.0             NaN    NaN    NaN
+grid8      theta  0.0   t0.05 17        NaN      NaN   NaN     NaN          0.9772 0.7395 1.4683
+grid8      theta  0.0   LP0.1 17    -0.0095   0.0048   7.0    10.0             NaN    NaN    NaN
+grid8      theta  0.0  len0.1 17   -11.6953  13.2492   6.0    11.0             NaN    NaN    NaN
+grid8      theta  0.0    t0.1 17        NaN      NaN   NaN     NaN          0.8809 0.6595 1.3817
+grid8      theta  0.0  LP0.15 17     0.0046   0.0036   9.0     8.0             NaN    NaN    NaN
+grid8      theta  0.0 len0.15 17   -19.6410  18.4885   4.0    13.0             NaN    NaN    NaN
+grid8      theta  0.0   t0.15 17        NaN      NaN   NaN     NaN          0.8564 0.6488 1.2355
+grid8      theta 20.0  LP0.05  8     0.0127   0.0036   8.0     0.0             NaN    NaN    NaN
+grid8      theta 20.0 len0.05  8   -19.6986  64.3244   7.0     1.0             NaN    NaN    NaN
+grid8      theta 20.0   t0.05  8        NaN      NaN   NaN     NaN          1.0802 0.9742 1.2128
+grid8      theta 20.0   LP0.1  8     0.0147   0.0054   8.0     0.0             NaN    NaN    NaN
+grid8      theta 20.0  len0.1  8    65.3928  43.4529   6.0     2.0             NaN    NaN    NaN
+grid8      theta 20.0    t0.1  8        NaN      NaN   NaN     NaN          1.0775 0.9214 1.2572
+grid8      theta 20.0  LP0.15  8     0.0358   0.0315   8.0     0.0             NaN    NaN    NaN
+grid8      theta 20.0 len0.15  8   -23.2193  31.2916   3.0     5.0             NaN    NaN    NaN
+grid8      theta 20.0   t0.15  8        NaN      NaN   NaN     NaN          1.0705 0.9184 1.1839
+grid8      theta  inf  LP0.05  4    -0.0351   0.0531   2.0     2.0             NaN    NaN    NaN
+grid8      theta  inf len0.05  4  -290.5416 131.1331   0.0     4.0             NaN    NaN    NaN
+grid8      theta  inf   t0.05  4        NaN      NaN   NaN     NaN          0.8822 0.4477 1.2186
+grid8      theta  inf   LP0.1  4    -0.0477   0.0366   1.0     3.0             NaN    NaN    NaN
+grid8      theta  inf  len0.1  4  -201.1317 104.0723   1.0     3.0             NaN    NaN    NaN
+grid8      theta  inf    t0.1  4        NaN      NaN   NaN     NaN          0.9928 0.5944 1.4369
+grid8      theta  inf  LP0.15  4    -0.0446   0.0371   1.0     3.0             NaN    NaN    NaN
+grid8      theta  inf len0.15  4  -230.1195  84.4218   0.0     4.0             NaN    NaN    NaN
+grid8      theta  inf   t0.15  4        NaN      NaN   NaN     NaN          1.0134 0.6799 1.3734
+grid8    eikonal  NaN  LP0.05 25     0.0147   0.0079  14.0    11.0             NaN    NaN    NaN
+grid8    eikonal  NaN len0.05 25   -63.1263  56.5068  12.0    13.0             NaN    NaN    NaN
+grid8    eikonal  NaN   t0.05 25        NaN      NaN   NaN     NaN          1.0543 0.7667 1.4988
+grid8    eikonal  NaN   LP0.1 25    -0.0077   0.0037   7.0    18.0             NaN    NaN    NaN
+grid8    eikonal  NaN  len0.1 25    18.6800  18.4031  14.0    11.0             NaN    NaN    NaN
+grid8    eikonal  NaN    t0.1 25        NaN      NaN   NaN     NaN          0.9805 0.7180 1.4424
+grid8    eikonal  NaN  LP0.15 25     0.0098   0.0058  15.0    10.0             NaN    NaN    NaN
+grid8    eikonal  NaN len0.15 25    -3.6287  21.6986   8.0    17.0             NaN    NaN    NaN
+grid8    eikonal  NaN   t0.15 25        NaN      NaN   NaN     NaN          0.9510 0.6675 1.3829
+grid8    eikonal  0.0  LP0.05 17     0.0227   0.0111  11.0     6.0             NaN    NaN    NaN
+grid8    eikonal  0.0 len0.05 17   -34.8165  32.5938   7.0    10.0             NaN    NaN    NaN
+grid8    eikonal  0.0   t0.05 17        NaN      NaN   NaN     NaN          1.0131 0.7667 1.4180
+grid8    eikonal  0.0   LP0.1 17    -0.0103   0.0048   5.0    12.0             NaN    NaN    NaN
+grid8    eikonal  0.0  len0.1 17     2.5824  25.2653   6.0    11.0             NaN    NaN    NaN
+grid8    eikonal  0.0    t0.1 17        NaN      NaN   NaN     NaN          0.9106 0.7180 1.3250
+grid8    eikonal  0.0  LP0.15 17     0.0064   0.0037  11.0     6.0             NaN    NaN    NaN
+grid8    eikonal  0.0 len0.15 17   -31.1917  15.1726   4.0    13.0             NaN    NaN    NaN
+grid8    eikonal  0.0   t0.15 17        NaN      NaN   NaN     NaN          0.8758 0.6675 1.3633
+grid8    eikonal 20.0  LP0.05  8    -0.0022   0.0030   3.0     5.0             NaN    NaN    NaN
+grid8    eikonal 20.0 len0.05  8  -123.2848 168.1982   5.0     3.0             NaN    NaN    NaN
+grid8    eikonal 20.0   t0.05  8        NaN      NaN   NaN     NaN          1.1473 0.8720 1.4988
+grid8    eikonal 20.0   LP0.1  8    -0.0021   0.0056   2.0     6.0             NaN    NaN    NaN
+grid8    eikonal 20.0  len0.1  8    52.8876  16.8029   8.0     0.0             NaN    NaN    NaN
+grid8    eikonal 20.0    t0.1  8        NaN      NaN   NaN     NaN          1.1472 0.9620 1.4424
+grid8    eikonal 20.0  LP0.15  8     0.0171   0.0170   4.0     4.0             NaN    NaN    NaN
+grid8    eikonal 20.0 len0.15  8    54.9426  56.6191   4.0     4.0             NaN    NaN    NaN
+grid8    eikonal 20.0   t0.15  8        NaN      NaN   NaN     NaN          1.1328 0.9895 1.3829
+grid8 visibility  NaN  LP0.05 17     0.0247   0.0093  12.0     5.0             NaN    NaN    NaN
+grid8 visibility  NaN len0.05 17   -29.1054  28.9911   6.0    11.0             NaN    NaN    NaN
+grid8 visibility  NaN   t0.05 17        NaN      NaN   NaN     NaN          0.8796 0.6946 1.1522
+grid8 visibility  NaN   LP0.1 17    -0.0095   0.0049   7.0    10.0             NaN    NaN    NaN
+grid8 visibility  NaN  len0.1 17   -26.9828  12.0818   5.0    12.0             NaN    NaN    NaN
+grid8 visibility  NaN    t0.1 17        NaN      NaN   NaN     NaN          0.7952 0.5810 1.0518
+grid8 visibility  NaN  LP0.15 17     0.0047   0.0035   9.0     8.0             NaN    NaN    NaN
+grid8 visibility  NaN len0.15 17   -53.0373  23.0384   3.0    14.0             NaN    NaN    NaN
+grid8 visibility  NaN   t0.15 17        NaN      NaN   NaN     NaN          0.7922 0.6008 1.1416
+grid8 visibility  0.0  LP0.05 17     0.0247   0.0093  12.0     5.0             NaN    NaN    NaN
+grid8 visibility  0.0 len0.05 17   -29.1054  28.9911   6.0    11.0             NaN    NaN    NaN
+grid8 visibility  0.0   t0.05 17        NaN      NaN   NaN     NaN          0.8796 0.6946 1.1522
+grid8 visibility  0.0   LP0.1 17    -0.0095   0.0049   7.0    10.0             NaN    NaN    NaN
+grid8 visibility  0.0  len0.1 17   -26.9828  12.0818   5.0    12.0             NaN    NaN    NaN
+grid8 visibility  0.0    t0.1 17        NaN      NaN   NaN     NaN          0.7952 0.5810 1.0518
+grid8 visibility  0.0  LP0.15 17     0.0047   0.0035   9.0     8.0             NaN    NaN    NaN
+grid8 visibility  0.0 len0.15 17   -53.0373  23.0384   3.0    14.0             NaN    NaN    NaN
+grid8 visibility  0.0   t0.15 17        NaN      NaN   NaN     NaN          0.7922 0.6008 1.1416
+theta      grid8  NaN  LP0.05 29    -0.0129   0.0093   7.0    22.0             NaN    NaN    NaN
+theta      grid8  NaN len0.05 29    64.3115  34.2429  15.0    14.0             NaN    NaN    NaN
+theta      grid8  NaN   t0.05 29        NaN      NaN   NaN     NaN          1.0095 0.6811 2.2336
+theta      grid8  NaN   LP0.1 29     0.0081   0.0065  13.0    16.0             NaN    NaN    NaN
+theta      grid8  NaN  len0.1 29    16.5588  24.1571  16.0    13.0             NaN    NaN    NaN
+theta      grid8  NaN    t0.1 29        NaN      NaN   NaN     NaN          1.0562 0.6960 1.6823
+theta      grid8  NaN  LP0.15 29    -0.0064   0.0107  11.0    18.0             NaN    NaN    NaN
+theta      grid8  NaN len0.15 29    49.6596  21.7608  22.0     7.0             NaN    NaN    NaN
+theta      grid8  NaN   t0.15 29        NaN      NaN   NaN     NaN          1.0728 0.7281 1.5412
+theta      grid8  0.0  LP0.05 17    -0.0243   0.0095   5.0    12.0             NaN    NaN    NaN
+theta      grid8  0.0 len0.05 17    32.0752  31.8408  10.0     7.0             NaN    NaN    NaN
+theta      grid8  0.0   t0.05 17        NaN      NaN   NaN     NaN          1.0233 0.6811 1.3523
+theta      grid8  0.0   LP0.1 17     0.0095   0.0048  10.0     7.0             NaN    NaN    NaN
+theta      grid8  0.0  len0.1 17    11.6953  13.2492  11.0     6.0             NaN    NaN    NaN
+theta      grid8  0.0    t0.1 17        NaN      NaN   NaN     NaN          1.1352 0.7238 1.5163
+theta      grid8  0.0  LP0.15 17    -0.0046   0.0036   8.0     9.0             NaN    NaN    NaN
+theta      grid8  0.0 len0.15 17    19.6410  18.4885  13.0     4.0             NaN    NaN    NaN
+theta      grid8  0.0   t0.15 17        NaN      NaN   NaN     NaN          1.1677 0.8094 1.5412
+theta      grid8 20.0  LP0.05  8    -0.0127   0.0036   0.0     8.0             NaN    NaN    NaN
+theta      grid8 20.0 len0.05  8    19.6986  64.3244   1.0     7.0             NaN    NaN    NaN
+theta      grid8 20.0   t0.05  8        NaN      NaN   NaN     NaN          0.9257 0.8246 1.0265
+theta      grid8 20.0   LP0.1  8    -0.0147   0.0054   0.0     8.0             NaN    NaN    NaN
+theta      grid8 20.0  len0.1  8   -65.3928  43.4529   2.0     6.0             NaN    NaN    NaN
+theta      grid8 20.0    t0.1  8        NaN      NaN   NaN     NaN          0.9280 0.7954 1.0853
+theta      grid8 20.0  LP0.15  8    -0.0358   0.0315   0.0     8.0             NaN    NaN    NaN
+theta      grid8 20.0 len0.15  8    23.2193  31.2916   5.0     3.0             NaN    NaN    NaN
+theta      grid8 20.0   t0.15  8        NaN      NaN   NaN     NaN          0.9341 0.8446 1.0889
+theta      grid8  inf  LP0.05  4     0.0351   0.0531   2.0     2.0             NaN    NaN    NaN
+theta      grid8  inf len0.05  4   290.5416 131.1331   4.0     0.0             NaN    NaN    NaN
+theta      grid8  inf   t0.05  4        NaN      NaN   NaN     NaN          1.1336 0.8206 2.2336
+theta      grid8  inf   LP0.1  4     0.0477   0.0366   3.0     1.0             NaN    NaN    NaN
+theta      grid8  inf  len0.1  4   201.1317 104.0723   3.0     1.0             NaN    NaN    NaN
+theta      grid8  inf    t0.1  4        NaN      NaN   NaN     NaN          1.0073 0.6960 1.6823
+theta      grid8  inf  LP0.15  4     0.0446   0.0371   3.0     1.0             NaN    NaN    NaN
+theta      grid8  inf len0.15  4   230.1195  84.4218   4.0     0.0             NaN    NaN    NaN
+theta      grid8  inf   t0.15  4        NaN      NaN   NaN     NaN          0.9868 0.7281 1.4708
+theta     pulled  NaN  LP0.05 24    -0.0263   0.0129  11.0    13.0             NaN    NaN    NaN
+theta     pulled  NaN len0.05 24   -12.9400  12.4419  12.0    12.0             NaN    NaN    NaN
+theta     pulled  NaN   t0.05 24        NaN      NaN   NaN     NaN          1.0016 0.5018 1.3943
 theta     pulled  NaN   LP0.1 24     0.0050   0.0031  13.0    11.0             NaN    NaN    NaN
-theta     pulled  NaN  len0.1 24    24.2986  10.1063  16.0     8.0             NaN    NaN    NaN
-theta     pulled  NaN    t0.1 24        NaN      NaN   NaN     NaN          1.0843 0.7117 1.4707
-theta     pulled  NaN  LP0.15 24     0.0019   0.0057  11.0    13.0             NaN    NaN    NaN
-theta     pulled  NaN len0.15 24    42.0895  15.8228  16.0     8.0             NaN    NaN    NaN
-theta     pulled  NaN   t0.15 24        NaN      NaN   NaN     NaN          1.1217 0.7395 1.5372
-theta     pulled  0.0  LP0.05 16    -0.0368   0.0183   5.0    11.0             NaN    NaN    NaN
-theta     pulled  0.0 len0.05 16   -13.6988  13.1656   7.0     9.0             NaN    NaN    NaN
-theta     pulled  0.0   t0.05 16        NaN      NaN   NaN     NaN          0.9996 0.4885 1.4357
+theta     pulled  NaN  len0.1 24    13.6651  10.2223  14.0    10.0             NaN    NaN    NaN
+theta     pulled  NaN    t0.1 24        NaN      NaN   NaN     NaN          1.0940 0.7137 1.5235
+theta     pulled  NaN  LP0.15 24    -0.0026   0.0035  11.0    13.0             NaN    NaN    NaN
+theta     pulled  NaN len0.15 24    57.3121  22.1361  17.0     7.0             NaN    NaN    NaN
+theta     pulled  NaN   t0.15 24        NaN      NaN   NaN     NaN          1.1325 0.7380 1.5778
+theta     pulled  0.0  LP0.05 16    -0.0390   0.0184   6.0    10.0             NaN    NaN    NaN
+theta     pulled  0.0 len0.05 16   -14.7089  13.4373   7.0     9.0             NaN    NaN    NaN
+theta     pulled  0.0   t0.05 16        NaN      NaN   NaN     NaN          1.0070 0.5018 1.3943
 theta     pulled  0.0   LP0.1 16     0.0056   0.0045   7.0     9.0             NaN    NaN    NaN
-theta     pulled  0.0  len0.1 16    14.8928  12.5011  10.0     6.0             NaN    NaN    NaN
-theta     pulled  0.0    t0.1 16        NaN      NaN   NaN     NaN          1.1305 0.7117 1.4707
+theta     pulled  0.0  len0.1 16    13.9011  12.8367  10.0     6.0             NaN    NaN    NaN
+theta     pulled  0.0    t0.1 16        NaN      NaN   NaN     NaN          1.1392 0.7137 1.5235
 theta     pulled  0.0  LP0.15 16    -0.0045   0.0053   6.0    10.0             NaN    NaN    NaN
-theta     pulled  0.0 len0.15 16    37.0004  17.9577  10.0     6.0             NaN    NaN    NaN
-theta     pulled  0.0   t0.15 16        NaN      NaN   NaN     NaN          1.1968 0.7395 1.5372
-theta     pulled 20.0  LP0.05  8    -0.0152   0.0125   4.0     4.0             NaN    NaN    NaN
-theta     pulled 20.0 len0.05  8    12.5043  40.5804   5.0     3.0             NaN    NaN    NaN
-theta     pulled 20.0   t0.05  8        NaN      NaN   NaN     NaN          0.9839 0.8361 1.2040
-theta     pulled 20.0   LP0.1  8     0.0037   0.0030   6.0     2.0             NaN    NaN    NaN
-theta     pulled 20.0  len0.1  8    43.1103  16.1615   6.0     2.0             NaN    NaN    NaN
-theta     pulled 20.0    t0.1  8        NaN      NaN   NaN     NaN          0.9976 0.8524 1.1862
-theta     pulled 20.0  LP0.15  8     0.0145   0.0128   5.0     3.0             NaN    NaN    NaN
-theta     pulled 20.0 len0.15  8    52.2678  32.6126   6.0     2.0             NaN    NaN    NaN
-theta     pulled 20.0   t0.15  8        NaN      NaN   NaN     NaN          0.9853 0.8864 1.1412
-theta    eikonal  NaN  LP0.05 25    -0.0112   0.0069   7.0    18.0             NaN    NaN    NaN
-theta    eikonal  NaN len0.05 25   -33.8838  28.8278  12.0    13.0             NaN    NaN    NaN
-theta    eikonal  NaN   t0.05 25        NaN      NaN   NaN     NaN          1.0068 0.7830 1.2595
-theta    eikonal  NaN   LP0.1 25    -0.0055   0.0028   9.0    16.0             NaN    NaN    NaN
-theta    eikonal  NaN  len0.1 25     5.6639  15.0224  15.0    10.0             NaN    NaN    NaN
-theta    eikonal  NaN    t0.1 25        NaN      NaN   NaN     NaN          1.0169 0.7065 1.3424
-theta    eikonal  NaN  LP0.15 25     0.0017   0.0024  11.0    14.0             NaN    NaN    NaN
-theta    eikonal  NaN len0.15 25     5.8979  18.9685  14.0    11.0             NaN    NaN    NaN
-theta    eikonal  NaN   t0.15 25        NaN      NaN   NaN     NaN          1.0018 0.7391 1.2466
-theta    eikonal  0.0  LP0.05 17    -0.0023   0.0068   7.0    10.0             NaN    NaN    NaN
-theta    eikonal  0.0 len0.05 17   -11.4627   9.7530   7.0    10.0             NaN    NaN    NaN
-theta    eikonal  0.0   t0.05 17        NaN      NaN   NaN     NaN          0.9970 0.7854 1.1726
-theta    eikonal  0.0   LP0.1 17    -0.0001   0.0022   8.0     9.0             NaN    NaN    NaN
-theta    eikonal  0.0  len0.1 17     3.5959   7.6047  10.0     7.0             NaN    NaN    NaN
-theta    eikonal  0.0    t0.1 17        NaN      NaN   NaN     NaN          1.0079 0.7065 1.3424
-theta    eikonal  0.0  LP0.15 17     0.0017   0.0024   9.0     8.0             NaN    NaN    NaN
-theta    eikonal  0.0 len0.15 17    -2.5546   5.8340   8.0     9.0             NaN    NaN    NaN
-theta    eikonal  0.0   t0.15 17        NaN      NaN   NaN     NaN          0.9900 0.7391 1.2466
-theta    eikonal 20.0  LP0.05  8    -0.0301   0.0143   0.0     8.0             NaN    NaN    NaN
-theta    eikonal 20.0 len0.05  8   -81.5287  89.2475   5.0     3.0             NaN    NaN    NaN
-theta    eikonal 20.0   t0.05  8        NaN      NaN   NaN     NaN          1.0280 0.7830 1.2595
-theta    eikonal 20.0   LP0.1  8    -0.0170   0.0058   1.0     7.0             NaN    NaN    NaN
-theta    eikonal 20.0  len0.1  8    10.0585  46.1841   5.0     3.0             NaN    NaN    NaN
-theta    eikonal 20.0    t0.1  8        NaN      NaN   NaN     NaN          1.0364 0.9180 1.1854
-theta    eikonal 20.0  LP0.15  8     0.0017   0.0057   2.0     6.0             NaN    NaN    NaN
-theta    eikonal 20.0 len0.15  8    23.8592  60.1827   6.0     2.0             NaN    NaN    NaN
-theta    eikonal 20.0   t0.15  8        NaN      NaN   NaN     NaN          1.0271 0.9246 1.2304
-theta visibility  NaN  LP0.05 17     0.0002   0.0004   4.0     3.0             NaN    NaN    NaN
-theta visibility  NaN len0.05 17    -4.8005   5.2844   4.0     3.0             NaN    NaN    NaN
-theta visibility  NaN   t0.05 17        NaN      NaN   NaN     NaN          0.9964 0.5753 1.2878
-theta visibility  NaN   LP0.1 17     0.0001   0.0008   6.0     3.0             NaN    NaN    NaN
-theta visibility  NaN  len0.1 17   -26.3886  27.9607   6.0     3.0             NaN    NaN    NaN
-theta visibility  NaN    t0.1 17        NaN      NaN   NaN     NaN          1.0117 0.6012 1.3038
-theta visibility  NaN  LP0.15 17     0.0009   0.0010   9.0     4.0             NaN    NaN    NaN
-theta visibility  NaN len0.15 17   -21.8854  24.8460   9.0     4.0             NaN    NaN    NaN
-theta visibility  NaN   t0.15 17        NaN      NaN   NaN     NaN          1.0390 0.7009 1.4228
-theta visibility  0.0  LP0.05 17     0.0002   0.0004   4.0     3.0             NaN    NaN    NaN
-theta visibility  0.0 len0.05 17    -4.8005   5.2844   4.0     3.0             NaN    NaN    NaN
-theta visibility  0.0   t0.05 17        NaN      NaN   NaN     NaN          0.9964 0.5753 1.2878
-theta visibility  0.0   LP0.1 17     0.0001   0.0008   6.0     3.0             NaN    NaN    NaN
-theta visibility  0.0  len0.1 17   -26.3886  27.9607   6.0     3.0             NaN    NaN    NaN
-theta visibility  0.0    t0.1 17        NaN      NaN   NaN     NaN          1.0117 0.6012 1.3038
-theta visibility  0.0  LP0.15 17     0.0009   0.0010   9.0     4.0             NaN    NaN    NaN
-theta visibility  0.0 len0.15 17   -21.8854  24.8460   9.0     4.0             NaN    NaN    NaN
-theta visibility  0.0   t0.15 17        NaN      NaN   NaN     NaN          1.0390 0.7009 1.4228
+theta     pulled  0.0 len0.15 16    36.6654  18.0873  10.0     6.0             NaN    NaN    NaN
+theta     pulled  0.0   t0.15 16        NaN      NaN   NaN     NaN          1.2005 0.7380 1.5778
+theta     pulled 20.0  LP0.05  8    -0.0007   0.0061   5.0     3.0             NaN    NaN    NaN
+theta     pulled 20.0 len0.05  8    -9.4020  27.3749   5.0     3.0             NaN    NaN    NaN
+theta     pulled 20.0   t0.05  8        NaN      NaN   NaN     NaN          0.9909 0.8851 1.2066
+theta     pulled 20.0   LP0.1  8     0.0039   0.0026   6.0     2.0             NaN    NaN    NaN
+theta     pulled 20.0  len0.1  8    13.1931  17.9936   4.0     4.0             NaN    NaN    NaN
+theta     pulled 20.0    t0.1  8        NaN      NaN   NaN     NaN          1.0090 0.8965 1.1199
+theta     pulled 20.0  LP0.15  8     0.0014   0.0014   5.0     3.0             NaN    NaN    NaN
+theta     pulled 20.0 len0.15  8    98.6055  55.3408   7.0     1.0             NaN    NaN    NaN
+theta     pulled 20.0   t0.15  8        NaN      NaN   NaN     NaN          1.0079 0.9378 1.1306
+theta    eikonal  NaN  LP0.05 25    -0.0059   0.0049   7.0    18.0             NaN    NaN    NaN
+theta    eikonal  NaN len0.05 25   -35.0116  34.0874  11.0    14.0             NaN    NaN    NaN
+theta    eikonal  NaN   t0.05 25        NaN      NaN   NaN     NaN          1.0448 0.7526 1.2690
+theta    eikonal  NaN   LP0.1 25    -0.0059   0.0028   8.0    17.0             NaN    NaN    NaN
+theta    eikonal  NaN  len0.1 25     5.7072  19.2234  16.0     9.0             NaN    NaN    NaN
+theta    eikonal  NaN    t0.1 25        NaN      NaN   NaN     NaN          1.0435 0.7421 1.2375
+theta    eikonal  NaN  LP0.15 25    -0.0048   0.0051  10.0    15.0             NaN    NaN    NaN
+theta    eikonal  NaN len0.15 25    17.1573  19.7466  12.0    13.0             NaN    NaN    NaN
+theta    eikonal  NaN   t0.15 25        NaN      NaN   NaN     NaN          1.0339 0.7746 1.2574
+theta    eikonal  0.0  LP0.05 17    -0.0016   0.0069   7.0    10.0             NaN    NaN    NaN
+theta    eikonal  0.0 len0.05 17    -2.7413   4.1129   7.0    10.0             NaN    NaN    NaN
+theta    eikonal  0.0   t0.05 17        NaN      NaN   NaN     NaN          1.0367 0.7526 1.2479
+theta    eikonal  0.0   LP0.1 17    -0.0008   0.0026   8.0     9.0             NaN    NaN    NaN
+theta    eikonal  0.0  len0.1 17    14.2777  15.9500  10.0     7.0             NaN    NaN    NaN
+theta    eikonal  0.0    t0.1 17        NaN      NaN   NaN     NaN          1.0337 0.7421 1.2340
+theta    eikonal  0.0  LP0.15 17     0.0017   0.0023   9.0     8.0             NaN    NaN    NaN
+theta    eikonal  0.0 len0.15 17   -11.5507   8.4319   6.0    11.0             NaN    NaN    NaN
+theta    eikonal  0.0   t0.15 17        NaN      NaN   NaN     NaN          1.0226 0.7746 1.2292
+theta    eikonal 20.0  LP0.05  8    -0.0149   0.0018   0.0     8.0             NaN    NaN    NaN
+theta    eikonal 20.0 len0.05  8  -103.5862 106.6744   4.0     4.0             NaN    NaN    NaN
+theta    eikonal 20.0   t0.05  8        NaN      NaN   NaN     NaN          1.0621 0.8441 1.2690
+theta    eikonal 20.0   LP0.1  8    -0.0168   0.0053   0.0     8.0             NaN    NaN    NaN
+theta    eikonal 20.0  len0.1  8   -12.5052  51.5169   6.0     2.0             NaN    NaN    NaN
+theta    eikonal 20.0    t0.1  8        NaN      NaN   NaN     NaN          1.0647 0.9143 1.2375
+theta    eikonal 20.0  LP0.15  8    -0.0186   0.0147   1.0     7.0             NaN    NaN    NaN
+theta    eikonal 20.0 len0.15  8    78.1619  55.2325   6.0     2.0             NaN    NaN    NaN
+theta    eikonal 20.0   t0.15  8        NaN      NaN   NaN     NaN          1.0582 0.9300 1.2574
+theta visibility  NaN  LP0.05 17     0.0004   0.0004   6.0     2.0             NaN    NaN    NaN
+theta visibility  NaN len0.05 17     2.9698   2.9656   7.0     2.0             NaN    NaN    NaN
+theta visibility  NaN   t0.05 17        NaN      NaN   NaN     NaN          0.9001 0.5167 1.1960
+theta visibility  NaN   LP0.1 17     0.0001   0.0007   7.0     3.0             NaN    NaN    NaN
+theta visibility  NaN  len0.1 17   -15.2875  16.3256   9.0     3.0             NaN    NaN    NaN
+theta visibility  NaN    t0.1 17        NaN      NaN   NaN     NaN          0.9026 0.5269 1.1011
+theta visibility  NaN  LP0.15 17     0.0000   0.0002  10.0     4.0             NaN    NaN    NaN
+theta visibility  NaN len0.15 17   -33.3964  35.0684  13.0     3.0             NaN    NaN    NaN
+theta visibility  NaN   t0.15 17        NaN      NaN   NaN     NaN          0.9250 0.6638 1.0749
+theta visibility  0.0  LP0.05 17     0.0004   0.0004   6.0     2.0             NaN    NaN    NaN
+theta visibility  0.0 len0.05 17     2.9698   2.9656   7.0     2.0             NaN    NaN    NaN
+theta visibility  0.0   t0.05 17        NaN      NaN   NaN     NaN          0.9001 0.5167 1.1960
+theta visibility  0.0   LP0.1 17     0.0001   0.0007   7.0     3.0             NaN    NaN    NaN
+theta visibility  0.0  len0.1 17   -15.2875  16.3256   9.0     3.0             NaN    NaN    NaN
+theta visibility  0.0    t0.1 17        NaN      NaN   NaN     NaN          0.9026 0.5269 1.1011
+theta visibility  0.0  LP0.15 17     0.0000   0.0002  10.0     4.0             NaN    NaN    NaN
+theta visibility  0.0 len0.15 17   -33.3964  35.0684  13.0     3.0             NaN    NaN    NaN
+theta visibility  0.0   t0.15 17        NaN      NaN   NaN     NaN          0.9250 0.6638 1.0749
