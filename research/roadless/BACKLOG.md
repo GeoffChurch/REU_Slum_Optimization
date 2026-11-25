@@ -1194,6 +1194,19 @@ Not pursued, with what would change that:
 
 ## Coverage and model
 
+- **Our networks against real neighbourhoods' streets** (owner 2026-11-25: "queue up that study.
+  All of your metrics are useful to check"; **queued**, after the precision model). Descriptive,
+  not an objective (cycle density and the commute ratio were gameable as objectives): each
+  method's network at matched D on the study blocks, beside formal and informal neighbourhoods'
+  street networks near them from OSM (common.own_osm), on street length per area, intersection
+  density, node degrees and the dead-end share, circuity (network over straight-line distance),
+  orientation entropy, block sizes, the meshedness coefficient (cycle rank E - V + 1 over its planar
+  most, 2V - 5; Cardillo et al. 2006), through roads against culs-de-sac (the 2-edge-connected
+  decomposition: an edge on a cycle is a through road, a bridge a dead end's), edge connectivity
+  between points (Menger: the disjoint paths), road curvature. Shock Reblock without spurs builds
+  an ear decomposition, so it is 2-edge-connected by construction; the spur variants and the other
+  methods are where the comparison says something. Most come from OSMnx's basic stats.
+
 - **A price per displaced person in place of the budget** (owner 2026-10-16: "Write down the price
   per displaced person in place of the budget idea so we don't forget it"; the concern: "Clearing N
   people's homes to provide access to n<N people's homes seems unfair"). Today a run clears up to a
@@ -1222,6 +1235,24 @@ Not pursued, with what would change that:
 
 ## Infrastructure
 
+- **One precision model for the mesh** (owner 2026-11-25: "go straight to the single precision
+  model and its rerun", **running**). The fixed mesh's geometry passes through precisions chosen
+  apart: corridors unioned on 1 mm (networks.GRID_M), the carving's cuts exact (Carving.of), the
+  linework snap-rounded on 0.1 mm (gap_clear.LINE_SNAP_M), vertices on 1e-9 m (gap_complex.SNAP_M);
+  each step can make a feature the next cannot represent. Three cascades are known (the conformity
+  refuses them: gap_clear._conform), each a hair-thin piece of a building whose w / 2 zone line
+  runs almost on top of its neighbour's (0.036 degrees at 41785's): road_simp's D 0.15 k 0.08 r 7
+  answer on 5810 (a corridor vertex 5.3e-6 m from a wall), and Shock Reblock with spurs of 10 to 80
+  m on 41785 rev 4 (stops 59 and 68's outlines 0.27 mm apart; a corridor edge 0.1 -- 0.6 mm off
+  building 247's wall). The design: one constant, the minimum feature size (1 mm), applied once
+  where all geometry is overlaid, a piece's part thinner than it joining the other side of its cut,
+  so the mesher only receives input it can mesh. Tried first, on the three cases
+  (.superpowers/sdd/2026-11-25-precision/cases): concentric-shell splitting in the conformity
+  cures road_simp's only (the 41785 wedges are not small angles a split rule fills); overlaying a
+  network's stops jointly on 1 mm cures 59/68 and makes building 247's (it bends an edge to 0.08
+  mm of the wall); opening each cut's two sides by 0.5 mm cures all three with today's mesher (8,
+  63 and 2 splits; at 0.1 mm all three conform at 587 -- 939 splits, at 0.2 mm one does not). It
+  changes the code's digest, so the metric is renamed and the live rows re-run under it.
 - **Faster submits** (done 2026-10-08; NOTES "Faster submits"): a staged `dwithin` near test, a
   count without the cells' attributes, 8 blocks counted at a time; sizing 16 -- 18x faster, the
   meshes identical.

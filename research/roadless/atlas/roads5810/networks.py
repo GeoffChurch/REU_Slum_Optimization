@@ -19,8 +19,9 @@ its source (Source, a Strategy):
     road_simp.SMOOTH_M); the shortest prefix whose exact D reaches each slider target is its
     frame (the whole run where it falls short). Two smoothings part by a few m^2 (4 -- 10 m^2
     between neighbouring steps on 5810, over Carving.of's tolerance), so each stop's corridor is
-    unioned with the last stop's, on the raw unions' GRID_M grid (off it, two stops' outlines
-    left vertices 1e-9 m apart, which the carved mesh's conformity refused on the islands run):
+    unioned with the last stop's, on the mesh's grid (gap_complex.FEATURE_M; off it, two stops'
+    outlines left vertices 1e-9 m apart, which the carved mesh's conformity refused on the
+    islands run):
     the stops nest, a stop's D read on what is carved (its own region's, which picked it, within
     the grid's half millimetre). Carved as a kappa-10 road under RUNTIME whatever the
     run's contrast: the grounded runs too, so every method on the page compares under one
@@ -66,7 +67,8 @@ On the page (2026-10-28), each one `add`:
   joint paved 'rs.D{D}.s0.1.r7.q1,2,3,3,3.b1,2,4,8,16.i60.uOC.cjoint.p1e0.0001v8'
   joint roads 'rs.D{D}.s0.1.r7.q1,2,3,3,3.b1,2,4,8,16.i60.uOC.cjoint.p1e0.0001v8'
   growth gr.k10.att.greedy.N48.sep14.n2s0.3.B21m8k2.K0.D0.15.v2           (price 0.3)
-  ears ears.paths.grid8.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15.v1
+  ears ears.paths.grid8.b20.f2000.e30.loop.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15.v4   (rev 4,
+      2026-11-24, in rev 1's place: b charges the building share of the road's width)
   templates 'tp.D{D}.s0.1.v1'
   growth gr.gl0.25Croad.free0.03.greedy.N48.sep14.n2s0.1.B0.K4.D0.15.v2  (islands: the charge
       that scores best under RUNTIME, the growth study's frames.py score: 0.492 at D 0.15, 0.01's
@@ -81,9 +83,10 @@ On the page (2026-10-28), each one `add`:
   (R3=pt.K5.R10.band.t0.2,0.1,0.05,0.03,0.02.b1,2,4,8,16.q1,2,3,3,3.e0.2,0.1,0.05,0.02,0.i40)
   spurs 'ps.lazy5.D{D}.spec{n}s0.x{x}.v4'                (the spectral cuts at D 0.05 and 0.10 plus
       the lazy ΔP greedy's roads to 0.01 and 0.02 more D; 0.15's beyond the slider)
-  ears ears.paths.grid8.b20.f2000.e30.spur10-30.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15.v3   (2026-11-03:
-  ears ears.paths.grid8.b20.f2000.e30.spur10-80.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15.v3    Shock Reblock
-      with spurs, dead ends on open ground 10 -- 30 and 10 -- 80 m from their start: Ears.SPUR_CLS)
+  ears ears.paths.grid8.b20.f2000.e30.spur10-30.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15.v4   (2026-11-03:
+  ears ears.paths.grid8.b20.f2000.e30.spur10-80.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15.v4    Shock Reblock
+      with spurs, dead ends on open ground 10 -- 30 and 10 -- 80 m from their start: Ears.SPUR_CLS;
+      rev 4 in rev 3's place, 2026-11-24)
   lineup clearance | cycle_native_betweenness_contrast | euclidean_grid
       | greedy_arterial_access_displacement | resistance_lp     (2026-11-03: Lineup.WORDS)
   lineup cycle_native | clearance_looped     (2026-11-03: the page's first two, once compute.py's
@@ -130,7 +133,6 @@ PAGE = cp.PAGE                        # the page's block; its networks' frames i
 BID = PAGE.bid                        # names the page's designs' rows (Runs, Lined, Joint)
 SLIDER = render.SLIDER                # D 0.01 .. 0.15
 SKEL_PIX = 1.0                        # m: the skeleton's raster (road_simp.PIXEL's)
-GRID_M = 1e-3                         # m: a grown region's union grid (frames.py's `region`)
 SPURS = sheet.ROOT / ".superpowers/sdd/2026-10-27-partition/spurs_rows"   # spurs.py's rows
 
 
@@ -203,7 +205,7 @@ class Grown:
             t = np.flatnonzero(step == s)
             self.raw.append(shapely.union_all(
                 np.concatenate([[self.raw[-1]], shapely.polygons(fm.xy[fm.tri[t]])]),
-                grid_size=GRID_M))
+                grid_size=gc.FEATURE_M))
         self._D: dict[int, float] = {}
         D_eps = rows.set_index("step").D
         stops = {t: self._shortest(t, guess=int(D_eps.index[np.argmax(D_eps.to_numpy() >= t)])
@@ -213,9 +215,9 @@ class Grown:
         self.corridors: dict[int, Any] = {}
         last = None
         for s in chain:
-            reg = shapely.set_precision(polygonal(self.region(s)), GRID_M)
+            reg = shapely.set_precision(polygonal(self.region(s)), gc.FEATURE_M)
             last = reg if last is None else polygonal(shapely.make_valid(
-                shapely.union(last, reg, grid_size=GRID_M)))
+                shapely.union(last, reg, grid_size=gc.FEATURE_M)))
             self.corridors[s] = last
         print(f"{run.name}: {self.size} steps, stops {self.stop_of} ({time.time() - t0:.0f}s)",
               flush=True)
