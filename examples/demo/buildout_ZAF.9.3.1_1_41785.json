@@ -44,12 +44,12 @@
     "file": "loop_ZAF.9.3.1_1_41785.webp",
     "width": 600,
     "frame_height": 801,
-    "frames": 15,
+    "frames": 17,
     "columns": 1
    },
    "run": {
     "kind": "recorded",
-    "seconds": 111.7,
+    "seconds": 145.5,
     "machine": "one process on a workstation CPU (Intel Xeon w7-3455)"
    },
    "cells": [
@@ -66,315 +66,314 @@
     {
      "kind": "met",
      "step": {
-      "displacement": 0.0568,
-      "road_km": 0.162,
-      "permeability": 0.4792,
-      "seconds": 10.6,
+      "displacement": 0.0635,
+      "road_km": 0.181,
+      "permeability": 0.5217,
+      "seconds": 12.0,
       "row": 1
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.0568,
-      "road_km": 0.162,
-      "permeability": 0.4792,
-      "seconds": 10.6,
+      "displacement": 0.0635,
+      "road_km": 0.181,
+      "permeability": 0.5217,
+      "seconds": 12.0,
       "row": 1
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.0568,
-      "road_km": 0.162,
-      "permeability": 0.4792,
-      "seconds": 10.6,
+      "displacement": 0.0635,
+      "road_km": 0.181,
+      "permeability": 0.5217,
+      "seconds": 12.0,
       "row": 1
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.0568,
-      "road_km": 0.162,
-      "permeability": 0.4792,
-      "seconds": 10.6,
+      "displacement": 0.0635,
+      "road_km": 0.181,
+      "permeability": 0.5217,
+      "seconds": 12.0,
       "row": 1
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.0568,
-      "road_km": 0.162,
-      "permeability": 0.4792,
-      "seconds": 10.6,
+      "displacement": 0.0635,
+      "road_km": 0.181,
+      "permeability": 0.5217,
+      "seconds": 12.0,
       "row": 1
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.1238,
-      "road_km": 0.298,
-      "permeability": 0.6831,
-      "seconds": 17.2,
+      "displacement": 0.0635,
+      "road_km": 0.181,
+      "permeability": 0.5217,
+      "seconds": 12.0,
+      "row": 1
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1093,
+      "road_km": 0.295,
+      "permeability": 0.71,
+      "seconds": 18.8,
       "row": 2
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.1238,
-      "road_km": 0.298,
-      "permeability": 0.6831,
-      "seconds": 17.2,
+      "displacement": 0.1093,
+      "road_km": 0.295,
+      "permeability": 0.71,
+      "seconds": 18.8,
       "row": 2
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.1238,
-      "road_km": 0.298,
-      "permeability": 0.6831,
-      "seconds": 17.2,
+      "displacement": 0.1093,
+      "road_km": 0.295,
+      "permeability": 0.71,
+      "seconds": 18.8,
       "row": 2
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.1238,
-      "road_km": 0.298,
-      "permeability": 0.6831,
-      "seconds": 17.2,
+      "displacement": 0.1093,
+      "road_km": 0.295,
+      "permeability": 0.71,
+      "seconds": 18.8,
       "row": 2
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.1238,
-      "road_km": 0.298,
-      "permeability": 0.6831,
-      "seconds": 17.2,
-      "row": 2
-     }
-    },
-    {
-     "kind": "met",
-     "step": {
-      "displacement": 0.1238,
-      "road_km": 0.298,
-      "permeability": 0.6831,
-      "seconds": 17.2,
-      "row": 2
-     }
-    },
-    {
-     "kind": "met",
-     "step": {
-      "displacement": 0.1238,
-      "road_km": 0.298,
-      "permeability": 0.6831,
-      "seconds": 17.2,
-      "row": 2
-     }
-    },
-    {
-     "kind": "met",
-     "step": {
-      "displacement": 0.1508,
-      "road_km": 0.366,
-      "permeability": 0.73,
-      "seconds": 21.7,
+      "displacement": 0.1495,
+      "road_km": 0.4,
+      "permeability": 0.7782,
+      "seconds": 23.1,
       "row": 3
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.1508,
-      "road_km": 0.366,
-      "permeability": 0.73,
-      "seconds": 21.7,
+      "displacement": 0.1495,
+      "road_km": 0.4,
+      "permeability": 0.7782,
+      "seconds": 23.1,
       "row": 3
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.1508,
-      "road_km": 0.366,
-      "permeability": 0.73,
-      "seconds": 21.7,
+      "displacement": 0.1495,
+      "road_km": 0.4,
+      "permeability": 0.7782,
+      "seconds": 23.1,
       "row": 3
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.2115,
-      "road_km": 0.556,
-      "permeability": 0.83,
-      "seconds": 29.7,
+      "displacement": 0.1495,
+      "road_km": 0.4,
+      "permeability": 0.7782,
+      "seconds": 23.1,
+      "row": 3
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.1718,
+      "road_km": 0.473,
+      "permeability": 0.8267,
+      "seconds": 27.4,
       "row": 4
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.2526,
-      "road_km": 0.668,
-      "permeability": 0.8743,
-      "seconds": 33.6,
+      "displacement": 0.2084,
+      "road_km": 0.582,
+      "permeability": 0.8676,
+      "seconds": 31.5,
       "row": 5
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.321,
-      "road_km": 0.851,
-      "permeability": 0.9113,
-      "seconds": 43.1,
+      "displacement": 0.2563,
+      "road_km": 0.729,
+      "permeability": 0.9073,
+      "seconds": 39.3,
       "row": 6
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.3597,
-      "road_km": 0.948,
-      "permeability": 0.9367,
-      "seconds": 49.5,
+      "displacement": 0.3129,
+      "road_km": 0.88,
+      "permeability": 0.9295,
+      "seconds": 50.2,
       "row": 7
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.4105,
-      "road_km": 1.101,
-      "permeability": 0.9431,
-      "seconds": 58.2,
+      "displacement": 0.3669,
+      "road_km": 1.042,
+      "permeability": 0.941,
+      "seconds": 59.7,
       "row": 8
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.4619,
-      "road_km": 1.327,
-      "permeability": 0.953,
-      "seconds": 69.6,
+      "displacement": 0.4045,
+      "road_km": 1.138,
+      "permeability": 0.9494,
+      "seconds": 65.3,
       "row": 9
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.5094,
-      "road_km": 1.547,
-      "permeability": 0.96,
-      "seconds": 78.2,
+      "displacement": 0.4582,
+      "road_km": 1.304,
+      "permeability": 0.9581,
+      "seconds": 76.9,
       "row": 10
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.5661,
-      "road_km": 1.66,
-      "permeability": 0.965,
-      "seconds": 86.3,
+      "displacement": 0.5114,
+      "road_km": 1.485,
+      "permeability": 0.9637,
+      "seconds": 89.5,
       "row": 11
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.6021,
-      "road_km": 1.815,
-      "permeability": 0.9668,
-      "seconds": 94.0,
+      "displacement": 0.556,
+      "road_km": 1.659,
+      "permeability": 0.9676,
+      "seconds": 101.3,
       "row": 12
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.6585,
-      "road_km": 1.99,
-      "permeability": 0.9726,
-      "seconds": 101.9,
+      "displacement": 0.6031,
+      "road_km": 1.811,
+      "permeability": 0.9728,
+      "seconds": 110.6,
       "row": 13
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.7137,
-      "road_km": 2.203,
+      "displacement": 0.655,
+      "road_km": 1.98,
       "permeability": 0.9753,
-      "seconds": 111.7,
+      "seconds": 122.7,
       "row": 14
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.7055,
+      "road_km": 2.131,
+      "permeability": 0.9779,
+      "seconds": 131.8,
+      "row": 15
+     }
+    },
+    {
+     "kind": "met",
+     "step": {
+      "displacement": 0.752,
+      "road_km": 2.303,
+      "permeability": 0.9796,
+      "seconds": 145.5,
+      "row": 16
      }
     },
     {
      "kind": "short",
      "step": {
-      "displacement": 0.7137,
-      "road_km": 2.203,
-      "permeability": 0.9753,
-      "seconds": 111.7,
-      "row": 14
+      "displacement": 0.752,
+      "road_km": 2.303,
+      "permeability": 0.9796,
+      "seconds": 145.5,
+      "row": 16
      },
      "why": "no road left that would split a sub-block"
     },
     {
      "kind": "short",
      "step": {
-      "displacement": 0.7137,
-      "road_km": 2.203,
-      "permeability": 0.9753,
-      "seconds": 111.7,
-      "row": 14
+      "displacement": 0.752,
+      "road_km": 2.303,
+      "permeability": 0.9796,
+      "seconds": 145.5,
+      "row": 16
      },
      "why": "no road left that would split a sub-block"
     },
     {
      "kind": "short",
      "step": {
-      "displacement": 0.7137,
-      "road_km": 2.203,
-      "permeability": 0.9753,
-      "seconds": 111.7,
-      "row": 14
+      "displacement": 0.752,
+      "road_km": 2.303,
+      "permeability": 0.9796,
+      "seconds": 145.5,
+      "row": 16
      },
      "why": "no road left that would split a sub-block"
     },
     {
      "kind": "short",
      "step": {
-      "displacement": 0.7137,
-      "road_km": 2.203,
-      "permeability": 0.9753,
-      "seconds": 111.7,
-      "row": 14
-     },
-     "why": "no road left that would split a sub-block"
-    },
-    {
-     "kind": "short",
-     "step": {
-      "displacement": 0.7137,
-      "road_km": 2.203,
-      "permeability": 0.9753,
-      "seconds": 111.7,
-      "row": 14
+      "displacement": 0.752,
+      "road_km": 2.303,
+      "permeability": 0.9796,
+      "seconds": 145.5,
+      "row": 16
      },
      "why": "no road left that would split a sub-block"
     }

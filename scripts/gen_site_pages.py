@@ -1828,35 +1828,15 @@ def _demo_fires() -> str:
     return f'<ol class="sbu-fires">\n{items}</ol>'
 
 
-def _demo_beside(d: dict[str, Any]) -> M:
-    """The shipped method the bundle sets beside ours on the page's block, as this site lists it:
-    its METHODS entry by the bundle's key, refused where the bundle's name for it is not the
-    site's (the bundle is baked on another branch, and a renamed method would otherwise appear
-    under two names)."""
-    key, name = d["beside"]["key"], d["beside"]["name"]
-    found = [m for m in METHODS if m.slug == key and m.published]
-    if len(found) != 1:
-        raise SystemExit(f"examples/demo/demo.json: {key!r} is no published method of this site")
-    [m] = found
-    if m.display_title != name:
-        raise SystemExit(f"examples/demo/demo.json names {key!r} {name!r}; the site names it "
-                         f"{m.display_title!r}")
-    return m
-
-
 def _demo_method() -> str:
-    """The two methods the Demo page builds out on its block, each named and explained in the
-    bundle's own words -- ours (one setting of its producer, so its name is never typed here),
-    and the shipped method beside it, linked to its method page."""
+    """Our method, named and explained in the bundle's own words -- one setting of its producer,
+    so its name is never typed here."""
     d = _demo()
     if d is None:
         return ""
-    m, b = d["method"], d["beside"]
-    beside = _demo_beside(d)
+    m = d["method"]
     return (f"<p><strong>{html.escape(m['name'])}.</strong> "
-            f"{html.escape(m['blurb'], quote=False)}</p>\n"
-            f'<p><strong><a href="../methodology/methods/{beside.slug}/">'
-            f"{html.escape(b['name'])}</a>.</strong> {html.escape(b['blurb'], quote=False)}</p>")
+            f"{html.escape(m['blurb'], quote=False)}</p>")
 
 
 class _TopologyTime(Protocol):
@@ -2057,65 +2037,18 @@ def _build_out_figure(name: str, widget: str, alt: str, caption: str) -> str:
                    img_style=style)
 
 
-# The budgets the page block's face-off is read at in words (owner, 2026-11-04: Shock Reblock beside
-# the Loop Network at 5, 10 and 15%), each one of its build-out's budgets; and the gap in escape
-# time saved under which a method is "narrowly" ahead or behind the other.
-_FACEOFF_AT = (0.05, 0.10, 0.15)
-_NARROW = 0.02
-
-
-def _faceoff_takeaway(bo: dict[str, Any]) -> str:
-    """The page block's two methods side by side in words, every number the build-out's: at each of
-    _FACEOFF_AT, which saves more escape time and by how much (ahead, behind, narrowly where the
-    gap is under _NARROW), and each one's run time to its network at the last of them."""
-    ours, beside = bo["series"]
-    name, other = html.escape(ours["method"]), html.escape(beside["method"])
-
-    def at(b: float) -> tuple[dict[str, Any], dict[str, Any]]:
-        k = bo["budgets"].index(b)        # ValueError: a budget the build-out does not offer
-        o, t = ours["cells"][k], beside["cells"][k]
-        if o["kind"] != "met" or t["kind"] != "met":
-            raise SystemExit(f"examples/demo/{bo['block_id']}: a method stops short of {b:.0%}")
-        return o["step"], t["step"]
-
-    def standing(o: dict[str, Any], t: dict[str, Any]) -> str:
-        gap = o["permeability"] - t["permeability"]
-        if gap == 0:
-            return "level"
-        return ("narrowly " if abs(gap) < _NARROW else "") + ("ahead" if gap > 0 else "behind")
-
-    parts = []
-    for i, b in enumerate(_FACEOFF_AT):
-        o, t = at(b)
-        if i == 0:
-            parts.append(f"At a {b:.0%} budget {name} is {standing(o, t)}, saving "
-                         f"{o['permeability']:.1%} of the escape time to the {other}'s "
-                         f"{t['permeability']:.1%}")
-        else:
-            parts.append(f"at {b:.0%} it is {standing(o, t)}, {o['permeability']:.1%} to "
-                         f"{t['permeability']:.1%}")
-    o, t = at(_FACEOFF_AT[-1])
-    return (f"{'; '.join(parts)}. {name} takes {_duration(o['seconds'])} to its "
-            f"{_FACEOFF_AT[-1]:.0%} network, the {other} {_duration(t['seconds'])}.")
-
-
 def _demo_build_out() -> str:
-    """The Demo page's build-out: our method and the shipped method beside it on the block under
-    one budget slider, each budget's escape-time plate per method and three plots whose dots
-    follow it (`_build_out_figure`, two series), headed by how the two compare
-    (`_faceoff_takeaway`).
+    """The Demo page's build-out: our method on the block under a budget slider, each budget's
+    escape-time plate and three plots whose dots follow it (`_build_out_figure`, one series).
 
-    The caption says what the plates and the plots show, every number read from the bundle; the
+    The caption says what the plate and the plots show, every number read from the bundle; the
     widget writes only labels and each budget's own readouts. `data-metric-label` hands it
-    DEMO_METRIC, so the page names L_P in one place. The method beside ours is timed by a run made
-    to time it, whose note the run-times table carries (`_demo_compare`); the caption points
-    there."""
+    DEMO_METRIC, so the page names L_P in one place."""
     d = _demo()
     if d is None:
         return ""
     b, m, e = d["block"], d["method"], d["encoding"]
     bo = _buildout(b["buildout"])
-    _ours, beside = bo["series"]
     caption = (
         f"Each home coloured by its escape time, as a share of the 99th-percentile home's with no "
         f"new road ({bo['escape_scale']:,.0f} model units): {_plate_key(e)} "
@@ -2123,62 +2056,30 @@ def _demo_build_out() -> str:
         f"remove, 1 − P(roads) / P(no roads): what the rest of this site calls "
         '<a href="../methodology/permeability/">permeability</a>. The conductance the roads add '
         "gives a natural single number for a budget, but the page plots displacement and "
-        "road length. Run time is each method's since its start, on a log scale, and steps: "
-        "flat until the run has finished the next network. The "
-        f"{html.escape(beside['method'])}'s, to a plate, is when its run had built every road "
-        f'on it<sup><a href="#{_TIMED_NOTE}" aria-label="How this was timed">{_TIMED_K}</a>'
-        f"</sup>.")
+        "road length. Run time is the method's since its start, on a log scale, and steps: "
+        "flat until the run has finished the next network.")
     opening = bo["budgets"][bo["default_step"]]
-    figure = _build_out_figure(
+    return _build_out_figure(
         b["buildout"], "build-out",
         f"Block {b['block_id']}'s homes coloured by escape time, with the roads "
-        f"{html.escape(m['name'])} and the {html.escape(beside['method'])} build to a "
-        f"{opening:.0%} displacement budget", caption)
-    return f'<p class="sbu-compare__takeaway">{_faceoff_takeaway(bo)}</p>\n{figure}'
+        f"{html.escape(m['name'])} builds to a {opening:.0%} displacement budget", caption)
 
 
 class _RuntimeCell(NamedTuple):
     """A run-times table cell: its time and how it was had, and the seconds the row ranks it by
-    for its fastest (an estimate's least; None for a method not timed on the block)."""
+    for its fastest (an estimate's least)."""
     time: str
     how: str
-    seconds: float | None
-
-
-# The run-times table's note on the timed run (the page block's second method), linked from the
-# 5810 build-out's caption too: the third of the table's notes (`_demo_compare`'s `notes`).
-_TIMED_K = 3
-_TIMED_NOTE = f"topology-note-{_TIMED_K}"
-
-
-def _timed_note(s: dict[str, Any], ours: dict[str, Any], last: float) -> str:
-    """How the timed run's times were had (build.py's DemoTimed, explore_proto/loop_time.py): in
-    what conditions, why a plate's time is when every road on it was built, and the whole run's
-    time beside its time to the slider's last budget `last`."""
-    r = s["run"]
-    if r["kind"] != "timed" or r["machine"] != ours["run"]["machine"]:
-        raise SystemExit(f"examples/demo: {s['method']}'s run is {r['kind']} on {r['machine']}, "
-                         f"not timed where {ours['method']}'s ran")
-    name = html.escape(s["method"])
-    return (f"Measured once on this block, in one process on the same workstation as "
-            f"{html.escape(ours['method'])}'s run, its numerical libraries held to one thread, "
-            f"the machine's load average {r['load']:.1f} on its {r['cores']} cores. The {name} "
-            f"builds its loops in its own order, but each plate shows the shortest stretch of its "
-            f"whole network, taken street-first, that reaches the budget, so its time to a plate "
-            f"is when the run had built every road on it: "
-            f"{_duration(s['cells'][-1]['step']['seconds'])} to the {last:.0%} network. Its whole "
-            f"run, which builds on past the slider's last budget, took {_duration(r['seconds'])}.")
+    seconds: float
 
 
 def _demo_compare() -> str:
     """Our method and the earlier one (owner, 2026-10-29): on the comparison block, where topology
     has run, what each method does there; a runtime table, both blocks by topology's original,
-    our port of it, our method and the shipped method set beside ours on the page's block (owner,
-    2026-11-04: not run on the comparison block), the fastest on each block marked; then both
-    methods under one budget slider (`_build_out_figure`, two series), headed by when one saves
-    as much escape time as the other's whole network. Footnotes say how topology's times were had
-    (`_TopologyTime`): one for every estimate, one for the measurement; and a third how the
-    method beside ours was timed (`_timed_note`)."""
+    our port of it, and our method, the fastest on each block marked; then both methods under one
+    budget slider (`_build_out_figure`, two series), headed by when one saves as much escape time
+    as the other's whole network. Footnotes say how topology's times were had (`_TopologyTime`):
+    one for every estimate, one for the measurement."""
     d = _demo()
     if d is None:
         return ""
@@ -2187,20 +2088,17 @@ def _demo_compare() -> str:
     bo = _buildout(c["buildout"])
     ours, earlier = bo["series"]
     page_bo = _buildout(b["buildout"])
-    page_ours, page_beside = page_bo["series"]
+    [page_ours] = page_bo["series"]
     last = page_bo["budgets"][-1]
     topology = _topology_of(c["topology"], c["block_id"])
     page_topology = _topology_of(b["topology"], b["block_id"])
     factors = (f"{c['topology']['original_factor']:.1f}× at {c['n_buildings']:,} buildings, "
                f"{b['topology']['original_factor']:.1f}× at {b['n_buildings']:,}")
-    # Three footnotes, each with a fixed number: every estimate links the first, the measurement
-    # the second, the timed run the third (_TIMED_K, which the page block's caption links too) --
-    # one explanation however many cells it covers.
+    # Two footnotes, each with a fixed number: every estimate links the first, the measurement
+    # the second -- one explanation however many cells it covers.
     notes = (("How these were estimated",
               _estimates_note(d["topology_port"], page_topology, factors)),
-             (topology.how, topology.note()),
-             ("How this was timed", _timed_note(page_beside, page_ours, last)))
-    assert len(notes) == _TIMED_K
+             (topology.how, topology.note()))
 
     def marked(k: int, value: str) -> str:
         return (f'{value}<sup><a href="#topology-note-{k}" aria-label="{notes[k - 1][0]}">{k}</a>'
@@ -2230,8 +2128,7 @@ def _demo_compare() -> str:
 
     # The methods' columns, named once: the header, and each cell's label where a phone stacks
     # a block's row into lines (sbu.css: the cells' `data-label`).
-    methods = ("Topology, original implementation", "Topology, our optimized port", name,
-               html.escape(page_beside["method"]))
+    methods = ("Topology, original implementation", "Topology, our optimized port", name)
 
     def td(cell: _RuntimeCell, label: str, fastest: float) -> str:
         if cell.seconds != fastest:
@@ -2241,14 +2138,14 @@ def _demo_compare() -> str:
                 f"</strong><span>{cell.how} · fastest</span></td>")
 
     def row(blk: dict[str, Any], cells: tuple[_RuntimeCell, ...]) -> str:
-        fastest = min(c.seconds for c in cells if c.seconds is not None)
+        fastest = min(c.seconds for c in cells)
         return (f"<tr><th scope=\"row\"><code>{_short(blk['block_id'])}</code>"
                 f"<span>{blk['n_buildings']:,} buildings</span></th>"
                 f"{''.join(td(cell, m, fastest) for cell, m in zip(cells, methods, strict=True))}"
                 "</tr>")
 
     p_head, _ = page_topology.figure(page_ours["run"]["seconds"])
-    o_s, b_s = (s["cells"][-1]["step"]["seconds"] for s in (page_ours, page_beside))
+    o_s = page_ours["cells"][-1]["step"]["seconds"]
     table = (
         '<table class="sbu-runtimes">\n'
         "<caption>Run times on each block, the fastest on each in green and marked.</caption>\n"
@@ -2259,15 +2156,12 @@ def _demo_compare() -> str:
                                topology.original_s()),
                   _RuntimeCell(t_head, marked(2, "measured"), topology.least_s()),
                   _RuntimeCell(_duration(ours["run"]["seconds"]), "measured, whole run",
-                               ours["run"]["seconds"]),
-                  _RuntimeCell("—", "not timed on this block", None)))
+                               ours["run"]["seconds"])))
         + "\n"
         + row(b, (_RuntimeCell(page_topology.original(), marked(1, "estimated"),
                                page_topology.original_s()),
                   _RuntimeCell(p_head, marked(1, "estimated"), page_topology.least_s()),
-                  _RuntimeCell(_duration(o_s), f"measured, to a {last:.0%} budget", o_s),
-                  _RuntimeCell(_duration(b_s),
-                               marked(_TIMED_K, f"measured, to a {last:.0%} budget"), b_s)))
+                  _RuntimeCell(_duration(o_s), f"measured, to a {last:.0%} budget", o_s)))
         + "\n</tbody>\n</table>\n")
     # The takeaway: the first of our networks to save as much as topology's whole one, if any.
     target = e_whole["permeability"]
