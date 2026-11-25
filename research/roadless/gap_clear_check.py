@@ -176,7 +176,7 @@ and the complex walls in the homes the flow model does (Model.free_first's check
 `features-dropped` (every block built with no OSM features: the cut absent), `unshifted` (the
 atoms left in the uncut block's frame: on 3934, whose railway cut moves its origin, the
 footprints misplaced and the complex's walled-in homes not the flow model's).
-`exits-identity`: the per-block metric's name is PER_BLOCK and its code digests 28 constants to the
+`exits-identity`: the per-block metric's name is PER_BLOCK and its code digests 29 constants to the
 same digest; RUNTIME is the per-block metric with metrics.EXITS, read back, and the region's
 T500b90D10; every configuration of region_leaks (and more shares and lam with the boost) under
 each preset's search spells a name that parses back to it, and no two share a name; every stored
@@ -405,11 +405,11 @@ LEAK_PAIRS = ((LEAK_LAM, math.inf), (math.inf, 20.0), (100.0, 25.0))   # ... the
                          # (open_m, foot_m): open ground only, footprints only, both
 FOLD_SHARES = (0.0, 1.0, 0.75)   # leak-fold: the region test's shares at LEAK_LAM, as constants
                                  # (0.75: not symmetric under the swap)
-PER_BLOCK = "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+ved297a08"   # the per-block metric's name (moved by
+PER_BLOCK = "cx+shy0.5+s0.125r1b1+R0.5g4x2q4+ve61619b8"   # the per-block metric's name (moved by
                                                           # gap_clear.MESH_REV 4, the one precision
                                                           # model: every row stored under v1569a066
                                                           # is the previous mesh's)
-PER_BLOCK_CONSTANTS = 28
+PER_BLOCK_CONSTANTS = 29
 CONFORM_ATOMS = (        # conform-floor: the cascade's four atoms (5810's carving, its local frame)
     "POLYGON ((546.4662255144212 667.5179657656699, 547.0873077790664 665.0049, 545.252525 "
     "665.0049, 545.252525 667.2180103082314, 546.4662255144212 667.5179657656699))",

@@ -159,8 +159,8 @@ def origin_of(block) -> tuple[float, float]:
     return (math.floor(x0 / FEATURE_M) * FEATURE_M, math.floor(y0 / FEATURE_M) * FEATURE_M)
 
 
-_MITRE_LIMIT = 1e3   # `regular`'s mitre joins: a corner as sharp as 0.11 degrees comes back whole
-                     # (in MESH_REV: a change to `regular` raises it)
+MITRE_LIMIT = 1e3    # `regular`'s mitre joins: a corner as sharp as 0.11 degrees comes back whole
+                     # (public, so gap_clear.CODE digests it: it moves every footprint)
 
 
 def regular(g: Any) -> Any:
@@ -171,8 +171,8 @@ def regular(g: Any) -> Any:
     outside, Carving.of) moved by a grid step or vanished (41785: a building of 89.7 m^2 eroded to
     nothing, a rectangle shifted 1 mm per opening)."""
     d = FEATURE_M / 2
-    opened = shapely.buffer(shapely.buffer(g, -d, join_style="mitre", mitre_limit=_MITRE_LIMIT),
-                            d, join_style="mitre", mitre_limit=_MITRE_LIMIT)
+    opened = shapely.buffer(shapely.buffer(g, -d, join_style="mitre", mitre_limit=MITRE_LIMIT),
+                            d, join_style="mitre", mitre_limit=MITRE_LIMIT)
     return shapely.set_precision(shapely.set_precision(opened, FEATURE_M), 0.0)
 
 
