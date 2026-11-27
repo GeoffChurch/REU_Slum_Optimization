@@ -33,7 +33,7 @@
    },
    "run": {
     "kind": "recorded",
-    "seconds": 5670.384333610535,
+    "seconds": 6030.55796122551,
     "machine": "one process on a workstation CPU (Intel Xeon w7-3455)"
    },
    "cells": [
@@ -51,9 +51,9 @@
      "kind": "met",
      "step": {
       "displacement": 0.011,
-      "road_km": 3.23,
-      "permeability": 0.297,
-      "seconds": 594.1571273803711,
+      "road_km": 3.29,
+      "permeability": 0.296,
+      "seconds": 542.3660070896149,
       "row": 1
      }
     },
@@ -61,139 +61,139 @@
      "kind": "met",
      "step": {
       "displacement": 0.0207,
-      "road_km": 5.17,
-      "permeability": 0.388,
-      "seconds": 932.0905804634094,
+      "road_km": 5.24,
+      "permeability": 0.387,
+      "seconds": 871.2140686511993,
       "row": 2
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.0304,
-      "road_km": 6.67,
-      "permeability": 0.442,
-      "seconds": 1367.9279119968414,
+      "displacement": 0.0302,
+      "road_km": 6.47,
+      "permeability": 0.428,
+      "seconds": 1232.8868432044983,
       "row": 3
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.0411,
-      "road_km": 8.22,
-      "permeability": 0.497,
-      "seconds": 1843.917732477188,
+      "displacement": 0.0414,
+      "road_km": 8.3,
+      "permeability": 0.496,
+      "seconds": 1733.1328020095825,
       "row": 4
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.0542,
-      "road_km": 9.61,
+      "displacement": 0.0545,
+      "road_km": 9.62,
       "permeability": 0.538,
-      "seconds": 2198.539767742157,
+      "seconds": 2094.0228383541107,
       "row": 5
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.063,
-      "road_km": 10.22,
-      "permeability": 0.551,
-      "seconds": 2411.6223199367523,
+      "displacement": 0.0626,
+      "road_km": 10.03,
+      "permeability": 0.549,
+      "seconds": 2273.602475643158,
       "row": 6
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.0701,
-      "road_km": 10.89,
+      "displacement": 0.0704,
+      "road_km": 10.9,
       "permeability": 0.578,
-      "seconds": 2636.856632709503,
+      "seconds": 2620.0671622753143,
       "row": 7
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.081,
-      "road_km": 11.48,
-      "permeability": 0.596,
-      "seconds": 2981.703646183014,
+      "displacement": 0.0813,
+      "road_km": 11.49,
+      "permeability": 0.595,
+      "seconds": 3093.460390806198,
       "row": 8
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.0902,
-      "road_km": 12.04,
+      "displacement": 0.0905,
+      "road_km": 12.05,
       "permeability": 0.619,
-      "seconds": 3271.7799730300903,
+      "seconds": 3424.3810918331146,
       "row": 9
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.1011,
-      "road_km": 12.98,
-      "permeability": 0.631,
-      "seconds": 3690.2798714637756,
+      "displacement": 0.1004,
+      "road_km": 12.89,
+      "permeability": 0.628,
+      "seconds": 3819.909204721451,
       "row": 10
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.1103,
-      "road_km": 13.75,
+      "displacement": 0.1105,
+      "road_km": 13.77,
       "permeability": 0.648,
-      "seconds": 4034.2673377990723,
+      "seconds": 4264.661909580231,
       "row": 11
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.1216,
-      "road_km": 14.38,
+      "displacement": 0.1219,
+      "road_km": 14.4,
       "permeability": 0.655,
-      "seconds": 4425.0390188694,
+      "seconds": 4704.898357868195,
       "row": 12
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.1303,
-      "road_km": 14.72,
-      "permeability": 0.658,
-      "seconds": 4658.339378595352,
+      "displacement": 0.1306,
+      "road_km": 14.74,
+      "permeability": 0.657,
+      "seconds": 4983.844121456146,
       "row": 13
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.1403,
-      "road_km": 15.3,
-      "permeability": 0.662,
-      "seconds": 5060.172024726868,
+      "displacement": 0.141,
+      "road_km": 15.29,
+      "permeability": 0.663,
+      "seconds": 5368.457995891571,
       "row": 14
      }
     },
     {
      "kind": "met",
      "step": {
-      "displacement": 0.1513,
-      "road_km": 16.12,
-      "permeability": 0.681,
-      "seconds": 5597.7055377960205,
+      "displacement": 0.1502,
+      "road_km": 15.96,
+      "permeability": 0.679,
+      "seconds": 5896.534736156464,
       "row": 15
      }
     }
