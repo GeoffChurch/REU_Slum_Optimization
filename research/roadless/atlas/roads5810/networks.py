@@ -52,7 +52,7 @@ families and specs:
   partition band|cut <plan with D{D}[, {n}]>  partition_rows/<RUNTIME>/<plan>, the same ({n}: the
                                               start's size, one run a budget)
   templates <plan with D{D}>                  templates_rows/<RUNTIME>/<plan>, the same
-  spurs <plan with D{D}, {n}, {x}>            the partition study's spurs_rows/<plan>: a cut ({n}
+  spurs <plan with D{D}, {n}, {x}>            spurs_rows/<RUNTIME>/<plan> (spurs.py): a cut ({n}
                                               its start's size) plus the greedy's roads to {x}
                                               more D, at D its total
   lineup <method>                             the lineup's stored network of a shipped method
@@ -81,7 +81,7 @@ On the page (2026-10-28), each one `add`:
   partition cut "$R3.D{D}.s0.1.ears.p1e0.0001v4"          (the ears start: ears' paths at each
       budget)
   (R3=pt.K5.R10.band.t0.2,0.1,0.05,0.03,0.02.b1,2,4,8,16.q1,2,3,3,3.e0.2,0.1,0.05,0.02,0.i40)
-  spurs 'ps.lazy5.D{D}.spec{n}s0.x{x}.v4'                (the spectral cuts at D 0.05 and 0.10 plus
+  spurs 'ps.lineup_lazy5_D.D{D}.spec{n}s0.x{x}.v4'      (the spectral cuts at D 0.05 and 0.10 plus
       the lazy ΔP greedy's roads to 0.01 and 0.02 more D; 0.15's beyond the slider)
   ears ears.paths.grid8.b20.f2000.e30.spur10-30.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15.v4   (2026-11-03:
   ears ears.paths.grid8.b20.f2000.e30.spur10-80.nodt.gl0.25Croad.n2s0.1.M8.K4.D0.15.v4    Shock Reblock
@@ -133,7 +133,7 @@ PAGE = cp.PAGE                        # the page's block; its networks' frames i
 BID = PAGE.bid                        # names the page's designs' rows (Runs, Lined, Joint)
 SLIDER = render.SLIDER                # D 0.01 .. 0.15
 SKEL_PIX = 1.0                        # m: the skeleton's raster (road_simp.PIXEL's)
-SPURS = sheet.ROOT / ".superpowers/sdd/2026-10-27-partition/spurs_rows"   # spurs.py's rows
+SPURS = sheet.ROOT / "research/roadless/spurs_rows" / metrics.RUNTIME     # spurs.ROWS's
 
 
 # ------------------------------------------------------------------ geometry
@@ -815,7 +815,7 @@ class PartitionFamily:
 
 class SpursFamily:
     """A partition SIMP cut with the lazy ΔP greedy's roads added up to a little more D (the
-    partition study's spurs.py, its rows in SPURS)."""
+    research/roadless/spurs.py, its rows in SPURS)."""
 
     def __init__(self, plan: str) -> None:
         runs = Runs(rows=SPURS, template=plan)
