@@ -1155,6 +1155,37 @@ Not pursued, with what would change that:
 - **The restore screen's solve on gated blocks**: closed, the raster's iterative solve (AMG-CG);
   every solve on the complex is direct (wiki `pages/reblock/raster-escape-time-metric-retired.md`).
 
+- **Shock Reblock scored with the metric's own roads** (owner 2026-11-26, **queued** after the
+  precision model's rerun): the ears and spurs rescored exactly with the grown roads conducting at
+  kappa (growth.Road, the scoring metric's road) in place of growth.GroundedLeak. Grounded, a road
+  is the street moved inward: a spur's tip is as good an exit as the street, so P cannot see the
+  network's shape and closing a spur earns only the ground its link opens (plain spur10-80 on 41785
+  is .92 dead end by length at D 0.4; Detour's credit ended that and bought no L_P). Conducting, a
+  spur's tip sits at its resistance back to the street times the current it carries, and an ear that
+  carries it on to the other side lowers that: continuation from a global property (where the
+  network meets the street, how loaded the spur is), not from the spur's heading, in P's own units
+  and with no new parameter. The scoring metric already rewards it: closing the loops of clearance's
+  tree on 5810 lifted L_P 0.224 -> 0.371 at 10% displacement and 0.325 -> 0.421 at 15% (wiki
+  `pages/reblock/trips-inside-the-block-reward-loops-weakly.md`). The cost: the faces no longer
+  decouple (ears.py's restricted solves), so an exact rescore is the whole block's solve. First the
+  cheap form (the grounded first order screens, the `exact` few rescored conducting); if it pays, a
+  cached factorization with each candidate's corridor as a low-rank update, or the system reduced to
+  the road network's nodes. Time it on 41785 first (5810's loop run is about 6000 s grounded). The
+  caution: ΔP greedy (exact P, free segments) clutters (wiki
+  `pages/reblock/delta-p-greedy-wins-on-p-and-clutters.md`), so the ear and spur moves stay. The
+  test: spur10-80 conducting against plain spurs, Detour lam 0.1 and loop, on 41785 and 5810,
+  dead-end share and L_P at matched D; if closing emerges unprompted and L_P rises, Detour is likely
+  dominated (deleted, its numbers to the wiki). Companion arm (the owner's hotspot idea,
+  2026-11-26): spurs that end at a persistent peak of u in their face (the Morse-Smale maxima
+  `divides` already finds), no length window, in place of spur<min>-<max>'s two bounds; a spur to
+  the peak and then the ridge on to the next sink is a divide's ear built in two halves. Other
+  continuation terms, not queued: expected P with any one road segment blocked (2-edge-connectivity
+  in P's units, weighted by the people a bridge serves; needs the same conducting world); a
+  fire-code turnaround (a dead end over 45 m, IFC 503.2.5, pays its turning head's displacement).
+  Set aside: weighted k-connectivity as the objective (its smooth form, effective conductance,
+  averaged over pairs is the Kirchhoff index K, which rewards loops weakly: the trips page above;
+  Fiedler, resistance and log-tree failed as connectivity metrics in July).
+
 ## Experiment design
 
 - **Pruning by epistemetry's decision layer** (owner 2026-10-14: "Yes"; four replays from
