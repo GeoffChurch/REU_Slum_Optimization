@@ -1178,13 +1178,27 @@ Not pursued, with what would change that:
   dominated (deleted, its numbers to the wiki). Companion arm (the owner's hotspot idea,
   2026-11-26): spurs that end at a persistent peak of u in their face (the Morse-Smale maxima
   `divides` already finds), no length window, in place of spur<min>-<max>'s two bounds; a spur to
-  the peak and then the ridge on to the next sink is a divide's ear built in two halves. Other
-  continuation terms, not queued: expected P with any one road segment blocked (2-edge-connectivity
-  in P's units, weighted by the people a bridge serves; needs the same conducting world); a
-  fire-code turnaround (a dead end over 45 m, IFC 503.2.5, pays its turning head's displacement).
-  Set aside: weighted k-connectivity as the objective (its smooth form, effective conductance,
-  averaged over pairs is the Kirchhoff index K, which rewards loops weakly: the trips page above;
-  Fiedler, resistance and log-tree failed as connectivity metrics in July).
+  the peak and then the ridge on to the next sink is a divide's ear built in two halves. Second arm,
+  if the conducting rescore keeps most of the kappa-10 growth's lead (it leads Shock Reblock and
+  partition by 0.05 -- 0.20 under RUNTIME, NOTES; ears' loops cost about 0.17 at D 0.10 -- 0.15):
+  every candidate from the one conducting field u, the gradient lines of its persistence-simplified
+  Morse-Smale complex (owner 2026-11-26: "Could it lead to a more elegant overall algorithm?"). Up
+  to a peak is a spur to its hotspot; from a loaded spur's tip, high in u, down through a saddle to
+  the network beyond is its continuation; each scored to first order by (kappa - 1) sigma (grad u .
+  t)^2 over its corridor (a thin inclusion's topological derivative; the dipole page) and the best
+  rescored exactly. It would replace Paths' router candidates, the spur window, Detour and `divides`
+  as a separate family, one mechanism for spurs and loops; the price of displacement stays (current
+  lines do not avoid every building). Expectation: routers move L_P by about 0.02 and grounded
+  `divides` trailed `paths` throughout (NOTES), so its case is simplicity at a tie; the objective's
+  world is where the 0.10 -- 0.20 is. The problem is volume-to-point conduction (Bejan's constructal
+  theory; topology optimization), whose single-load optimum is a tree (Corson 2010): P closes a spur
+  only where it is loaded enough to pay. Other continuation terms, not queued: expected P with any
+  one road segment blocked (2-edge-connectivity in P's units, weighted by the people a bridge
+  serves; needs the same conducting world); a fire-code turnaround (a dead end over 45 m, IFC
+  503.2.5, pays its turning head's displacement). Set aside: weighted k-connectivity as the
+  objective (its smooth form, effective conductance, averaged over pairs is the Kirchhoff index K,
+  which rewards loops weakly: the trips page above; Fiedler, resistance and log-tree failed as
+  connectivity metrics in July).
 
 ## Experiment design
 
